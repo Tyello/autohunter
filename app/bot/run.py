@@ -1,6 +1,7 @@
 import logging
 
-from telegram.ext import Application, CommandHandler
+from telegram import Update
+from telegram.ext import ContextTypes, Application, CommandHandler
 
 from app.core.settings import settings
 from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas
@@ -8,6 +9,10 @@ from app.bot.handlers_debug import cmd_debug
 
 logger = logging.getLogger(__name__)
 
+async def on_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("Bot error", exc_info=context.error)
+    if update and getattr(update, "message", None):
+        await update.message.reply_text("Deu erro aqui. Já loguei. Tente novamente em instantes.")
 
 def main():
     token = getattr(settings, "telegram_bot_token", None)

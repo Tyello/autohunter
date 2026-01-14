@@ -7,6 +7,7 @@ from app.models.car_listing import CarListing
 
 from app.scrapers.mercadolivre import scrape_mercadolivre
 from app.scrapers.olx import scrape_olx
+from app.scrapers.base import FetchBlocked
 
 
 def build_ml_search_url(query: str) -> str:
@@ -31,7 +32,14 @@ def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
     olx_url = build_olx_search_url(query)
 
     ml_items = scrape_mercadolivre(ml_url)
-    olx_items = scrape_olx(olx_url)
+    olx_items = []
+    try:
+        olx_items = scrape_olx(olx_url)
+    except FetchBlocked:
+        # MVP: ignora OLX por enquanto
+        olx_items = []
+    except Exception:
+        olx_items = []
 
     # ingest: retorna IDs novos, mas para busca manual também queremos "top resultados"
     # Aqui persistimos tudo (dedupe) e depois buscamos no DB os mais recentes dessas fontes.

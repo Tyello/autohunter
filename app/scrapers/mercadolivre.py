@@ -1,21 +1,17 @@
+import re
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any
-from urllib.parse import urlparse, parse_qs
 
 from app.scrapers.base import fetch_html
 from app.scrapers.parsing import parse_brl_price
 
 
 def _extract_external_id_from_url(url: str) -> str:
-    # ML costuma ter ID no path (ex: /MLB-1234567890-...)
-    path = urlparse(url).path
-    parts = [p for p in path.split("/") if p]
-    for p in parts:
-        if "MLB-" in p:
-            return p.split("-")[0] if p.startswith("MLB-") else p
-    # fallback: tenta query params
-    qs = parse_qs(urlparse(url).query)
-    return (qs.get("item_id") or [""])[0] or url
+    # captura MLB-1234567890
+    m = re.search(r"(MLB-\d+)", url)
+    if m:
+        return m.group(1)
+    return url
 
 
 def scrape_mercadolivre(search_url: str) -> List[Dict[str, Any]]:

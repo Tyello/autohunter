@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -21,7 +22,7 @@ def add_wishlist(db: Session, user_id, query: str):
     if count >= MAX_WISHLISTS_PER_USER:
         return False, f"Limite atingido: {MAX_WISHLISTS_PER_USER} wishlists por usuário."
 
-    w = Wishlist(user_id=user_id, query=query.strip(), is_active=True)
+    w = Wishlist(id=uuid.uuid4(), user_id=user_id, query=query.strip(), is_active=True)
     db.add(w)
     db.commit()
     return True, "Wishlist criada."

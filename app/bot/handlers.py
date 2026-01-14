@@ -1,6 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from app.bot.formatting import format_price
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
@@ -17,28 +18,25 @@ from app.bot.debug import run_once_for_wishlist, status_for_wishlist
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args).strip()
     if not query:
-        await update.message.reply_text("Use: /buscar <termos>")
+        await update.message.reply_text("Use: /buscar <termos>\nEx: /buscar civic 2019")
         return
 
     with SessionLocal() as db:
-        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-
-        results = manual_search(db, query=query, limit=5)  # retorna objetos/DTOs prontos pro bot
+        _user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        results = manual_search(db, query=query, limit=5)
 
     if not results:
         await update.message.reply_text("Nada encontrado agora.")
         return
 
-    # Envio simples: 1 msg por anúncio (MVP)
     for item in results:
-        # item já deve trazer url, thumb, price, fipe, score_text
         text = (
             f"{item.title or 'Anúncio'}\n"
-            f"Preço: {item.price_text}\n"
-            f"FIPE: {item.fipe_text}\n"
-            f"{item.score_text}\n"
+            f"Fonte: {item.source}\n"
+            f"Preço: {format_price(item.price)}\n"
             f"{item.url}"
         )
+
         if item.thumbnail_url:
             await update.message.reply_photo(photo=item.thumbnail_url, caption=text)
         else:

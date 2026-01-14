@@ -8,7 +8,11 @@ from app.db.base import Base, TimestampMixin
 class CarListing(TimestampMixin, Base):
     __tablename__ = "car_listings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,  # ✅ gera UUID no app
+    )
     source: Mapped[str] = mapped_column(Text, nullable=False)
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
 
