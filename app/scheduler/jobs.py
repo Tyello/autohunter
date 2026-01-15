@@ -1,10 +1,14 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
+from app.scrapers.base import FetchBlocked
+
 from app.services.system_logs_service import log
-from app.services.notifications_service import create_queued, mark_failed_reason, create_queued_if_absent
+from app.services.notifications_service import create_queued, mark_failed_reason
+from app.services.notifications_queue_service import queue_notifications_for_matches
 from app.services.limits_service import can_send_more_today
-from app.services.matching_service import text_match, apply_filters
+from app.services.matching_service import match_listings_for_wishlist
+from app.services.listings_service import ingest_listings
 
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
@@ -24,11 +28,6 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
     for w in wishlists:
         filters = list(getattr(w, "filters", []) or [])
         for listing in listings:
-            if not text_match(w.query, listing):
-                continue
-            if filters and not apply_filters(filters, listing):
-                continue
-
             # Evita duplicar notification do mesmo anúncio pra mesma wishlist
             exists = (
                 db.query(Notification.id)
@@ -91,39 +90,57 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
 
     log(db, "info", component, "send queued notifications result", {"sent": sent, "blocked": blocked, "failed": failed, "checked": len(queued)})
 
-def scrape_ingest_match(db: Session, component: str, scraper_fn, search_url: str):
-    log(db, "info", component, "job started", {"search_url": search_url})
+def scrape_ingest_match(db, job_name, scraper_fn, search_url, wishlist=None) -> dict:
+    # 1) scrape
+    try:
+        listings = scraper_fn(search_url)
+    except FetchBlocked as e:
+        log(db, "warning", job_name, "source_blocked", {"status_code": e.status_code, "url": e.url})
+        return {"ok": False, "reason": "blocked", "status_code": e.status_code, "url": e.url}
+    except Exception as e:
+        log(db, "error", job_name, "scrape_failed", {"error": str(e), "url": search_url})
+        return {"ok": False, "reason": "error", "url": search_url}
 
-    listings = scraper_fn(search_url)
-    inserted_ids = ingest_listings(db, listings)  # ✅ RETURNING ids
+    found = len(listings or [])
+    if found == 0:
+        log(db, "info", job_name, "no_results_found", {"url": search_url})
+        return {"ok": True, "reason": "no_results", "found": 0, "inserted": 0, "matched": 0, "queued": 0}
 
-    if not inserted_ids:
-        log(db, "info", component, "no new listings inserted")
-        return
+    # 2) ingest (dedupe no DB)
+    inserted_ids = ingest_listings(db, listings)  # deve retornar ids inseridos
+    inserted = len(inserted_ids or [])
 
-    new_listings = db.query(CarListing).filter(CarListing.id.in_(inserted_ids)).all()
+    if inserted == 0:
+        log(db, "info", job_name, "no_new_listings_inserted", {"found": found, "url": search_url})
+        return {"ok": True, "reason": "no_new", "found": found, "inserted": 0, "matched": 0, "queued": 0}
 
-    wishlists = (
-        db.query(Wishlist)
-        .filter(Wishlist.is_active == True)
-        .all()
-    )
+    # 3) matching (somente novos)
+    matched_listings = []
+    if wishlist is not None:
+        matched_listings = match_listings_for_wishlist(db, wishlist, inserted_ids)
 
+    matched = len(matched_listings)
+
+    # 4) queue notifications
+    matched_listings = []
+    matched = 0
     queued = 0
-    for w in wishlists:
-        filters = list(getattr(w, "filters", []) or [])
-        for listing in new_listings:
-            if not text_match(w.query, listing):
-                continue
-            if filters and not apply_filters(filters, listing):
-                continue
 
-            created = create_queued_if_absent(db, w.user_id, w.id, listing.id)
-            if created:
-                queued += 1
+    if wishlist is not None and inserted_ids:
+        matched_listings = match_listings_for_wishlist(db, wishlist, inserted_ids)
+        matched = len(matched_listings)
 
-    log(db, "info", component, "job finished", {
-        "scraped": len(listings),
-        "inserted_new": len(inserted_ids),
+        if matched:
+            queued = queue_notifications_for_matches(db, wishlist, matched_listings)
+
+    db.commit()
+
+    log(db, "info", job_name, "pipeline_summary", {
+        "url": search_url,
+        "found": found,
+        "inserted": inserted,
+        "matched": matched,
         "queued": queued,
     })
+
+    return {"ok": True, "reason": None, "found": found, "inserted": inserted, "matched": matched, "queued": queued}

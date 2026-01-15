@@ -7,24 +7,48 @@ from app.models.notification import Notification
 from app.models.system_log import SystemLog
 from app.models.wishlist_filter import WishlistFilter
 
+from app.services.wishlist_sources_service import allowed_sources_for_wishlist
+from app.services.source_availability_service import is_in_cooldown
 from app.services.search_urls_service import ml_url, olx_url
 from app.scheduler.jobs import scrape_ingest_match
 from app.scrapers.mercadolivre import scrape_mercadolivre
 from app.scrapers.olx import scrape_olx
 
+from app.core.settings import settings
 
-def run_once_for_wishlist(db: Session, wishlist: Wishlist) -> dict:
+
+def run_once_for_wishlist(db: Session, wishlist) -> dict:
     q = wishlist.query
+    sources = allowed_sources_for_wishlist(db, wishlist.id)
 
-    # roda ML
     ml = ml_url(q)
-    scrape_ingest_match(db, "scraper_mercadolivre_debug", scrape_mercadolivre, ml)
+    ml_res = None
+    if "mercadolivre" in sources:
+        ml_res = scrape_ingest_match(db, "scraper_mercadolivre_debug", scrape_mercadolivre, ml)
 
-    # roda OLX
     olx = olx_url(q)
-    scrape_ingest_match(db, "scraper_olx_debug", scrape_olx, olx)
+    olx_res = None
+    olx_skipped = None
 
-    return {"ok": True, "query": q, "ml_url": ml, "olx_url": olx}
+    if "olx" not in sources:
+        olx_skipped = "filtered_out"
+    elif not settings.enable_olx:
+        olx_skipped = "disabled"
+    elif is_in_cooldown(db, "olx", settings.olx_cooldown_minutes):
+        olx_skipped = "cooldown"
+    else:
+        olx_res = scrape_ingest_match(db, "scraper_olx_debug", scrape_olx, olx)
+
+    return {
+        "ok": True,
+        "query": q,
+        "sources": sorted(list(sources)),
+        "ml_url": ml,
+        "olx_url": olx,
+        "ml_result": ml_res,
+        "olx_result": olx_res,
+        "olx_skipped": olx_skipped,
+    }
 
 
 def status_for_wishlist(db: Session, wishlist: Wishlist) -> dict:

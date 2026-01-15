@@ -24,5 +24,5 @@ def insert_ignore_duplicates_return_ids(db: Session, rows: Iterable[Dict[str, An
 
     result = db.execute(stmt)
     inserted_ids = [row[0] for row in result.fetchall()]
-    db.commit()
+
     return inserted_ids

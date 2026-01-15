@@ -1,12 +1,17 @@
-from typing import List, Dict, Any
+from typing import List
 from sqlalchemy.orm import Session
 from urllib.parse import quote_plus
 
+from app.core.settings import settings
+
+from app.services.system_logs_service import log
+from app.services.source_availability_service import is_in_cooldown
 from app.services.listings_service import ingest_listings
+
 from app.models.car_listing import CarListing
 
 from app.scrapers.mercadolivre import scrape_mercadolivre
-from app.scrapers.olx import scrape_olx
+from app.scrapers.olx import scrape_olx, build_olx_search_url
 from app.scrapers.base import FetchBlocked
 
 
@@ -24,35 +29,51 @@ def build_olx_search_url(query: str) -> str:
 
 
 def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
-    """
-    Faz scraping leve nas duas fontes, persiste no DB (com dedupe) e retorna
-    anúncios recentes para responder no bot.
-    """
     ml_url = build_ml_search_url(query)
     olx_url = build_olx_search_url(query)
 
+    # ML
     ml_items = scrape_mercadolivre(ml_url)
-    olx_items = []
-    try:
-        olx_items = scrape_olx(olx_url)
-    except FetchBlocked:
-        # MVP: ignora OLX por enquanto
-        olx_items = []
-    except Exception:
-        olx_items = []
-
-    # ingest: retorna IDs novos, mas para busca manual também queremos "top resultados"
-    # Aqui persistimos tudo (dedupe) e depois buscamos no DB os mais recentes dessas fontes.
     ingest_listings(db, ml_items)
-    ingest_listings(db, olx_items)
 
-    # Retorno simples: últimos anúncios inseridos/atualizados não é trivial sem update,
-    # então retornamos os mais recentes por created_at filtrando pelas fontes.
-    rows = (
-        db.query(CarListing)
-        .filter(CarListing.source.in_(["mercadolivre", "olx"]))
-        .order_by(CarListing.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return rows
+    # OLX (best-effort)
+    if settings.enable_olx and not is_in_cooldown(db, "olx", settings.olx_cooldown_minutes):
+        try:
+            olx_items = scrape_olx(olx_url)
+            ingest_listings(db, olx_items)
+        except FetchBlocked as e:
+            log(db, "warning", "scraper_olx", "source_blocked", {"status_code": e.status_code, "url": e.url})
+        except Exception as e:
+            log(db, "error", "scraper_olx", "scrape_failed", {"error": str(e), "url": olx_url})
+
+    terms = [t for t in query.lower().split() if t]
+
+    q = db.query(CarListing)
+
+    # opcional: só coisas recentes (evita lixo antigo na busca manual)
+    # q = q.filter(CarListing.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))
+
+    # match simples: todos os termos no título/location
+    for t in terms:
+        q = q.filter(
+            (CarListing.title.ilike(f"%{t}%")) |
+            (CarListing.location.ilike(f"%{t}%"))
+        )
+
+    return q.order_by(CarListing.created_at.desc()).limit(limit).all()
+
+
+def _olx_items_to_listings(items):
+    listings = []
+    for it in items:
+        listings.append({
+            "source": "olx",
+            "external_id": str(it.external_id),
+            "title": it.title or "",
+            "url": it.url,
+            "thumbnail_url": it.thumbnail_url,
+            "price": it.price,          # Decimal ou None
+            "currency": "BRL",
+            "location": it.location,
+        })
+    return listings

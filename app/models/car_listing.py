@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Text, Numeric
 from sqlalchemy.dialects.postgresql import UUID
@@ -20,7 +22,7 @@ class CarListing(TimestampMixin, Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="BRL")
 
     location: Mapped[str | None] = mapped_column(Text, nullable=True)

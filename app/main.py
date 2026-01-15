@@ -2,9 +2,12 @@ from fastapi import FastAPI, Depends
 from sqlalchemy import text
 from typing import List
 from sqlalchemy.orm import Session
-from app.scheduler.run import start_scheduler
 
 import app.models
+from app.core.settings import settings
+
+from app.scheduler.run import start_scheduler
+
 from app.models.car_listing import CarListing
 from app.schemas.car_listing import CarListingOut
 
@@ -17,7 +20,8 @@ _scheduler = None
 @app.on_event("startup")
 def startup():
     global _scheduler
-    _scheduler = start_scheduler()
+    if settings.enable_scheduler_in_api:
+        _scheduler = start_scheduler()
 
 @app.on_event("shutdown")
 def shutdown():
