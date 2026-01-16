@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     enable_olx: bool = False
     olx_cooldown_minutes: int = 60
 
+    default_alert_limit: int = 30
+
     # Scheduler tuning (DEV)
     sched_ml_minutes: int = 30
     sched_olx_minutes: int = 30

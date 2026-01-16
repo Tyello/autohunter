@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -9,10 +11,33 @@ from app.services.wishlists_service import (
     list_wishlists, add_wishlist, remove_wishlist,
     add_filter, list_filters, remove_filter,
 )
+from app.services.limits_service import get_daily_limit_for_user, count_sent_today
+from app.models.user import User
+from app.models.plan import Plan
+from app.models.subscription import Subscription
+
 from app.bot.admin import is_admin
 
 # debug pipeline:
 from app.bot.debug import run_once_for_wishlist, status_for_wishlist
+
+
+def _get_active_subscription_and_plan(db, user: User):
+    if not user.account_id:
+        return None, None
+
+    row = (
+        db.query(Subscription, Plan)
+        .join(Plan, Plan.id == Subscription.plan_id)
+        .filter(Subscription.account_id == user.account_id)
+        .filter(Subscription.status == "active")
+        .order_by(Subscription.created_at.desc())
+        .first()
+    )
+    if not row:
+        return None, None
+    sub, plan = row
+    return sub, plan
 
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -150,10 +175,182 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_alertas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # MVP: só informa limites e estado (sem painel complexo)
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        limit = get_daily_limit_for_user(db, user.id)
+
     await update.message.reply_text(
         "Alertas do AutoHunter:\n"
         "- Monitoramento: a cada 30 min (Mercado Livre e OLX)\n"
-        "- Limite: 10 alertas/dia\n"
-        "Use /wishlist para gerenciar suas buscas monitoradas."
+        f"- Limite: {limit} alertas/dia\n"
+        "Use /plan para ver consumo e /wishlist para gerenciar."
     )
+
+
+async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+
+        limit = get_daily_limit_for_user(db, user.id)
+        sent_today = count_sent_today(db, user.id)
+        remaining = max(0, limit - sent_today)
+
+        sub, plan = _get_active_subscription_and_plan(db, user)
+
+    plan_label = "free"
+    if plan:
+        plan_label = f"{plan.code} ({plan.name})"
+
+    override = None
+    if sub and sub.daily_alert_limit_override is not None:
+        override = sub.daily_alert_limit_override
+
+    text = (
+        "📦 Seu plano no AutoHunter\n"
+        f"- Plano: {plan_label}\n"
+        f"- Limite diário: {limit}/dia\n"
+        f"- Enviados hoje: {sent_today}\n"
+        f"- Restantes hoje: {remaining}\n"
+    )
+    if override is not None:
+        text += f"- Override: {override}\n"
+
+    text += "\nUse /upgrade para ver opções de aumento."
+    await update.message.reply_text(text)
+
+
+async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        plans = (
+            db.query(Plan)
+            .filter(Plan.is_active == True)  # noqa
+            .order_by(Plan.daily_alert_limit.asc())
+            .all()
+        )
+
+    if not plans:
+        await update.message.reply_text("Sem planos disponíveis no momento.")
+        return
+
+    lines = ["🚀 Upgrade AutoHunter", ""]
+    for p in plans:
+        lines.append(f"- {p.code}: {p.daily_alert_limit} alertas/dia | até {p.max_wishlists} wishlists")
+    lines += ["", "Para upgrade, fale com o admin do bot.", "Dica: use /plan para ver seu consumo hoje."]
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        await update.message.reply_text("Sem permissão.")
+        return
+
+    args = [a.strip() for a in (context.args or []) if a.strip()]
+    if not args:
+        await update.message.reply_text("Use: /setplan <free|pro|ultra> [telegram_chat_id]")
+        return
+
+    plan_code = args[0].lower()
+
+    if len(args) >= 2:
+        if not args[1].isdigit():
+            await update.message.reply_text("telegram_chat_id inválido (deve ser número).")
+            return
+        chat_id = int(args[1])
+    else:
+        chat_id = int(update.effective_chat.id)
+
+    with SessionLocal() as db:
+        u = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+        if not u:
+            await update.message.reply_text("Usuário não encontrado nesse chat_id.")
+            return
+        if not u.account_id:
+            await update.message.reply_text("Usuário sem account_id (verifique users_service).")
+            return
+
+        plan = db.query(Plan).filter(Plan.code == plan_code).first()
+        if not plan:
+            await update.message.reply_text("Plano inválido. Use: free|pro|ultra")
+            return
+
+        # cancela subscription ativa (se existir)
+        active = (
+            db.query(Subscription)
+            .filter(Subscription.account_id == u.account_id)
+            .filter(Subscription.status == "active")
+            .order_by(Subscription.created_at.desc())
+            .first()
+        )
+        if active:
+            active.status = "canceled"
+            active.ends_at = datetime.now(timezone.utc)
+
+        # cria nova subscription ativa
+        db.add(
+            Subscription(
+                account_id=u.account_id,
+                plan_id=plan.id,
+                status="active",
+                source="manual",
+                starts_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+
+    await update.message.reply_text(f"✅ Plano atualizado para {plan_code} (chat_id={chat_id}).")
+
+
+async def cmd_setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        await update.message.reply_text("Sem permissão.")
+        return
+
+    args = [a.strip() for a in (context.args or []) if a.strip()]
+    if not args:
+        await update.message.reply_text("Use: /setlimit <numero|none> [telegram_chat_id]")
+        return
+
+    raw = args[0].lower()
+
+    if len(args) >= 2:
+        if not args[1].isdigit():
+            await update.message.reply_text("telegram_chat_id inválido (deve ser número).")
+            return
+        chat_id = int(args[1])
+    else:
+        chat_id = int(update.effective_chat.id)
+
+    with SessionLocal() as db:
+        u = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+        if not u:
+            await update.message.reply_text("Usuário não encontrado nesse chat_id.")
+            return
+        if not u.account_id:
+            await update.message.reply_text("Usuário sem account_id (verifique users_service).")
+            return
+
+        active = (
+            db.query(Subscription)
+            .filter(Subscription.account_id == u.account_id)
+            .filter(Subscription.status == "active")
+            .order_by(Subscription.created_at.desc())
+            .first()
+        )
+        if not active:
+            await update.message.reply_text("Usuário sem subscription ativa.")
+            return
+
+        if raw == "none":
+            active.daily_alert_limit_override = None
+            db.commit()
+            await update.message.reply_text(f"✅ Override removido (chat_id={chat_id}).")
+            return
+
+        if not raw.isdigit():
+            await update.message.reply_text("Use um número (ex: 50) ou 'none'.")
+            return
+
+        active.daily_alert_limit_override = int(raw)
+        db.commit()
+
+    await update.message.reply_text(f"✅ Override diário setado para {raw} (chat_id={chat_id}).")

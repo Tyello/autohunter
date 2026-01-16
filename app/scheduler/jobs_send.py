@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
+from app.core.settings import settings
+
 from app.models.notification import Notification
-from app.services.limits_service import can_send_more_today
+from app.services.limits_service import can_send_more_today, should_send_daily_limit_notice
 from app.services.system_logs_service import log
-from app.services.notifications_service import mark_failed_reason
+
+from app.bot.sender import send_daily_limit_notice_http
 
 
 def send_queued_notifications(db: Session, component: str, sender_fn):
@@ -12,7 +15,7 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
         db.query(Notification)
         .filter(Notification.status == "queued")
         .order_by(Notification.created_at.asc())
-        .limit(50)
+        .limit(10)
         .all()
     )
 
@@ -23,7 +26,19 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
     for n in queued:
         # Limite diário: não acumula
         if not can_send_more_today(db, n.user_id):
-            mark_failed_reason(db, n.id, "daily_limit_reached")
+            # 1) não é "failed": é política
+            n.status = "suppressed"  # ou "limit_reached"
+            n.error_message = "daily_limit_reached"
+            db.commit()
+
+            # 2) aviso 1x/dia
+            user = n.user  # você já tem relationship no model Notification :contentReference[oaicite:4]{index=4}
+            if user and should_send_daily_limit_notice(user):
+                ok = send_daily_limit_notice_http(user, settings.default_alert_limit)
+                if ok:
+                    user.last_daily_limit_notice_at = datetime.now(timezone.utc)
+                    db.commit()
+
             blocked += 1
             continue
 

@@ -4,7 +4,8 @@ from telegram import Update
 from telegram.ext import ContextTypes, Application, CommandHandler
 
 from app.core.settings import settings
-from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas
+
+from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit
 from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_misc import cmd_me
 
@@ -31,6 +32,10 @@ def main():
     app.add_handler(CommandHandler("buscar", cmd_buscar))
     app.add_handler(CommandHandler("wishlist", cmd_wishlist))
     app.add_handler(CommandHandler("alertas", cmd_alertas))
+    app.add_handler(CommandHandler("plan", cmd_plan))
+    app.add_handler(CommandHandler("upgrade", cmd_upgrade))
+    app.add_handler(CommandHandler("setplan", cmd_setplan))
+    app.add_handler(CommandHandler("setlimit", cmd_setlimit))
     app.add_handler(CommandHandler("me", cmd_me))
 
     app.add_error_handler(on_error)

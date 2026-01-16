@@ -41,7 +41,7 @@ class Notification(TimestampMixin, Base):
     )
 
     # Estado mínimo do envio
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")  # queued|sent|failed
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")  # queued|sent|failed|suppressed
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

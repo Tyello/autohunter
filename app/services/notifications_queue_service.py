@@ -38,7 +38,7 @@ def queue_notifications_for_matches(
             wishlist_id=wishlist.id,
             car_listing_id=listing.id,
             status="queued",
-            error=None,
+            error_message=None,
         )
         db.add(n)
         queued += 1

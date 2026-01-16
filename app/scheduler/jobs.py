@@ -91,51 +91,34 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
     log(db, "info", component, "send queued notifications result", {"sent": sent, "blocked": blocked, "failed": failed, "checked": len(queued)})
 
 def scrape_ingest_match(db, job_name, scraper_fn, search_url, wishlist=None) -> dict:
-    # 1) scrape
     try:
         listings = scraper_fn(search_url)
     except FetchBlocked as e:
-        log(db, "warning", job_name, "source_blocked", {"status_code": e.status_code, "url": e.url})
-        return {"ok": False, "reason": "blocked", "status_code": e.status_code, "url": e.url}
+        log(db, "warning", job_name, "source_blocked",
+            {"status_code": getattr(e, "status_code", None), "url": getattr(e, "url", search_url)})
+        return {"ok": False, "reason": "blocked"}
     except Exception as e:
         log(db, "error", job_name, "scrape_failed", {"error": str(e), "url": search_url})
-        return {"ok": False, "reason": "error", "url": search_url}
+        return {"ok": False, "reason": "error"}
 
     found = len(listings or [])
-    if found == 0:
-        log(db, "info", job_name, "no_results_found", {"url": search_url})
-        return {"ok": True, "reason": "no_results", "found": 0, "inserted": 0, "matched": 0, "queued": 0}
 
-    # 2) ingest (dedupe no DB)
-    inserted_ids = ingest_listings(db, listings)  # deve retornar ids inseridos
+    inserted_ids = ingest_listings(db, listings)  # <- PRECISA retornar lista de UUIDs
     inserted = len(inserted_ids or [])
 
-    if inserted == 0:
-        log(db, "info", job_name, "no_new_listings_inserted", {"found": found, "url": search_url})
-        return {"ok": True, "reason": "no_new", "found": found, "inserted": 0, "matched": 0, "queued": 0}
-
-    # 3) matching (somente novos)
-    matched_listings = []
-    if wishlist is not None:
-        matched_listings = match_listings_for_wishlist(db, wishlist, inserted_ids)
-
-    matched = len(matched_listings)
-
-    # 4) queue notifications
-    matched_listings = []
     matched = 0
     queued = 0
 
     if wishlist is not None and inserted_ids:
         matched_listings = match_listings_for_wishlist(db, wishlist, inserted_ids)
         matched = len(matched_listings)
-
         if matched:
             queued = queue_notifications_for_matches(db, wishlist, matched_listings)
 
     db.commit()
 
     log(db, "info", job_name, "pipeline_summary", {
+        "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
         "url": search_url,
         "found": found,
         "inserted": inserted,
@@ -143,4 +126,4 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, wishlist=None) -> 
         "queued": queued,
     })
 
-    return {"ok": True, "reason": None, "found": found, "inserted": inserted, "matched": matched, "queued": queued}
+    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued}

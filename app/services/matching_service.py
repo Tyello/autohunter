@@ -141,8 +141,11 @@ def match_listings_for_wishlist(
     for l in listings:
         if not _apply_filters(l, filters):
             continue
-        if not text_match(l, terms):
-            continue
+        for t in terms:
+            if not text_match(t, l):
+                continue
+        #if not text_match(wishlist.query, l):
+            #continue
         matched.append(l)
 
     return matched

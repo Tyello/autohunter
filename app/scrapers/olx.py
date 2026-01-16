@@ -150,6 +150,24 @@ def _extract_items_from_next_data(next_data: dict) -> list[OlxItem]:
     return unique
 
 
+def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
+    out: list[dict] = []
+    for it in items:
+        out.append(
+            {
+                "source": "olx",
+                "external_id": str(it.external_id),
+                "title": it.title or None,
+                "url": it.url,
+                "thumbnail_url": it.thumbnail_url,
+                "price": it.price,
+                "currency": "BRL",
+                "location": it.location,
+            }
+        )
+    return out
+
+
 def scrape_olx(search_url: str) -> list[OlxItem]:
     html = fetch_html(search_url)
 

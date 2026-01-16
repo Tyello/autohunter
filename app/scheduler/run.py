@@ -1,4 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.executors.pool import ThreadPoolExecutor
 
 from app.core.settings import settings
 
@@ -38,7 +39,16 @@ def job_run_source_for_all_wishlists(source_name: str):
                         continue
 
                     url = ml_url(w.query)
-                    scrape_ingest_match(db, "scraper_mercadolivre", scrape_mercadolivre, url)
+
+                    log(db, "info", component, "job_started", {"wishlist_id": str(w.id), "query": w.query, "url": url})
+
+                    res = scrape_ingest_match(db, component, scrape_mercadolivre, url, wishlist=w)
+
+                    log(db, "info", component, "job_finished", {
+                        "wishlist_id": str(w.id),
+                        "query": w.query,
+                        "result": res,
+                    })
 
                 elif source_name == "olx":
                     if "olx" not in sources:
@@ -70,7 +80,15 @@ def job_run_source_for_all_wishlists(source_name: str):
 
 
 def start_scheduler() -> BackgroundScheduler:
-    sched = BackgroundScheduler(timezone="UTC")
+    sched = BackgroundScheduler(
+        timezone="UTC",
+        executors={"default": ThreadPoolExecutor(10)},
+        job_defaults={
+            "coalesce": True,
+            "misfire_grace_time": 60,
+            "max_instances": 1,
+        },
+    )
 
     sched.add_job(
         lambda: job_run_source_for_all_wishlists("mercadolivre"),

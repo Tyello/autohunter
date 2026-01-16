@@ -5,6 +5,10 @@ from .car_listing import CarListing
 from .fipe_price import FipePrice
 from .notification import Notification
 from .system_log import SystemLog
+from .plan import Plan
+from .subscription import Subscription
+from .account import Account
+from .account_member import AccountMember
 
 __all__ = [
     "User",
@@ -14,4 +18,8 @@ __all__ = [
     "FipePrice",
     "Notification",
     "SystemLog",
+    "Plan",
+    "Subscription",
+    "Account",
+    "AccountMember",
 ]
