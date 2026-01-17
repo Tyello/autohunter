@@ -1,50 +1,87 @@
 from typing import List
 from sqlalchemy.orm import Session
-from urllib.parse import quote_plus
-
 from app.core.settings import settings
 
 from app.services.system_logs_service import log
-from app.services.source_availability_service import is_in_cooldown
+import time
+
+from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success
+from app.services.source_runs_service import record_run
 from app.services.listings_service import ingest_listings
 
 from app.models.car_listing import CarListing
 
-from app.scrapers.mercadolivre import scrape_mercadolivre
-from app.scrapers.olx import scrape_olx, build_olx_search_url
+from app.sources import list_sources
 from app.scrapers.base import FetchBlocked
 
 
-def build_ml_search_url(query: str) -> str:
-    # MVP: URL simples de busca do ML
-    # Ex: https://lista.mercadolivre.com.br/<query>
-    q = quote_plus(query.strip())
-    return f"https://lista.mercadolivre.com.br/{q}"
-
-
-def build_olx_search_url(query: str) -> str:
-    # MVP: URL simples (pode variar por região; mantém genérico)
-    q = quote_plus(query.strip())
-    return f"https://www.olx.com.br/brasil?q={q}"
-
-
 def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
-    ml_url = build_ml_search_url(query)
-    olx_url = build_olx_search_url(query)
+    # Pluggable sources: iterate registry
+    for plugin in list_sources():
+        if not plugin.supports_manual_search:
+            continue
+        if plugin.enabled_setting and not getattr(settings, plugin.enabled_setting, False):
+            continue
+        if plugin.scrape is None:
+            continue
 
-    # ML
-    ml_items = scrape_mercadolivre(ml_url)
-    ingest_listings(db, ml_items)
+        cooldown = 0
+        if plugin.cooldown_minutes_setting:
+            cooldown = int(getattr(settings, plugin.cooldown_minutes_setting, 0) or 0)
 
-    # OLX (best-effort)
-    if settings.enable_olx and not is_in_cooldown(db, "olx", settings.olx_cooldown_minutes):
+        avail = is_source_allowed(db, plugin.name)
+        if not avail.is_allowed:
+            continue
+
+        url = plugin.build_url(query)
+
+        t0 = time.perf_counter()
         try:
-            olx_items = scrape_olx(olx_url)
-            ingest_listings(db, olx_items)
+            items = plugin.scrape(url)
+            inserted_ids = ingest_listings(db, items)
+
+            mark_success(db, plugin.name, {"manual_query": query, "inserted": len(inserted_ids or [])})
+            record_run(
+                db,
+                source=plugin.name,
+                kind="manual",
+                status="success",
+                query=query,
+                url=url,
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+                items_found=len(items or []),
+                items_ingested=len(inserted_ids or []),
+            )
         except FetchBlocked as e:
-            log(db, "warning", "scraper_olx", "source_blocked", {"status_code": e.status_code, "url": e.url})
+            minutes = mark_blocked(db, plugin.name, base_cooldown_minutes=max(cooldown, 1), http_status=getattr(e, "status_code", None), url=getattr(e, "url", url))
+            record_run(
+                db,
+                source=plugin.name,
+                kind="manual",
+                status="blocked",
+                query=query,
+                url=getattr(e, "url", url),
+                http_status=getattr(e, "status_code", None),
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+                error=f"blocked(backoff={minutes}m)",
+            )
+            log(db, "warn", f"scraper_{plugin.name}", "source_blocked", {"status_code": e.status_code, "url": e.url, "backoff_minutes": minutes})
         except Exception as e:
-            log(db, "error", "scraper_olx", "scrape_failed", {"error": str(e), "url": olx_url})
+            err = str(e)
+            minutes = mark_error(db, plugin.name, base_cooldown_minutes=max(cooldown, 1), error=err, url=url)
+            record_run(
+                db,
+                source=plugin.name,
+                kind="manual",
+                status="error",
+                query=query,
+                url=url,
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+                error=f"{err} (backoff={minutes}m)",
+            )
+            log(db, "error", f"scraper_{plugin.name}", "scrape_failed", {"error": err, "url": url, "backoff_minutes": minutes})
+
+    db.commit()
 
     terms = [t for t in query.lower().split() if t]
 
@@ -61,19 +98,3 @@ def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
         )
 
     return q.order_by(CarListing.created_at.desc()).limit(limit).all()
-
-
-def _olx_items_to_listings(items):
-    listings = []
-    for it in items:
-        listings.append({
-            "source": "olx",
-            "external_id": str(it.external_id),
-            "title": it.title or "",
-            "url": it.url,
-            "thumbnail_url": it.thumbnail_url,
-            "price": it.price,          # Decimal ou None
-            "currency": "BRL",
-            "location": it.location,
-        })
-    return listings

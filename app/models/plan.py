@@ -8,7 +8,7 @@ from app.db.base import Base, TimestampMixin
 class Plan(TimestampMixin, Base):
     __tablename__ = "plans"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # free|pro|ultra
     name: Mapped[str] = mapped_column(Text, nullable=False)
     daily_alert_limit: Mapped[int] = mapped_column(Integer, nullable=False)

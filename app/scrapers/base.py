@@ -58,7 +58,7 @@ def fetch_html(url: str, *, timeout: int = 25, headers: Optional[dict] = None) -
         resp = s.get(url, headers=base_headers, timeout=timeout, allow_redirects=True)
 
     if resp.status_code in (403, 429):
-        raise FetchBlocked(f"Blocked ({resp.status_code}) for url={url}")
+        raise FetchBlocked(resp.status_code, url)
 
     resp.raise_for_status()
     return resp.text

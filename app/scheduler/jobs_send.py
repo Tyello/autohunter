@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from app.core.settings import settings
-
 from app.models.notification import Notification
-from app.services.limits_service import can_send_more_today, should_send_daily_limit_notice
+from app.services.limits_service import (
+    can_send_more_today,
+    get_active_subscription_limit_for_user,
+    should_send_daily_limit_notice,
+)
+from app.services.notifications_service import mark_suppressed_reason
 from app.services.system_logs_service import log
 
 from app.bot.sender import send_daily_limit_notice_http
@@ -24,17 +27,15 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
     failed = 0
 
     for n in queued:
-        # Limite diário: não acumula
         if not can_send_more_today(db, n.user_id):
-            # 1) não é "failed": é política
-            n.status = "suppressed"  # ou "limit_reached"
-            n.error_message = "daily_limit_reached"
-            db.commit()
+            # política (não é erro)
+            mark_suppressed_reason(db, n.id, "daily_limit_reached")
 
-            # 2) aviso 1x/dia
-            user = n.user  # você já tem relationship no model Notification :contentReference[oaicite:4]{index=4}
+            # aviso 1x por dia (no fuso do usuário)
+            user = n.user
             if user and should_send_daily_limit_notice(user):
-                ok = send_daily_limit_notice_http(user, settings.default_alert_limit)
+                limit = get_active_subscription_limit_for_user(db, n.user_id)
+                ok = send_daily_limit_notice_http(user, limit)
                 if ok:
                     user.last_daily_limit_notice_at = datetime.now(timezone.utc)
                     db.commit()
@@ -49,11 +50,13 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
             sender_fn(n, listing, user)
             n.status = "sent"
             n.sent_at = datetime.now(timezone.utc)
+            n.reason = None
             n.error_message = None
             db.commit()
             sent += 1
         except Exception as e:
             n.status = "failed"
+            n.reason = "send_error"
             n.error_message = str(e)[:5000]
             db.commit()
             failed += 1
@@ -64,3 +67,5 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
         "failed": failed,
         "checked": len(queued),
     })
+
+    return sent

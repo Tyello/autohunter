@@ -1,5 +1,6 @@
 import re
-from typing import List, Dict, Any, Optional
+import json
+from typing import List, Dict, Any, Optional, Iterable
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html
@@ -28,6 +29,86 @@ def _extract_external_id_from_url(url: str) -> str:
     if m2:
         return m2.group(1)
     return url
+
+
+def _find_preloaded_state(html: str) -> Optional[dict]:
+    """Parseia o JSON do script `__PRELOADED_STATE__` (quando existe).
+
+    Observação: em páginas SPA (VIP / Motors), o preço muitas vezes só existe aqui.
+    """
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        tag = soup.find("script", id="__PRELOADED_STATE__")
+        if not tag or not tag.string:
+            return None
+        return json.loads(tag.string)
+    except Exception:
+        return None
+
+
+def _walk(obj: Any) -> Iterable[Any]:
+    """Itera recursivamente por dicts/lists para buscas tolerantes a mudanças de layout."""
+    stack = [obj]
+    while stack:
+        cur = stack.pop()
+        yield cur
+        if isinstance(cur, dict):
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
+
+
+def _extract_price_from_vip_html(html: str) -> Optional[int]:
+    """Extrai preço de uma página de anúncio (VIP) do Mercado Livre.
+
+    Prioriza o JSON `__PRELOADED_STATE__`, com fallback para HTML visível.
+    Retorna valor inteiro em BRL (ex.: 165590) ou None.
+    """
+    state = _find_preloaded_state(html)
+    if state:
+        # Caminho comum em VIP Motors: pageState.initialState.components.short_description[*].price.value
+        try:
+            comps = (
+                state.get("pageState", {})
+                     .get("initialState", {})
+                     .get("components", {})
+            )
+            short_desc = comps.get("short_description") or []
+            for comp in short_desc:
+                if not isinstance(comp, dict):
+                    continue
+                # Alguns layouts têm id="price"/type="price".
+                if comp.get("id") == "price" or comp.get("type") == "price":
+                    p = comp.get("price") or {}
+                    v = p.get("value")
+                    if isinstance(v, (int, float)):
+                        return int(v)
+        except Exception:
+            pass
+
+        # Fallback ultra-tolerante: procura algum dict com {"type":"price", "price": {"value": ...}}
+        for node in _walk(state):
+            if not isinstance(node, dict):
+                continue
+            if node.get("type") == "price":
+                p = node.get("price")
+                if isinstance(p, dict) and isinstance(p.get("value"), (int, float)):
+                    return int(p["value"])
+
+            # Às vezes o bloco vem sem type, só "price": {"value": ...}
+            p2 = node.get("price")
+            if isinstance(p2, dict) and isinstance(p2.get("value"), (int, float)):
+                return int(p2["value"])
+
+    # Fallback HTML visível (quando SSR):
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        price_el = soup.select_one("span.andes-money-amount__fraction") or soup.select_one("span.price-tag-fraction")
+        price_text = price_el.get_text(strip=True) if price_el else ""
+        v = parse_brl_price(price_text)
+        return int(v) if isinstance(v, (int, float)) else None
+    except Exception:
+        return None
 
 
 def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -126,9 +207,11 @@ def scrape_mercadolivre(search_url: str) -> List[Dict[str, Any]]:
         price_text = price_el.get_text(strip=True) if price_el else ""
         price = parse_brl_price(price_text)
 
+        external_id = _extract_external_id_from_url(url)
+
         items.append({
             "source": "mercadolivre",
-            "external_id": _extract_external_id_from_url(url),
+            "external_id": external_id,
             "title": title,
             "url": url,
             "thumbnail_url": thumb,
@@ -137,11 +220,42 @@ def scrape_mercadolivre(search_url: str) -> List[Dict[str, Any]]:
             "location": None,
         })
 
-    # Se veio quase tudo sem title, cai pro POLYCARD (seu layout atual)
+    # Sempre tenta extrair POLYCARD (é o layout novo do ML), mas usa como:
+    # - fallback (quando títulos somem)
+    # - preenchimento de campos faltantes (quando só alguns cards vieram incompletos)
+    poly_items = _parse_polycard_items(html, limit=50)
+    poly_by_id = {p.get("external_id"): p for p in poly_items if p.get("external_id")}
+
+    # 1) Se veio quase tudo sem title, retorna POLYCARD direto.
     empty_titles = sum(1 for i in items if not i.get("title"))
-    if not items or empty_titles > (len(items) * 0.7):
-        poly_items = _parse_polycard_items(html, limit=50)
+    if (not items) or (items and empty_titles > (len(items) * 0.7)):
         if poly_items:
             return poly_items
+
+    # 2) Mescla POLYCARD para completar campos faltantes.
+    for it in items:
+        pid = it.get("external_id")
+        p = poly_by_id.get(pid)
+        if not p:
+            continue
+        # completa só o que estiver faltando
+        for k in ("title", "thumbnail_url", "price", "location", "url"):
+            if not it.get(k) and p.get(k):
+                it[k] = p[k]
+
+    # 3) Último fallback: se ainda faltar preço em alguns anúncios, busca a página VIP do anúncio
+    # (capado para não virar N+1 sempre).
+    missing_price = [i for i in items if not i.get("price") and i.get("url")]
+    if missing_price:
+        max_vip_fetch = 5
+        for it in missing_price[:max_vip_fetch]:
+            try:
+                vip_html = fetch_html(it["url"], timeout=20)
+                vip_price = _extract_price_from_vip_html(vip_html)
+                if vip_price:
+                    it["price"] = vip_price
+            except Exception:
+                # falhou: segue com price None
+                pass
 
     return items

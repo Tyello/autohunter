@@ -18,34 +18,33 @@ class Notification(TimestampMixin, Base):
         default=uuid.uuid4,
     )
 
-    # Dono do alerta (sempre existe)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # Wishlist que gerou o match (pode ser null caso você gere alertas por busca manual no futuro,
-    # mas no MVP de monitoramento normalmente vem preenchido)
     wishlist_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("wishlists.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    # Anúncio que disparou o alerta (sempre existe)
     car_listing_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("car_listings.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # Estado mínimo do envio
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")  # queued|sent|failed|suppressed
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Motivo curto (ex: daily_limit_reached, no_chat_id, telegram_error)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Mensagem detalhada (stacktrace/erro do provider etc.)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Relacionamentos (opcionais mas úteis no serviço)
     user = relationship("User")
     wishlist = relationship("Wishlist")
     car_listing = relationship("CarListing")

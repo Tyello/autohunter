@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.wishlist_filter import WishlistFilter
+from app.sources import list_sources
 
 
 def allowed_sources_for_wishlist(db: Session, wishlist_id) -> set[str]:
@@ -14,4 +15,6 @@ def allowed_sources_for_wishlist(db: Session, wishlist_id) -> set[str]:
     if eq_sources:
         return set(eq_sources)
 
-    return {"mercadolivre", "olx"}
+    # defaults (MVP): todas as fontes "implementadas" (scrape != None)
+    # que suportam monitoramento. Fontes SPA/placeholder ficam fora.
+    return {p.name for p in list_sources() if p.supports_wishlist_monitoring and p.scrape is not None}

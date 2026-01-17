@@ -7,6 +7,7 @@ from app.models.notification import Notification
 from app.models.subscription import Subscription
 from app.models.plan import Plan
 from app.models.user import User
+from app.utils.time_windows import day_window_utc, local_date
 
 
 def should_send_daily_limit_notice(user) -> bool:
@@ -18,21 +19,22 @@ def should_send_daily_limit_notice(user) -> bool:
     last = getattr(user, "last_daily_limit_notice_at", None)
     if last is None:
         return True
-    return last.date() != now.date()
+
+    # compara o "dia" no timezone do usuario (evita reset em UTC que parece bug no BR)
+    return local_date(last, settings.default_user_timezone) != local_date(now, settings.default_user_timezone)
 
 
 def count_sent_today(db: Session, user_id) -> int:
-    """
-    Conta notificações 'sent' desde 00:00 UTC.
-    """
+    """Conta notificacoes 'sent' no "dia" do usuario (timezone local), convertido para UTC."""
     now = datetime.now(timezone.utc)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    window = day_window_utc(now, settings.default_user_timezone)
 
     count = (
         db.query(func.count(Notification.id))
         .filter(Notification.user_id == user_id)
         .filter(Notification.status == "sent")
-        .filter(Notification.sent_at >= day_start)
+        .filter(Notification.sent_at >= window.start_utc)
+        .filter(Notification.sent_at < window.end_utc)
         .scalar()
     )
     return int(count or 0)

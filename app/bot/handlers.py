@@ -18,9 +18,6 @@ from app.models.subscription import Subscription
 
 from app.bot.admin import is_admin
 
-# debug pipeline:
-from app.bot.debug import run_once_for_wishlist, status_for_wishlist
-
 
 def _get_active_subscription_and_plan(db, user: User):
     if not user.account_id:
@@ -79,7 +76,12 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub in ("listar",):
             w = list_wishlists(db, user.id)
             if not w:
-                await update.message.reply_text("Você não tem wishlists. Use: /wishlist add <termos>")
+                await update.message.reply_text(
+                    "Você não tem wishlists.\n"
+                    "Opções:\n"
+                    "• /wishlist_add (assistente)\n"
+                    "• /wishlist add <termos> (modo antigo)"
+                )
                 return
             lines = [f"{i+1}. {x.query}" for i, x in enumerate(w)]
             await update.message.reply_text("Wishlists:\n" + "\n".join(lines))
@@ -240,7 +242,8 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
         await update.message.reply_text("Sem permissão.")
         return
 
@@ -301,7 +304,8 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
         await update.message.reply_text("Sem permissão.")
         return
 

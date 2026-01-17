@@ -21,6 +21,7 @@ def mark_sent(db: Session, notification_id):
     row = db.query(Notification).filter(Notification.id == notification_id).one()
     row.status = "sent"
     row.sent_at = datetime.now(timezone.utc)
+    row.reason = None
     row.error_message = None
     db.commit()
 
@@ -28,15 +29,28 @@ def mark_sent(db: Session, notification_id):
 def mark_failed(db: Session, notification_id, error_message: str):
     row = db.query(Notification).filter(Notification.id == notification_id).one()
     row.status = "failed"
+    row.reason = "send_error"
     row.error_message = error_message[:5000]
     db.commit()
 
 
-def mark_failed_reason(db: Session, notification_id, reason: str):
+def mark_failed_reason(db: Session, notification_id, reason: str, error_message: str | None = None):
+    """Marca como failed com um motivo curto e, opcionalmente, uma mensagem detalhada."""
     row = db.query(Notification).filter(Notification.id == notification_id).one()
     row.status = "failed"
-    row.error_message = reason[:5000]
+    row.reason = reason
+    row.error_message = (error_message or reason)[:5000]
     db.commit()
+
+
+def mark_suppressed_reason(db: Session, notification_id, reason: str):
+    """Marca como suppressed (politica/regra de negocio), sem contar como erro."""
+    row = db.query(Notification).filter(Notification.id == notification_id).one()
+    row.status = "suppressed"
+    row.reason = reason
+    row.error_message = None
+    db.commit()
+
 
 def notification_exists(db: Session, user_id, wishlist_id, car_listing_id) -> bool:
     return (

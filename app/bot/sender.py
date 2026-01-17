@@ -11,8 +11,6 @@ def telegram_sender(notification, listing, user):
 
     chat_id = user.telegram_chat_id
 
-    # Se você já calculou FIPE/score no matching, use isso.
-    # MVP: aqui manda preço e link. FIPE entra quando seu matching já estiver abastecendo.
     price_text = format_price(listing.price)
 
     text = (
@@ -21,7 +19,6 @@ def telegram_sender(notification, listing, user):
         f"{listing.url}"
     )
 
-    # Se tiver thumb: manda foto
     if listing.thumbnail_url:
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         resp = requests.post(url, data={"chat_id": chat_id, "photo": listing.thumbnail_url, "caption": text}, timeout=15)
@@ -31,6 +28,7 @@ def telegram_sender(notification, listing, user):
 
     if resp.status_code >= 400:
         raise RuntimeError(f"Telegram API error {resp.status_code}: {resp.text}")
+
 
 def send_daily_limit_notice_http(user, limit: int):
     token = settings.telegram_bot_token
@@ -53,5 +51,6 @@ def send_daily_limit_notice_http(user, limit: int):
 
     # Se falhar, não derrube o sender inteiro (aviso é best-effort)
     if resp.status_code >= 400:
-        # você pode logar em system_logs se quiser
         return False
+
+    return True

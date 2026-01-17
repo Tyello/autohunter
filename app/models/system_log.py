@@ -26,4 +26,4 @@ class SystemLog(TimestampMixin, Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
     # payload livre para debug (jsonb)
-    payload: Mapped[Optional[Dict[str, Any]]] = Mapped
+    payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)

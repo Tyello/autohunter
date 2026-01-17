@@ -5,6 +5,8 @@ from .car_listing import CarListing
 from .fipe_price import FipePrice
 from .notification import Notification
 from .system_log import SystemLog
+from .source_state import SourceState
+from .source_run import SourceRun
 from .plan import Plan
 from .subscription import Subscription
 from .account import Account
@@ -18,6 +20,8 @@ __all__ = [
     "FipePrice",
     "Notification",
     "SystemLog",
+    "SourceState",
+    "SourceRun",
     "Plan",
     "Subscription",
     "Account",
