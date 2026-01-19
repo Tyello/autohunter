@@ -9,7 +9,9 @@ from urllib.parse import quote_plus
 
 from bs4 import BeautifulSoup
 
-from app.scrapers.base import fetch_html
+from app.scrapers.base import fetch_html, FetchBlocked
+from app.core.settings import settings
+from app.services.browser_fetcher import fetch_html_browser
 
 
 @dataclass
@@ -170,7 +172,14 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
 
 def scrape_olx(search_url: str) -> list[dict]:
     """Retorna lista de dicts pronta para ingest_listings()."""
-    html = fetch_html(search_url)
+    try:
+        html = fetch_html(search_url, referer="https://www.olx.com.br/")
+    except FetchBlocked as e:
+        if settings.enable_olx_browser_fallback and settings.enable_playwright:
+            res = fetch_html_browser(search_url)
+            html = res.html
+        else:
+            raise
 
     next_data = _extract_next_data_json(html)
     if not next_data:

@@ -20,6 +20,8 @@ from app.services.search_urls_service import (
 from app.scrapers.mercadolivre import scrape_mercadolivre
 from app.scrapers.olx import scrape_olx
 from app.scrapers.chavesnamao import scrape_chavesnamao
+from app.scrapers.webmotors import scrape_webmotors
+from app.scrapers.gogarage import scrape_gogarage
 
 from .registry import register_source
 from .types import SourcePlugin
@@ -36,6 +38,7 @@ register_source(
         cooldown_minutes_setting=None,
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
+        fetch_mode="browser",
     )
 )
 
@@ -51,6 +54,7 @@ register_source(
         cooldown_minutes_setting="olx_cooldown_minutes",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
+        fetch_mode="browser",
     )
 )
 
@@ -70,17 +74,18 @@ register_source(
 )
 
 
-# Webmotors: SPA/JS-heavy. Placeholder (scrape=None) até implementar via API/headless.
+# Webmotors: SPA/JS-heavy. Placeholder (scrape=scrape_webmotors) até implementar via API/headless.
 register_source(
     SourcePlugin(
         name="webmotors",
         build_url=webmotors_url,
-        scrape=None,
+        scrape=scrape_webmotors,
         enabled_setting="enable_webmotors",
         sched_minutes_setting="sched_webmotors_minutes",
         cooldown_minutes_setting="webmotors_cooldown_minutes",
-        supports_manual_search=False,
+        supports_manual_search=True,
         supports_wishlist_monitoring=True,
+        fetch_mode="browser",
     )
 )
 
@@ -90,11 +95,12 @@ register_source(
     SourcePlugin(
         name="gogarage",
         build_url=gogarage_url,
-        scrape=None,
+        scrape=scrape_gogarage,
         enabled_setting="enable_gogarage",
         sched_minutes_setting="sched_gogarage_minutes",
         cooldown_minutes_setting="gogarage_cooldown_minutes",
-        supports_manual_search=False,
+        supports_manual_search=True,
         supports_wishlist_monitoring=True,
+        fetch_mode="browser",
     )
 )

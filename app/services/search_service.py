@@ -25,6 +25,11 @@ def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
         if plugin.scrape is None:
             continue
 
+        if plugin.fetch_mode == 'browser' and not settings.enable_playwright:
+            # keep it silent in user flow; metrics still track skip
+            record_run(db, source=plugin.name, kind='manual', status='skipped', payload={'reason': 'playwright_off'})
+            continue
+
         cooldown = 0
         if plugin.cooldown_minutes_setting:
             cooldown = int(getattr(settings, plugin.cooldown_minutes_setting, 0) or 0)

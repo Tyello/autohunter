@@ -36,6 +36,15 @@ def job_run_source_for_all_wishlists(source_name: str):
                 return
 
             # Global checks (per-source)
+            # Browser sources require Playwright
+            if plugin.fetch_mode == 'browser' and not settings.enable_playwright:
+                mark_skipped(db, plugin.name, 'playwright_off')
+                record_run(db, source=plugin.name, kind='scheduler', status='skipped', payload={'reason': 'playwright_off'})
+                db.commit()
+                log(db, 'warn', component, 'playwright_off')
+                return
+
+
             if plugin.enabled_setting and not getattr(settings, plugin.enabled_setting, False):
                 mark_skipped(db, plugin.name, "disabled", {"enabled_setting": plugin.enabled_setting})
                 record_run(db, source=plugin.name, kind="scheduler", status="skipped", payload={"reason": "disabled"})
