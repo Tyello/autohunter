@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from app.scrapers.base import fetch_html, FetchBlocked
 from app.core.settings import settings
 from app.services.browser_fetcher import fetch_html_browser
+from app.sources.types import ScrapeContext
 
 
 @dataclass
@@ -170,13 +171,13 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
     return out
 
 
-def scrape_olx(search_url: str) -> list[dict]:
+def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """Retorna lista de dicts pronta para ingest_listings()."""
     try:
-        html = fetch_html(search_url, referer="https://www.olx.com.br/")
+        html = fetch_html(search_url, referer="https://www.olx.com.br/", proxy=ctx.proxy_server)
     except FetchBlocked as e:
         if settings.enable_olx_browser_fallback and settings.enable_playwright:
-            res = fetch_html_browser(search_url)
+            res = fetch_html_browser(search_url, ctx=ctx)
             html = res.html
         else:
             raise

@@ -9,6 +9,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
+from app.bot.text_sanitize import sanitize_for_telegram
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -55,6 +56,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     Usage:
       /admin sources
+      /admin health
     """
     chat_id = update.effective_chat.id
     if not is_admin(chat_id):
@@ -63,15 +65,18 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources")
+        await update.message.reply_text("Use: /admin sources | /admin health")
         return
 
     action = args[0].lower()
     if action == "sources":
         await _admin_sources(update)
         return
+    if action == "health":
+        await _admin_health(update)
+        return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin health")
 
 
 async def _admin_sources(update: Update):
@@ -223,3 +228,70 @@ async def _admin_sources(update: Update):
     if len(text) > 3800:
         text = text[:3797] + "..."
     await update.message.reply_text(text)
+
+
+async def _admin_health(update: Update):
+    now = datetime.now(timezone.utc)
+    lines: List[str] = []
+    lines.append("\ud83e\ude7a Admin \u2014 Health")
+    lines.append(f"Agora (UTC): {_fmt_dt(now)}")
+    lines.append("")
+
+    # Best-effort system info (psutil is optional)
+    try:
+        import psutil  # type: ignore
+
+        cpu = psutil.cpu_percent(interval=0.2)
+        vm = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+
+        lines.append(f"CPU: {cpu}%")
+        lines.append(
+            f"RAM: {int(vm.percent)}% ({int(vm.used/1024/1024)}MB/{int(vm.total/1024/1024)}MB)"
+        )
+        lines.append(
+            f"Disk: {int(disk.percent)}% ({int(disk.used/1024/1024)}MB/{int(disk.total/1024/1024)}MB)"
+        )
+    except Exception:
+        lines.append("CPU/RAM/Disk: psutil not installed")
+
+    lines.append("")
+    lines.append(f"Playwright enabled: {settings.enable_playwright}")
+    lines.append(f"Playwright headless: {settings.playwright_headless}")
+    lines.append(f"Scheduler workers: {settings.scheduler_workers}")
+
+    # Internal pools
+    try:
+        from app.services.playwright_pool import get_playwright_pool
+
+        pool = get_playwright_pool()
+        st = pool.stats()
+        lines.append(f"Playwright pool: browsers={st.get('browsers')} contexts={st.get('contexts')}")
+    except Exception:
+        pass
+
+    try:
+        from app.scrapers.base import get_session_stats
+
+        sst = get_session_stats()
+        lines.append(f"Requests sessions: {sst.get('sessions')}")
+    except Exception:
+        pass
+
+    # Backoff/throttle snapshot
+    with SessionLocal() as db:
+        rows = db.query(SourceState).all()
+        paused = [r for r in rows if r.next_allowed_at and r.next_allowed_at > now]
+        if paused:
+            lines.append("")
+            lines.append("Sources paused (backoff/throttle):")
+            for r in sorted(paused, key=lambda x: x.source):
+                lines.append(
+                    f"- {r.source}: until {_fmt_dt(r.next_allowed_at)} status={r.last_status or '-'}"
+                )
+
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3797] + "..."
+    safe = sanitize_for_telegram(text)
+    await update.message.reply_text(safe)

@@ -4,7 +4,19 @@ from dataclasses import dataclass
 from typing import Callable, Optional, List, Dict, Any, Literal
 
 
-ScrapeFn = Callable[[str], List[Dict[str, Any]]]
+@dataclass(frozen=True)
+class ScrapeContext:
+    """Runtime context passed to scrapers.
+
+    - source: source name (e.g. 'olx', 'webmotors'). Used for session/browser stickiness.
+    - proxy_server: full proxy URL (http://... or socks5://...). Optional.
+    """
+
+    source: str
+    proxy_server: Optional[str] = None
+
+
+ScrapeFn = Callable[[str, ScrapeContext], List[Dict[str, Any]]]
 BuildUrlFn = Callable[[str], str]
 FetchMode = Literal["http", "browser"]
 
@@ -13,12 +25,12 @@ FetchMode = Literal["http", "browser"]
 class SourcePlugin:
     """Defines a listing source.
 
-    - `build_url(query)` returns a URL that, when opened, shows a list of listings.
-    - `scrape(url)` returns a list of normalized listing dicts.
+    - build_url(query) returns a URL that shows a list of listings.
+    - scrape(url, ctx) returns a list of normalized listing dicts.
 
     Plugins are declarative: they wire into Settings by attribute-name strings.
 
-    `fetch_mode` is informational (used for logging / ops); scraping may still
+    fetch_mode is informational (used for logging / ops); scraping may still
     use either http or browser under the hood.
     """
 
@@ -30,6 +42,7 @@ class SourcePlugin:
     enabled_setting: Optional[str] = None
     sched_minutes_setting: Optional[str] = None
     cooldown_minutes_setting: Optional[str] = None
+    rate_limit_seconds_setting: Optional[str] = None
 
     # Behavior flags
     supports_manual_search: bool = True

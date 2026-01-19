@@ -13,6 +13,9 @@ from app.models.car_listing import CarListing
 
 from app.sources import list_sources
 from app.scrapers.base import FetchBlocked
+from app.services.source_proxy_service import get_source_proxy_server
+from app.services.source_rate_limit_service import get_source_rate_limit_seconds
+from app.sources.types import ScrapeContext
 
 
 def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
@@ -42,10 +45,11 @@ def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
 
         t0 = time.perf_counter()
         try:
-            items = plugin.scrape(url)
+            ctx = ScrapeContext(source=plugin.name, proxy_server=get_source_proxy_server(plugin.name))
+            items = plugin.scrape(url, ctx)
             inserted_ids = ingest_listings(db, items)
 
-            mark_success(db, plugin.name, {"manual_query": query, "inserted": len(inserted_ids or [])})
+            mark_success(db, plugin.name, rate_limit_seconds=get_source_rate_limit_seconds(plugin.name), payload={"manual_query": query, "inserted": len(inserted_ids or [])})
             record_run(
                 db,
                 source=plugin.name,

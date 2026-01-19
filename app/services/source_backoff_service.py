@@ -48,11 +48,19 @@ def _compute_backoff_minutes(base_minutes: int, exponent: int) -> int:
     return int(min(minutes, max_m))
 
 
-def mark_success(db: Session, source: str, payload: Optional[Dict[str, Any]] = None) -> None:
+def mark_success(db: Session, source: str, *, rate_limit_seconds: int = 0, payload: Optional[Dict[str, Any]] = None) -> None:
     st = _get_or_create_state(db, source)
+    st.last_run_at = _utcnow()
     st.consecutive_blocks = 0
     st.consecutive_failures = 0
-    st.next_allowed_at = None
+
+    # Apply throttling (min interval) using next_allowed_at.
+    rl = int(rate_limit_seconds or 0)
+    if rl > 0:
+        st.next_allowed_at = _utcnow() + timedelta(seconds=rl)
+    else:
+        st.next_allowed_at = None
+
     st.last_status = "success"
     st.last_error = None
     st.last_payload = payload
@@ -61,6 +69,7 @@ def mark_success(db: Session, source: str, payload: Optional[Dict[str, Any]] = N
 
 def mark_skipped(db: Session, source: str, reason: str, payload: Optional[Dict[str, Any]] = None) -> None:
     st = _get_or_create_state(db, source)
+    st.last_run_at = _utcnow()
     st.last_status = f"skipped:{reason}"
     st.last_payload = payload
     db.add(st)
@@ -76,6 +85,7 @@ def mark_blocked(
 ) -> int:
     """Marca bloqueio e retorna minutos de backoff aplicado."""
     st = _get_or_create_state(db, source)
+    st.last_run_at = _utcnow()
     st.consecutive_blocks = int(st.consecutive_blocks or 0) + 1
     st.consecutive_failures = 0
 
@@ -100,6 +110,7 @@ def mark_error(
 ) -> int:
     """Marca erro e retorna minutos de backoff aplicado."""
     st = _get_or_create_state(db, source)
+    st.last_run_at = _utcnow()
     st.consecutive_failures = int(st.consecutive_failures or 0) + 1
     # não zera blocks completamente — mas deixa o signal principal como failure
     st.consecutive_blocks = 0

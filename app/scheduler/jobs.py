@@ -39,9 +39,9 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
     log(db, "info", component, "queued notifications", {"queued": queued, "listings": len(listings), "wishlists": len(wishlists)})
 
 
-def scrape_ingest_match(db, job_name, scraper_fn, search_url, wishlist=None) -> dict:
+def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None) -> dict:
     try:
-        listings = scraper_fn(search_url)
+        listings = scraper_fn(search_url, ctx)
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)

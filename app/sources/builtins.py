@@ -36,9 +36,10 @@ register_source(
         enabled_setting=None,
         sched_minutes_setting="sched_ml_minutes",
         cooldown_minutes_setting=None,
+        rate_limit_seconds_setting="rate_limit_mercadolivre_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="browser",
+        fetch_mode="http",
     )
 )
 
@@ -52,9 +53,11 @@ register_source(
         enabled_setting="enable_olx",
         sched_minutes_setting="sched_olx_minutes",
         cooldown_minutes_setting="olx_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_olx_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="browser",
+        # Primário via HTTP; pode cair para browser internamente quando bloqueado.
+        fetch_mode="http",
     )
 )
 
@@ -68,6 +71,7 @@ register_source(
         enabled_setting="enable_chavesnamao",
         sched_minutes_setting="sched_chavesnamao_minutes",
         cooldown_minutes_setting="chavesnamao_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_chavesnamao_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
     )
@@ -83,6 +87,7 @@ register_source(
         enabled_setting="enable_webmotors",
         sched_minutes_setting="sched_webmotors_minutes",
         cooldown_minutes_setting="webmotors_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_webmotors_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="browser",
@@ -99,6 +104,7 @@ register_source(
         enabled_setting="enable_gogarage",
         sched_minutes_setting="sched_gogarage_minutes",
         cooldown_minutes_setting="gogarage_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_gogarage_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="browser",

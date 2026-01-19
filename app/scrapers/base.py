@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 import time
+import threading
 from typing import Optional
 
 import requests
@@ -22,7 +23,24 @@ class FetchBlocked(Exception):
 
 
 # Reutiliza sessão para manter cookies. Isso ajuda bastante em sites tipo OLX.
-_session = requests.Session()
+_sessions: dict[str, requests.Session] = {}
+_sessions_lock = threading.Lock()
+
+
+def _get_session(proxy: Optional[str]) -> requests.Session:
+    key = proxy or "__default__"
+    with _sessions_lock:
+        sess = _sessions.get(key)
+        if sess is None:
+            sess = _init_session(requests.Session())
+            _sessions[key] = sess
+        return sess
+
+
+def get_session_stats() -> dict:
+    with _sessions_lock:
+        return {"sessions": len(_sessions), "keys": list(_sessions.keys())[:10]}
+
 
 retries = Retry(
     total=2,
@@ -33,8 +51,13 @@ retries = Retry(
 )
 
 adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
-_session.mount("https://", adapter)
-_session.mount("http://", adapter)
+
+
+def _init_session(sess: requests.Session) -> requests.Session:
+    # Retry + connection pooling
+    sess.mount("https://", adapter)
+    sess.mount("http://", adapter)
+    return sess
 
 _DEFAULT_UAS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -63,6 +86,7 @@ def fetch_html(
     timeout: int = 25,
     headers: Optional[dict] = None,
     referer: Optional[str] = None,
+    proxy: Optional[str] = None,
     min_delay_ms: int = 150,
     max_delay_ms: int = 450,
 ) -> str:
@@ -74,7 +98,8 @@ def fetch_html(
     - Detects bot challenges in body
 
     Proxies:
-    - Requests respects HTTP(S)_PROXY env vars automatically.
+    - If proxy is provided, it will be used for both HTTP and HTTPS.
+    - Requests also respects HTTP(S)_PROXY env vars automatically.
     """
 
     # Pequeno delay randômico para reduzir padrão.
@@ -102,7 +127,18 @@ def fetch_html(
     if headers:
         base_headers.update(headers)
 
-    resp = _session.get(url, headers=base_headers, timeout=timeout, allow_redirects=True)
+    proxies = None
+    if proxy:
+        proxies = {"http": proxy, "https": proxy}
+
+    sess = _get_session(proxy)
+    resp = sess.get(
+        url,
+        headers=base_headers,
+        timeout=timeout,
+        allow_redirects=True,
+        proxies=proxies,
+    )
 
     # Bloqueio explícito
     if resp.status_code in (403, 429):

@@ -3,7 +3,6 @@ from sqlalchemy import text
 from typing import List
 from sqlalchemy.orm import Session
 
-import app.models
 from app.core.settings import settings
 
 from app.scheduler.run import start_scheduler

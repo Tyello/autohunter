@@ -12,6 +12,9 @@ from app.services.source_backoff_service import is_source_allowed, mark_blocked,
 from app.services.source_runs_service import record_run
 from app.sources import list_sources
 from app.services.wishlist_sources_service import allowed_sources_for_wishlist
+from app.services.source_proxy_service import get_source_proxy_server
+from app.services.source_rate_limit_service import get_source_rate_limit_seconds
+from app.sources.types import ScrapeContext
 
 from app.scheduler.jobs import scrape_ingest_match
 from app.scheduler.heartbeat import heartbeat
@@ -93,7 +96,8 @@ def job_run_source_for_all_wishlists(source_name: str):
                 log(db, "info", component, "job_started", {"wishlist_id": str(w.id), "query": w.query, "url": url})
 
                 ran_any = True
-                res = scrape_ingest_match(db, component, plugin.scrape, url, wishlist=w)
+                ctx = ScrapeContext(source=plugin.name, proxy_server=get_source_proxy_server(plugin.name))
+                res = scrape_ingest_match(db, component, plugin.scrape, url, ctx=ctx, wishlist=w)
 
                 if res.get("ok") is True:
                     total_found += int(res.get("found") or 0)
@@ -124,7 +128,7 @@ def job_run_source_for_all_wishlists(source_name: str):
                 final_status = "skipped"
                 mark_skipped(db, plugin.name, "no_work")
             elif final_status == "success":
-                mark_success(db, plugin.name, {
+                mark_success(db, plugin.name, rate_limit_seconds=get_source_rate_limit_seconds(plugin.name), payload={
                     "found": total_found,
                     "inserted": total_inserted,
                     "matched": total_matched,
@@ -156,7 +160,7 @@ def job_run_source_for_all_wishlists(source_name: str):
 def start_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(
         timezone="UTC",
-        executors={"default": ThreadPoolExecutor(10)},
+        executors={"default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 4) or 4))},
         job_defaults={
             "coalesce": True,
             "misfire_grace_time": 60,

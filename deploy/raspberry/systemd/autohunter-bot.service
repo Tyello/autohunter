@@ -1,0 +1,22 @@
+[Unit]
+Description=AutoHunter Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autohunter
+WorkingDirectory=/opt/autohunter
+EnvironmentFile=/opt/autohunter/.env
+ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_bot.sh
+Restart=always
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

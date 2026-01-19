@@ -11,6 +11,8 @@ from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
 
+from app.services.wishlist_semantic_rules import semantic_match
+
 
 @dataclass(frozen=True)
 class FilterRule:
@@ -135,17 +137,20 @@ def match_listings_for_wishlist(
     listings = db.query(CarListing).filter(CarListing.id.in_(ids)).all()
 
     filters = _get_filters(wishlist)
-    terms = _normalize_terms(wishlist.query)
 
     matched: list[CarListing] = []
     for l in listings:
         if not _apply_filters(l, filters):
             continue
-        for t in terms:
-            if not text_match(t, l):
-                continue
-        #if not text_match(wishlist.query, l):
-            #continue
+        # Texto da wishlist precisa bater integralmente (AND de termos).
+        # Isso evita "Civic" trazer LXR/EXR quando a intenção é "Civic SI", por exemplo.
+        if not text_match(wishlist.query, l):
+            continue
+
+        # Regras semânticas (required/blocked/sinônimos) por wishlist.
+        # Mantém o comportamento simples por padrão e endurece onde faz sentido.
+        if not semantic_match(wishlist, l):
+            continue
         matched.append(l)
 
     return matched
