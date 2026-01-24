@@ -1,124 +1,324 @@
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup
-
+from app.core.settings import settings
+from app.scrapers.base import FetchBlocked, fetch_html
+from app.scrapers.parsing import parse_brl_price
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
 
-def _parse_brl_price_to_decimal(text: str) -> Optional[Decimal]:
-    if not text:
+GOGARAGE_BASE = "https://www.gogarage.com.br"
+
+
+def _to_decimal_brl(v: Any) -> Optional[Decimal]:
+    if v is None:
         return None
-    t = text.strip().replace('R$', '').strip()
-    t = t.replace('.', '').replace(',', '.')
+    if isinstance(v, (int, float)):
+        try:
+            return Decimal(str(int(v)))
+        except Exception:
+            return None
+    if isinstance(v, Decimal):
+        return v
+    if isinstance(v, str):
+        p = parse_brl_price(v)
+        if p is None:
+            return None
+        try:
+            return Decimal(str(int(p)))
+        except Exception:
+            return None
+    return None
+
+
+def _extract_jsonld_itemlist(html: str) -> List[Tuple[str, Optional[str]]]:
+    """Tenta extrair urls de anúncios via JSON-LD (SEO-friendly)."""
+    out: List[Tuple[str, Optional[str]]] = []
+    for m in re.finditer(r"<script[^>]+type=\"application/ld\+json\"[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE):
+        raw = (m.group(1) or "").strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+
+        candidates: List[dict] = []
+        if isinstance(data, dict):
+            candidates = [data]
+        elif isinstance(data, list):
+            candidates = [x for x in data if isinstance(x, dict)]
+
+        for obj in candidates:
+            if "itemListElement" not in obj:
+                continue
+            items = obj.get("itemListElement")
+            if not isinstance(items, list):
+                continue
+            for el in items:
+                url = None
+                name = None
+                if isinstance(el, dict):
+                    # formatos comuns: {"url":...} ou {"item": {"@id":...}}
+                    url = el.get("url") or el.get("@id")
+                    item = el.get("item") if isinstance(el.get("item"), dict) else None
+                    if not url and item:
+                        url = item.get("@id") or item.get("url")
+                        name = item.get("name")
+                    if not name:
+                        name = el.get("name")
+                if isinstance(url, str) and "/ads/" in url:
+                    out.append((url, name.strip() if isinstance(name, str) else None))
+
+    # dedupe mantendo ordem
+    seen = set()
+    uniq: List[Tuple[str, Optional[str]]] = []
+    for u, n in out:
+        if u in seen:
+            continue
+        seen.add(u)
+        uniq.append((u, n))
+    return uniq
+
+
+def _extract_from_anchors(html: str) -> List[str]:
+    """Fallback: varre âncoras /ads/ no HTML."""
     try:
-        return Decimal(t)
+        from lxml import html as lhtml
+
+        doc = lhtml.fromstring(html)
+        urls = []
+        for a in doc.xpath("//a[contains(@href,'/ads/') and @href]"):
+            href = a.get("href")
+            if not href:
+                continue
+            full = urljoin(GOGARAGE_BASE, href)
+            if "/ads/" not in full:
+                continue
+            urls.append(full)
+
+        # dedupe
+        seen = set()
+        out = []
+        for u in urls:
+            if u in seen:
+                continue
+            seen.add(u)
+            out.append(u)
+        return out
+    except Exception:
+        # regex extremo
+        urls = []
+        for m in re.finditer(r'href="([^"]+/ads/[^"]+)"', html):
+            urls.append(urljoin(GOGARAGE_BASE, m.group(1)))
+        return list(dict.fromkeys(urls))
+
+
+def _guess_external_id(url: str, blob: str) -> str:
+    mid = re.search(r"#(\d+)", blob or "")
+    if mid:
+        return mid.group(1)
+    # usa slug como id estável
+    m = re.search(r"/ads/([^/?#]+)", url)
+    return (m.group(1) if m else url).strip()
+
+
+def _guess_title(url: str, anchor_text: str, blob: str, jsonld_name: Optional[str] = None) -> str:
+    if jsonld_name and jsonld_name.strip():
+        return re.sub(r"\s+", " ", jsonld_name).strip()
+    t = (anchor_text or "").strip()
+    if t and len(t) >= 6:
+        return re.sub(r"\s+", " ", t)
+    # tenta pegar primeira linha antes de preço
+    b = re.sub(r"\s+", " ", (blob or "")).strip()
+    if not b:
+        return ""
+    # remove preço pra sobrar título
+    b2 = re.sub(r"R\$\s*[\d\.]+", "", b).strip()
+    return b2[:120].strip()
+
+
+def _guess_price(blob: str) -> Optional[Decimal]:
+    if not blob:
+        return None
+    m = re.search(r"R\$\s*[\d\.]+", blob)
+    if not m:
+        m = re.search(r"R\$\s*[\d\.]+\,\d{2}", blob)
+    if not m:
+        return None
+    return _to_decimal_brl(m.group(0))
+
+
+def _guess_thumb(doc_el, card_el=None) -> Optional[str]:
+    try:
+        el = card_el or doc_el
+        if el is None:
+            return None
+        imgs = el.xpath('.//img/@src')
+        if imgs:
+            return imgs[0]
     except Exception:
         return None
+    return None
+
+
+def fetch_details(url: str, *, ctx: ScrapeContext) -> Dict[str, Any]:
+    """(Opcional) Completa campos essenciais de um anúncio."""
+    html = fetch_html(
+        url,
+        referer=GOGARAGE_BASE + "/",
+        proxy=ctx.proxy_server,
+        min_delay_ms=700,
+        max_delay_ms=2000,
+    )
+
+    title = ""
+    thumb = None
+    try:
+        from lxml import html as lhtml
+
+        doc = lhtml.fromstring(html)
+        ogt = doc.xpath("//meta[@property='og:title']/@content")
+        if ogt:
+            title = ogt[0]
+        if not title:
+            t = doc.xpath("//title/text()")
+            if t:
+                title = t[0]
+        ogi = doc.xpath("//meta[@property='og:image']/@content")
+        if ogi:
+            thumb = ogi[0]
+    except Exception:
+        pass
+
+    price = _guess_price(html)
+    external_id = _guess_external_id(url, html)
+
+    return {
+        "external_id": external_id,
+        "title": re.sub(r"\s+", " ", (title or "")).strip() or None,
+        "thumbnail_url": thumb,
+        "price": price,
+    }
 
 
 def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
-    res = fetch_html_browser(search_url, ctx=ctx)
-    soup = BeautifulSoup(res.html, "html.parser")
+    """Scraper HTTP-first para Go Garage.
 
-    items: list[dict] = []
+    - Prioriza HTML/JSON-LD (muito mais leve que renderizar JS)
+    - Mantém fallback opcional via Playwright (desligado por padrão)
+    """
+
+    try:
+        html = fetch_html(
+            search_url,
+            referer=GOGARAGE_BASE + "/",
+            proxy=ctx.proxy_server,
+            min_delay_ms=700,
+            max_delay_ms=2200,
+        )
+    except FetchBlocked:
+        if settings.enable_playwright:
+            res = fetch_html_browser(search_url, ctx=ctx)
+            html = res.html
+        else:
+            raise
+
+    # 1) JSON-LD (se existir)
+    jsonld = _extract_jsonld_itemlist(html)
+    jsonld_map = {u: n for u, n in jsonld}
+
+    urls = [u for u, _ in jsonld] if jsonld else _extract_from_anchors(html)
+
+    out: List[dict] = []
     seen: set[str] = set()
 
-    def normalize_location(text: str):
-        t = " ".join((text or "").split())
-        if not t:
-            return None
-        m = re.search(r"([A-Za-zÀ-ÿ\s\.]+)\s*[-,]\s*([A-Z]{2})\b", t)
-        if m:
-            city = " ".join(m.group(1).split())
-            uf = m.group(2)
-            return f"{city}-{uf}" if city else uf
-        return None
+    # Tentativa de enriquecer via leitura do HTML de listagem
+    doc = None
+    try:
+        from lxml import html as lhtml
 
-    # Prefer listing anchors patterns
-    anchors = soup.select('a[href*="/carro/"]') or soup.select('a[href*="/veiculo/"]') or soup.select('a[href*="/anuncio/"]')
+        doc = lhtml.fromstring(html)
+        doc.make_links_absolute(GOGARAGE_BASE)
+    except Exception:
+        doc = None
 
-    for a in anchors:
-        href = a.get("href") or ""
-        full = href if "gogarage.com.br" in href else urljoin("https://gogarage.com.br", href)
+    details_budget = 10  # limite de fetch_details por chamada
 
-        if "gogarage.com.br" not in full:
+    for url in urls:
+        if not isinstance(url, str) or "/ads/" not in url:
             continue
 
-        m = re.search(r"(\d{6,})", full)
-        external_id = m.group(1) if m else full
+        anchor_text = ""
+        blob = ""
+        thumb = None
+
+        if doc is not None:
+            # tenta achar a âncora exata e seu "card" pai
+            try:
+                a_nodes = doc.xpath(f"//a[contains(@href, '{urlparse_safe(url)}')]")
+            except Exception:
+                a_nodes = []
+            if a_nodes:
+                a = a_nodes[0]
+                anchor_text = " ".join([t.strip() for t in a.xpath('.//text()') if t and t.strip()]).strip()
+                card = a
+                for _ in range(6):
+                    if card is None:
+                        break
+                    cls = (card.get('class') or '').lower()
+                    if any(k in cls for k in ('card', 'achado', 'item', 'post', 'result')):
+                        break
+                    card = card.getparent()
+                blob = (card.text_content() if card is not None else a.text_content()) or ""
+                thumb = _guess_thumb(doc, card)
+
+        external_id = _guess_external_id(url, blob)
         if external_id in seen:
             continue
         seen.add(external_id)
 
-        # Walk up to get a card container
-        card = a
-        for _ in range(5):
-            if card is None:
-                break
-            if getattr(card, "name", None) in ("article", "li", "section", "div"):
-                # stop early if the card seems rich enough
-                if hasattr(card, "select_one") and card.select_one("img"):
-                    break
-            card = card.parent
-        if card is None:
-            card = a.parent or a
+        title = _guess_title(url, anchor_text, blob, jsonld_map.get(url))
+        price = _guess_price(blob)
 
-        txt = card.get_text(" ", strip=True) if hasattr(card, "get_text") else ""
-
-        title = (a.get("aria-label") or a.get_text(" ", strip=True) or "").strip()
-        if not title or len(title) < 6:
-            # fallback to first chunk of text
-            title = " ".join(txt.split()[:10])
-        if not title:
-            continue
-
-        pm = re.search(r"R\$\s*[0-9\.]+(\,[0-9]{2})?", txt)
-        price = _parse_brl_price_to_decimal(pm.group(0)) if pm else None
-
-        thumb = None
-        img = card.select_one("img") if hasattr(card, "select_one") else None
-        if img:
-            thumb = img.get("src") or img.get("data-src") or img.get("data-lazy")
-            if thumb and thumb.startswith("//"):
-                thumb = "https:" + thumb
-
-        location = None
-        for sel in (
-            '[data-testid*="location"]',
-            'span[class*="Location"]',
-            'p[class*="Location"]',
-        ):
+        # Se faltou coisa crítica, gasta "orçamento" com details (bem limitado)
+        if details_budget > 0 and (not title or price is None or thumb is None):
             try:
-                el = card.select_one(sel)
+                d = fetch_details(url, ctx=ctx)
+                details_budget -= 1
+                external_id = str(d.get("external_id") or external_id)
+                title = title or (d.get("title") or "")
+                price = price or d.get("price")
+                thumb = thumb or d.get("thumbnail_url")
             except Exception:
-                el = None
-            if el:
-                location = normalize_location(el.get_text(" ", strip=True))
-                if location:
-                    break
-        if not location:
-            location = normalize_location(txt)
+                details_budget -= 1
 
-        items.append(
+        out.append(
             {
                 "source": "gogarage",
                 "external_id": str(external_id),
-                "title": title,
-                "url": full,
+                "title": title or None,
+                "url": url,
                 "thumbnail_url": thumb,
                 "price": price,
                 "currency": "BRL",
-                "location": location,
+                "location": None,
             }
         )
 
-        if len(items) >= 60:
+        if len(out) >= 60:
             break
 
-    return items
+    return out
+
+
+def urlparse_safe(url: str) -> str:
+    """Retorna um fragmento estável do path para usar em xpath contains()."""
+    m = re.search(r"/ads/[^/?#]+", url)
+    return m.group(0) if m else url

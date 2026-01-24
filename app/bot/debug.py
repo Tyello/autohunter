@@ -10,6 +10,8 @@ from app.models.wishlist_filter import WishlistFilter
 from app.services.wishlist_sources_service import allowed_sources_for_wishlist
 from app.services.source_availability_service import is_in_cooldown
 from app.services.search_urls_service import ml_url, olx_url
+from app.services.source_proxy_service import get_source_proxy_server
+from app.sources.types import ScrapeContext
 from app.scheduler.jobs import scrape_ingest_match
 from app.scrapers.mercadolivre import scrape_mercadolivre
 from app.scrapers.olx import scrape_olx
@@ -24,7 +26,15 @@ def run_once_for_wishlist(db: Session, wishlist) -> dict:
     ml = ml_url(q)
     ml_res = None
     if "mercadolivre" in sources:
-        ml_res = scrape_ingest_match(db, "scraper_mercadolivre_debug", scrape_mercadolivre, ml)
+        ctx = ScrapeContext(source="mercadolivre", proxy_server=get_source_proxy_server("mercadolivre"))
+        ml_res = scrape_ingest_match(
+            db,
+            "scraper_mercadolivre_debug",
+            scrape_mercadolivre,
+            ml,
+            ctx=ctx,
+            wishlist=wishlist,
+        )
 
     olx = olx_url(q)
     olx_res = None
@@ -37,7 +47,15 @@ def run_once_for_wishlist(db: Session, wishlist) -> dict:
     elif is_in_cooldown(db, "olx", settings.olx_cooldown_minutes):
         olx_skipped = "cooldown"
     else:
-        olx_res = scrape_ingest_match(db, "scraper_olx_debug", scrape_olx, olx)
+        ctx = ScrapeContext(source="olx", proxy_server=get_source_proxy_server("olx"))
+        olx_res = scrape_ingest_match(
+            db,
+            "scraper_olx_debug",
+            scrape_olx,
+            olx,
+            ctx=ctx,
+            wishlist=wishlist,
+        )
 
     return {
         "ok": True,

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import re
 
 from dataclasses import dataclass
 from decimal import Decimal
@@ -7,10 +6,10 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
+from app.core.text_norm import tokens
 from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
-
 from app.services.wishlist_semantic_rules import semantic_match
 
 
@@ -22,6 +21,7 @@ class FilterRule:
 
 
 def _normalize_terms(query: str) -> list[str]:
+    # kept for backward compat; prefer app.core.text_norm.tokens for new usage
     return [t.strip().lower() for t in (query or "").split() if t.strip()]
 
 
@@ -45,22 +45,28 @@ def _parse_decimal(value: str) -> Decimal | None:
 
 
 def text_match(query: str, listing: CarListing) -> bool:
-    q = (query or "").lower().strip()
-    terms = [t for t in q.split() if t]
+    """Token-level AND match.
+
+    Motivo: substring contains() é fraco (e gera falsos positivos com termos curtos como 'si').
+    """
+
+    terms = tokens(query or "")
     if not terms:
         return True
 
-    # inclui URL porque às vezes o título vem vazio mas a URL tem o slug
-    hay = " ".join([
-        listing.title or "",
-        listing.location or "",
-        listing.url or "",
-    ]).lower()
+    hay_tokens = set(
+        tokens(
+            " ".join(
+                [
+                    listing.title or "",
+                    listing.location or "",
+                    listing.url or "",
+                ]
+            )
+        )
+    )
 
-    # normaliza separadores comuns
-    hay = re.sub(r"[-_/]+", " ", hay)
-
-    return all(t in hay for t in terms)
+    return all(t in hay_tokens for t in terms)
 
 
 def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
@@ -125,11 +131,13 @@ def match_listings_for_wishlist(
     wishlist: Wishlist,
     inserted_ids: Iterable,
 ) -> list[CarListing]:
+    """Retorna os listings NOVOS (inserted_ids) que:
+
+    - passam nos filtros da wishlist (price + source)
+    - batem no texto da wishlist.query
+    - passam nas regras semânticas (quando existirem)
     """
-    Retorna os listings NOVOS (inserted_ids) que:
-      - passam nos filtros da wishlist (price + source)
-      - batem no texto de wishlist.query
-    """
+
     ids = list(inserted_ids or [])
     if not ids:
         return []
@@ -142,15 +150,16 @@ def match_listings_for_wishlist(
     for l in listings:
         if not _apply_filters(l, filters):
             continue
+
         # Texto da wishlist precisa bater integralmente (AND de termos).
-        # Isso evita "Civic" trazer LXR/EXR quando a intenção é "Civic SI", por exemplo.
+        # Isso evita "Civic" trazer LXR/EXR quando a intenção é "Civic SI".
         if not text_match(wishlist.query, l):
             continue
 
-        # Regras semânticas (required/blocked/sinônimos) por wishlist.
-        # Mantém o comportamento simples por padrão e endurece onde faz sentido.
+        # Regras semânticas específicas por wishlist.
         if not semantic_match(wishlist, l):
             continue
+
         matched.append(l)
 
     return matched

@@ -66,6 +66,25 @@ _DEFAULT_UAS = [
 ]
 
 
+def _ensure_session_fingerprint(sess: requests.Session) -> None:
+    """Ensure a stable, browser-like fingerprint per Session.
+
+    Some sites (notably OLX) are very sensitive to stateless traffic patterns.
+    Rotating User-Agent on every request is a strong bot signal. We keep a
+    consistent UA (and a few related headers) attached to the Session.
+    """
+    if not sess.headers.get("User-Agent"):
+        sess.headers["User-Agent"] = random.choice(_DEFAULT_UAS)
+
+    # Keep these stable too (requests will merge per-request headers on top).
+    sess.headers.setdefault(
+        "Accept",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    )
+    sess.headers.setdefault("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+    sess.headers.setdefault("Connection", "keep-alive")
+
+
 def _looks_like_bot_challenge(html: str) -> bool:
     h = html.lower()
     # Marcadores comuns de challenge / captcha.
@@ -102,18 +121,9 @@ def fetch_html(
     - Requests also respects HTTP(S)_PROXY env vars automatically.
     """
 
-    # Pequeno delay randômico para reduzir padrão.
-    delay = random.randint(min_delay_ms, max_delay_ms) / 1000.0
-    time.sleep(delay)
-
-    ua = random.choice(_DEFAULT_UAS)
     base_headers = {
-        "User-Agent": ua,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-        "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         # Sec-CH (não garante, mas ajuda parecer navegador moderno)
         "Sec-Fetch-Dest": "document",
@@ -127,16 +137,62 @@ def fetch_html(
     if headers:
         base_headers.update(headers)
 
+    resp = fetch_response(
+        url,
+        timeout=timeout,
+        headers=base_headers,
+        proxy=proxy,
+        min_delay_ms=min_delay_ms,
+        max_delay_ms=max_delay_ms,
+    )
+    return resp.text
+
+
+def fetch_response(
+    url: str,
+    *,
+    timeout: int = 25,
+    headers: Optional[dict] = None,
+    referer: Optional[str] = None,
+    proxy: Optional[str] = None,
+    min_delay_ms: int = 150,
+    max_delay_ms: int = 450,
+    allow_redirects: bool = True,
+    _skip_delay: bool = False,
+) -> requests.Response:
+    """Low-level GET that returns the Response.
+
+    Why it exists:
+    - Some sources are JS-heavy but expose JSON/XHR endpoints.
+    - We want the same session/cookie stickiness + jitter + retry/backoff.
+
+    Notes:
+    - Keep requests stateless at the *process* level, but stateful at the *Session* level.
+    - Retry/backoff is handled by the Session adapter (urllib3 Retry).
+    """
+
+    if not _skip_delay:
+        delay = random.randint(min_delay_ms, max_delay_ms) / 1000.0
+        time.sleep(delay)
+
+    sess = _get_session(proxy)
+    _ensure_session_fingerprint(sess)
+
+    base_headers = {}
+    if referer:
+        base_headers["Referer"] = referer
+    if headers:
+        base_headers.update(headers)
+
     proxies = None
     if proxy:
         proxies = {"http": proxy, "https": proxy}
 
-    sess = _get_session(proxy)
     resp = sess.get(
         url,
         headers=base_headers,
         timeout=timeout,
-        allow_redirects=True,
+        allow_redirects=allow_redirects,
         proxies=proxies,
     )
 
@@ -149,4 +205,55 @@ def fetch_html(
         raise FetchBlocked(200, url, reason="bot_challenge")
 
     resp.raise_for_status()
-    return resp.text
+    return resp
+
+
+def fetch_json(
+    url: str,
+    *,
+    timeout: int = 25,
+    headers: Optional[dict] = None,
+    referer: Optional[str] = None,
+    proxy: Optional[str] = None,
+    min_delay_ms: int = 150,
+    max_delay_ms: int = 450,
+):
+    """Fetch JSON from an XHR/internal endpoint.
+
+    - Reuses the same cookie-sticky Session as fetch_html.
+    - Adds browser-like headers for XHR.
+    - Uses Retry(backoff) from the mounted adapter.
+    """
+
+    base_headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        # XHR-ish
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    if referer:
+        base_headers["Referer"] = referer
+    if headers:
+        base_headers.update(headers)
+
+    resp = fetch_response(
+        url,
+        timeout=timeout,
+        headers=base_headers,
+        proxy=proxy,
+        min_delay_ms=min_delay_ms,
+        max_delay_ms=max_delay_ms,
+    )
+
+    try:
+        return resp.json()
+    except Exception:
+        # Fallback para JSON em string
+        import json as _json
+
+        return _json.loads(resp.text)
+
+

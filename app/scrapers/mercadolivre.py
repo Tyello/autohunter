@@ -3,8 +3,72 @@ import json
 from typing import List, Dict, Any, Optional, Iterable
 from bs4 import BeautifulSoup
 
-from app.scrapers.base import fetch_html
+from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.parsing import parse_brl_price
+from app.sources.types import ScrapeContext
+
+from app.core.settings import settings
+from app.services.browser_fetcher import fetch_html_browser
+
+
+def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
+    proxy = getattr(ctx, "proxy_server", None)
+
+    # 1) HTTP normal
+    try:
+        return fetch_html(
+            url,
+            timeout=timeout,
+            referer="https://lista.mercadolivre.com.br/",
+            proxy=proxy,
+            min_delay_ms=250,
+            max_delay_ms=900,
+        )
+    except FetchBlocked:
+        pass
+
+    # 2) curl_cffi (fingerprint melhor)
+    try:
+        from curl_cffi import requests as creq  # type: ignore
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Upgrade-Insecure-Requests": "1",
+            "Referer": "https://lista.mercadolivre.com.br/",
+        }
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+
+        r = creq.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            proxies=proxies,
+            impersonate="chrome120",
+            allow_redirects=True,
+        )
+        if r.status_code == 200 and r.text:
+            return r.text
+    except Exception:
+        pass
+
+    # 3) fallback browser (se habilitado)
+    if getattr(settings, "enable_playwright", False):
+        res = fetch_html_browser(
+            url,
+            ctx=ctx,
+            timeout_ms=timeout * 1000,
+            wait_until="domcontentloaded",
+            min_delay_ms=250,
+            max_delay_ms=900,
+        )
+        return res.html
+
+    # se chegou aqui, mantém sem mascarar: marca blocked mesmo
+    raise FetchBlocked(403, url, reason="ml_403_all_strategies")
 
 
 def _unescape_ml(s: str) -> str:
@@ -177,11 +241,13 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
     return items
 
 
-def scrape_mercadolivre(search_url: str) -> List[Dict[str, Any]]:
+def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) -> List[Dict[str, Any]]:
     """
     HTML público do Mercado Livre.
     """
-    html = fetch_html(search_url)
+    # ctx é mantido por compatibilidade com o pipeline unificado (scrape(url, ctx)).
+    # Mercado Livre não usa sessão sticky hoje.
+    html = _fetch_html_ml(search_url, ctx, timeout=25)
 
     # 1) tentativa via HTML “clássico”
     soup = BeautifulSoup(html, "lxml")
@@ -250,7 +316,7 @@ def scrape_mercadolivre(search_url: str) -> List[Dict[str, Any]]:
         max_vip_fetch = 5
         for it in missing_price[:max_vip_fetch]:
             try:
-                vip_html = fetch_html(it["url"], timeout=20)
+                vip_html = _fetch_html_ml(it["url"], ctx, timeout=20)
                 vip_price = _extract_price_from_vip_html(vip_html)
                 if vip_price:
                     it["price"] = vip_price

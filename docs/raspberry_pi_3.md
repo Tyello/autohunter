@@ -15,65 +15,100 @@ On Raspberry Pi 3 this is the recommended layout (lower memory spikes, easier re
 
 ## 2) Install
 
+Se você quiser automatizar o setup (pacotes + venv + deps), use o bootstrap:
+
+```bash
+# (assumindo o repo já em /opt/autohunter)
+sudo bash deploy/raspberry/scripts/bootstrap_rpi.sh /opt/autohunter
 ```
+
+Ou faça manualmente:
+
+
+```bash
 sudo adduser autohunter
 sudo mkdir -p /opt/autohunter
 sudo chown autohunter:autohunter /opt/autohunter
 
 # copy your repo into /opt/autohunter (git clone or rsync)
 cd /opt/autohunter
+
 python -m venv .venv
 source .venv/bin/activate
+
+# base deps (no Playwright)
 pip install -r requirements.txt
 
-# Playwright (only if enable_playwright=true)
-playwright install chromium
+# optional: better TLS fingerprint for some sources (if it fails on your ARM build, remove it)
+pip install -r requirements.optional.txt
+
+# Playwright (HEAVY) — only if you really need browser fallback
+# pip install -r requirements.playwright.txt
+# python -m playwright install chromium
 ```
 
 ## 3) Config (.env)
 
+Create your `.env` from the template:
+
+```bash
+cp .env.example .env
+```
+
 Minimum:
 
-```
+```env
 DATABASE_URL=...
 TELEGRAM_BOT_TOKEN=...
 AUTOHUNTER_ADMINS=5410199985
 ```
 
+Recommended Pi settings:
+
+```env
+SCHEDULER_WORKERS=2
+SCHED_ML_MINUTES=10
+SCHED_OLX_MINUTES=60
+SCHED_CHAVESNAMAO_MINUTES=60
+SCHED_SENDER_SECONDS=60
+
+ENABLE_PLAYWRIGHT=false
+```
+
 Optional per-source proxy (only OLX uses proxy, the rest runs direct):
 
-```
+```env
 SOURCE_PROXY_OLX=http://user:pass@host:port
 ```
 
 Optional per-source throttling:
 
-```
-RATE_LIMIT_OLX_SECONDS=20
+```env
+RATE_LIMIT_OLX_SECONDS=25
 RATE_LIMIT_WEBMOTORS_SECONDS=10
 RATE_LIMIT_GOGARAGE_SECONDS=10
 ```
 
-Playwright storage (cookie stickiness):
-
-```
-PLAYWRIGHT_STORAGE_DIR=.data/playwright
-```
-
 ## 4) systemd services
+
+Make scripts executable:
+
+```bash
+chmod +x deploy/raspberry/scripts/*.sh
+```
 
 Copy unit files:
 
-```
+```bash
 sudo cp deploy/raspberry/systemd/autohunter-bot.service /etc/systemd/system/
 sudo cp deploy/raspberry/systemd/autohunter-scheduler.service /etc/systemd/system/
 ```
 
-Adjust WorkingDirectory/ExecStart if you did not use /opt/autohunter.
+Adjust WorkingDirectory/ExecStart if you did not use `/opt/autohunter`.
 
 Enable and start:
 
-```
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable autohunter-bot autohunter-scheduler
 sudo systemctl start autohunter-bot autohunter-scheduler

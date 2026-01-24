@@ -13,7 +13,7 @@ def ml_url(query: str) -> str:
 
 def olx_url(query: str) -> str:
     q = quote_plus(query.strip())
-    return f"https://www.olx.com.br/brasil?q={q}"
+    return f"https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q={q}"
 
 
 def webmotors_url(query: str) -> str:

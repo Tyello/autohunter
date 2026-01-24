@@ -31,9 +31,11 @@ class Settings(BaseSettings):
     rate_limit_mercadolivre_seconds: int = 0
 
     # OLX
-    enable_olx: bool = False
-    olx_cooldown_minutes: int = 60
+    enable_olx: bool = True
+    olx_cooldown_minutes: int = 120
     enable_olx_browser_fallback: bool = True
+    # Force OLX scraping via Playwright (recommended when OLX returns 403/Cloudflare to HTTP clients)
+    olx_force_browser: bool = False
 
     # Chaves na Mao
     enable_chavesnamao: bool = True
@@ -56,7 +58,7 @@ class Settings(BaseSettings):
 
     # Scheduler tuning (DEV)
     sched_ml_minutes: int = 30
-    sched_olx_minutes: int = 30
+    sched_olx_minutes: int = 60
     sched_chavesnamao_minutes: int = 60
     sched_webmotors_minutes: int = 180
     sched_gogarage_minutes: int = 180

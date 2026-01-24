@@ -6,7 +6,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from app.core.settings import settings
 
@@ -15,6 +15,15 @@ from app.core.settings import settings
 class PoolFetchResult:
     html: str
     final_url: str
+
+
+@dataclass
+class PoolJsonFetchResult:
+    """Result for JSON capture inside a browser context."""
+
+    data: dict
+    final_url: str
+    data_url: str
 
 
 class PlaywrightPool:
@@ -199,6 +208,81 @@ class PlaywrightPool:
                 pass
 
         return PoolFetchResult(html=html, final_url=final_url)
+
+
+    def fetch_json(
+        self,
+        url: str,
+        *,
+        source: str,
+        proxy_server: Optional[str] = None,
+        timeout_ms: int = 30000,
+        wait_until: str = "domcontentloaded",
+        json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
+        min_delay_ms: int = 250,
+        max_delay_ms: int = 900,
+    ) -> PoolJsonFetchResult:
+        """Navigate a page and capture a JSON response emitted during navigation.
+
+        This is intended for Next.js "_next/data" endpoints (OLX) and other SPA/XHR flows.
+        It keeps everything inside the browser context (cookies, TLS fingerprint), while
+        avoiding the cost of parsing/rendering heavy DOM content.
+        """
+
+        # Small random delay to reduce patterns
+        time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
+
+        src = (source or "unknown").lower().strip() or "unknown"
+
+        with self._lock:
+            ctx = self._get_or_create_context(proxy_server=proxy_server, source=src)
+
+        def _route(route):
+            rtype = route.request.resource_type
+            if rtype in ("image", "media", "font"):
+                return route.abort()
+            return route.continue_()
+
+        page = ctx.new_page()
+        page.route("**/*", _route)
+
+        captured_data: Optional[dict] = None
+        captured_url: str = ""
+
+        def _default_pred(url_: str, headers_: dict, status_: int) -> bool:
+            ct = (headers_.get("content-type") or "").lower()
+            return status_ == 200 and "application/json" in ct
+
+        pred = json_url_predicate or _default_pred
+
+        try:
+            # Expect a JSON response during navigation
+            with page.expect_response(lambda r: pred(r.url, r.headers, r.status), timeout=timeout_ms) as resp_info:
+                page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+
+            resp = resp_info.value
+            captured_url = resp.url
+            captured_data = resp.json()
+            final_url = page.url
+
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+
+            # Persist cookies/session for stickiness across restarts
+            try:
+                proxy_key = proxy_server or "__no_proxy__"
+                storage_path = self._storage_path(proxy_key, src)
+                ctx.storage_state(path=storage_path)
+            except Exception:
+                pass
+
+        if not isinstance(captured_data, dict):
+            raise RuntimeError("Browser JSON capture failed (no JSON response matched).")
+
+        return PoolJsonFetchResult(data=captured_data, final_url=final_url, data_url=captured_url)
 
 
 _POOL: Optional[PlaywrightPool] = None

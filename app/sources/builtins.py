@@ -78,7 +78,7 @@ register_source(
 )
 
 
-# Webmotors: SPA/JS-heavy. Placeholder (scrape=scrape_webmotors) até implementar via API/headless.
+# Webmotors: HTTP-first via endpoint XHR (sem Playwright como padrão).
 register_source(
     SourcePlugin(
         name="webmotors",
@@ -90,12 +90,12 @@ register_source(
         rate_limit_seconds_setting="rate_limit_webmotors_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="browser",
+        fetch_mode="http",
     )
 )
 
 
-# GoGarage: SPA/JS-heavy. Placeholder.
+# GoGarage: HTTP-first (HTML/JSON-LD) com fallback opcional.
 register_source(
     SourcePlugin(
         name="gogarage",
@@ -107,6 +107,6 @@ register_source(
         rate_limit_seconds_setting="rate_limit_gogarage_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="browser",
+        fetch_mode="http",
     )
 )

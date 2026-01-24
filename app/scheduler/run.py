@@ -6,6 +6,7 @@ from app.core.settings import settings
 from app.db.session import SessionLocal
 
 import time
+import random
 
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
@@ -122,6 +123,11 @@ def job_run_source_for_all_wishlists(source_name: str):
 
                 log(db, "info", component, "job_finished", {"wishlist_id": str(w.id), "query": w.query, "result": res})
 
+                # Evita "rajada" no mesmo tick do scheduler (sinal forte de bot em fontes sensíveis).
+                # Para OLX especificamente, adiciona um pacing humano entre wishlists.
+                if plugin.name == "olx":
+                    time.sleep(random.randint(8, 25))
+
             duration_ms = int((time.perf_counter() - t0) * 1000)
 
             if not ran_any:
@@ -197,7 +203,7 @@ def start_scheduler() -> BackgroundScheduler:
         finally:
             db.close()
 
-    sched.add_job(_job_heartbeat, "interval", seconds=10, id="heartbeat")
+    sched.add_job(_job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
 
     from app.scheduler.sender_job import job_send_notifications
     sched.add_job(
@@ -205,6 +211,7 @@ def start_scheduler() -> BackgroundScheduler:
         "interval",
         seconds=settings.sched_sender_seconds,
         id="sender_job",
+        replace_existing=True
     )
 
     # Limpeza leve: mantém notifications enxutas (evita crescimento infinito)

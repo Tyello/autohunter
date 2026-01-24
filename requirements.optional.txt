@@ -1,0 +1,5 @@
+# Extras opcionais (instale somente se precisar)
+
+# TLS fingerprint mais parecido com navegador (pode ajudar em fontes que bloqueiam requests)
+# Observação: pode não ter wheel para algumas builds ARM. Se falhar, remova.
+curl_cffi>=0.7

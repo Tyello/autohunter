@@ -9,6 +9,7 @@ from app.scheduler.run import start_scheduler
 
 from app.models.car_listing import CarListing
 from app.schemas.car_listing import CarListingOut
+from app.scrapers.olx import get_olx_health_snapshot
 
 from app.db.deps import get_db
 
@@ -50,3 +51,10 @@ def list_listings(
 
     listings = query.order_by(CarListing.created_at.desc()).limit(limit).all()
     return listings
+
+@app.get("/admin/health")
+def admin_health():
+    return {
+        "status": "ok",
+        "olx": get_olx_health_snapshot(),
+    }

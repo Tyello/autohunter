@@ -8,6 +8,7 @@ from urllib.parse import quote_plus
 
 from bs4 import BeautifulSoup
 
+from app.core.text_norm import normalize
 from app.scrapers.base import fetch_html
 
 
@@ -22,29 +23,51 @@ class ChavesNaMaoItem:
     location: Optional[str] = None
 
 
+# ---- URL resolver (SSR pages) ----
+
 def build_chavesnamao_search_url(query: str, page: int = 1) -> str:
+    """Resolve a query into the most stable Chaves na Mão listing URL.
+
+    The site has SSR model pages that are *much* more consistent than `?q=`.
+
+    Examples:
+      - https://www.chavesnamao.com.br/carros/brasil/honda-civic/
+      - https://www.chavesnamao.com.br/carros/brasil/honda-civic-2.0-si-sedan-16v-4p/
+
+    For the MVP we keep the resolver intentionally conservative:
+    - Civic special cases (SI / Type R) -> specific trim pages
+    - Otherwise, fallback to the generic `carros-usados/brasil/?q=...` search.
+
+    NOTE: If you add new mappings, prefer ones you have validated exist.
     """
-    O site tem páginas SSR bem mais "semânticas" por modelo, ex:
-    - https://www.chavesnamao.com.br/carros/brasil/honda-civic/
 
-    O parâmetro `?q=` na listagem nacional existe, mas na prática pode ser ignorado e
-    acabar trazendo o topo do Brasil (luxo, etc.).
+    raw = normalize(query)
+    tok = raw.split()
 
-    Para o MVP, aplicamos um "resolver" simples que tenta mapear o termo para um slug
-    de modelo (ex: "civic" -> "honda-civic"). Quando não houver match, cai no fallback
-    `carros-usados/brasil/?q=...`.
-    """
+    slug: Optional[str] = None
 
-    raw = " ".join(query.lower().split())
+    # Honda Civic family (special cases reduce false positives a lot)
+    if "civic" in tok:
+        is_type_r = ("type" in tok and "r" in tok) or "typer" in tok
+        is_si = "si" in tok or "sir" in tok
+        is_coupe = "coupe" in tok or "2p" in tok
 
-    # Resolver mínimo (extensível). A ideia é priorizar páginas de modelo SSR.
-    slug = None
-    if "civic" in raw:
-        slug = "honda-civic"
+        if is_type_r:
+            slug = "honda-civic-2.0-type-r-turbo-16v-4p"
+        elif is_si and is_coupe:
+            # Civic Si Coupé (ex.: 2014/2015 2.4 aspirado)
+            slug = "honda-civic-2.4-si-coupe-16v-2p"
+        elif is_si:
+            # Civic Si Sedan (ex.: 2007/2008 2.0)
+            slug = "honda-civic-2.0-si-sedan-16v-4p"
+        else:
+            slug = "honda-civic"
 
+    # If we have a validated SSR slug, use it.
     if slug:
         url = f"https://www.chavesnamao.com.br/carros/brasil/{slug}/"
     else:
+        # Fallback: generic search. Can be noisier.
         q = quote_plus(query.strip())
         url = f"https://www.chavesnamao.com.br/carros-usados/brasil/?q={q}"
 
@@ -87,7 +110,6 @@ def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
     out: list[dict] = []
 
     # A página lista os anúncios como <a> com o título + preço no texto.
-    # Nos dumps do site, os links vêm logo depois do H1.
     # Regra de ouro pra não puxar "similares"/conteúdo editorial:
     # anúncios têm URL com /carro/.../id-<digits>/
     for a in soup.select("a[href]"):
@@ -119,11 +141,14 @@ def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
         if img:
             thumb = img.get("src") or img.get("data-src")
 
+        # título: remove o preço do texto do link
+        title = text.split("R$")[0].strip() or None
+
         out.append(
             {
                 "source": "chavesnamao",
                 "external_id": str(external_id),
-                "title": text.split("R$")[0].strip() or None,
+                "title": title,
                 "url": url,
                 "thumbnail_url": thumb,
                 "price": price,
