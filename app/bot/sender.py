@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional, Tuple
+from urllib.parse import urlparse, urlunparse
 
 import requests
 
@@ -38,16 +39,87 @@ def _clean_spaces(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 
+def _strip_query_fragment(url: str) -> str:
+    if not url:
+        return ""
+    try:
+        p = urlparse(url)
+        return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
+    except Exception:
+        return url.split("#")[0].split("?")[0]
+
+
+def _is_ml_tracking(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+        path = (p.path or "").lower()
+        if "mercadolivre.com.br" not in host:
+            return False
+        if host.startswith("click") or host.startswith("clk"):
+            return True
+        if "brand_ads/clicks" in path:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _canonical_ml_url(external_id: str) -> str:
+    m = re.match(r"^MLB(\d+)$", (external_id or "").upper())
+    if not m:
+        return ""
+    # curto e estável para veículos
+    return f"https://carro.mercadolivre.com.br/MLB-{m.group(1)}-_JM"
+
+
+def _clean_url_for_telegram(listing) -> str:
+    """Evita mandar URL gigantes (tracking) que quebram texto/caption e confundem matching."""
+    url = (getattr(listing, "url", None) or "").strip()
+    if not url:
+        return ""
+
+    # completa esquema
+    if url.startswith("//"):
+        url = "https:" + url
+    if url and not url.startswith("http"):
+        url = "https://" + url.lstrip("/")
+
+    source = (getattr(listing, "source", None) or "").lower()
+    external_id = getattr(listing, "external_id", None) or ""
+
+    # Mercado Livre: troca tracking por URL canônica curta
+    if source == "mercadolivre" and (_is_ml_tracking(url) or len(url) > 300):
+        canon = _canonical_ml_url(external_id)
+        if canon:
+            return canon
+
+    # padrão: remove query/fragment (reduz demais o tamanho)
+    cleaned = _strip_query_fragment(url)
+
+    # se ainda estiver absurdo e for ML com id, força canônica
+    if source == "mercadolivre" and len(cleaned) > 300:
+        canon = _canonical_ml_url(external_id)
+        if canon:
+            return canon
+
+    return cleaned
+
+
 def _build_text(listing) -> str:
     title = _clean_spaces(listing.title or "Novo anúncio")
     price_text = format_price(listing.price)
     loc = _clean_spaces(getattr(listing, "location", None) or "")
+    url = _clean_url_for_telegram(listing)
 
     lines = [title]
     lines.append(f"Preço: {price_text}")
     if loc:
         lines.append(f"Local: {loc}")
-    lines.append(listing.url)
+    if url:
+        lines.append(url)
 
     text = "\n".join(lines)
     text = sanitize_for_telegram(text)
@@ -147,7 +219,7 @@ def telegram_sender(notification, listing, user):
             raise RuntimeError(f"Telegram API error {resp.status_code}: {resp.text}")
         return
 
-    # Foto enviada com caption curta. Se sobrou texto (muito raro), envia como follow-up.
+    # Foto enviada com caption curta. Se sobrou texto, envia como follow-up (capado)
     if remainder.strip():
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         extra = _truncate(remainder.strip(), TELEGRAM_TEXT_MAX)

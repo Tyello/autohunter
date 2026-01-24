@@ -1,6 +1,8 @@
 import re
 import json
 from typing import List, Dict, Any, Optional, Iterable
+from urllib.parse import urlparse, urlunparse
+
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
@@ -56,7 +58,7 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
         pass
 
     # 3) fallback browser (se habilitado)
-    if getattr(settings, "enable_playwright", False):
+    if getattr(settings, "enable_playwright", False) and ctx is not None:
         res = fetch_html_browser(
             url,
             ctx=ctx,
@@ -73,26 +75,103 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
 
 def _unescape_ml(s: str) -> str:
     """
-    Mercado Livre costuma vir com escapes tipo \\u002F.
+    Mercado Livre costuma vir com escapes tipo \u002F.
     """
     return (
-        s.replace("\\u002F", "/")
-         .replace("\\u003D", "=")
-         .replace("\\u0026", "&")
-         .replace("\\/", "/")
+        (s or "")
+        .replace("\u002F", "/")
+        .replace("\u003D", "=")
+        .replace("\u0026", "&")
+        .replace("\/", "/")
     )
+
+
+def _is_tracking_url(url: str) -> bool:
+    """Detecta URLs de tracking patrocinado (click*.mercadolivre.com.br/brand_ads/...)."""
+    if not url:
+        return False
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+        path = (p.path or "").lower()
+        if "mercadolivre.com.br" not in host:
+            return False
+        if host.startswith("click") or host.startswith("clk"):
+            return True
+        if "brand_ads/clicks" in path:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _strip_query_fragment(url: str) -> str:
+    """Remove ?query e #fragment para evitar URLs gigantes e tokens falsos no matching."""
+    if not url:
+        return ""
+    try:
+        p = urlparse(url)
+        return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
+    except Exception:
+        return url.split("#")[0].split("?")[0]
+
+
+def _canonical_url_from_external_id(external_id: str) -> str:
+    """Gera URL canônica curta a partir do MLB id (ex.: MLB6160123242)."""
+    m = re.match(r"^MLB(\d+)$", (external_id or "").upper())
+    if not m:
+        return ""
+    # Para veículos, este padrão é estável e bem curto.
+    return f"https://carro.mercadolivre.com.br/MLB-{m.group(1)}-_JM"
+
+
+def _normalize_ml_url(url: str, external_id: str) -> str:
+    """Normaliza URL:
+    - remove query/fragment
+    - se for tracking e tiver MLB id, troca por URL canônica
+    """
+    url = (url or "").strip()
+    if not url:
+        return ""
+    # completa esquema
+    if url.startswith("//"):
+        url = "https:" + url
+    if url and not url.startswith("http"):
+        url = "https://" + url.lstrip("/")
+
+    if _is_tracking_url(url):
+        canon = _canonical_url_from_external_id(external_id)
+        if canon:
+            return canon
+        # se não temos id, pelo menos não manda query/fragment
+        return _strip_query_fragment(url)
+
+    return _strip_query_fragment(url)
 
 
 def _extract_external_id_from_url(url: str) -> str:
     # captura MLB-1234567890 e normaliza para MLB1234567890
-    m = re.search(r"(MLB)-(\d+)", url)
+    m = re.search(r"(MLB)-(\d+)", url or "")
     if m:
         return f"{m.group(1)}{m.group(2)}"
     # fallback: tenta MLB123 diretamente
-    m2 = re.search(r"(MLB\d+)", url)
+    m2 = re.search(r"(MLB\d+)", url or "")
     if m2:
         return m2.group(1)
-    return url
+    return ""
+
+
+def _extract_external_id_from_text(text: str) -> str:
+    """Tenta achar MLB id em qualquer pedaço do card (HTML/atributos)."""
+    if not text:
+        return ""
+    m = re.search(r"(MLB)-(\d{6,})", text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    m2 = re.search(r"(MLB\d{6,})", text)
+    if m2:
+        return m2.group(1)
+    return ""
 
 
 def _find_preloaded_state(html: str) -> Optional[dict]:
@@ -180,7 +259,7 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
     Extrai itens do bloco embutido de POLYCARD.
     No seu HTML, os campos aparecem assim:
     - metadata.id: "MLB6160123242"
-    - metadata.url: "carro.mercadolivre.com.br\\u002FMLB-6160123242-...."
+    - metadata.url: "carro.mercadolivre.com.br\u002FMLB-6160123242-...."
     - components -> title.text
     - components -> price.current_price.value
     - pictures.pictures[0].id (para thumbnail)
@@ -188,8 +267,6 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
     """
     items: List[Dict[str, Any]] = []
 
-    # Pega blocos de polycard de forma “good enough” (não é JSON válido completo, mas dá pra extrair)
-    # Captura metadata.id, metadata.url e o trecho de components.
     pattern = re.compile(
         r'"polycard"\s*:\s*\{.*?"metadata"\s*:\s*\{.*?"id"\s*:\s*"(MLB\d+)".*?"url"\s*:\s*"(.*?)".*?\}\s*,'
         r'.*?"pictures"\s*:\s*\{.*?"pictures"\s*:\s*\[\s*\{\s*"id"\s*:\s*"(.*?)".*?\}\s*\].*?\}\s*,'
@@ -197,31 +274,27 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
         re.DOTALL
     )
 
-    for m in pattern.finditer(html):
+    for m in pattern.finditer(html or ""):
         external_id = m.group(1)
         raw_url = _unescape_ml(m.group(2))
         pic_id = m.group(3)
         components = m.group(4)
 
-        # title.text
         mt = re.search(r'"type"\s*:\s*"title".*?"text"\s*:\s*"(.*?)"', components, re.DOTALL)
         title = _unescape_ml(mt.group(1)) if mt else None
 
-        # price.current_price.value
         mp = re.search(r'"type"\s*:\s*"price".*?"current_price"\s*:\s*\{.*?"value"\s*:\s*(\d+)', components, re.DOTALL)
         price = int(mp.group(1)) if mp else None
 
-        # location.location.text (opcional)
-        ml = re.search(r'"type"\s*:\s*"location".*?"text"\s*:\s*"(.*?)"', components, re.DOTALL)
-        location = _unescape_ml(ml.group(1)) if ml else None
+        mlc = re.search(r'"type"\s*:\s*"location".*?"text"\s*:\s*"(.*?)"', components, re.DOTALL)
+        location = _unescape_ml(mlc.group(1)) if mlc else None
 
-        # monta URL completa
         url = raw_url
         if url and not url.startswith("http"):
             url = "https://" + url.lstrip("/")
 
-        # thumbnail: padrão comum que funciona bem com ID do picture
-        # Ex.: "782273-MLB104686102403_012026"
+        url = _normalize_ml_url(url, external_id)
+
         thumbnail_url = f"https://http2.mlstatic.com/D_Q_NP_2X_{pic_id}-E.webp" if pic_id else None
 
         items.append({
@@ -245,11 +318,12 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
     """
     HTML público do Mercado Livre.
     """
-    # ctx é mantido por compatibilidade com o pipeline unificado (scrape(url, ctx)).
-    # Mercado Livre não usa sessão sticky hoje.
     html = _fetch_html_ml(search_url, ctx, timeout=25)
 
-    # 1) tentativa via HTML “clássico”
+    # POLYCARD é o layout mais confiável hoje; preferimos ele como base
+    poly_items = _parse_polycard_items(html, limit=50)
+    poly_by_id = {p.get("external_id"): p for p in poly_items if p.get("external_id")}
+
     soup = BeautifulSoup(html, "lxml")
     items: List[Dict[str, Any]] = []
 
@@ -262,18 +336,35 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
         if not a or not a.get("href"):
             continue
 
-        url = a["href"].split("#")[0]
+        raw_url = a["href"]
+
+        # Se for tracking patrocinado, tentamos recuperar o MLB id no HTML do card.
+        card_html = str(c)
+        external_id = _extract_external_id_from_url(raw_url)
+        if not external_id and _is_tracking_url(raw_url):
+            external_id = _extract_external_id_from_text(card_html)
+
+        if not external_id:
+            # Sem MLB id não tem dedupe/match; não vale ingerir.
+            continue
+
+        url = _normalize_ml_url(raw_url, external_id)
+        if _is_tracking_url(url):
+            # Se ainda sobrou tracking, força canônica.
+            canon = _canonical_url_from_external_id(external_id)
+            if canon:
+                url = canon
+
         title_el = c.select_one("h2.ui-search-item__title") or c.select_one("h2")
         title = title_el.get_text(strip=True) if title_el else None
 
         img = c.select_one("img")
         thumb = img.get("data-src") or img.get("src") if img else None
+        thumb = _strip_query_fragment(thumb) if thumb else None
 
         price_el = c.select_one("span.andes-money-amount__fraction") or c.select_one("span.price-tag-fraction")
         price_text = price_el.get_text(strip=True) if price_el else ""
         price = parse_brl_price(price_text)
-
-        external_id = _extract_external_id_from_url(url)
 
         items.append({
             "source": "mercadolivre",
@@ -286,31 +377,30 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
             "location": None,
         })
 
-    # Sempre tenta extrair POLYCARD (é o layout novo do ML), mas usa como:
-    # - fallback (quando títulos somem)
-    # - preenchimento de campos faltantes (quando só alguns cards vieram incompletos)
-    poly_items = _parse_polycard_items(html, limit=50)
-    poly_by_id = {p.get("external_id"): p for p in poly_items if p.get("external_id")}
+    # Se POLYCARD existir, ele vira a base (evita URL de tracking e layout instável).
+    if poly_items:
+        base: List[Dict[str, Any]] = list(poly_items)
+        base_by_id = {b.get("external_id"): b for b in base if b.get("external_id")}
 
-    # 1) Se veio quase tudo sem title, retorna POLYCARD direto.
-    empty_titles = sum(1 for i in items if not i.get("title"))
-    if (not items) or (items and empty_titles > (len(items) * 0.7)):
-        if poly_items:
-            return poly_items
+        for it in items:
+            pid = it.get("external_id")
+            if not pid:
+                continue
+            if pid not in base_by_id:
+                base.append(it)
+                base_by_id[pid] = it
+            else:
+                # completa campos faltantes no polycard
+                cur = base_by_id[pid]
+                for k in ("title", "thumbnail_url", "price", "location", "url"):
+                    if not cur.get(k) and it.get(k):
+                        cur[k] = it[k]
+        items = base
+    else:
+        # Sem polycard: tenta mesclar qualquer coisa que vier (nada a fazer).
+        pass
 
-    # 2) Mescla POLYCARD para completar campos faltantes.
-    for it in items:
-        pid = it.get("external_id")
-        p = poly_by_id.get(pid)
-        if not p:
-            continue
-        # completa só o que estiver faltando
-        for k in ("title", "thumbnail_url", "price", "location", "url"):
-            if not it.get(k) and p.get(k):
-                it[k] = p[k]
-
-    # 3) Último fallback: se ainda faltar preço em alguns anúncios, busca a página VIP do anúncio
-    # (capado para não virar N+1 sempre).
+    # Último fallback: se ainda faltar preço em alguns anúncios, busca a página VIP (capado)
     missing_price = [i for i in items if not i.get("price") and i.get("url")]
     if missing_price:
         max_vip_fetch = 5
@@ -321,7 +411,6 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
                 if vip_price:
                     it["price"] = vip_price
             except Exception:
-                # falhou: segue com price None
                 pass
 
     return items

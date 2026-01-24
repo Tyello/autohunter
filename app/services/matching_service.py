@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -44,6 +45,38 @@ def _parse_decimal(value: str) -> Decimal | None:
         return None
 
 
+def _safe_url_for_match(listing: CarListing) -> str:
+    """Evita falsos positivos causados por URLs gigantes de tracking (ex.: click1/brand_ads)."""
+    url = (listing.url or "").strip()
+    if not url:
+        return ""
+
+    source = (listing.source or "").lower()
+
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+        path = (p.path or "")
+        path_l = path.lower()
+
+        # Mercado Livre: ignore totalmente URLs de tracking patrocinado, pois podem conter "si" por acaso
+        if source == "mercadolivre":
+            if ("mercadolivre.com.br" in host) and (host.startswith("click") or host.startswith("clk")):
+                return ""
+            if "brand_ads/clicks" in path_l:
+                return ""
+
+        # Para matching, queremos algo estável e "curto": host+path, sem query/fragment
+        return f"{host}{path}"
+    except Exception:
+        # fallback simples
+        u = url.split("#")[0].split("?")[0]
+        # se parecer tracking do ML, ignora
+        if source == "mercadolivre" and ("click" in u and "mercadolivre.com.br" in u):
+            return ""
+        return u
+
+
 def text_match(query: str, listing: CarListing) -> bool:
     """Token-level AND match.
 
@@ -60,7 +93,7 @@ def text_match(query: str, listing: CarListing) -> bool:
                 [
                     listing.title or "",
                     listing.location or "",
-                    listing.url or "",
+                    _safe_url_for_match(listing),
                 ]
             )
         )

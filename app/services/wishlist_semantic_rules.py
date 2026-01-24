@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
@@ -28,13 +29,56 @@ def _norm(s: str) -> str:
     return s
 
 
+def _safe_url_for_semantic(listing: CarListing) -> str:
+    """Evita usar URLs de tracking (ML click/brand_ads) como texto de match."""
+    url = (listing.url or "").strip()
+    if not url:
+        return ""
+
+    source = (listing.source or "").lower()
+
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+        path = (p.path or "")
+        path_l = path.lower()
+
+        if source == "mercadolivre":
+            if ("mercadolivre.com.br" in host) and (host.startswith("click") or host.startswith("clk")):
+                return ""
+            if "brand_ads/clicks" in path_l:
+                return ""
+
+        # sem query/fragment, reduz ruído
+        return f"{host}{path}"
+    except Exception:
+        u = url.split("#")[0].split("?")[0]
+        if source == "mercadolivre" and ("click" in u and "mercadolivre.com.br" in u):
+            return ""
+        return u
+
+
 def _hay(listing: CarListing) -> str:
-    # inclui URL porque às vezes o título vem vazio, mas o slug ajuda
+    # inclui URL (sanitizada) porque às vezes o título vem vazio, mas o slug ajuda
     return _norm(" ".join([
         listing.title or "",
         listing.location or "",
-        listing.url or "",
+        _safe_url_for_semantic(listing),
     ]))
+
+
+def _term_in_hay(term: str, hay: str) -> bool:
+    """Match de termo com proteção para termos curtos (ex.: 'si').
+
+    Para termos com <= 2 chars, exige palavra inteira (\bsi\b),
+    evitando falsos positivos vindos de tracking/strings aleatórias.
+    """
+    t = _norm(term)
+    if not t:
+        return True
+    if len(t) <= 2:
+        return re.search(rf"\b{re.escape(t)}\b", hay) is not None
+    return t in hay
 
 
 RULES: dict[str, SemanticRules] = {
@@ -74,17 +118,17 @@ def semantic_match(wishlist: Wishlist, listing: CarListing) -> bool:
 
     # bloqueios primeiro (barato)
     for term in rules.blocked_any:
-        if _norm(term) in hay:
+        if _term_in_hay(term, hay):
             return False
 
     # required_all (AND)
     for term in rules.required_all:
-        if _norm(term) not in hay:
+        if not _term_in_hay(term, hay):
             return False
 
     # required_any_groups (OR por grupo)
     for group in rules.required_any_groups:
-        if not any(_norm(t) in hay for t in group):
+        if not any(_term_in_hay(t, hay) for t in group):
             return False
 
     return True
