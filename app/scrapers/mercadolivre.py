@@ -82,7 +82,8 @@ def _unescape_ml(s: str) -> str:
         .replace("\u002F", "/")
         .replace("\u003D", "=")
         .replace("\u0026", "&")
-        .replace("\/", "/")
+        .replace(r"\/", "/")
+
     )
 
 
