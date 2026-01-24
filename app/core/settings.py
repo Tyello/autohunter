@@ -70,5 +70,7 @@ class Settings(BaseSettings):
     source_backoff_max_minutes: int = 720
     source_backoff_jitter_seconds: int = 20
 
+    telegram_text_max: int = 4000
+    safe_chunk: int = 3800
 
 settings = Settings()
