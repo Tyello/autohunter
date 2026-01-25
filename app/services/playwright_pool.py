@@ -6,6 +6,7 @@ import random
 import threading
 import time
 import traceback
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -28,16 +29,32 @@ class PoolJsonFetchResult:
 
 
 class _Job:
-    __slots__ = ("name", "args", "kwargs", "done", "result", "exc", "tb")
+    __slots__ = (
+        "name",
+        "args",
+        "kwargs",
+        "done",
+        "result",
+        "exc",
+        "tb",
+        "created_at",
+        "started_at",
+        "ended_at",
+        "key",
+    )
 
-    def __init__(self, name: str, args: tuple, kwargs: dict):
+    def __init__(self, name: str, args: tuple, kwargs: dict, *, key: Optional[tuple] = None):
         self.name = name
         self.args = args
         self.kwargs = kwargs
+        self.key = key
         self.done = threading.Event()
         self.result: Any = None
         self.exc: Optional[BaseException] = None
         self.tb: Optional[str] = None
+        self.created_at = time.perf_counter()
+        self.started_at: Optional[float] = None
+        self.ended_at: Optional[float] = None
 
     def set_result(self, v: Any) -> None:
         self.result = v
@@ -61,7 +78,9 @@ class _PlaywrightWorker(threading.Thread):
 
     def __init__(self) -> None:
         super().__init__(name="PlaywrightWorker", daemon=True)
-        self.q: "queue.Queue[_Job]" = queue.Queue()
+        max_jobs = int(getattr(settings, "playwright_queue_max_jobs", 25) or 25)
+        self._queue_max_jobs = max(1, max_jobs)
+        self.q: "queue.Queue[_Job]" = queue.Queue(maxsize=self._queue_max_jobs)
         self._ready = threading.Event()
         self._stop = False
 
@@ -71,6 +90,13 @@ class _PlaywrightWorker(threading.Thread):
         self._browsers: Dict[str, object] = {}
         self._contexts: Dict[Tuple[str, str], object] = {}
         self._last_error: Optional[str] = None
+
+        # Metrics (worker-side)
+        self._jobs_done = 0
+        self._jobs_failed = 0
+        self._exec_ms_total = 0.0
+        self._wait_ms_total = 0.0
+        self._last_job: Optional[dict] = None
 
     # ---------------------------
     # Thread lifecycle
@@ -96,20 +122,45 @@ class _PlaywrightWorker(threading.Thread):
         while True:
             job = self.q.get()
             if job.name == "__stop__":
+                # stop request; don't count as a real job
+                job.started_at = time.perf_counter()
+                job.ended_at = job.started_at
                 job.set_result(True)
                 break
 
             try:
                 fn = getattr(self, f"_do_{job.name}")
             except AttributeError:
+                job.started_at = time.perf_counter()
+                job.ended_at = job.started_at
                 job.set_exc(RuntimeError(f"Unknown Playwright job: {job.name}"))
+                self._jobs_failed += 1
                 continue
 
+            job.started_at = time.perf_counter()
             try:
                 job.set_result(fn(*job.args, **job.kwargs))
             except Exception as e:
                 self._last_error = traceback.format_exc()
                 job.set_exc(e)
+                self._jobs_failed += 1
+            finally:
+                job.ended_at = time.perf_counter()
+                # Update metrics (best-effort)
+                try:
+                    exec_ms = max(0.0, (job.ended_at - (job.started_at or job.ended_at)) * 1000.0)
+                    wait_ms = max(0.0, ((job.started_at or job.ended_at) - job.created_at) * 1000.0)
+                    self._jobs_done += 1
+                    self._exec_ms_total += exec_ms
+                    self._wait_ms_total += wait_ms
+                    self._last_job = {
+                        "name": job.name,
+                        "exec_ms": int(exec_ms),
+                        "wait_ms": int(wait_ms),
+                        "key": (str(job.key)[:200] if job.key else None),
+                    }
+                except Exception:
+                    pass
 
         self._cleanup()
 
@@ -215,14 +266,25 @@ class _PlaywrightWorker(threading.Thread):
     # ---------------------------
     # Jobs (executed in worker thread)
     # ---------------------------
-    def _do_stats(self) -> dict:
-        return {
-            "started": self._started,
-            "browsers": len(self._browsers),
-            "contexts": len(self._contexts),
-            "proxy_keys": list(self._browsers.keys())[:10],
-            "last_error": (self._last_error[:500] if self._last_error else None),
-        }
+def _do_stats(self) -> dict:
+    jobs_done = int(self._jobs_done or 0)
+    avg_exec = (self._exec_ms_total / jobs_done) if jobs_done else 0.0
+    avg_wait = (self._wait_ms_total / jobs_done) if jobs_done else 0.0
+
+    return {
+        "started": self._started,
+        "browsers": len(self._browsers),
+        "contexts": len(self._contexts),
+        "proxy_keys": list(self._browsers.keys())[:10],
+        "last_error": (self._last_error[:500] if self._last_error else None),
+        "queue_size": int(self.q.qsize()),
+        "queue_max": int(getattr(self, "_queue_max_jobs", 0) or 0),
+        "jobs_done": jobs_done,
+        "jobs_failed": int(self._jobs_failed or 0),
+        "avg_exec_ms": int(avg_exec),
+        "avg_wait_ms": int(avg_wait),
+        "last_job": self._last_job,
+    }
 
     def _do_fetch(
         self,
@@ -330,14 +392,104 @@ class PlaywrightPool:
     """
     Public facade. All Playwright Sync calls are executed inside a dedicated thread.
 
-    This keeps the API stable for the rest of the codebase while making the
-    implementation actually thread-safe for schedulers/bots.
+    Added for scale:
+    - Bounded queue (protects Raspberry Pi RAM)
+    - In-flight dedupe: if same request is already queued/running, callers "join" instead of enqueueing duplicates
+    - Short TTL cache (default: only for fetch_json) to collapse bursts across users
     """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._worker: Optional[_PlaywrightWorker] = None
 
+        # In-flight dedupe (key -> job)
+        self._pending: Dict[tuple, _Job] = {}
+
+        # Short TTL cache (LRU): key -> (expires_at_monotonic, result)
+        self._cache: "OrderedDict[tuple, tuple[float, Any]]" = OrderedDict()
+
+        # Metrics (facade-side)
+        self._m_submitted = 0
+        self._m_queue_full = 0
+        self._m_dedupe_joins = 0
+        self._m_cache_hits = 0
+
+    # ---------------------------
+    # Internal helpers
+    # ---------------------------
+    def _cfg_queue_max(self) -> int:
+        return int(getattr(settings, "playwright_queue_max_jobs", 25) or 25)
+
+    def _cfg_dedupe(self) -> bool:
+        return bool(getattr(settings, "playwright_dedupe_inflight", True))
+
+    def _cfg_cache_ttl(self) -> int:
+        return int(getattr(settings, "playwright_cache_ttl_seconds", 30) or 0)
+
+    def _cfg_cache_max(self) -> int:
+        return int(getattr(settings, "playwright_cache_max_entries", 16) or 0)
+
+    def _cache_enabled(self, name: str) -> bool:
+        # HTML can be huge; keep caching conservative by default.
+        return name == "fetch_json" and self._cfg_cache_ttl() > 0 and self._cfg_cache_max() > 0
+
+    def _make_key(self, name: str, **kwargs) -> tuple:
+        # Normalize fields we care about for dedupe/caching.
+        # NOTE: json_url_predicate may be a lambda/unhashable; we only differentiate "custom vs default".
+        pred = kwargs.get("json_url_predicate", None)
+        pred_flag = 1 if pred is not None else 0
+
+        return (
+            name,
+            kwargs.get("url"),
+            (kwargs.get("source") or "").lower().strip(),
+            kwargs.get("proxy_server") or "",
+            kwargs.get("timeout_ms"),
+            kwargs.get("wait_until"),
+            pred_flag,
+        )
+
+    def _cache_purge(self) -> None:
+        now = time.perf_counter()
+        # Drop expired
+        for k in list(self._cache.keys()):
+            exp, _ = self._cache.get(k, (0.0, None))
+            if exp <= now:
+                self._cache.pop(k, None)
+
+        # Enforce max entries (LRU by insertion order)
+        max_entries = self._cfg_cache_max()
+        while max_entries > 0 and len(self._cache) > max_entries:
+            self._cache.popitem(last=False)
+
+    def _cache_get(self, key: tuple) -> Any | None:
+        if not self._cache:
+            return None
+        now = time.perf_counter()
+        v = self._cache.get(key)
+        if not v:
+            return None
+        exp, res = v
+        if exp <= now:
+            self._cache.pop(key, None)
+            return None
+        # Refresh LRU
+        try:
+            self._cache.move_to_end(key, last=True)
+        except Exception:
+            pass
+        return res
+
+    def _cache_set(self, key: tuple, res: Any) -> None:
+        ttl = self._cfg_cache_ttl()
+        if ttl <= 0:
+            return
+        self._cache[key] = (time.perf_counter() + float(ttl), res)
+        self._cache_purge()
+
+    # ---------------------------
+    # Lifecycle
+    # ---------------------------
     def start(self) -> None:
         with self._lock:
             if self._worker and self._worker.is_alive():
@@ -347,7 +499,6 @@ class PlaywrightPool:
             w._ready.wait(timeout=20)
             self._worker = w
 
-            # If Playwright failed to start, surface a readable error
             if not w._started:
                 err = w._last_error or "Playwright worker failed to start."
                 raise RuntimeError(err)
@@ -356,8 +507,14 @@ class PlaywrightPool:
         with self._lock:
             if not self._worker or not self._worker.is_alive():
                 return
-            job = _Job("__stop__", (), {})
-            self._worker.q.put(job)
+            job = _Job("__stop__", (), {}, key=("__stop__",))
+            # stop should not be dropped; block briefly
+            try:
+                self._worker.q.put(job, timeout=2)
+            except Exception:
+                # best-effort
+                return
+
         job.done.wait(timeout=10)
 
         with self._lock:
@@ -366,36 +523,139 @@ class PlaywrightPool:
             except Exception:
                 pass
             self._worker = None
+            self._pending.clear()
+            self._cache.clear()
 
+    # ---------------------------
+    # Introspection
+    # ---------------------------
     def stats(self) -> dict:
         with self._lock:
+            base = {
+                "started": False,
+                "browsers": 0,
+                "contexts": 0,
+                "proxy_keys": [],
+                "last_error": None,
+                "queue_size": 0,
+                "queue_max": self._cfg_queue_max(),
+                "jobs_done": 0,
+                "jobs_failed": 0,
+                "avg_exec_ms": 0,
+                "avg_wait_ms": 0,
+                "last_job": None,
+                "pending_inflight": len(self._pending),
+                "cache_entries": len(self._cache),
+                "submitted": self._m_submitted,
+                "queue_full_rejects": self._m_queue_full,
+                "dedupe_joins": self._m_dedupe_joins,
+                "cache_hits": self._m_cache_hits,
+            }
+
             if not self._worker or not self._worker.is_alive():
-                return {"started": False, "browsers": 0, "contexts": 0, "proxy_keys": [], "last_error": None}
-            self.start()
-            job = _Job("stats", (), {})
-            self._worker.q.put(job)
+                return base
+
+            # Ask worker for its own stats
+            job = _Job("stats", (), {}, key=("stats",))
+            try:
+                self._worker.q.put(job, timeout=1)
+            except Exception:
+                return base
 
         job.done.wait(timeout=5)
         if job.exc:
-            raise job.exc
-        return job.result
+            return base
 
+        st = job.result or {}
+        if not isinstance(st, dict):
+            return base
+
+        # Merge
+        base.update(st)
+        base["pending_inflight"] = len(self._pending)
+        base["cache_entries"] = len(self._cache)
+        base["submitted"] = self._m_submitted
+        base["queue_full_rejects"] = self._m_queue_full
+        base["dedupe_joins"] = self._m_dedupe_joins
+        base["cache_hits"] = self._m_cache_hits
+        return base
+
+    # ---------------------------
+    # Core call path
+    # ---------------------------
     def _call(self, name: str, *, hard_timeout_s: float, **kwargs):
         self.start()
         assert self._worker is not None
 
-        job = _Job(name, (), kwargs)
-        self._worker.q.put(job)
+        key = self._make_key(name, **kwargs)
 
+        # Fast path: cache
+        with self._lock:
+            if self._cache_enabled(name):
+                self._cache_purge()
+                cached = self._cache_get(key)
+                if cached is not None:
+                    self._m_cache_hits += 1
+                    return cached
+
+            # In-flight dedupe
+            if self._cfg_dedupe():
+                existing = self._pending.get(key)
+                if existing is not None:
+                    self._m_dedupe_joins += 1
+                    job = existing
+                else:
+                    job = _Job(name, (), kwargs, key=key)
+                    self._pending[key] = job
+                    self._m_submitted += 1
+                    try:
+                        self._worker.q.put_nowait(job)
+                    except queue.Full:
+                        self._m_queue_full += 1
+                        # rollback pending
+                        self._pending.pop(key, None)
+                        raise RuntimeError(
+                            f"Playwright queue is full (max={self._cfg_queue_max()}). "
+                            "Reduce concurrency / increase interval / move browser worker to a stronger host."
+                        )
+            else:
+                job = _Job(name, (), kwargs, key=key)
+                self._m_submitted += 1
+                try:
+                    self._worker.q.put_nowait(job)
+                except queue.Full:
+                    self._m_queue_full += 1
+                    raise RuntimeError(
+                        f"Playwright queue is full (max={self._cfg_queue_max()}). "
+                        "Reduce concurrency / increase interval / move browser worker to a stronger host."
+                    )
+
+        # Wait outside lock
         if not job.done.wait(timeout=hard_timeout_s):
+            # Ensure pending is cleaned
+            with self._lock:
+                if self._pending.get(key) is job:
+                    self._pending.pop(key, None)
             raise TimeoutError(f"Playwright worker timed out waiting for job '{name}'.")
 
+        # Clean pending & cache
+        with self._lock:
+            if self._pending.get(key) is job:
+                self._pending.pop(key, None)
+            if (job.exc is None) and self._cache_enabled(name):
+                try:
+                    self._cache_set(key, job.result)
+                except Exception:
+                    pass
+
         if job.exc:
-            # re-raise preserving original message; traceback is kept in stats().last_error
             raise job.exc
 
         return job.result
 
+    # ---------------------------
+    # Public API
+    # ---------------------------
     def fetch(
         self,
         url: str,

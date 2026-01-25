@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     # Cookie/session stickiness (Playwright)
     playwright_storage_dir: str = '.data/playwright'
 
+
+    # Playwright queue & dedupe (scaling)
+    # - queue_max_jobs: hard cap to avoid RAM blowups on Raspberry Pi
+    # - dedupe_inflight: if the same (url, source, proxy) is requested while in-flight, join instead of enqueue
+    # - cache_ttl_seconds: short TTL to collapse bursts (manual search / multiple users) without serving stale results for long
+    # - cache_max_entries: keep small; browser HTML can be heavy
+    playwright_queue_max_jobs: int = 25
+    playwright_dedupe_inflight: bool = True
+    playwright_cache_ttl_seconds: int = 30
+    playwright_cache_max_entries: int = 16
+
     default_alert_limit: int = 30
 
     # Scheduler tuning (DEV)

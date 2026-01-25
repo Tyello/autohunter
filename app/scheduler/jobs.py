@@ -78,3 +78,51 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     })
 
     return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued}
+
+
+def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
+    """Scrape once, ingest once, then match+queue for many wishlists.
+
+    This collapses duplicate work when multiple users share the same query/URL for a given source.
+    """
+    try:
+        listings = scraper_fn(search_url, ctx)
+    except FetchBlocked as e:
+        status_code = getattr(e, "status_code", None)
+        url = getattr(e, "url", search_url)
+        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url})
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
+    except Exception as e:
+        err = str(e)
+        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url})
+        return {"ok": False, "reason": "error", "error": err, "url": search_url}
+
+    found = len(listings or [])
+
+    inserted_ids = ingest_listings(db, listings)
+    inserted = len(inserted_ids or [])
+
+    total_matched = 0
+    total_queued = 0
+
+    # Keep the semantics: only notify on NEW listings (inserted_ids).
+    if inserted_ids:
+        for w in wishlists or []:
+            matched_listings = match_listings_for_wishlist(db, w, inserted_ids)
+            m = len(matched_listings or [])
+            total_matched += m
+            if m:
+                total_queued += int(queue_notifications_for_matches(db, w, matched_listings) or 0)
+
+    db.commit()
+
+    log(db, "info", job_name, "pipeline_summary_many", {
+        "url": search_url,
+        "wishlists": len(wishlists or []),
+        "found": found,
+        "inserted": inserted,
+        "matched": total_matched,
+        "queued": total_queued,
+    })
+
+    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or [])}

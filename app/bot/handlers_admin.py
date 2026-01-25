@@ -336,7 +336,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
 async def _admin_health(update: Update):
     now = datetime.now(timezone.utc)
     lines: List[str] = []
-    lines.append("\ud83e\ude7a Admin \u2014 Health")
+    lines.append("🧰 Admin — Health")
     lines.append(f"Agora (UTC): {_fmt_dt(now)}")
     lines.append("")
 
@@ -369,7 +369,17 @@ async def _admin_health(update: Update):
 
         pool = get_playwright_pool()
         st = pool.stats()
-        lines.append(f"Playwright pool: browsers={st.get('browsers')} contexts={st.get('contexts')}")
+        lines.append(
+            f"Playwright pool: browsers={st.get('browsers')} contexts={st.get('contexts')} "
+            f"queue={st.get('queue_size')}/{st.get('queue_max')} pending={st.get('pending_inflight')}"
+        )
+        lines.append(
+            f"PW dedupe/cache: joins={st.get('dedupe_joins')} cache_hits={st.get('cache_hits')} "
+            f"queue_full={st.get('queue_full_rejects')}"
+        )
+        lines.append(
+            f"PW perf: avg_exec={st.get('avg_exec_ms')}ms avg_wait={st.get('avg_wait_ms')}ms last={st.get('last_job')}"
+        )
     except Exception:
         pass
 

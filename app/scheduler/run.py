@@ -17,7 +17,7 @@ from app.services.source_proxy_service import get_source_proxy_server
 from app.services.source_rate_limit_service import get_source_rate_limit_seconds
 from app.sources.types import ScrapeContext
 
-from app.scheduler.jobs import scrape_ingest_match
+from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
 from app.scheduler.heartbeat import heartbeat
 
 from app.models.wishlist import Wishlist
@@ -84,6 +84,9 @@ def job_run_source_for_all_wishlists(source_name: str):
             final_http_status = None
             final_error = None
 
+            # Collapse duplicate work: many users can share the same query/URL per source.
+            # We scrape+ingest once per unique URL, then match/queue for all wishlists in that group.
+            groups: dict[str, dict] = {}
             for w in wishlists:
                 sources = allowed_sources_for_wishlist(db, w.id)
 
@@ -91,14 +94,19 @@ def job_run_source_for_all_wishlists(source_name: str):
                     log(db, "info", component, "skipped_filtered_out", {"wishlist_id": str(w.id), "source": plugin.name})
                     continue
 
-                # enabled/backoff são globais por fonte e já foram checados acima
-
                 url = plugin.build_url(w.query)
-                log(db, "info", component, "job_started", {"wishlist_id": str(w.id), "query": w.query, "url": url})
+                g = groups.get(url)
+                if g is None:
+                    groups[url] = {"query": w.query, "wishlists": [w]}
+                else:
+                    g["wishlists"].append(w)
+
+            for url, g in groups.items():
+                log(db, "info", component, "job_started_group", {"query": g.get("query"), "url": url, "wishlists": len(g.get("wishlists") or [])})
 
                 ran_any = True
                 ctx = ScrapeContext(source=plugin.name, proxy_server=get_source_proxy_server(plugin.name))
-                res = scrape_ingest_match(db, component, plugin.scrape, url, ctx=ctx, wishlist=w)
+                res = scrape_ingest_match_many(db, component, plugin.scrape, url, ctx=ctx, wishlists=g.get("wishlists") or [])
 
                 if res.get("ok") is True:
                     total_found += int(res.get("found") or 0)
@@ -121,10 +129,10 @@ def job_run_source_for_all_wishlists(source_name: str):
                         log(db, "error", component, "backoff_applied", {"source": plugin.name, "minutes": minutes, "error": final_error})
                         break
 
-                log(db, "info", component, "job_finished", {"wishlist_id": str(w.id), "query": w.query, "result": res})
+                log(db, "info", component, "job_finished_group", {"query": g.get("query"), "url": url, "result": res})
 
                 # Evita "rajada" no mesmo tick do scheduler (sinal forte de bot em fontes sensíveis).
-                # Para OLX especificamente, adiciona um pacing humano entre wishlists.
+                # Para OLX especificamente, adiciona um pacing humano entre grupos.
                 if plugin.name == "olx":
                     time.sleep(random.randint(8, 25))
 
