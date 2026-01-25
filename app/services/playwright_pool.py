@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import queue
 import random
 import threading
@@ -148,41 +149,70 @@ class _PlaywrightWorker(threading.Thread):
         safe_source = source.replace(":", "_").replace("/", "_")
         return str(base / f"storage_{safe_source}__{safe_proxy}.json")
 
-    def _playwright_browsers_base(self) -> Path:
-        """
-        Resolve where Playwright browsers are stored.
-        - If PLAYWRIGHT_BROWSERS_PATH is set (and not "0"), use it.
-        - Otherwise default to ~/.cache/ms-playwright
-        """
-        env = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
-        if env and env != "0":
-            return Path(env).expanduser()
-        return Path.home() / ".cache" / "ms-playwright"
+    def _extract_missing_executable(self, msg: str) -> Optional[str]:
+        """Parse missing executable path from Playwright error message."""
+        if not msg:
+            return None
+        m = re.search(r"Executable doesn't exist at\s+([^\r\n]+)", msg)
+        if not m:
+            return None
+        # Trim any UI box start that may be appended to the same line
+        p = m.group(1).strip()
+        p = p.split("╔", 1)[0].strip()
+        return p or None
 
-    def _find_chromium_full_executable(self) -> Optional[str]:
-        """
-        Best-effort search for the full Chromium executable shipped by Playwright.
-        Used as a fallback when the headless_shell executable is missing/corrupted.
-        """
-        base = self._playwright_browsers_base()
+    def _resolve_ms_playwright_base_from_missing(self, missing_path: str) -> Optional[Path]:
+        """Given .../ms-playwright/<browser-dir>/..., return ms-playwright base."""
+        try:
+            p = Path(missing_path)
+            # .../chromium_headless_shell-1200/chrome-linux/headless_shell
+            # base is parent of chromium_headless_shell-1200
+            for parent in p.parents:
+                if parent.name.startswith("chromium_headless_shell-") or parent.name.startswith("chromium-"):
+                    return parent.parent
+        except Exception:
+            return None
+        return None
+
+    def _find_full_chromium_executable(
+        self, *, base: Optional[Path] = None, build: Optional[int] = None
+    ) -> Optional[str]:
+        """Best-effort search for full Chromium executable shipped by Playwright."""
+        # Respect PLAYWRIGHT_BROWSERS_PATH if set (and not "0")
+        env = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
+        if not base:
+            if env and env != "0":
+                base = Path(env).expanduser()
+            else:
+                base = Path.home() / ".cache" / "ms-playwright"
+
         if not base.exists():
             return None
 
+        # If we know the build number, try the exact directory first
+        if build:
+            d = base / f"chromium-{build}"
+            for exe in (d / "chrome-linux" / "chrome", d / "chrome-linux" / "chromium"):
+                if exe.exists():
+                    return str(exe)
+
+        # Otherwise pick the newest chromium-* directory
         candidates: list[tuple[int, Path]] = []
         for p in base.glob("chromium-*"):
             try:
-                build = int(p.name.split("-", 1)[1])
+                b = int(p.name.split("-", 1)[1])
             except Exception:
-                build = 0
-            candidates.append((build, p))
+                b = 0
+            candidates.append((b, p))
 
-        for _, p in sorted(candidates, key=lambda x: x[0], reverse=True):
-            # Common layout: chromium-<build>/chrome-linux/chrome
-            for exe in (p / "chrome-linux" / "chrome", p / "chrome-linux" / "chromium"):
+        for _, d in sorted(candidates, key=lambda x: x[0], reverse=True):
+            for exe in (d / "chrome-linux" / "chrome", d / "chrome-linux" / "chromium"):
                 if exe.exists():
                     return str(exe)
 
         return None
+
+
 
     def _get_or_create_browser(self, proxy_server: Optional[str]) -> object:
         assert self._p is not None
@@ -198,25 +228,34 @@ class _PlaywrightWorker(threading.Thread):
         else:
             headless = headless_env.lower() not in ("0", "false", "no")
 
-        launch_kwargs: dict = {"headless": headless}
+        launch_kwargs: Dict[str, Any] = {"headless": headless}
         if proxy_server:
             launch_kwargs["proxy"] = {"server": proxy_server}
 
         try:
             b = self._p.chromium.launch(**launch_kwargs)
         except Exception as e:
-            # Some environments may have a corrupted/missing Chromium Headless Shell installation.
-            # In that case, Playwright may try to launch headless_shell and fail with:
-            #   BrowserType.launch: Executable doesn't exist at ...chromium_headless_shell.../headless_shell
             msg = str(e)
-            if (
-                "Executable doesn't exist" in msg
-                and "chromium_headless_shell" in msg
-                and "headless_shell" in msg
-            ):
-                exe_path = self._find_chromium_full_executable()
+
+            # Fallback: some installs have missing/corrupted chromium-headless-shell.
+            # Example:
+            #   BrowserType.launch: Executable doesn't exist at .../chromium_headless_shell-1200/.../headless_shell
+            missing = self._extract_missing_executable(msg)
+            if missing and "chromium_headless_shell" in missing and "headless_shell" in missing:
+                base = self._resolve_ms_playwright_base_from_missing(missing)
+                build = None
+                try:
+                    # chromium_headless_shell-1200
+                    for part in Path(missing).parts:
+                        if part.startswith("chromium_headless_shell-"):
+                            build = int(part.split("-", 1)[1])
+                            break
+                except Exception:
+                    build = None
+
+                exe_path = self._find_full_chromium_executable(base=base, build=build)
                 if exe_path:
-                    launch_kwargs2: Dict[str, Any] = dict(launch_kwargs)
+                    launch_kwargs2 = dict(launch_kwargs)
                     launch_kwargs2["executable_path"] = exe_path
                     b = self._p.chromium.launch(**launch_kwargs2)
                 else:
