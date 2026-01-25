@@ -426,10 +426,6 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
     - Se ainda bloquear, entra em force-browser runtime por N horas (default 6h) para evitar loops de 403.
     """
 
-    def _olx_next_data_pred(url: str, headers: dict, status: int) -> bool:
-        ct = (headers.get("content-type") or "").lower()
-        return status == 200 and "application/json" in ct and "/_next/data/" in url and ".json" in url
-
     min_http_delay = 1200
     max_http_delay = 4200
 
@@ -454,7 +450,7 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 ctx=ctx,
                 wait_until="domcontentloaded",
                 timeout_ms=20000,
-                json_url_predicate=_olx_next_data_pred,
+                capture_mode="olx_next_data",
                 min_delay_ms=300,
                 max_delay_ms=900,
             ).data

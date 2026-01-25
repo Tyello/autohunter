@@ -12,13 +12,15 @@ from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_admin import cmd_admin
 from app.bot.handlers_misc import cmd_me
 from app.bot.handlers_wishlist_ui import (
-    cmd_wishlist_remove2,
-    cmd_wishlist_clear,
-    cb_wishlist_clear,
     wishlist_add_conversation,
     cb_wishlist_add_confirm,
+    cb_wishlist_clear,
+    cmd_wishlist_filter_add,
+    cmd_wishlist_filter_list,
+    cmd_wishlist_filter_remove,
+    cmd_wishlist_clear,
+    cmd_wishlist_remove,
 )
-
 logger = logging.getLogger(__name__)
 
 
@@ -57,10 +59,15 @@ def main():
 
     # wishlist (UX nova)
     app.add_handler(wishlist_add_conversation())
-    app.add_handler(CallbackQueryHandler(cb_wishlist_add_confirm, pattern=r"^W:ADD:(SAVE:|CANCEL$)"))
-    app.add_handler(CommandHandler("wishlist_remove", cmd_wishlist_remove2))
-    app.add_handler(CommandHandler("wishlist_clear", cmd_wishlist_clear))
+    app.add_handler(CallbackQueryHandler(cb_wishlist_add_confirm, pattern=r"^W:ADD:(SAVE|CANCEL)$"))
     app.add_handler(CallbackQueryHandler(cb_wishlist_clear, pattern=r"^W:CLEAR:(YES|NO)$"))
+
+    app.add_handler(CommandHandler("wishlist_filter_add", cmd_wishlist_filter_add))
+    app.add_handler(CommandHandler("wishlist_filter_list", cmd_wishlist_filter_list))
+    app.add_handler(CommandHandler("wishlist_filter_remove", cmd_wishlist_filter_remove))
+
+    app.add_handler(CommandHandler("wishlist_clear", cmd_wishlist_clear))
+    app.add_handler(CommandHandler("wishlist_remove", cmd_wishlist_remove))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))

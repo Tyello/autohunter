@@ -125,7 +125,7 @@ On Telegram (admin only):
 - `/admin health` : system + pools snapshot
 - `/admin sources` : per-source backoff + 24h aggregates
 
-## 6) Start / Stop / Restart / Status
+## 6) Start / Stop / Restart
 
 Start
 
@@ -150,9 +150,41 @@ Boot Disable
 ```bash
 sudo systemctl disable autohunter-bot autohunter-scheduler
 ```
+## 3) (Opcional, recomendado) Browser Service (Playwright) separado
 
-Status
+Quando OLX exige Cloudflare/anti-bot, Playwright vira o recurso mais caro. No Raspberry Pi 3, o ideal é **isolar** o browser em um serviço separado:
+
+- se o Chromium travar, você reinicia só o serviço do browser
+- dá pra limitar CPU/RAM do Playwright sem derrubar bot/scheduler
+- prepara o caminho pra mover isso pra outro host no futuro (sem refatorar)
+
+### Instalar dependências do Playwright (uma vez)
 
 ```bash
- sudo systemctl status autohunter-scheduler --no-pager
+source /opt/autohunter/.venv/bin/activate
+pip install -r requirements.playwright.txt
+python -m playwright install chromium
 ```
+
+### Configurar `.env`
+
+No `/opt/autohunter/.env`:
+
+```bash
+ENABLE_PLAYWRIGHT=true
+PLAYWRIGHT_ENDPOINT=http://127.0.0.1:8787
+# opcional: trava o serviço com um token simples
+# PLAYWRIGHT_SERVICE_TOKEN=algum_segredo
+```
+
+### Habilitar no systemd
+
+```bash
+sudo cp deploy/raspberry/systemd/autohunter-browser.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now autohunter-browser.service
+sudo systemctl status autohunter-browser.service
+```
+
+Se precisar ajustar limites no Pi, edite o unit e mexa em `MemoryMax` e `CPUQuota`.
+

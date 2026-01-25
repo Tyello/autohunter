@@ -1,0 +1,28 @@
+[Unit]
+Description=AutoHunter Browser Service (Playwright)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autohunter
+WorkingDirectory=/opt/autohunter
+EnvironmentFile=/opt/autohunter/.env
+ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_browser_service.sh
+Restart=always
+RestartSec=3
+
+# Resource control (tune if needed)
+CPUQuota=80%
+MemoryMax=600M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

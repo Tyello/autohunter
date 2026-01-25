@@ -7,7 +7,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
 from app.scrapers.base import FetchBlocked
-from app.services.playwright_pool import get_playwright_pool
+from app.core.settings import settings
+
+def _get_backend():
+    # If configured, use external browser service. Otherwise, use in-process pool.
+    if getattr(settings, 'playwright_endpoint', None):
+        from app.services.playwright_client import get_playwright_client
+        return get_playwright_client()
+    from app.services.playwright_pool import get_playwright_pool
+    return get_playwright_pool()
+
 
 if TYPE_CHECKING:
     from app.sources.types import ScrapeContext
@@ -64,8 +73,8 @@ def fetch_html_browser(
     # small random delay to reduce patterns
     time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
-    pool = get_playwright_pool()
-    r = pool.fetch(
+    backend = _get_backend()
+    r = backend.fetch(
         url,
         source=ctx.source,
         proxy_server=ctx.proxy_server,
@@ -89,6 +98,7 @@ def fetch_json_browser(
     ctx: "ScrapeContext",
     timeout_ms: int = 30000,
     wait_until: str = "domcontentloaded",
+    capture_mode: str = "any_json",
     json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
     min_delay_ms: int = 250,
     max_delay_ms: int = 900,
@@ -101,14 +111,16 @@ def fetch_json_browser(
 
     time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
-    pool = get_playwright_pool()
-    r = pool.fetch_json(
+    backend = _get_backend()
+    r = backend.fetch_json(
         url,
         source=ctx.source,
         proxy_server=ctx.proxy_server,
         timeout_ms=timeout_ms,
         wait_until=wait_until,
-        json_url_predicate=json_url_predicate,
+        capture_mode=capture_mode,
+        # json_url_predicate is only supported in-process; prefer capture_mode.
+        
         min_delay_ms=min_delay_ms,
         max_delay_ms=max_delay_ms,
     )
