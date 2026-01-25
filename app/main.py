@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends
 from sqlalchemy import text
 from typing import List
@@ -13,21 +15,22 @@ from app.scrapers.olx import get_olx_health_snapshot
 
 from app.db.deps import get_db
 
-app = FastAPI(title="AutoHunter", version="0.1.0")
-
-_scheduler = None
-
-@app.on_event("startup")
-def startup():
-    global _scheduler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan handler (substitui startup/shutdown).
+    Evita warnings do @app.on_event e centraliza o ciclo de vida.
+    """
     if settings.enable_scheduler_in_api:
-        _scheduler = start_scheduler()
+        app.state.scheduler = start_scheduler()
+    try:
+        yield
+    finally:
+        scheduler = getattr(app.state, "scheduler", None)
+        if scheduler:
+            scheduler.shutdown(wait=False)
 
-@app.on_event("shutdown")
-def shutdown():
-    global _scheduler
-    if _scheduler:
-        _scheduler.shutdown(wait=False)
+
+app = FastAPI(title="AutoHunter", version="0.1.0", lifespan=lifespan)
 
 @app.get("/health")
 def health():
