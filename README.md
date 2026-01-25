@@ -34,6 +34,9 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
+
+# para testes
+pip install -r requirements.dev.txt
 ```
 
 Configure o `.env` (exemplo mínimo):
@@ -98,6 +101,41 @@ Se quiser que a API também suba o scheduler no startup:
 ```env
 ENABLE_SCHEDULER_IN_API=true
 ```
+
+## Testes (funcionais essenciais)
+
+Os testes são **offline** (sem rede/Playwright) e usam SQLite automaticamente.
+
+```bash
+pytest
+```
+
+O que eles cobrem:
+- Smoke tests da API (`/health`, `/db-check`, `/listings`, `/admin/health`)
+- Matching “anti-falso-positivo” (ex.: `civic si` não casa com `civic 2015`)
+- Sender de notifications respeitando limite diário (e aviso 1x por dia)
+- Parsing/normalização de Mercado Livre e extração de `__NEXT_DATA__` da OLX
+
+### Contract tests (anti-breaking change)
+
+Além dos testes funcionais, existe um **contrato** para evitar que mudanças quebrem consumidores:
+
+- Snapshot do OpenAPI (`tests/contracts/openapi_snapshot.json`)
+- Contrato de formato da mensagem do Telegram (linhas e URL limpa)
+
+Para atualizar o snapshot do OpenAPI **intencionalmente**:
+
+```bash
+UPDATE_CONTRACT=1 pytest -k openapi_contract_snapshot
+```
+
+### CI (GitHub Actions)
+
+O repositório já vem com um workflow minimalista em `.github/workflows/ci.yml`:
+
+- roda em `push` e `pull_request`
+- instala dependências + `requirements.dev.txt`
+- executa `pytest`
 
 ## Comandos do Bot (principais)
 

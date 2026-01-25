@@ -125,7 +125,7 @@ On Telegram (admin only):
 - `/admin health` : system + pools snapshot
 - `/admin sources` : per-source backoff + 24h aggregates
 
-## 6) Start / Stop / Restart
+## 6) Start / Stop / Restart / Status
 
 Start
 
@@ -149,4 +149,10 @@ Boot Disable
 
 ```bash
 sudo systemctl disable autohunter-bot autohunter-scheduler
+```
+
+Status
+
+```bash
+ sudo systemctl status autohunter-scheduler --no-pager
 ```

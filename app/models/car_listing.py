@@ -26,3 +26,12 @@ class CarListing(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="BRL")
 
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def listing_url(self) -> str | None:
+        """Compat layer for the API schema.
+
+        The FastAPI response schema exposes `listing_url`, while the DB column is `url`.
+        Exposing this property prevents response validation errors.
+        """
+        return self.url

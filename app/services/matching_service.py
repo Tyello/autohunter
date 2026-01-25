@@ -184,7 +184,7 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
     return True
 
 
-def match_listings_for_wishlist(db: Session, wishlist: Wishlist, listing: CarListing) -> bool:
+def match_listing_to_wishlist(db: Session, wishlist: Wishlist, listing: CarListing) -> bool:
     # 1) semantic rules (hardening por wishlist)
     if not semantic_match(wishlist, listing):
         return False
@@ -197,3 +197,30 @@ def match_listings_for_wishlist(db: Session, wishlist: Wishlist, listing: CarLis
     filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
     frules = [FilterRule(f.field, f.operator, f.value) for f in filters]
     return _apply_filters(listing, frules)
+
+
+def match_listings_for_wishlist(db: Session, wishlist: Wishlist, listing_ids: list) -> list[CarListing]:
+    """Return the subset of listings that match a wishlist.
+
+    This is intentionally lightweight (Raspberry Pi 3 friendly):
+    - Pull listings by id
+    - Run rule-based semantic + token matching
+
+    The scheduler pipeline (`scrape_ingest_match`) depends on this helper.
+    """
+
+    if not listing_ids:
+        return []
+
+    rows = db.query(CarListing).filter(CarListing.id.in_(listing_ids)).all()
+    out: list[CarListing] = []
+    for l in rows:
+        try:
+            if match_listing_to_wishlist(db, wishlist, l):
+                out.append(l)
+        except Exception:
+            # Matching should never break the pipeline.
+            continue
+    # newest first is usually more useful
+    out.sort(key=lambda x: x.created_at, reverse=True)
+    return out
