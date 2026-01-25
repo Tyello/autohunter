@@ -76,8 +76,8 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
 def _unescape_ml(s: str) -> str:
     """
     Mercado Livre costuma vir com escapes no HTML, por exemplo:
-      - "\u002F" (sequência literal)
-      - "\/" (slash escapado)
+      "\u002F" (sequência literal)
+      "\\/" (slash escapado)
     """
     if not s:
         return ""

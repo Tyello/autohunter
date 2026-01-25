@@ -184,7 +184,7 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
     return True
 
 
-def match_listing_to_wishlist(db: Session, wishlist: Wishlist, listing: CarListing) -> bool:
+def match_listings_for_wishlist(db: Session, wishlist: Wishlist, listing: CarListing) -> bool:
     # 1) semantic rules (hardening por wishlist)
     if not semantic_match(wishlist, listing):
         return False
