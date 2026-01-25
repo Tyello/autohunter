@@ -50,6 +50,53 @@ def _get_int_setting(attr: Optional[str], default: Optional[int] = None) -> Opti
     except Exception:
         return default
 
+def _short(s: Optional[str], n: int = 140) -> str:
+    s = (s or "").strip()
+    if not s:
+        return "-"
+    s = " ".join(s.split())
+    return s if len(s) <= n else s[: max(0, n - 3)] + "..."
+
+
+def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
+    if not dt:
+        return None
+    if dt <= now:
+        return 0
+    return int((dt - now).total_seconds() // 60)
+
+
+def _classify_error(source: str, err: str | None, http_status: Optional[int]) -> tuple[str, str, str]:
+    """
+    Retorna (kind, short_reason, action).
+    Kinds: BUG | NET | BLOCKED | DATA | ERR
+    """
+    e = (err or "").strip()
+    e_l = e.lower()
+
+    # BUG: concorrência / Playwright / greenlet / asyncio
+    if ("cannot switch to a different thread" in e_l) or ("greenlet" in e_l):
+        return ("BUG", "thread/greenlet (Playwright Sync)", "usar PlaywrightPool thread-safe / evitar uso cross-thread")
+    if "playwright sync api inside the asyncio loop" in e_l:
+        return ("BUG", "Playwright Sync dentro do asyncio", "rodar fetch browser em thread (to_thread) ou usar Playwright Async API")
+
+    # BLOCKED: anti-bot
+    if http_status in (403, 429):
+        return ("BLOCKED", f"HTTP {http_status}", "browser warmup/cookies/fingerprint; ajustar backoff")
+    if any(k in e_l for k in ("cloudflare", "captcha", "attention required")):
+        return ("BLOCKED", "Cloudflare/captcha", "browser warmup + cookies; marcar como blocked no pipeline")
+
+    # NET: rede/timeout/DNS/SSL
+    if any(k in e_l for k in ("timed out", "timeout", "connection", "dns", "name or service not known", "temporary failure", "ssl", "tls")):
+        return ("NET", "rede/timeout/dns/ssl", "verificar conectividade/proxy/DNS; aumentar timeout e retries")
+
+    # DATA: endpoint/parser
+    if http_status == 404 or ("404" in e_l and "not found" in e_l):
+        return ("DATA", "HTTP 404 (rota mudou)", "atualizar URL/endpoint do scraper")
+    if any(k in e_l for k in ("selector", "parse", "jsondecode", "__next_data__", "__preloaded_state__")):
+        return ("DATA", "HTML/JSON mudou", "ajustar parser/selectors e normalização")
+
+    return ("ERR", _short(e, 160), "abrir stacktrace e classificar (BUG/NET/BLOCKED/DATA)")
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin dispatcher.
@@ -70,7 +117,8 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     action = args[0].lower()
     if action == "sources":
-        await _admin_sources(update)
+        verbose = any(a.lower() in ("v", "-v", "verbose", "full", "details") for a in args[1:])
+        await _admin_sources(update, verbose=verbose)
         return
     if action == "health":
         await _admin_health(update)
@@ -79,7 +127,14 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Ação inválida. Use: /admin sources | /admin health")
 
 
-async def _admin_sources(update: Update):
+async def _admin_sources(update: Update, verbose: bool = False):
+    """
+    Visão compacta + categorizada (BUG/NET/BLOCKED/DATA) para operar rápido.
+
+    Use:
+      /admin sources
+      /admin sources verbose
+    """
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=24)
 
@@ -91,18 +146,27 @@ async def _admin_sources(update: Update):
     with SessionLocal() as db:
         states = {s.source: s for s in db.query(SourceState).all()}
 
-        # last run per source
-        last_runs = {}
+        # last run per source (qualquer status)
+        last_runs: dict[str, Optional[SourceRun]] = {}
+        # last "effective" run per source (ignora skipped, ajuda a achar a causa real)
+        last_effective: dict[str, Optional[SourceRun]] = {}
+
         for src in {p.name for p in plugins}:
-            lr = (
+            last_runs[src] = (
                 db.query(SourceRun)
                 .filter(SourceRun.source == src)
                 .order_by(SourceRun.created_at.desc())
                 .first()
             )
-            last_runs[src] = lr
+            last_effective[src] = (
+                db.query(SourceRun)
+                .filter(SourceRun.source == src)
+                .filter(SourceRun.status != "skipped")
+                .order_by(SourceRun.created_at.desc())
+                .first()
+            )
 
-        # 24h aggregates per source
+        # 24h aggregates per source (contagem + média ponderada)
         aggs: Dict[str, _Agg24h] = {}
         for src in {p.name for p in plugins}:
             rows = (
@@ -119,8 +183,10 @@ async def _admin_sources(update: Update):
             )
 
             a = _Agg24h()
-            avg_dur: Optional[float] = None
-            avg_found: Optional[float] = None
+            sum_dur = 0.0
+            sum_found = 0.0
+            sum_cnt_dur = 0
+            sum_cnt_found = 0
 
             for status, cnt, avg_ms, avg_f in rows:
                 cnt = int(cnt or 0)
@@ -134,21 +200,21 @@ async def _admin_sources(update: Update):
                 elif status == "skipped":
                     a.skipped += cnt
 
-                # keep the last non-null averages we see (per status), then compute a simple overall
                 if avg_ms is not None:
-                    avg_dur = float(avg_ms)
+                    sum_dur += float(avg_ms) * cnt
+                    sum_cnt_dur += cnt
                 if avg_f is not None:
-                    avg_found = float(avg_f)
+                    sum_found += float(avg_f) * cnt
+                    sum_cnt_found += cnt
 
-            a.avg_duration_ms = int(avg_dur) if avg_dur is not None else None
-            a.avg_found = int(avg_found) if avg_found is not None else None
-
+            a.avg_duration_ms = int(sum_dur / sum_cnt_dur) if sum_cnt_dur else None
+            a.avg_found = int(sum_found / sum_cnt_found) if sum_cnt_found else None
             aggs[src] = a
 
     lines: List[str] = []
     lines.append("🧰 Admin — Sources")
     lines.append(f"Agora (UTC): {_fmt_dt(now)}")
-    lines.append(f"Janela: últimas 24h desde {_fmt_dt(since)}")
+    lines.append(f"Janela: 24h desde {_fmt_dt(since)}")
     lines.append("")
 
     for i, p in enumerate(plugins, start=1):
@@ -159,72 +225,109 @@ async def _admin_sources(update: Update):
 
         st = states.get(p.name)
         lr = last_runs.get(p.name)
+        le = last_effective.get(p.name)
         a = aggs.get(p.name, _Agg24h())
 
-        # status evaluation
+        # estado de execução (enabled/backoff)
         if not enabled:
-            status = "🚫 disabled"
+            state = "🚫 disabled"
         else:
             if st and st.next_allowed_at and st.next_allowed_at > now:
-                status = f"⏳ backoff até {_fmt_dt(st.next_allowed_at)}"
+                mins = _mins_left(st.next_allowed_at, now)
+                state = f"⏳ backoff {mins}m" if mins is not None else "⏳ backoff"
             else:
-                status = "✅ ok"
+                state = "✅ ok"
 
-        flags = []
+        flags: list[str] = []
         flags.append("impl✅" if implemented else "impl❌")
         if sched_m is not None:
             flags.append(f"sched={sched_m}m")
-        flags.append(f"cooldown={cooldown_m}m")
+        if cooldown_m:
+            flags.append(f"cool={cooldown_m}m")
 
-        lines.append(f"[{i}] {p.name} — {status} | " + " | ".join(flags))
+        # causa (usa last_effective se last=skipped)
+        lr_cause = lr
+        if lr and lr.status == "skipped" and le:
+            lr_cause = le
 
+        kind = "OK"
+        why = "-"
+        action = "—"
+        emoji = "✅"
+
+        if not enabled:
+            kind = "DISABLED"
+            emoji = "🚫"
+            why = "setting disabled"
+            action = "habilitar a fonte nas settings"
+        else:
+            if lr_cause is None:
+                kind = "ERR"
+                emoji = "❔"
+                why = "sem execuções registradas"
+                action = "verificar scheduler/job"
+            else:
+                if lr_cause.status == "success":
+                    kind = "OK"
+                    emoji = "✅"
+                elif lr_cause.status == "blocked":
+                    kind = "BLOCKED"
+                    emoji = "🟠"
+                    why = f"HTTP {lr_cause.http_status or 403}"
+                    action = "browser warmup/cookies/fingerprint; ajustar backoff"
+                elif lr_cause.status == "skipped":
+                    kind = "SKIP"
+                    emoji = "⏳"
+                    why = "cooldown/backoff ativo"
+                    action = "aguardar janela; reduzir duração do job"
+                elif lr_cause.status == "error":
+                    k, w, a2 = _classify_error(p.name, lr_cause.error, lr_cause.http_status)
+                    kind = k
+                    why = w
+                    action = a2
+                    emoji = {"BUG": "🔴", "NET": "🟣", "BLOCKED": "🟠", "DATA": "🟡", "ERR": "⚪"}.get(kind, "⚪")
+                else:
+                    kind = (lr_cause.status or "ERR").upper()
+                    emoji = "⚪"
+                    why = _short(lr_cause.error, 120)
+                    action = "ver logs"
+
+        ok_pct = int(round((a.success / a.total) * 100)) if a.total else 0
+        snap = f"24h ok={a.success}/{a.total} ({ok_pct}%) err={a.error} blk={a.blocked} skip={a.skipped}"
+        if a.avg_duration_ms is not None:
+            snap += f" avg={a.avg_duration_ms}ms"
+
+        # last run compacto
+        last_line = "last: -"
+        if lr:
+            dur = f"{lr.duration_ms}ms" if lr.duration_ms is not None else "-"
+            found = f"{lr.items_found}" if lr.items_found is not None else "-"
+            match = f"{lr.items_matched}" if lr.items_matched is not None else "-"
+            last_line = f"last {lr.status} at={_fmt_dt(lr.created_at)} dur={dur} found={found} match={match}"
+            if lr.http_status is not None:
+                last_line += f" http={lr.http_status}"
+
+        lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind} | " + " ".join(flags))
         if st:
             if st.consecutive_blocks:
                 lines.append(f"   blocks seguidos: {st.consecutive_blocks}")
             if st.consecutive_failures:
                 lines.append(f"   erros seguidos: {st.consecutive_failures}")
 
-        if lr:
-            bits = [f"last={lr.status}", f"at={_fmt_dt(lr.created_at)}"]
-            if lr.duration_ms is not None:
-                bits.append(f"{lr.duration_ms}ms")
-            if lr.items_found is not None:
-                bits.append(f"found={lr.items_found}")
-            if lr.items_ingested is not None:
-                bits.append(f"ing={lr.items_ingested}")
-            if lr.items_matched is not None:
-                bits.append(f"match={lr.items_matched}")
-            if lr.notifications_queued is not None:
-                bits.append(f"notif={lr.notifications_queued}")
-            if lr.http_status is not None:
-                bits.append(f"http={lr.http_status}")
-            lines.append("   " + " | ".join(bits))
-            if lr.error:
-                # keep it short for telegram
-                err = lr.error
-                if len(err) > 160:
-                    err = err[:157] + "..."
-                lines.append(f"   err: {err}")
-        else:
-            lines.append("   last: -")
+        lines.append(f"   {last_line}")
+        lines.append(f"   {snap}")
 
-        # 24h snapshot
-        snap = [
-            f"24h total={a.total}",
-            f"ok={a.success}",
-            f"blocked={a.blocked}",
-            f"err={a.error}",
-            f"skip={a.skipped}",
-        ]
-        if a.avg_duration_ms is not None:
-            snap.append(f"avg={a.avg_duration_ms}ms")
-        if a.avg_found is not None:
-            snap.append(f"avg_found={a.avg_found}")
-        lines.append("   " + " | ".join(snap))
+        backoff_active = bool(enabled and st and st.next_allowed_at and st.next_allowed_at > now)
+        if kind != "OK" or backoff_active:
+            lines.append(f"   causa: {why}")
+            lines.append(f"   ação: {action}")
+
+        if verbose and lr and lr.error:
+            lines.append(f"   err_full: {_short(lr.error, 420)}")
+
         lines.append("")
 
-    # Telegram hard limit is ~4096 chars; keep safe
-    text = "\n".join(lines)
+    text = sanitize_for_telegram("\n".join(lines))
     if len(text) > 3800:
         text = text[:3797] + "..."
     await update.message.reply_text(text)

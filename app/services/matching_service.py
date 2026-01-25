@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Iterable
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
@@ -45,9 +46,31 @@ def _parse_decimal(value: str) -> Decimal | None:
         return None
 
 
+
+def _decode_url_escapes(url: str) -> str:
+    """Conserta URLs com escapes literais (ex: https:\u002F\u002Fclick1...)."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    u = (
+        u.replace("\\u002F", "/")
+         .replace("\\u003A", ":")
+         .replace("\\u003D", "=")
+         .replace("\\u0026", "&")
+         .replace("\\/", "/")
+    )
+    if re.search(r"\\u[0-9a-fA-F]{4}", u):
+        try:
+            u = u.encode("utf-8", "ignore").decode("unicode_escape")
+        except Exception:
+            pass
+        u = u.replace("\\/", "/")
+    return u
 def _safe_url_for_match(listing: CarListing) -> str:
     """Evita falsos positivos causados por URLs gigantes de tracking (ex.: click1/brand_ads)."""
     url = (listing.url or "").strip()
+    url = _decode_url_escapes(url)
+    url = _decode_url_escapes(url)
     if not url:
         return ""
 
@@ -77,27 +100,52 @@ def _safe_url_for_match(listing: CarListing) -> str:
         return u
 
 
+def _clean_url_for_match(listing: CarListing) -> str:
+    """
+    Evita falso-positivo por URL de tracking (ex: click1.mercadolivre...).
+    Retorna apenas host+path, sem query/fragment.
+    """
+    url = (listing.url or "").strip()
+    if not url:
+        return ""
+
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+        path = (p.path or "").lower()
+
+        if (listing.source or "").lower() == "mercadolivre":
+            if host.startswith("click") or "brand_ads/clicks" in path:
+                # tracking: não entra no matching
+                return ""
+
+        # canonical sem query/fragment
+        return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
+    except Exception:
+        # fallback: remove query/fragment
+        u = url.split("#")[0].split("?")[0]
+        if (listing.source or "").lower() == "mercadolivre" and ("brand_ads/clicks" in u or "click" in u):
+            return ""
+        return u
+
+
 def text_match(query: str, listing: CarListing) -> bool:
     """Token-level AND match.
 
-    Motivo: substring contains() é fraco (e gera falsos positivos com termos curtos como 'si').
+    Motivo: substring contains() é fraco (gera falsos positivos com termos curtos como 'si').
     """
 
     terms = tokens(query or "")
     if not terms:
         return True
 
-    hay_tokens = set(
-        tokens(
-            " ".join(
-                [
-                    listing.title or "",
-                    listing.location or "",
-                    _safe_url_for_match(listing),
-                ]
-            )
-        )
-    )
+    url_for_match = _clean_url_for_match(listing)
+
+    hay_tokens = set(tokens(" ".join([
+            listing.title or "",
+            listing.location or "",
+            url_for_match,
+    ])))
 
     return all(t in hay_tokens for t in terms)
 
@@ -116,83 +164,36 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
 
         if field == "source":
             if op != "eq":
-                # operador não suportado → ignora (MVP)
                 continue
             if not listing.source:
                 return False
             if listing.source.lower() != val.lower():
                 return False
 
-        elif field == "price":
-            price = getattr(listing, "price", None)
-            if price is None:
+        if field == "price":
+            if listing.price is None:
                 return False
-
             target = _parse_decimal(val)
             if target is None:
+                continue
+            if op == "lte" and Decimal(str(listing.price)) > target:
                 return False
-
-            # price pode ser Decimal vindo do Numeric
-            if op == "lte":
-                if price > target:
-                    return False
-            elif op == "gte":
-                if price < target:
-                    return False
-            else:
-                continue  # operador desconhecido → ignora no MVP
-
-        else:
-            # campo não suportado no MVP → ignora
-            continue
+            if op == "gte" and Decimal(str(listing.price)) < target:
+                return False
 
     return True
 
 
-def _get_filters(wishlist: Wishlist) -> list[FilterRule]:
-    # usa relationship se já carregou
-    if getattr(wishlist, "filters", None) is not None:
-        raw = list(wishlist.filters)
-    else:
-        raw = []
+def match_listing_to_wishlist(db: Session, wishlist: Wishlist, listing: CarListing) -> bool:
+    # 1) semantic rules (hardening por wishlist)
+    if not semantic_match(wishlist, listing):
+        return False
 
-    return [FilterRule(f.field, f.operator, f.value) for f in raw]
+    # 2) token-level match
+    if not text_match(wishlist.query or "", listing):
+        return False
 
-
-def match_listings_for_wishlist(
-    db: Session,
-    wishlist: Wishlist,
-    inserted_ids: Iterable,
-) -> list[CarListing]:
-    """Retorna os listings NOVOS (inserted_ids) que:
-
-    - passam nos filtros da wishlist (price + source)
-    - batem no texto da wishlist.query
-    - passam nas regras semânticas (quando existirem)
-    """
-
-    ids = list(inserted_ids or [])
-    if not ids:
-        return []
-
-    listings = db.query(CarListing).filter(CarListing.id.in_(ids)).all()
-
-    filters = _get_filters(wishlist)
-
-    matched: list[CarListing] = []
-    for l in listings:
-        if not _apply_filters(l, filters):
-            continue
-
-        # Texto da wishlist precisa bater integralmente (AND de termos).
-        # Isso evita "Civic" trazer LXR/EXR quando a intenção é "Civic SI".
-        if not text_match(wishlist.query, l):
-            continue
-
-        # Regras semânticas específicas por wishlist.
-        if not semantic_match(wishlist, l):
-            continue
-
-        matched.append(l)
-
-    return matched
+    # 3) filtros explícitos
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    frules = [FilterRule(f.field, f.operator, f.value) for f in filters]
+    return _apply_filters(listing, frules)

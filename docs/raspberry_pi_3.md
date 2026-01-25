@@ -124,3 +124,29 @@ On Telegram (admin only):
 
 - `/admin health` : system + pools snapshot
 - `/admin sources` : per-source backoff + 24h aggregates
+
+## 6) Start / Stop / Restart
+
+Start
+
+```bash
+sudo systemctl start autohunter-bot autohunter-scheduler
+```
+
+Stop
+
+```bash
+sudo systemctl stop autohunter-bot autohunter-scheduler
+```
+
+Restart
+
+```bash
+sudo systemctl restart autohunter-bot autohunter-scheduler
+```
+
+Boot Disable
+
+```bash
+sudo systemctl disable autohunter-bot autohunter-scheduler
+```

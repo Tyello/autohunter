@@ -18,6 +18,22 @@ TELEGRAM_TEXT_MAX = 4096
 # RPi-friendly guardrails
 MAX_IMAGE_BYTES = 3_500_000  # ~3.5MB
 
+def _decode_escapes(s: str) -> str:
+    """Decodifica sequências comuns (/ etc.) vistas em URLs do ML/logs."""
+    if not s:
+        return ""
+    # primeiro, trata sequências literais (com barra invertida)
+    s = (s or "")
+    s = s.replace("\\u002F", "/").replace("\\u003D", "=").replace("\\u0026", "&")
+    s = s.replace("\\/", "/")
+    # tentativa genérica: se contiver \uXXXX, decodifica
+    if re.search(r"\\u[0-9a-fA-F]{4}", s):
+        try:
+            s = s.encode("utf-8", "ignore").decode("unicode_escape")
+        except Exception:
+            pass
+    return s
+
 
 def _truncate(text: str, limit: int) -> str:
     if not text:
@@ -78,6 +94,7 @@ def _canonical_ml_url(external_id: str) -> str:
 def _clean_url_for_telegram(listing) -> str:
     """Evita mandar URL gigantes (tracking) que quebram texto/caption e confundem matching."""
     url = (getattr(listing, "url", None) or "").strip()
+    url = _decode_escapes(url)
     if not url:
         return ""
 
@@ -127,28 +144,28 @@ def _build_text(listing) -> str:
 
 
 def _download_image_bytes(url: str, timeout: int = 8) -> Optional[Tuple[bytes, str]]:
-    """Baixa a imagem e valida Content-Type.
-
-    Evita os erros 400 do Telegram quando você manda uma URL que:
-    - não é imagem (HTML/403/redirect)
-    - é lenta/bloqueada para o fetch do Telegram
-    """
+    """Baixa a imagem e valida Content-Type (evita Telegram 400)."""
     if not url:
         return None
 
+    url = _decode_escapes(url)
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+        ),
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-        "Referer": "https://www.olx.com.br/",
+        "Referer": "https://www.google.com/",
     }
 
     try:
-        with requests.get(url, headers=headers, stream=True, timeout=timeout, allow_redirects=True) as r:
+        with requests.get(url, headers=headers, timeout=timeout, stream=True, allow_redirects=True) as r:
             if r.status_code != 200:
                 return None
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            if not ctype.startswith("image/"):
+            ct = (r.headers.get("Content-Type") or "").lower()
+            if not ct.startswith("image/"):
                 return None
 
             buf = bytearray()
@@ -159,7 +176,7 @@ def _download_image_bytes(url: str, timeout: int = 8) -> Optional[Tuple[bytes, s
                 if len(buf) > MAX_IMAGE_BYTES:
                     return None
 
-            return bytes(buf), ctype
+            return bytes(buf), ct
     except Exception:
         return None
 
@@ -191,7 +208,7 @@ def telegram_sender(notification, listing, user):
     sent_photo = False
 
     if getattr(listing, "thumbnail_url", None):
-        img = _download_image_bytes(listing.thumbnail_url)
+        img = _download_image_bytes(_decode_escapes(listing.thumbnail_url))
         if img:
             img_bytes, ctype = img
             url = f"https://api.telegram.org/bot{token}/sendPhoto"

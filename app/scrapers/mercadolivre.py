@@ -34,7 +34,7 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
         from curl_cffi import requests as creq  # type: ignore
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
             "Cache-Control": "no-cache",
@@ -49,7 +49,7 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
             headers=headers,
             timeout=timeout,
             proxies=proxies,
-            impersonate="chrome120",
+            impersonate=getattr(settings, "ml_impersonate", None) or "chrome120",
             allow_redirects=True,
         )
         if r.status_code == 200 and r.text:
@@ -69,22 +69,37 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
         )
         return res.html
 
-    # se chegou aqui, mantém sem mascarar: marca blocked mesmo
+    # se chegou aqui, marca blocked
     raise FetchBlocked(403, url, reason="ml_403_all_strategies")
 
 
 def _unescape_ml(s: str) -> str:
     """
-    Mercado Livre costuma vir com escapes tipo \u002F.
+    Mercado Livre costuma vir com escapes no HTML, por exemplo:
+      - "\u002F" (sequência literal)
+      - "\/" (slash escapado)
     """
-    return (
-        (s or "")
-        .replace("\u002F", "/")
-        .replace("\u003D", "=")
-        .replace("\u0026", "&")
-        .replace(r"\/", "/")
+    if not s:
+        return ""
+    s = (s or "")
 
+    # sequências literais comuns
+    s = (
+        s.replace("\\u002F", "/")
+         .replace("\\u003D", "=")
+         .replace("\\u0026", "&")
+         .replace("\\/", "/")
     )
+
+    # fallback genérico: decodifica qualquer \uXXXX remanescente
+    if re.search(r"\\u[0-9a-fA-F]{4}", s):
+        try:
+            s = s.encode("utf-8", "ignore").decode("unicode_escape")
+        except Exception:
+            pass
+        s = s.replace("\\/", "/")
+
+    return s
 
 
 def _is_tracking_url(url: str) -> bool:
