@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+APP_DIR="${APP_DIR:-/opt/autohunter/autohunter}"
 cd "$APP_DIR"
 
 # Use a venv if present
