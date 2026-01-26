@@ -1,7 +1,7 @@
 import re
 import json
 from typing import List, Dict, Any, Optional, Iterable
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, parse_qs, unquote
 
 from bs4 import BeautifulSoup
 
@@ -131,6 +131,69 @@ def _strip_query_fragment(url: str) -> str:
     except Exception:
         return url.split("#")[0].split("?")[0]
 
+# Apenas anúncios do vertical de veículos (carros/caminhonetes) devem entrar no AutoHunter.
+# Itens de "produto" (peças/acessórios) podem aparecer como patrocinados na listagem e devem ser descartados.
+_ALLOWED_VEHICLE_HOSTS = {"carro.mercadolivre.com.br"}
+
+
+def _is_vehicle_host(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        host = (urlparse(url).netloc or "").lower()
+        return host in _ALLOWED_VEHICLE_HOSTS
+    except Exception:
+        return False
+
+
+def _extract_tracking_destination(tracking_url: str) -> str:
+    """Extrai o destino real de uma URL de tracking (click*/brand_ads).
+
+    Se não for possível resolver com segurança, retorna string vazia.
+    """
+    if not tracking_url:
+        return ""
+    try:
+        p = urlparse(tracking_url)
+        qs = parse_qs(p.query or "")
+        dest = ""
+        for key in ("url", "u", "adurl", "dest", "redirect"):
+            v = qs.get(key)
+            if v:
+                dest = v[0]
+                break
+        if not dest:
+            return ""
+
+        dest = _unescape_ml(dest).strip()
+
+        # Algumas URLs vêm com múltiplas camadas de encoding.
+        for _ in range(3):
+            decoded = unquote(dest)
+            if decoded == dest:
+                break
+            dest = decoded
+
+        dest = dest.strip()
+        if not dest:
+            return ""
+
+        if dest.startswith("//"):
+            dest = "https:" + dest
+        elif dest.startswith("/"):
+            dest = "https://www.mercadolivre.com.br" + dest
+        elif not dest.startswith("http"):
+            # Ex.: "carro.mercadolivre.com.br/MLB-....-_JM"
+            if "mercadolivre.com.br" in dest:
+                dest = "https://" + dest.lstrip("/")
+            else:
+                return ""
+
+        return dest
+    except Exception:
+        return ""
+
+
 
 def _canonical_url_from_external_id(external_id: str) -> str:
     """Gera URL canônica curta a partir do MLB id (ex.: MLB6160123242)."""
@@ -143,23 +206,29 @@ def _canonical_url_from_external_id(external_id: str) -> str:
 
 def _normalize_ml_url(url: str, external_id: str) -> str:
     """Normaliza URL:
+    - completa esquema quando vier sem
     - remove query/fragment
-    - se for tracking e tiver MLB id, troca por URL canônica
+    - se for tracking (click*/brand_ads), tenta extrair o destino real
+
+    Importante: NÃO assumimos que tracking = veículo.
     """
     url = (url or "").strip()
     if not url:
         return ""
+
     # completa esquema
     if url.startswith("//"):
         url = "https:" + url
     if url and not url.startswith("http"):
-        url = "https://" + url.lstrip("/")
+        if url.startswith("/"):
+            url = "https://www.mercadolivre.com.br" + url
+        else:
+            url = "https://" + url.lstrip("/")
 
     if _is_tracking_url(url):
-        canon = _canonical_url_from_external_id(external_id)
-        if canon:
-            return canon
-        # se não temos id, pelo menos não manda query/fragment
+        dest = _extract_tracking_destination(url)
+        if dest:
+            return _strip_query_fragment(dest)
         return _strip_query_fragment(url)
 
     return _strip_query_fragment(url)
@@ -311,6 +380,10 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
 
         url = _normalize_ml_url(url, external_id)
 
+        # Mantém apenas anúncios do vertical de veículos.
+        if not _is_vehicle_host(url):
+            continue
+
         thumbnail_url = f"https://http2.mlstatic.com/D_Q_NP_2X_{pic_id}-E.webp" if pic_id else None
 
         items.append({
@@ -365,11 +438,10 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
             continue
 
         url = _normalize_ml_url(raw_url, external_id)
-        if _is_tracking_url(url):
-            # Se ainda sobrou tracking, força canônica.
-            canon = _canonical_url_from_external_id(external_id)
-            if canon:
-                url = canon
+
+        # Mantém apenas anúncios do vertical de veículos.
+        if not _is_vehicle_host(url):
+            continue
 
         title_el = c.select_one("h2.ui-search-item__title") or c.select_one("h2")
         title = title_el.get_text(strip=True) if title_el else None
