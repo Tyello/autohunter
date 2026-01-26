@@ -118,8 +118,8 @@ async def cmd_wishlist_add_start(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(
         "Digite os termos da wishlist.\n"
         "Ex: civic si\n\n"
-        "Dica: você pode incluir \"até ano 2005\" (cria filtro automático).\n"
-        "Ex: daihatsu cuore até ano 2005"
+        "Dica: você pode incluir \"até 2005\" (cria filtro automático).\n"
+        "Ex: daihatsu cuore até 2005"
     )
     return WADD_QUERY
 

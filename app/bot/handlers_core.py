@@ -26,7 +26,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /wishlist_filter_add 1 price lte 90000\n"
         "• /wishlist_filter_add 1 source eq olx\n\n"
         "Dica (atalho no /wishlist_add):\n"
-        "• \"daihatsu cuore até ano 2005\" (cria filtro year lte 2005 automaticamente)\n\n"
+        "• \"daihatsu cuore até 2005\" (cria filtro year lte 2005 automaticamente)\n\n"
         "Busca manual:\n"
         "• /buscar civic 2019 até 90000 sp\n\n"
         "Alertas:\n"

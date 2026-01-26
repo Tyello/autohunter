@@ -32,7 +32,7 @@ _YEAR_MAX_PATTERNS = [
 def _extract_year_max_directive(query: str) -> Tuple[str, Optional[int]]:
     """Suporta sintaxes amigáveis no /wishlist_add:
 
-    - "daihatsu cuore até ano 2005"
+    - "daihatsu cuore até 2005"
     - "daihatsu cuore ano<=2005"
     - "daihatsu cuore year<=2005"
 
@@ -164,7 +164,7 @@ def add_wishlist(db: Session, user_id, query: str):
     if count >= max_wishlists:
         return False, f"Limite atingido: {max_wishlists} wishlists no seu plano."
 
-    # suporte a diretiva amigável: "até ano 2005"
+    # suporte a diretiva amigável: "até 2005"
     cleaned_query, year_max = _extract_year_max_directive(query)
 
     w = Wishlist(id=uuid.uuid4(), user_id=user_id, query=cleaned_query.strip(), is_active=True)
