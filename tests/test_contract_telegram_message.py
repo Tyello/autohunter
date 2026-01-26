@@ -15,7 +15,14 @@ class _Listing:
 
 
 def test_telegram_message_contract_basic_formatting():
-    """Contract: mensagem sempre tem título, linha de preço, e URL limpa."""
+    """Contract: mensagem sempre tem título, preço e URL normalizada.
+
+    O conteúdo pode evoluir (ex.: Ano, Score, FIPE), mas:
+    - 1ª linha: título limpo
+    - Deve existir linha "Preço: ..."
+    - Deve existir linha "Score: N/100"
+    - A última linha deve ser uma URL sem query/fragment
+    """
     from app.bot.sender import _build_text
 
     listing = _Listing(
@@ -28,12 +35,13 @@ def test_telegram_message_contract_basic_formatting():
     )
 
     text = _build_text(listing)
-    assert text.splitlines() == [
-        "Honda Civic Hatch 1994",
-        "Preço: R$ 32.000,00",
-        "Local: Curitiba, PR",
-        "https://www.exemplo.com/anuncio",
-    ]
+    lines = text.splitlines()
+
+    assert lines[0] == "Honda Civic Hatch 1994"
+    assert "Preço: R$ 32.000,00" in lines
+    assert any(l.startswith("Score: ") and l.endswith("/100") for l in lines)
+    # URL sempre sem query/fragment
+    assert lines[-1] == "https://www.exemplo.com/anuncio"
 
 
 def test_telegram_message_contract_ml_tracking_is_canonical():

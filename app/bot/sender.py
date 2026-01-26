@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional, Tuple
+from urllib.parse import urlparse, urlunparse
 
 import requests
 
@@ -36,6 +37,59 @@ def _split(text: str, limit: int) -> Tuple[str, str]:
 
 def _clean_spaces(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def _strip_query_fragment(url: str) -> str:
+    """Remove querystring e fragment.
+
+    Isso evita:
+    - URLs gigantes no Telegram
+    - tokens de tracking causando falsos positivos no matching
+    """
+    if not url:
+        return ""
+    try:
+        p = urlparse(url)
+        return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
+    except Exception:
+        return url.split("#")[0].split("?")[0]
+
+
+def _canonical_ml_url(external_id: str) -> str:
+    """URL canônica curta para anúncios de veículos do Mercado Livre."""
+    m = re.match(r"^MLB[-]?(\d+)$", (external_id or "").upper())
+    if not m:
+        return ""
+    return f"https://carro.mercadolivre.com.br/MLB-{m.group(1)}-_JM"
+
+
+def _normalize_listing_url(url: str, source: str | None, external_id: str | None) -> str:
+    """Normaliza URLs antes de mandar pro Telegram.
+
+    Regras:
+    - Sempre remove ?query e #fragment
+    - MercadoLivre: se tiver MLB id (external_id), usa URL canônica curta.
+      Isso evita mandar URLs de tracking (click1...) para o usuário.
+    """
+    url = _clean_spaces(url or "")
+    if not url:
+        return ""
+
+    src = (source or "").lower()
+    if src == "mercadolivre":
+        canonical = _canonical_ml_url(external_id or "")
+        if canonical:
+            return canonical
+
+        # fallback: tenta extrair MLB-123... do path
+        try:
+            m = re.search(r"MLB-(\d+)", url)
+            if m:
+                return f"https://carro.mercadolivre.com.br/MLB-{m.group(1)}-_JM"
+        except Exception:
+            pass
+
+    return _strip_query_fragment(url)
 
 
 def _extract_year(title: str) -> int | None:
@@ -81,7 +135,11 @@ def _score_from_text(text: str) -> int:
 def _build_text(listing, notification=None) -> str:
     title = _clean_spaces(getattr(listing, "title", None) or "Novo anúncio")
     loc = _clean_spaces(getattr(listing, "location", None) or "")
-    url = _clean_spaces(getattr(listing, "url", None) or "")
+    url = _normalize_listing_url(
+        getattr(listing, "url", None) or "",
+        getattr(listing, "source", None) or "",
+        getattr(listing, "external_id", None) or "",
+    )
     price_text = format_price(getattr(listing, "price", None))
 
     year = _extract_year(title)

@@ -229,6 +229,11 @@ def _normalize_ml_url(url: str, external_id: str) -> str:
         dest = _extract_tracking_destination(url)
         if dest:
             return _strip_query_fragment(dest)
+        # Se não conseguimos extrair o destino, mas já temos o MLB id,
+        # devolve uma URL canônica curta e estável (melhor para dedupe e matching).
+        canonical = _canonical_url_from_external_id(external_id)
+        if canonical:
+            return canonical
         return _strip_query_fragment(url)
 
     return _strip_query_fragment(url)

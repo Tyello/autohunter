@@ -216,3 +216,27 @@ def match_listings_for_wishlist(
         matched.append(l)
 
     return matched
+
+
+def match_listing_to_wishlist(db: Session, wishlist: Wishlist, listing: CarListing) -> bool:
+    """Avalia 1 listing contra 1 wishlist.
+
+    O fluxo principal do produto usa :func:`match_listings_for_wishlist` (batch)
+    porque trabalha com IDs inseridos. Mas para testes e para pontos do código
+    que já chamavam um matcher unitário, esse helper evita duplicação.
+
+    Observação: o `db` é aceito para manter assinatura histórica, porém não é
+    necessário para a lógica (os filtros vêm da própria wishlist).
+    """
+
+    filters = _get_filters(wishlist)
+    if not _apply_filters(listing, filters):
+        return False
+
+    if not text_match(wishlist.query, listing):
+        return False
+
+    if not semantic_match(wishlist, listing):
+        return False
+
+    return True
