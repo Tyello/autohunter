@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-import re
 import queue
 import random
+import re
 import threading
 import time
 import traceback
@@ -28,120 +28,70 @@ class PoolJsonFetchResult:
     data_url: str
 
 
+@dataclass
 class _Job:
-    __slots__ = ("name", "args", "kwargs", "done", "result", "exc", "tb")
-
-    def __init__(self, name: str, args: tuple, kwargs: dict):
-        self.name = name
-        self.args = args
-        self.kwargs = kwargs
-        self.done = threading.Event()
-        self.result: Any = None
-        self.exc: Optional[BaseException] = None
-        self.tb: Optional[str] = None
-
-    def set_result(self, v: Any) -> None:
-        self.result = v
-        self.done.set()
-
-    def set_exc(self, e: BaseException) -> None:
-        self.exc = e
-        self.tb = traceback.format_exc()
-        self.done.set()
+    name: str
+    kwargs: dict
+    done: threading.Event
+    result: Any = None
+    exc: Optional[BaseException] = None
+    tb: str = ""
 
 
-class _PlaywrightWorker(threading.Thread):
-    """
-    Dedicated worker thread that owns Playwright Sync API objects.
-
-    Why:
-    - Playwright Sync is NOT safe to use across threads/greenlets.
-    - Serializing all browser operations in 1 thread eliminates
-      "cannot switch to a different thread"/greenlet crashes.
-    """
+class _PlaywrightCore:
+    """Must be used ONLY inside the worker thread."""
 
     def __init__(self) -> None:
-        super().__init__(name="PlaywrightWorker", daemon=True)
-        self.q: "queue.Queue[_Job]" = queue.Queue()
-        self._ready = threading.Event()
-        self._stop = False
-
-        # Owned by this thread only
+        self._booted = False
         self._p = None
-        self._started = False
-        self._browsers: Dict[str, object] = {}
-        self._contexts: Dict[Tuple[str, str], object] = {}
-        self._last_error: Optional[str] = None
+        self._browsers: Dict[str, Any] = {}                # proxy_key -> Browser
+        self._contexts: Dict[Tuple[str, str], Any] = {}    # (proxy_key, source) -> BrowserContext
 
-    # ---------------------------
-    # Thread lifecycle
-    # ---------------------------
-    def run(self) -> None:
-        try:
-            try:
-                from playwright.sync_api import sync_playwright
-            except Exception as e:  # pragma: no cover
-                self._last_error = (
-                    "Playwright not installed. Run: pip install playwright && playwright install chromium"
-                )
-                raise
-
-            self._p = sync_playwright().start()
-            self._started = True
-        except Exception:
-            self._ready.set()
+    def start(self) -> None:
+        if self._booted:
             return
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError(
+                "Playwright not installed. Run: pip install playwright && python -m playwright install chromium"
+            ) from e
+        self._p = sync_playwright().start()
+        self._booted = True
 
-        self._ready.set()
-
-        while True:
-            job = self.q.get()
-            if job.name == "__stop__":
-                job.set_result(True)
-                break
-
-            try:
-                fn = getattr(self, f"_do_{job.name}")
-            except AttributeError:
-                job.set_exc(RuntimeError(f"Unknown Playwright job: {job.name}"))
-                continue
-
-            try:
-                job.set_result(fn(*job.args, **job.kwargs))
-            except Exception as e:
-                self._last_error = traceback.format_exc()
-                job.set_exc(e)
-
-        self._cleanup()
-
-    def _cleanup(self) -> None:
-        # Close contexts first
+    def close(self) -> None:
+        if not self._booted:
+            return
+        # contexts
         for ctx in list(self._contexts.values()):
             try:
                 ctx.close()
             except Exception:
                 pass
         self._contexts.clear()
-
+        # browsers
         for b in list(self._browsers.values()):
             try:
                 b.close()
             except Exception:
                 pass
         self._browsers.clear()
-
+        # playwright
         try:
-            if self._p is not None:
-                self._p.stop()
+            self._p.stop()
         except Exception:
             pass
-
         self._p = None
-        self._started = False
+        self._booted = False
 
-    # ---------------------------
-    # Browser helpers (thread-owned)
-    # ---------------------------
+    def stats(self) -> dict:
+        return {
+            "started": self._booted,
+            "browsers": len(self._browsers),
+            "contexts": len(self._contexts),
+            "proxy_keys": list(self._browsers.keys())[:10],
+        }
+
     def _storage_path(self, proxy_key: str, source: str) -> str:
         base = Path(settings.playwright_storage_dir or ".data/playwright")
         base.mkdir(parents=True, exist_ok=True)
@@ -149,135 +99,132 @@ class _PlaywrightWorker(threading.Thread):
         safe_source = source.replace(":", "_").replace("/", "_")
         return str(base / f"storage_{safe_source}__{safe_proxy}.json")
 
-    def _extract_missing_executable(self, msg: str) -> Optional[str]:
-        """Parse missing executable path from Playwright error message."""
-        if not msg:
-            return None
-        m = re.search(r"Executable doesn't exist at\s+([^\r\n]+)", msg)
+    def _block_heavy_resources(self, page: Any) -> None:
+        # Best-effort: some page impls might not support route
+        try:
+            def _route(route):
+                rtype = route.request.resource_type
+                if rtype in ("image", "media", "font"):
+                    return route.abort()
+                return route.continue_()
+            page.route("**/*", _route)
+        except Exception:
+            pass
+
+    def _parse_missing_executable_path(self, msg: str) -> Optional[str]:
+        # Example: "BrowserType.launch: Executable doesn't exist at /home/.../headless_shell ..."
+        m = re.search(r"Executable doesn't exist at\s+([^\s]+)", msg)
         if not m:
             return None
-        # Trim any UI box start that may be appended to the same line
-        p = m.group(1).strip()
-        p = p.split("╔", 1)[0].strip()
-        return p or None
+        return m.group(1).strip()
 
-    def _resolve_ms_playwright_base_from_missing(self, missing_path: str) -> Optional[Path]:
-        """Given .../ms-playwright/<browser-dir>/..., return ms-playwright base."""
-        try:
-            p = Path(missing_path)
-            # .../chromium_headless_shell-1200/chrome-linux/headless_shell
-            # base is parent of chromium_headless_shell-1200
-            for parent in p.parents:
-                if parent.name.startswith("chromium_headless_shell-") or parent.name.startswith("chromium-"):
-                    return parent.parent
-        except Exception:
-            return None
-        return None
-
-    def _find_full_chromium_executable(
-        self, *, base: Optional[Path] = None, build: Optional[int] = None
-    ) -> Optional[str]:
-        """Best-effort search for full Chromium executable shipped by Playwright."""
-        # Respect PLAYWRIGHT_BROWSERS_PATH if set (and not "0")
-        env = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
-        if not base:
-            if env and env != "0":
-                base = Path(env).expanduser()
-            else:
-                base = Path.home() / ".cache" / "ms-playwright"
-
-        if not base.exists():
+    def _find_chromium_full_exe(self, ms_playwright_dir: Path, preferred_build: Optional[str]) -> Optional[str]:
+        """
+        Find .../chromium-<build>/chrome-linux/chrome, prefer matching build number when provided.
+        """
+        if not ms_playwright_dir.exists():
             return None
 
-        # If we know the build number, try the exact directory first
-        if build:
-            d = base / f"chromium-{build}"
-            for exe in (d / "chrome-linux" / "chrome", d / "chrome-linux" / "chromium"):
-                if exe.exists():
-                    return str(exe)
-
-        # Otherwise pick the newest chromium-* directory
-        candidates: list[tuple[int, Path]] = []
-        for p in base.glob("chromium-*"):
+        candidates = []
+        for p in ms_playwright_dir.glob("chromium-*/chrome-linux/chrome"):
             try:
-                b = int(p.name.split("-", 1)[1])
+                build = p.parts[-3]  # chromium-1200
             except Exception:
-                b = 0
-            candidates.append((b, p))
+                build = ""
+            candidates.append((build, p))
 
-        for _, d in sorted(candidates, key=lambda x: x[0], reverse=True):
-            for exe in (d / "chrome-linux" / "chrome", d / "chrome-linux" / "chromium"):
-                if exe.exists():
-                    return str(exe)
+        if not candidates:
+            return None
 
+        # Prefer exact build match (chromium-1200)
+        if preferred_build:
+            for build, p in candidates:
+                if build == preferred_build and p.exists():
+                    return str(p)
+
+        # Else pick newest by build number
+        def _build_num(build: str) -> int:
+            m = re.search(r"chromium-(\d+)", build)
+            return int(m.group(1)) if m else -1
+
+        candidates.sort(key=lambda bp: _build_num(bp[0]), reverse=True)
+        for _, p in candidates:
+            if p.exists():
+                return str(p)
         return None
 
-
-
-    def _get_or_create_browser(self, proxy_server: Optional[str]) -> object:
+    def _launch_browser(self, *, proxy_server: Optional[str], headless: bool) -> Any:
         assert self._p is not None
-        key = proxy_server or "__no_proxy__"
-        b = self._browsers.get(key)
-        if b is not None:
-            return b
-
-        # Headless from Settings (env override still allowed)
-        headless_env = os.getenv("PLAYWRIGHT_HEADLESS")
-        if headless_env is None:
-            headless = bool(settings.playwright_headless)
-        else:
-            headless = headless_env.lower() not in ("0", "false", "no")
 
         launch_kwargs: Dict[str, Any] = {"headless": headless}
         if proxy_server:
             launch_kwargs["proxy"] = {"server": proxy_server}
 
         try:
-            b = self._p.chromium.launch(**launch_kwargs)
+            return self._p.chromium.launch(**launch_kwargs)
         except Exception as e:
             msg = str(e)
 
-            # Fallback: some installs have missing/corrupted chromium-headless-shell.
-            # Example:
-            #   BrowserType.launch: Executable doesn't exist at .../chromium_headless_shell-1200/.../headless_shell
-            missing = self._extract_missing_executable(msg)
-            if missing and "chromium_headless_shell" in missing and "headless_shell" in missing:
-                base = self._resolve_ms_playwright_base_from_missing(missing)
-                build = None
-                try:
-                    # chromium_headless_shell-1200
-                    for part in Path(missing).parts:
-                        if part.startswith("chromium_headless_shell-"):
-                            build = int(part.split("-", 1)[1])
+            # Fallback for missing chromium_headless_shell executable
+            if ("chromium_headless_shell" in msg) and ("Executable doesn't exist" in msg or "headless_shell" in msg):
+                missing = self._parse_missing_executable_path(msg)
+                if missing:
+                    missing_path = Path(missing)
+                    # .../ms-playwright/chromium_headless_shell-1200/chrome-linux/headless_shell
+                    ms_dir = missing_path
+                    # climb until ms-playwright
+                    for _ in range(6):
+                        if ms_dir.name == "ms-playwright":
                             break
-                except Exception:
-                    build = None
+                        ms_dir = ms_dir.parent
+                    if ms_dir.name != "ms-playwright":
+                        # fallback to HOME cache
+                        ms_dir = Path.home() / ".cache" / "ms-playwright"
 
-                exe_path = self._find_full_chromium_executable(base=base, build=build)
-                if exe_path:
-                    launch_kwargs2 = dict(launch_kwargs)
-                    launch_kwargs2["executable_path"] = exe_path
-                    b = self._p.chromium.launch(**launch_kwargs2)
-                else:
-                    raise
-            else:
-                raise
+                    preferred_build = None
+                    for part in missing_path.parts:
+                        if part.startswith("chromium_headless_shell-") or part.startswith("chromium-"):
+                            # normalize: chromium_headless_shell-1200 -> chromium-1200
+                            preferred_build = "chromium-" + part.split("-")[-1]
+                            break
 
+                    full_exe = self._find_chromium_full_exe(ms_dir, preferred_build)
+                    if full_exe:
+                        launch_kwargs2 = dict(launch_kwargs)
+                        launch_kwargs2["executable_path"] = full_exe
+                        return self._p.chromium.launch(**launch_kwargs2)
+
+            raise
+
+    def _get_or_create_browser(self, proxy_server: Optional[str]) -> Any:
+        self.start()
+        assert self._p is not None
+
+        key = proxy_server or "__no_proxy__"
+        b = self._browsers.get(key)
+        if b is not None:
+            return b
+
+        headless_env = os.getenv("PLAYWRIGHT_HEADLESS")
+        if headless_env is None:
+            headless = bool(settings.playwright_headless)
+        else:
+            headless = headless_env.lower() not in ("0", "false", "no")
+
+        b = self._launch_browser(proxy_server=proxy_server, headless=headless)
         self._browsers[key] = b
         return b
 
-    def _get_or_create_context(self, *, proxy_server: Optional[str], source: str) -> object:
-        assert self._p is not None
-
+    def _get_or_create_context(self, *, proxy_server: Optional[str], source: str) -> Any:
+        src = (source or "unknown").lower().strip() or "unknown"
         proxy_key = proxy_server or "__no_proxy__"
-        key = (proxy_key, source)
+        key = (proxy_key, src)
         ctx = self._contexts.get(key)
         if ctx is not None:
             return ctx
 
         browser = self._get_or_create_browser(proxy_server)
 
-        # Keep a stable UA per (proxy, source)
         user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -285,7 +232,7 @@ class _PlaywrightWorker(threading.Thread):
         ]
         ua = random.choice(user_agents)
 
-        storage_path = self._storage_path(proxy_key, source)
+        storage_path = self._storage_path(proxy_key, src)
         storage_state = storage_path if os.path.exists(storage_path) else None
 
         ctx = browser.new_context(
@@ -296,31 +243,21 @@ class _PlaywrightWorker(threading.Thread):
             storage_state=storage_state,
         )
 
+        # Block heavy resources by default (speed + memory)
+        try:
+            def _route(route):
+                rtype = route.request.resource_type
+                if rtype in ("image", "media", "font"):
+                    return route.abort()
+                return route.continue_()
+            ctx.route("**/*", _route)
+        except Exception:
+            pass
+
         self._contexts[key] = ctx
         return ctx
 
-    def _block_heavy_resources(self, page: object) -> None:
-        def _route(route):
-            rtype = route.request.resource_type
-            if rtype in ("image", "media", "font"):
-                return route.abort()
-            return route.continue_()
-
-        page.route("**/*", _route)
-
-    # ---------------------------
-    # Jobs (executed in worker thread)
-    # ---------------------------
-    def _do_stats(self) -> dict:
-        return {
-            "started": self._started,
-            "browsers": len(self._browsers),
-            "contexts": len(self._contexts),
-            "proxy_keys": list(self._browsers.keys())[:10],
-            "last_error": (self._last_error[:500] if self._last_error else None),
-        }
-
-    def _do_fetch(
+    def fetch(
         self,
         url: str,
         *,
@@ -331,15 +268,12 @@ class _PlaywrightWorker(threading.Thread):
         min_delay_ms: int,
         max_delay_ms: int,
     ) -> PoolFetchResult:
-        # Small random delay to reduce patterns
         time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
-        src = (source or "unknown").lower().strip() or "unknown"
-        ctx = self._get_or_create_context(proxy_server=proxy_server, source=src)
+        ctx = self._get_or_create_context(proxy_server=proxy_server, source=source)
 
         page = ctx.new_page()
         self._block_heavy_resources(page)
-
         try:
             page.goto(url, wait_until=wait_until, timeout=timeout_ms)
             page.wait_for_timeout(500)
@@ -350,18 +284,15 @@ class _PlaywrightWorker(threading.Thread):
                 page.close()
             except Exception:
                 pass
-
-            # Persist cookies/session for stickiness across restarts
             try:
                 proxy_key = proxy_server or "__no_proxy__"
-                storage_path = self._storage_path(proxy_key, src)
+                storage_path = self._storage_path(proxy_key, (source or "unknown").lower().strip() or "unknown")
                 ctx.storage_state(path=storage_path)
             except Exception:
                 pass
-
         return PoolFetchResult(html=html, final_url=final_url)
 
-    def _do_fetch_json(
+    def fetch_json(
         self,
         url: str,
         *,
@@ -373,14 +304,9 @@ class _PlaywrightWorker(threading.Thread):
         min_delay_ms: int,
         max_delay_ms: int,
     ) -> PoolJsonFetchResult:
-        """Navigate a page and capture a JSON response emitted during navigation.
-
-        Intended for Next.js "_next/data" endpoints (OLX) and other SPA/XHR flows.
-        """
         time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
-        src = (source or "unknown").lower().strip() or "unknown"
-        ctx = self._get_or_create_context(proxy_server=proxy_server, source=src)
+        ctx = self._get_or_create_context(proxy_server=proxy_server, source=source)
 
         captured_data: Optional[dict] = None
         captured_url: str = ""
@@ -402,16 +328,14 @@ class _PlaywrightWorker(threading.Thread):
             captured_url = resp.url
             captured_data = resp.json()
             final_url = page.url
-
         finally:
             try:
                 page.close()
             except Exception:
                 pass
-
             try:
                 proxy_key = proxy_server or "__no_proxy__"
-                storage_path = self._storage_path(proxy_key, src)
+                storage_path = self._storage_path(proxy_key, (source or "unknown").lower().strip() or "unknown")
                 ctx.storage_state(path=storage_path)
             except Exception:
                 pass
@@ -422,12 +346,64 @@ class _PlaywrightWorker(threading.Thread):
         return PoolJsonFetchResult(data=captured_data, final_url=final_url, data_url=captured_url)
 
 
+class _PlaywrightWorker(threading.Thread):
+    """
+    Dedicated thread that owns Playwright Sync objects.
+
+    IMPORTANT: do NOT use attribute name '_started' here, it conflicts with threading.Thread internals.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="PlaywrightPoolWorker", daemon=True)
+        self.q: "queue.Queue[_Job]" = queue.Queue()
+        self._ready = threading.Event()
+        self._boot_ok = False
+        self._last_error: Optional[str] = None
+        self._core = _PlaywrightCore()
+
+    def run(self) -> None:
+        # boot
+        try:
+            self._core.start()
+            self._boot_ok = True
+        except Exception:
+            self._last_error = traceback.format_exc()
+            self._boot_ok = False
+        finally:
+            self._ready.set()
+
+        # main loop
+        while True:
+            job = self.q.get()
+            if job.name == "__stop__":
+                try:
+                    self._core.close()
+                finally:
+                    job.done.set()
+                break
+
+            try:
+                if job.name == "stats":
+                    st = self._core.stats()
+                    st["last_error"] = (self._last_error[:800] if self._last_error else None)
+                    job.result = st
+                elif job.name == "fetch":
+                    job.result = self._core.fetch(**job.kwargs)
+                elif job.name == "fetch_json":
+                    job.result = self._core.fetch_json(**job.kwargs)
+                else:
+                    raise RuntimeError(f"Unknown Playwright job: {job.name}")
+                job.exc = None
+            except Exception as e:
+                job.exc = e
+                self._last_error = traceback.format_exc()
+            finally:
+                job.done.set()
+
+
 class PlaywrightPool:
     """
-    Public facade. All Playwright Sync calls are executed inside a dedicated thread.
-
-    This keeps the API stable for the rest of the codebase while making the
-    implementation actually thread-safe for schedulers/bots.
+    Thread-safe facade. All Playwright Sync calls run inside a dedicated worker thread.
     """
 
     def __init__(self) -> None:
@@ -440,11 +416,9 @@ class PlaywrightPool:
                 return
             w = _PlaywrightWorker()
             w.start()
-            w._ready.wait(timeout=20)
+            w._ready.wait(timeout=25)
             self._worker = w
-
-            # If Playwright failed to start, surface a readable error
-            if not w._started:
+            if not w._boot_ok:
                 err = w._last_error or "Playwright worker failed to start."
                 raise RuntimeError(err)
 
@@ -452,10 +426,9 @@ class PlaywrightPool:
         with self._lock:
             if not self._worker or not self._worker.is_alive():
                 return
-            job = _Job("__stop__", (), {})
+            job = _Job("__stop__", kwargs={}, done=threading.Event())
             self._worker.q.put(job)
-        job.done.wait(timeout=10)
-
+        job.done.wait(timeout=15)
         with self._lock:
             try:
                 self._worker.join(timeout=10)
@@ -464,13 +437,10 @@ class PlaywrightPool:
             self._worker = None
 
     def stats(self) -> dict:
-        with self._lock:
-            if not self._worker or not self._worker.is_alive():
-                return {"started": False, "browsers": 0, "contexts": 0, "proxy_keys": [], "last_error": None}
-            self.start()
-            job = _Job("stats", (), {})
-            self._worker.q.put(job)
-
+        self.start()
+        assert self._worker is not None
+        job = _Job("stats", kwargs={}, done=threading.Event())
+        self._worker.q.put(job)
         job.done.wait(timeout=5)
         if job.exc:
             raise job.exc
@@ -479,17 +449,12 @@ class PlaywrightPool:
     def _call(self, name: str, *, hard_timeout_s: float, **kwargs):
         self.start()
         assert self._worker is not None
-
-        job = _Job(name, (), kwargs)
+        job = _Job(name, kwargs=kwargs, done=threading.Event())
         self._worker.q.put(job)
-
         if not job.done.wait(timeout=hard_timeout_s):
             raise TimeoutError(f"Playwright worker timed out waiting for job '{name}'.")
-
         if job.exc:
-            # re-raise preserving original message; traceback is kept in stats().last_error
             raise job.exc
-
         return job.result
 
     def fetch(
