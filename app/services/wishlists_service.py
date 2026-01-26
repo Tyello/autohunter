@@ -14,8 +14,17 @@ from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
 
-# Fallback se não houver plano/assinatura ainda
+# Fallback (quando não existir plano/assinatura no banco ainda)
 DEFAULT_MAX_WISHLISTS_PER_USER = 3
+
+# Fontes conhecidas hoje (expanda sem medo)
+KNOWN_SOURCES = {
+    "mercadolivre",
+    "olx",
+    "webmotors",
+    "chavesnamao",
+    "gogarage",
+}
 
 # Aceita "até 2004" / "ate 2004" / "até ano 2004" / "ano<=2004"
 _YEAR_MAX_PATTERNS = [
@@ -199,3 +208,73 @@ def remove_wishlist(db: Session, user_id, index: int):
         db.rollback()
         return False, "Erro ao remover wishlist."
     return True, "Wishlist removida."
+
+def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
+    """Filtros por wishlist.
+
+    Campos suportados:
+      - price  (comparadores numéricos)
+      - year   (comparadores numéricos)
+      - source (eq/neq)
+
+    Operadores:
+      - price/year: lt|lte|gt|gte|eq|neq
+      - source: eq|neq
+    """
+    field = (field or "").strip().lower()
+    operator = (operator or "").strip().lower()
+    value = (value or "").strip()
+
+    if field not in ("price", "source", "year"):
+        return False, "Campo inválido. Use: price | year | source"
+
+    if field in ("price", "year") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq"):
+        return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq"
+
+    if field == "source" and operator not in ("eq", "neq"):
+        return False, "Operador inválido para source. Use: eq|neq"
+
+    if field == "source":
+        v = value.strip().lower()
+        if v not in KNOWN_SOURCES:
+            return False, "Valor inválido para source. Use: " + " | ".join(sorted(KNOWN_SOURCES))
+        value = v
+
+    if field == "year":
+        try:
+            y = int(value)
+        except Exception:
+            return False, "Ano inválido. Ex: year lte 2005"
+        if y < 1900 or y > 2100:
+            return False, "Ano fora do intervalo (1900-2100)."
+        value = str(y)
+
+    # price: aceita int/decimal/pt-BR (validação real acontece no matching)
+    row = WishlistFilter(wishlist_id=wishlist_id, field=field, operator=operator, value=value)
+    db.add(row)
+    try:
+        db.commit()
+        return True, "Filtro adicionado."
+    except Exception:
+        db.rollback()
+        return False, "Filtro já existe (duplicado) ou erro ao salvar."
+
+
+def list_filters(db: Session, wishlist_id):
+    return (
+        db.query(WishlistFilter)
+        .filter(WishlistFilter.wishlist_id == wishlist_id)
+        .order_by(WishlistFilter.created_at.asc())
+        .all()
+    )
+
+
+def remove_filter(db: Session, wishlist_id, index: int):
+    filters = list_filters(db, wishlist_id)
+    if index < 1 or index > len(filters):
+        return False, "Número inválido. Use /wishlist_filter_list <n>"
+
+    f = filters[index - 1]
+    db.delete(f)
+    db.commit()
+    return True, "Filtro removido."
