@@ -1,8 +1,9 @@
 import uuid
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Text, Integer, DateTime
+from datetime import datetime, timezone
+
+from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
 
@@ -16,8 +17,18 @@ class Subscription(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     daily_alert_limit_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    starts_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # starts_at é NOT NULL no banco. Sem default aqui, o SQLAlchemy pode enviar NULL
+    # mesmo existindo server_default no Postgres (dependendo de como o objeto foi instanciado).
+    # Então colocamos:
+    # - default (client-side) para nunca gerar None
+    # - server_default (db-side) para blindar regressões
+    starts_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     source: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
 
