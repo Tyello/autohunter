@@ -21,6 +21,12 @@ def _parse_admins(raw: str | None) -> List[int]:
 
 
 def iter_admin_chat_ids() -> Iterable[int]:
+    # Preferencialmente envia alertas para chats dedicados (ex.: grupo de admin)
+    # para não poluir chats de uso comum.
+    raw = getattr(settings, "autohunter_admin_alert_chats", None) or None
+    if raw:
+        return _parse_admins(raw)
+    # compatibilidade: comportamento antigo
     return _parse_admins(settings.autohunter_admins)
 
 

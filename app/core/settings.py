@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     autohunter_admins: str | None = None
 
+    # Chat IDs que devem receber alertas automáticos (erros/backoff/monitoramento).
+    # Separe por vírgula. Se vazio, usa autohunter_admins (compatibilidade).
+    autohunter_admin_alert_chats: str | None = None
+
     default_user_timezone: str = 'America/Sao_Paulo'
 
     # Feature flags
