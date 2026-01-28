@@ -20,14 +20,13 @@ def get_source_rate_limit_seconds(source: str) -> int:
         return int(settings.rate_limit_chavesnamao_seconds or 0)
     if src == "mercadolivre":
         return int(settings.rate_limit_mercadolivre_seconds or 0)
-
     if src == "kavak":
-        return int(getattr(settings, "rate_limit_kavak_seconds", 0) or 0)
+        return int(settings.rate_limit_kavak_seconds or 0)
     if src == "mobiauto":
-        return int(getattr(settings, "rate_limit_mobiauto_seconds", 0) or 0)
+        return int(settings.rate_limit_mobiauto_seconds or 0)
     if src == "icarros":
-        return int(getattr(settings, "rate_limit_icarros_seconds", 0) or 0)
+        return int(settings.rate_limit_icarros_seconds or 0)
     if src == "facebook_marketplace":
-        return int(getattr(settings, "rate_limit_facebook_marketplace_seconds", 0) or 0)
+        return int(settings.rate_limit_facebook_marketplace_seconds or 0)
 
     return 0

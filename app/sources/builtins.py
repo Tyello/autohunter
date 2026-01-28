@@ -15,6 +15,7 @@ from app.services.search_urls_service import (
     chavesnamao_url,
     webmotors_url,
     gogarage_url,
+    icarros_url,
     mobiauto_url,
     kavak_url,
     facebook_marketplace_url,
@@ -25,6 +26,10 @@ from app.scrapers.olx import scrape_olx
 from app.scrapers.chavesnamao import scrape_chavesnamao
 from app.scrapers.webmotors import scrape_webmotors
 from app.scrapers.gogarage import scrape_gogarage
+from app.scrapers.facebook_marketplace import scrape_facebook_marketplace
+from app.scrapers.icarros import scrape_icarros
+from app.scrapers.kavak import scrape_kavak
+from app.scrapers.mobiauto import scrape_mobiauto
 
 from .registry import register_source
 from .types import SourcePlugin
@@ -114,16 +119,26 @@ register_source(
     )
 )
 
-
-# --- Future sources (placeholders) ---
-# Objetivo: aparecerem no /admin sources para gestão/roadmap,
-# mas sem rodar jobs nem entrar na busca manual até existir scraper.
+register_source(
+    SourcePlugin(
+        name="icarros",
+        build_url=icarros_url,
+        scrape=scrape_icarros,
+        enabled_setting="enable_icarros",
+        sched_minutes_setting="sched_icarros_minutes",
+        cooldown_minutes_setting="icarros_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_icarros_seconds",
+        supports_manual_search=False,
+        supports_wishlist_monitoring=False,
+        fetch_mode="http",
+    )
+)
 
 register_source(
     SourcePlugin(
         name="mobiauto",
         build_url=mobiauto_url,
-        scrape=None,
+        scrape=scrape_mobiauto,
         enabled_setting="enable_mobiauto",
         sched_minutes_setting="sched_mobiauto_minutes",
         cooldown_minutes_setting="mobiauto_cooldown_minutes",
@@ -138,7 +153,7 @@ register_source(
     SourcePlugin(
         name="kavak",
         build_url=kavak_url,
-        scrape=None,
+        scrape=scrape_kavak,
         enabled_setting="enable_kavak",
         sched_minutes_setting="sched_kavak_minutes",
         cooldown_minutes_setting="kavak_cooldown_minutes",
@@ -153,7 +168,7 @@ register_source(
     SourcePlugin(
         name="facebook_marketplace",
         build_url=facebook_marketplace_url,
-        scrape=None,
+        scrape=scrape_facebook_marketplace,
         enabled_setting="enable_facebook_marketplace",
         sched_minutes_setting="sched_facebook_marketplace_minutes",
         cooldown_minutes_setting="facebook_marketplace_cooldown_minutes",
