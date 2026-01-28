@@ -15,6 +15,9 @@ from app.services.search_urls_service import (
     chavesnamao_url,
     webmotors_url,
     gogarage_url,
+    mobiauto_url,
+    kavak_url,
+    facebook_marketplace_url,
 )
 
 from app.scrapers.mercadolivre import scrape_mercadolivre
@@ -108,5 +111,55 @@ register_source(
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="http",
+    )
+)
+
+
+# --- Future sources (placeholders) ---
+# Objetivo: aparecerem no /admin sources para gestão/roadmap,
+# mas sem rodar jobs nem entrar na busca manual até existir scraper.
+
+register_source(
+    SourcePlugin(
+        name="mobiauto",
+        build_url=mobiauto_url,
+        scrape=None,
+        enabled_setting="enable_mobiauto",
+        sched_minutes_setting="sched_mobiauto_minutes",
+        cooldown_minutes_setting="mobiauto_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_mobiauto_seconds",
+        supports_manual_search=False,
+        supports_wishlist_monitoring=False,
+        fetch_mode="http",
+    )
+)
+
+register_source(
+    SourcePlugin(
+        name="kavak",
+        build_url=kavak_url,
+        scrape=None,
+        enabled_setting="enable_kavak",
+        sched_minutes_setting="sched_kavak_minutes",
+        cooldown_minutes_setting="kavak_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_kavak_seconds",
+        supports_manual_search=False,
+        supports_wishlist_monitoring=False,
+        fetch_mode="http",
+    )
+)
+
+register_source(
+    SourcePlugin(
+        name="facebook_marketplace",
+        build_url=facebook_marketplace_url,
+        scrape=None,
+        enabled_setting="enable_facebook_marketplace",
+        sched_minutes_setting="sched_facebook_marketplace_minutes",
+        cooldown_minutes_setting="facebook_marketplace_cooldown_minutes",
+        rate_limit_seconds_setting="rate_limit_facebook_marketplace_seconds",
+        supports_manual_search=False,
+        supports_wishlist_monitoring=False,
+        fetch_mode="browser",
     )
 )

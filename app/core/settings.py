@@ -52,23 +52,23 @@ class Settings(BaseSettings):
     chavesnamao_cooldown_minutes: int = 30
 
     # SPA sources (usually require browser/headless or partner API)
-    enable_webmotors: bool = False
+    enable_webmotors: bool = True
     webmotors_cooldown_minutes: int = 180
-    enable_gogarage: bool = False
+    enable_gogarage: bool = True
     gogarage_cooldown_minutes: int = 180
 
     # Additional sources (mostly browser-heavy / anti-bot)
-    enable_kavak: bool = False
+    enable_kavak: bool = True
     kavak_cooldown_minutes: int = 240
     enable_mobiauto: bool = True
     mobiauto_cooldown_minutes: int = 120
-    enable_icarros: bool = False
+    enable_icarros: bool = True
     icarros_cooldown_minutes: int = 240
-    enable_facebook_marketplace: bool = False
+    enable_facebook_marketplace: bool = True
     facebook_marketplace_cooldown_minutes: int = 360
 
     # Playwright / Browser mode
-    enable_playwright: bool = False
+    enable_playwright: bool = True
     playwright_headless: bool = True
 
     # Cookie/session stickiness (Playwright)

@@ -111,11 +111,12 @@ def webmotors_url(query: str) -> str:
 def gogarage_url(query: str) -> str:
     # GoGarage também carrega via JS. Mantemos um URL estável para a página de busca.
     q = quote_plus(query.strip())
-    return f"https://gogarage.com.br/buscar?q={q}"
+    return f"https://gogarage.com.br/?q={q}"
 
 
 def chavesnamao_url(query: str) -> str:
     return build_chavesnamao_search_url(query)
+
 
 def kavak_url(query: str) -> str:
     # Kavak pages are usually JS-heavy; still, a stable "seminovos" URL works well with Playwright.

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 
-from sqlalchemy import func
+from sqlalchemy import func, or_, cast, Text, case
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -18,6 +18,8 @@ from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.system_log import SystemLog
+from app.models.wishlist import Wishlist
+from app.models.notification import Notification
 from app.sources.registry import list_sources
 
 
@@ -418,3 +420,243 @@ async def _admin_health(update: Update):
         text = text[:3797] + "..."
     safe = sanitize_for_telegram(text)
     await update.message.reply_text(safe)
+
+
+
+async def _admin_users(update: Update, raw_args: List[str]):
+    # Lista usuários (paginado) para operação remota via Telegram.
+    #
+    # Use:
+    #   /admin users
+    #   /admin users 2
+    #   /admin users civic
+    #   /admin users 2 civic
+
+    page = 1
+    term: Optional[str] = None
+
+    if raw_args:
+        if raw_args[0].isdigit():
+            page = max(1, int(raw_args[0]))
+            term = " ".join(raw_args[1:]).strip() or None
+        else:
+            term = " ".join(raw_args).strip() or None
+
+    if term:
+        term = term.strip()
+        if term.startswith("@"):  # permite /admin users @marcelo
+            term = term[1:]
+        if not term:
+            term = None
+
+    per_page = 10
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as db:
+        q = db.query(User)
+        if term:
+            like = f"%{term}%"
+            q = q.filter(
+                or_(
+                    User.username.ilike(like),
+                    cast(User.telegram_chat_id, Text).ilike(like),
+                    cast(User.id, Text).ilike(like),
+                )
+            )
+
+        total = q.count()
+        pages = max(1, (total + per_page - 1) // per_page)
+        if page > pages:
+            page = pages
+
+        users = (
+            q.order_by(User.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+
+        # wishlist counts (total/active)
+        uids = [u.id for u in users]
+        wl_counts: Dict[Any, tuple[int, int]] = {}
+        if uids:
+            wl_rows = (
+                db.query(
+                    Wishlist.user_id,
+                    func.count(Wishlist.id),
+                    func.sum(case((Wishlist.is_active == True, 1), else_=0)),
+                )
+                .filter(Wishlist.user_id.in_(uids))
+                .group_by(Wishlist.user_id)
+                .all()
+            )
+            for uid, wl_total, wl_active in wl_rows:
+                wl_counts[uid] = (int(wl_total or 0), int(wl_active or 0))
+
+        # subscription snapshot per account (latest by starts_at)
+        acc_ids = [u.account_id for u in users if u.account_id]
+        sub_map: Dict[Any, Dict[str, Any]] = {}
+        if acc_ids:
+            sub_rows = (
+                db.query(
+                    Subscription.account_id,
+                    Subscription.status,
+                    Subscription.daily_alert_limit_override,
+                    Subscription.starts_at,
+                    Subscription.ends_at,
+                    Plan.code,
+                )
+                .join(Plan, Subscription.plan_id == Plan.id)
+                .filter(Subscription.account_id.in_(acc_ids))
+                .order_by(Subscription.account_id.asc(), Subscription.starts_at.desc())
+                .all()
+            )
+            for aid, status, override, starts_at, ends_at, plan_code in sub_rows:
+                if aid not in sub_map:
+                    sub_map[aid] = {
+                        "status": status,
+                        "override": override,
+                        "starts_at": starts_at,
+                        "ends_at": ends_at,
+                        "plan_code": plan_code,
+                    }
+
+    out: List[str] = []
+    out.append("👥 Admin — Users")
+
+    header = f"total={total} | page={page}/{pages} | per_page={per_page}"
+    if term:
+        header += f" | filter={term}"
+    out.append(header)
+    out.append("")
+
+    if not users:
+        out.append("Nenhum usuário encontrado.")
+    else:
+        start_index = (page - 1) * per_page + 1
+        for i, u in enumerate(users, start=start_index):
+            uname = f"@{u.username}" if u.username else "-"
+            active = "✅" if u.is_active else "🚫"
+
+            wl_total, wl_active = wl_counts.get(u.id, (0, 0))
+
+            sub = sub_map.get(u.account_id) if u.account_id else None
+            plan = (sub.get("plan_code") if sub else None) or (u.plan or "free")
+            plan = (plan or "free").lower()
+
+            override = None
+            if sub and sub.get("override") is not None:
+                override = sub.get("override")
+            elif u.daily_limit_override is not None:
+                override = u.daily_limit_override
+
+            limit_txt = str(override) if override is not None else "-"
+            acc_txt = "acc✅" if u.account_id else "acc—"
+            sub_status = (sub.get("status") if sub else None) or "-"
+
+            out.append(
+                f"{i}. {active} {uname} | chat={u.telegram_chat_id} | {acc_txt} | wl={wl_active}/{wl_total} | plan={plan} ({sub_status}) | limit={limit_txt}"
+            )
+
+    out.append("")
+    out.append("Dica: /setplan <free|pro|ultra> <chat_id>  |  /setlimit <n|none> <chat_id>")
+
+    msg = sanitize_for_telegram("\n".join(out))
+    if len(msg) > 3800:
+        msg = msg[:3797] + "..."
+    await update.effective_message.reply_text(msg)
+
+
+async def _admin_errors(update: Update, raw_args: List[str]):
+    # Digest de problemas: system_logs + source_runs + notifications failed
+    limit = int(getattr(settings, "admin_errors_digest_limit", 10) or 10)
+    if raw_args and raw_args[0].isdigit():
+        limit = int(raw_args[0])
+    limit = max(1, min(30, limit))
+
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as db:
+        logs = (
+            db.query(SystemLog)
+            .filter(SystemLog.level.in_(["warn", "error"]))
+            .order_by(SystemLog.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        runs = (
+            db.query(SourceRun)
+            .filter(SourceRun.status.in_(["blocked", "error"]))
+            .order_by(SourceRun.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        notif_rows = (
+            db.query(Notification, User, Wishlist)
+            .join(User, Notification.user_id == User.id)
+            .outerjoin(Wishlist, Notification.wishlist_id == Wishlist.id)
+            .filter(Notification.status == "failed")
+            .order_by(Notification.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    # 1) System logs
+    out1: List[str] = []
+    out1.append("🧯 Admin — Errors")
+    out1.append(f"Agora (UTC): {_fmt_dt(now)}")
+    out1.append(f"Limite por seção: {limit}")
+    out1.append("")
+    out1.append("1) System logs (warn/error)")
+
+    if not logs:
+        out1.append("- (sem registros)")
+    else:
+        for row in logs:
+            out1.append(
+                f"- {_fmt_dt(row.created_at)} [{row.level}] {row.component}: {_short(row.message, 220)}"
+            )
+
+    msg1 = sanitize_for_telegram("\n".join(out1))
+    if len(msg1) > 3800:
+        msg1 = msg1[:3797] + "..."
+    await update.effective_message.reply_text(msg1)
+
+    # 2) Source runs
+    out2: List[str] = []
+    out2.append("2) Source runs (blocked/error)")
+    if not runs:
+        out2.append("- (sem registros)")
+    else:
+        for r in runs:
+            err = _short(r.error, 220)
+            out2.append(
+                f"- {_fmt_dt(r.created_at)} {r.source}: {r.status.upper()} http={r.http_status or '-'} dur={r.duration_ms or '-'}ms found={r.items_found or '-'} match={r.items_matched or '-'} | {err}"
+            )
+
+    msg2 = sanitize_for_telegram("\n".join(out2))
+    if len(msg2) > 3800:
+        msg2 = msg2[:3797] + "..."
+    await update.effective_message.reply_text(msg2)
+
+    # 3) Notifications failed
+    out3: List[str] = []
+    out3.append("3) Notifications failed")
+    if not notif_rows:
+        out3.append("- (sem registros)")
+    else:
+        for n, u, w in notif_rows:
+            uname = f"@{u.username}" if u.username else "-"
+            q = (w.query if w else None) or "-"
+            reason = n.reason or "-"
+            err = _short(n.error_message, 220)
+            out3.append(
+                f"- {_fmt_dt(n.created_at)} user={uname} chat={u.telegram_chat_id} reason={reason} wl={_short(q, 120)} | {err}"
+            )
+
+    msg3 = sanitize_for_telegram("\n".join(out3))
+    if len(msg3) > 3800:
+        msg3 = msg3[:3797] + "..."
+    await update.effective_message.reply_text(msg3)
