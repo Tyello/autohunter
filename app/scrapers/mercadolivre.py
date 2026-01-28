@@ -136,6 +136,39 @@ def _strip_query_fragment(url: str) -> str:
 _ALLOWED_VEHICLE_HOSTS = {"carro.mercadolivre.com.br"}
 
 
+
+_ML_VEHICLE_HOST = "carro.mercadolivre.com.br"
+
+
+def _ensure_vehicle_search_url(url: str) -> str:
+    """Força a busca no vertical de veículos (carro.mercadolivre.com.br).
+
+    O ML pode fazer fallback de categoria quando não encontra resultados; aqui preferimos
+    retornar 0 itens a ingerir peças/acessórios no AutoHunter.
+    """
+    url = (url or "").strip()
+    if not url:
+        return url
+
+    # completa esquema
+    if url.startswith("//"):
+        url = "https:" + url
+    if not url.startswith("http"):
+        url = "https://" + url.lstrip("/")
+
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+
+        # Se for qualquer host do ML, "trava" no host de veículos.
+        if "mercadolivre.com.br" in host and host != _ML_VEHICLE_HOST:
+            p = p._replace(netloc=_ML_VEHICLE_HOST)
+            return urlunparse(p)
+    except Exception:
+        pass
+
+    return url
+
 def _is_vehicle_host(url: str) -> bool:
     if not url:
         return False
@@ -144,6 +177,103 @@ def _is_vehicle_host(url: str) -> bool:
         return host in _ALLOWED_VEHICLE_HOSTS
     except Exception:
         return False
+
+
+
+def _extract_canonical_or_og_url(html: str) -> str:
+    """Tenta descobrir a URL efetiva (pós-redirect) via canonical/og:url."""
+    if not html:
+        return ""
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        link = soup.find("link", rel="canonical")
+        href = (link.get("href") if link else "") or ""
+        if not href:
+            meta = soup.find("meta", attrs={"property": "og:url"})
+            href = (meta.get("content") if meta else "") or ""
+
+        href = _unescape_ml((href or "").strip())
+        if href.startswith("//"):
+            href = "https:" + href
+        if href and not href.startswith("http") and "mercadolivre.com.br" in href:
+            href = "https://" + href.lstrip("/")
+        return href
+    except Exception:
+        return ""
+
+
+def _left_vehicle_vertical(requested_url: str, html: str) -> bool:
+    """True quando a resposta indica que o ML saiu do vertical de veículos.
+
+    Ex.: sem anúncios do termo, o ML pode redirecionar/sugerir itens de outras categorias.
+    """
+    canonical = _extract_canonical_or_og_url(html)
+
+    # Se a canonical existe e NÃO é do host de veículos, aborta.
+    if canonical and not _is_vehicle_host(canonical):
+        return True
+
+    # Se pedimos explicitamente o host de veículos e a canonical aponta para outro host, aborta.
+    try:
+        req_host = (urlparse(requested_url).netloc or "").lower()
+        if req_host == _ML_VEHICLE_HOST and canonical:
+            can_host = (urlparse(canonical).netloc or "").lower()
+            if can_host and can_host != _ML_VEHICLE_HOST:
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+# Heurística anti-peças: mesmo dentro do host de veículos, podem aparecer itens de produto.
+# Preferimos falsos negativos (0 resultados) a notificar "cabo", "pistão", etc.
+_PART_KEYWORDS = {
+    "cabo", "embreagem", "pistao", "pistão", "anel", "biela", "correia", "correia dentada",
+    "filtro", "vela", "bobina", "amortecedor", "pastilha", "disco", "radiador",
+    "farol", "lanterna", "retrovisor", "parachoque", "para-choque", "sensor",
+    "bomba", "rolamento", "mangueira", "tampa", "retentor", "escapamento",
+    "ponteira", "alternador", "arranque", "motor de arranque", "compressor",
+    "condensador", "evaporador", "mola", "molas", "suspensao", "suspensão",
+}
+
+_VEHICLE_POSITIVE_TERMS = {
+    "km", "quilometr", "ano", "manual", "automático", "automatico", "câmbio", "cambio",
+    "gasolina", "etanol", "flex", "diesel", "híbrido", "hibrido", "elétrico", "eletrico",
+    "hatch", "sedan", "cupê", "cupe", "suv", "picape", "pickup", "caminhonete", "perua", "wagon",
+}
+
+
+def _vehicle_relevance_score(text: str, title: str = "") -> int:
+    """Score simples para decidir se um card parece anúncio de veículo.
+
+    >=2: aceita
+    <2: descarta (provável peça/acessório ou sugestão fora do escopo)
+    """
+    blob = (text or "").lower()
+    ttitle = (title or "").lower()
+
+    score = 0
+
+    # sinais fortes: ano (4 dígitos) e km
+    if re.search(r"\b(19\d{2}|20\d{2})\b", blob):
+        score += 2
+    if re.search(r"\b\d{1,3}(?:[\.,]\d{3})+\s*km\b|\b\d+\s*km\b", blob):
+        score += 1
+
+    # sinais moderados
+    if any(term in blob for term in _VEHICLE_POSITIVE_TERMS):
+        score += 1
+
+    # penalidades (focadas no título)
+    if any(k in ttitle for k in _PART_KEYWORDS):
+        score -= 2
+
+    # padrões muito comuns de peças
+    if re.search(r"\b(kit|jg\.?|jogo)\b", ttitle):
+        score -= 1
+
+    return score
 
 
 def _extract_tracking_destination(tracking_url: str) -> str:
@@ -389,6 +519,12 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
         if not _is_vehicle_host(url):
             continue
 
+        # Extra: mesmo no host 'carro.*', o ML pode sugerir peças/acessórios quando não há resultados.
+        blob = f"{title or ''} {_unescape_ml(components)}"
+        if _vehicle_relevance_score(blob, title or "") < 2:
+            continue
+
+
         thumbnail_url = f"https://http2.mlstatic.com/D_Q_NP_2X_{pic_id}-E.webp" if pic_id else None
 
         items.append({
@@ -412,7 +548,16 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
     """
     HTML público do Mercado Livre.
     """
+
+    # Trava a busca no vertical de veículos.
+    search_url = _ensure_vehicle_search_url(search_url)
+
     html = _fetch_html_ml(search_url, ctx, timeout=25)
+
+    # Se o ML saiu do vertical (redirect/canonical fora de carro.*), não ingere nada.
+    if _left_vehicle_vertical(search_url, html):
+        return []
+
 
     # POLYCARD é o layout mais confiável hoje; preferimos ele como base
     poly_items = _parse_polycard_items(html, limit=50)
@@ -450,6 +595,12 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
 
         title_el = c.select_one("h2.ui-search-item__title") or c.select_one("h2")
         title = title_el.get_text(strip=True) if title_el else None
+
+        # Heurística anti-peças: descarta cards que não parecem anúncio de veículo.
+        blob = f"{title or ''} {card_html}"
+        if _vehicle_relevance_score(blob, title or "") < 2:
+            continue
+
 
         img = c.select_one("img")
         thumb = img.get("data-src") or img.get("src") if img else None

@@ -11,6 +11,7 @@ from .plan import Plan
 from .subscription import Subscription
 from .account import Account
 from .account_member import AccountMember
+from .app_kv import AppKV
 
 __all__ = [
     "User",
@@ -26,4 +27,5 @@ __all__ = [
     "Subscription",
     "Account",
     "AccountMember",
+    "AppKV",
 ]

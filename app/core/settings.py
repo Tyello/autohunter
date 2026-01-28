@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     source_proxy_olx: str | None = None
     source_proxy_webmotors: str | None = None
     source_proxy_gogarage: str | None = None
+    source_proxy_kavak: str | None = None
+    source_proxy_mobiauto: str | None = None
+    source_proxy_icarros: str | None = None
+    source_proxy_facebook_marketplace: str | None = None
+
 
     # Per-source rate limits (seconds). 0 disables throttling.
     rate_limit_olx_seconds: int = 20
@@ -29,6 +34,11 @@ class Settings(BaseSettings):
     rate_limit_gogarage_seconds: int = 10
     rate_limit_chavesnamao_seconds: int = 5
     rate_limit_mercadolivre_seconds: int = 0
+    rate_limit_kavak_seconds: int = 30
+    rate_limit_mobiauto_seconds: int = 10
+    rate_limit_icarros_seconds: int = 20
+    rate_limit_facebook_marketplace_seconds: int = 90
+
 
     # OLX
     enable_olx: bool = True
@@ -46,6 +56,16 @@ class Settings(BaseSettings):
     webmotors_cooldown_minutes: int = 180
     enable_gogarage: bool = False
     gogarage_cooldown_minutes: int = 180
+
+    # Additional sources (mostly browser-heavy / anti-bot)
+    enable_kavak: bool = False
+    kavak_cooldown_minutes: int = 240
+    enable_mobiauto: bool = True
+    mobiauto_cooldown_minutes: int = 120
+    enable_icarros: bool = False
+    icarros_cooldown_minutes: int = 240
+    enable_facebook_marketplace: bool = False
+    facebook_marketplace_cooldown_minutes: int = 360
 
     # Playwright / Browser mode
     enable_playwright: bool = False
@@ -73,6 +93,10 @@ class Settings(BaseSettings):
     sched_chavesnamao_minutes: int = 60
     sched_webmotors_minutes: int = 180
     sched_gogarage_minutes: int = 180
+    sched_kavak_minutes: int = 360
+    sched_mobiauto_minutes: int = 120
+    sched_icarros_minutes: int = 360
+    sched_facebook_marketplace_minutes: int = 720
     sched_sender_seconds: int = 60
     # APScheduler thread pool. For Raspberry Pi 3, 2-4 is usually safer.
     scheduler_workers: int = 4

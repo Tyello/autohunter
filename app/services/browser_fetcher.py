@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from app.scrapers.base import FetchBlocked
 from app.core.settings import settings
 
+
 def _get_backend():
     # If configured, use external browser service. Otherwise, use in-process pool.
     if getattr(settings, 'playwright_endpoint', None):
@@ -38,24 +39,24 @@ class BrowserJsonFetchResult:
 def _looks_like_bot_challenge(html: str) -> bool:
     h = html.lower()
     return (
-        "captcha" in h
-        or "verify you are" in h
-        or "cloudflare" in h
-        or "incapsula" in h
-        or "datadome" in h
-        or "perimeterx" in h
-        or "access denied" in h
+            "captcha" in h
+            or "verify you are" in h
+            or "cloudflare" in h
+            or "incapsula" in h
+            or "datadome" in h
+            or "perimeterx" in h
+            or "access denied" in h
     )
 
 
 def fetch_html_browser(
-    url: str,
-    *,
-    ctx: "ScrapeContext",
-    timeout_ms: int = 30000,
-    wait_until: str = "networkidle",
-    min_delay_ms: int = 250,
-    max_delay_ms: int = 900,
+        url: str,
+        *,
+        ctx: "ScrapeContext",
+        timeout_ms: int = 30000,
+        wait_until: str = "networkidle",
+        min_delay_ms: int = 250,
+        max_delay_ms: int = 900,
 ) -> BrowserFetchResult:
     """Render a page in a real browser (Playwright) and return the resulting HTML.
 
@@ -93,15 +94,15 @@ def fetch_html_browser(
 
 
 def fetch_json_browser(
-    url: str,
-    *,
-    ctx: "ScrapeContext",
-    timeout_ms: int = 30000,
-    wait_until: str = "domcontentloaded",
-    capture_mode: str = "any_json",
-    json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
-    min_delay_ms: int = 250,
-    max_delay_ms: int = 900,
+        url: str,
+        *,
+        ctx: "ScrapeContext",
+        timeout_ms: int = 30000,
+        wait_until: str = "domcontentloaded",
+        capture_mode: str = "any_json",
+        json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
+        min_delay_ms: int = 250,
+        max_delay_ms: int = 900,
 ) -> BrowserJsonFetchResult:
     """Navigate in a real browser and capture a JSON response.
 
@@ -120,7 +121,8 @@ def fetch_json_browser(
         wait_until=wait_until,
         capture_mode=capture_mode,
         # json_url_predicate is only supported in-process; prefer capture_mode.
-        
+        json_url_predicate=json_url_predicate,
+
         min_delay_ms=min_delay_ms,
         max_delay_ms=max_delay_ms,
     )

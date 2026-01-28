@@ -1,5 +1,4 @@
 import uuid
-
 from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError
@@ -48,7 +47,7 @@ def get_or_create_user_by_chat(db: Session, chat_id: int, username: str | None):
         if not free:
             raise RuntimeError("Plan free not found. Run migrations/seed.")
 
-        # starts_at é NOT NULL; setamos explicitamente para evitar NULL no INSERT
+        # starts_at é NOT NULL -> sempre preencher
         db.add(
             Subscription(
                 account_id=acc.id,

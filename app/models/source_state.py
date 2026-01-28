@@ -33,3 +33,8 @@ class SourceState(TimestampMixin, Base):
     last_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # success|blocked|error|skipped
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+    # Admin alerts (throttle)
+    last_admin_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_admin_alert_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_admin_alert_error_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

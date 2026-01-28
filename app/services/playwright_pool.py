@@ -300,7 +300,8 @@ class _PlaywrightCore:
         proxy_server: Optional[str],
         timeout_ms: int,
         wait_until: str,
-        json_url_predicate: Optional[Callable[[str, dict, int], bool]],
+        capture_mode: str = "any_json",
+        json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
         min_delay_ms: int,
         max_delay_ms: int,
     ) -> PoolJsonFetchResult:
@@ -315,7 +316,39 @@ class _PlaywrightCore:
             ct = (headers_.get("content-type") or "").lower()
             return status_ == 200 and "application/json" in ct
 
-        pred = json_url_predicate or _default_pred
+        def _pred_from_capture_mode(mode: str) -> Callable[[str, dict, int], bool]:
+            m = (mode or "any_json").strip().lower()
+            if m in ("any_json", "json"):
+                return _default_pred
+            if m in ("next_data", "nextjs", "_next_data"):
+                def _p(u: str, h: dict, s: int) -> bool:
+                    ct = (h.get("content-type") or "").lower()
+                    return s == 200 and ("application/json" in ct or u.endswith(".json")) and "/_next/data/" in u
+                return _p
+            if m.startswith("url_contains:"):
+                needle = m.split(":", 1)[1]
+                def _p(u: str, h: dict, s: int) -> bool:
+                    if s != 200:
+                        return False
+                    ct = (h.get("content-type") or "").lower()
+                    return needle in (u or "").lower() and ("application/json" in ct or u.endswith(".json"))
+                return _p
+            if m.startswith("url_regex:"):
+                rx = m.split(":", 1)[1]
+                try:
+                    cre = re.compile(rx)
+                except Exception:
+                    cre = re.compile(re.escape(rx))
+                def _p(u: str, h: dict, s: int) -> bool:
+                    if s != 200:
+                        return False
+                    ct = (h.get("content-type") or "").lower()
+                    return bool(cre.search(u or "")) and ("application/json" in ct or u.endswith(".json"))
+                return _p
+            # Unknown mode: fallback to any_json
+            return _default_pred
+
+        pred = json_url_predicate or _pred_from_capture_mode(capture_mode)
 
         page = ctx.new_page()
         self._block_heavy_resources(page)
@@ -489,6 +522,7 @@ class PlaywrightPool:
         proxy_server: Optional[str] = None,
         timeout_ms: int = 30000,
         wait_until: str = "domcontentloaded",
+        capture_mode: str = "any_json",
         json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
@@ -502,6 +536,7 @@ class PlaywrightPool:
             proxy_server=proxy_server,
             timeout_ms=timeout_ms,
             wait_until=wait_until,
+            capture_mode=capture_mode,
             json_url_predicate=json_url_predicate,
             min_delay_ms=min_delay_ms,
             max_delay_ms=max_delay_ms,

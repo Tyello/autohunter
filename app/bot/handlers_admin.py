@@ -14,6 +14,10 @@ from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
+from app.models.user import User
+from app.models.plan import Plan
+from app.models.subscription import Subscription
+from app.models.system_log import SystemLog
 from app.sources.registry import list_sources
 
 
@@ -112,7 +116,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin health")
+        await update.message.reply_text("Use: /admin sources | /admin health | /admin users | /admin errors")
         return
 
     action = args[0].lower()
@@ -123,8 +127,14 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "health":
         await _admin_health(update)
         return
+    if action == "users":
+        await _admin_users(update, args[1:])
+        return
+    if action == "errors":
+        await _admin_errors(update, args[1:])
+        return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin health")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin health | /admin users | /admin errors")
 
 
 async def _admin_sources(update: Update, verbose: bool = False):

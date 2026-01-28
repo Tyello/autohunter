@@ -222,6 +222,18 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True
     )
 
+
+    # Admin monitor (erro/bloqueio -> alerta no Telegram)
+    if getattr(settings, 'admin_monitor_enabled', True):
+        from app.scheduler.admin_monitor_job import job_admin_monitor
+        sched.add_job(
+            job_admin_monitor,
+            'interval',
+            seconds=int(getattr(settings, 'admin_monitor_seconds', 60) or 60),
+            id='admin_monitor',
+            replace_existing=True,
+        )
+
     # Limpeza leve: mantém notifications enxutas (evita crescimento infinito)
     from app.scheduler.cleanup_job import job_cleanup_notifications
     sched.add_job(
