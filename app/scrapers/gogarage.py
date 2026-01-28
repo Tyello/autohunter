@@ -229,12 +229,32 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
             html = res.html
         else:
             raise
+    except Exception:
+        # ex.: HTTP 404/5xx na rota de busca -> tenta renderizar via Playwright
+        if settings.enable_playwright:
+            res = fetch_html_browser(search_url, ctx=ctx)
+            html = res.html
+        else:
+            raise
 
     # 1) JSON-LD (se existir)
     jsonld = _extract_jsonld_itemlist(html)
     jsonld_map = {u: n for u, n in jsonld}
 
     urls = [u for u, _ in jsonld] if jsonld else _extract_from_anchors(html)
+
+    # Se a página veio vazia/placeholder (carrega via JS), tenta uma vez via browser
+    if (not urls) and settings.enable_playwright:
+        hlow = (html or '').lower()
+        if ('carregando os achados' in hlow) or ('gogarage' in hlow and 'ads/' not in hlow):
+            try:
+                res = fetch_html_browser(search_url, ctx=ctx)
+                html = res.html
+                jsonld = _extract_jsonld_itemlist(html)
+                jsonld_map = {u: n for u, n in jsonld}
+                urls = [u for u, _ in jsonld] if jsonld else _extract_from_anchors(html)
+            except Exception:
+                pass
 
     out: List[dict] = []
     seen: set[str] = set()

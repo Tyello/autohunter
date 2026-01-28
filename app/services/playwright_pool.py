@@ -469,6 +469,20 @@ class PlaywrightPool:
                 pass
             self._worker = None
 
+
+    def reset(self) -> None:
+        """Hard reset for recovery (TargetClosed/ContextClosed).
+
+        Stops the worker thread (closing all browsers/contexts) and starts a fresh one.
+        Best-effort: never raises during the close phase.
+        """
+        try:
+            self.close()
+        except Exception:
+            pass
+        # Start will raise if Playwright isn't installed, which is the desired signal.
+        self.start()
+
     def stats(self) -> dict:
         self.start()
         assert self._worker is not None

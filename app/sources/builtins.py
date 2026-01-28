@@ -32,7 +32,13 @@ from app.scrapers.kavak import scrape_kavak
 from app.scrapers.mobiauto import scrape_mobiauto
 
 from .registry import register_source
-from .types import SourcePlugin
+from .types import SourcePlugin, ScrapeContext
+
+
+def _scrape_chavesnamao(search_url: str, ctx: ScrapeContext) -> list[dict]:
+    # chavesnamao scraper original recebe (search_url, limit:int). O scheduler passa ctx.
+    # Mantemos compatibilidade sem alterar o scraper.
+    return scrape_chavesnamao(search_url)
 
 
 # Mercado Livre: API/HTML; always enabled in the MVP.
@@ -75,7 +81,7 @@ register_source(
     SourcePlugin(
         name="chavesnamao",
         build_url=chavesnamao_url,
-        scrape=scrape_chavesnamao,
+        scrape=_scrape_chavesnamao,
         enabled_setting="enable_chavesnamao",
         sched_minutes_setting="sched_chavesnamao_minutes",
         cooldown_minutes_setting="chavesnamao_cooldown_minutes",

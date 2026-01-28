@@ -49,6 +49,16 @@ def _looks_like_bot_challenge(html: str) -> bool:
     )
 
 
+def _is_target_closed_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return (
+            "target page, context or browser has been closed" in msg
+            or ("browsercontext.new_page" in msg and "has been closed" in msg)
+            or "target closed" in msg
+            or "browser has been closed" in msg
+    )
+
+
 def fetch_html_browser(
         url: str,
         *,
@@ -75,15 +85,33 @@ def fetch_html_browser(
     time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
     backend = _get_backend()
-    r = backend.fetch(
-        url,
-        source=ctx.source,
-        proxy_server=ctx.proxy_server,
-        timeout_ms=timeout_ms,
-        wait_until=wait_until,
-        min_delay_ms=min_delay_ms,
-        max_delay_ms=max_delay_ms,
-    )
+    try:
+        r = backend.fetch(
+            url,
+            source=ctx.source,
+            proxy_server=ctx.proxy_server,
+            timeout_ms=timeout_ms,
+            wait_until=wait_until,
+            min_delay_ms=min_delay_ms,
+            max_delay_ms=max_delay_ms,
+        )
+    except Exception as e:
+        if _is_target_closed_error(e) and hasattr(backend, 'reset'):
+            try:
+                backend.reset()
+            except Exception:
+                pass
+            r = backend.fetch(
+                url,
+                source=ctx.source,
+                proxy_server=ctx.proxy_server,
+                timeout_ms=timeout_ms,
+                wait_until=wait_until,
+                min_delay_ms=min_delay_ms,
+                max_delay_ms=max_delay_ms,
+            )
+        else:
+            raise
     html = r.html
     final_url = r.final_url
 
@@ -113,19 +141,41 @@ def fetch_json_browser(
     time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
     backend = _get_backend()
-    r = backend.fetch_json(
-        url,
-        source=ctx.source,
-        proxy_server=ctx.proxy_server,
-        timeout_ms=timeout_ms,
-        wait_until=wait_until,
-        capture_mode=capture_mode,
-        # json_url_predicate is only supported in-process; prefer capture_mode.
-        json_url_predicate=json_url_predicate,
+    try:
+        r = backend.fetch_json(
+            url,
+            source=ctx.source,
+            proxy_server=ctx.proxy_server,
+            timeout_ms=timeout_ms,
+            wait_until=wait_until,
+            capture_mode=capture_mode,
+            # json_url_predicate is only supported in-process; prefer capture_mode.
+            json_url_predicate=json_url_predicate,
 
-        min_delay_ms=min_delay_ms,
-        max_delay_ms=max_delay_ms,
-    )
+            min_delay_ms=min_delay_ms,
+            max_delay_ms=max_delay_ms,
+        )
+    except Exception as e:
+        if _is_target_closed_error(e) and hasattr(backend, 'reset'):
+            try:
+                backend.reset()
+            except Exception:
+                pass
+            r = backend.fetch_json(
+                url,
+                source=ctx.source,
+                proxy_server=ctx.proxy_server,
+                timeout_ms=timeout_ms,
+                wait_until=wait_until,
+                capture_mode=capture_mode,
+                # json_url_predicate is only supported in-process; prefer capture_mode.
+                json_url_predicate=json_url_predicate,
+
+                min_delay_ms=min_delay_ms,
+                max_delay_ms=max_delay_ms,
+            )
+        else:
+            raise
 
     # If the captured JSON is actually an HTML bot-challenge serialized or similar,
     # treat as blocked. In practice, we rely on content-type filtering, but keep a guard.
