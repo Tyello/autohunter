@@ -5,7 +5,7 @@ from app.scrapers.base import FetchBlocked
 from app.services.system_logs_service import log
 from app.services.notifications_service import create_queued
 from app.services.notifications_queue_service import queue_notifications_for_matches
-from app.services.matching_service import match_listings_for_wishlist
+from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists
 from app.services.listings_service import ingest_listings
 
 from app.models.wishlist import Wishlist
@@ -37,6 +37,7 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
             queued += 1
 
     log(db, "info", component, "queued notifications", {"queued": queued, "listings": len(listings), "wishlists": len(wishlists)})
+    db.commit()
 
 
 def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None) -> dict:
@@ -66,8 +67,6 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         if matched:
             queued = queue_notifications_for_matches(db, wishlist, matched_listings)
 
-    db.commit()
-
     log(db, "info", job_name, "pipeline_summary", {
         "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
         "url": search_url,
@@ -76,6 +75,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "matched": matched,
         "queued": queued,
     })
+
+    db.commit()
 
     return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued}
 
@@ -106,15 +107,17 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     total_queued = 0
 
     # Keep the semantics: only notify on NEW listings (inserted_ids).
-    if inserted_ids:
-        for w in wishlists or []:
-            matched_listings = match_listings_for_wishlist(db, w, inserted_ids)
-            m = len(matched_listings or [])
-            total_matched += m
-            if m:
-                total_queued += int(queue_notifications_for_matches(db, w, matched_listings) or 0)
+    if inserted_ids and wishlists:
+        new_listings = db.query(CarListing).filter(CarListing.id.in_(list(inserted_ids))).all()
+        matches_by_wishlist = match_listings_for_wishlists(wishlists, new_listings)
 
-    db.commit()
+        for w in wishlists:
+            matched_listings = matches_by_wishlist.get(w.id) or []
+            m = len(matched_listings)
+            if not m:
+                continue
+            total_matched += m
+            total_queued += int(queue_notifications_for_matches(db, w, matched_listings) or 0)
 
     log(db, "info", job_name, "pipeline_summary_many", {
         "url": search_url,
@@ -124,5 +127,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "matched": total_matched,
         "queued": total_queued,
     })
+
+    db.commit()
 
     return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or [])}

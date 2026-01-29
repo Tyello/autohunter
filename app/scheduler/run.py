@@ -12,7 +12,7 @@ from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
 from app.services.source_runs_service import record_run
 from app.sources import list_sources
-from app.services.wishlist_sources_service import allowed_sources_for_wishlist
+from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.source_proxy_service import get_source_proxy_server
 from app.services.source_rate_limit_service import get_source_rate_limit_seconds
 from app.sources.types import ScrapeContext
@@ -22,6 +22,8 @@ from app.scheduler.heartbeat import heartbeat
 
 from app.models.wishlist import Wishlist
 
+from sqlalchemy.orm import joinedload
+
 
 def job_run_source_for_all_wishlists(source_name: str):
     with SessionLocal() as db:
@@ -29,14 +31,22 @@ def job_run_source_for_all_wishlists(source_name: str):
             component = f"scheduler_{source_name}"
             log(db, "info", component, "job tick")
 
-            wishlists = db.query(Wishlist).filter(Wishlist.is_active == True).all()
+            # Eager load filters para evitar N+1 queries no matching.
+            wishlists = (
+                db.query(Wishlist)
+                .options(joinedload(Wishlist.filters))
+                .filter(Wishlist.is_active == True)
+                .all()
+            )
             if not wishlists:
                 log(db, "info", component, "no active wishlists")
+                db.commit()
                 return
 
             plugin = next((p for p in list_sources() if p.name == source_name), None)
             if plugin is None:
                 log(db, "error", component, "unknown_source", {"source": source_name})
+                db.commit()
                 return
 
             # Global checks (per-source)
@@ -44,8 +54,8 @@ def job_run_source_for_all_wishlists(source_name: str):
             if plugin.fetch_mode == 'browser' and not settings.enable_playwright:
                 mark_skipped(db, plugin.name, 'playwright_off')
                 record_run(db, source=plugin.name, kind='scheduler', status='skipped', payload={'reason': 'playwright_off'})
-                db.commit()
                 log(db, 'warn', component, 'playwright_off')
+                db.commit()
                 return
 
 
@@ -63,15 +73,15 @@ def job_run_source_for_all_wishlists(source_name: str):
             if not avail.is_allowed:
                 mark_skipped(db, plugin.name, "backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
                 record_run(db, source=plugin.name, kind="scheduler", status="skipped", payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
-                db.commit()
                 log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
+                db.commit()
                 return
 
             if plugin.scrape is None:
                 mark_skipped(db, plugin.name, "not_implemented")
                 record_run(db, source=plugin.name, kind="scheduler", status="skipped", payload={"reason": "not_implemented"})
-                db.commit()
                 log(db, "warn", component, "not_implemented")
+                db.commit()
                 return
 
             t0 = time.perf_counter()
@@ -87,11 +97,12 @@ def job_run_source_for_all_wishlists(source_name: str):
             # Collapse duplicate work: many users can share the same query/URL per source.
             # We scrape+ingest once per unique URL, then match/queue for all wishlists in that group.
             groups: dict[str, dict] = {}
+            allowed_map = allowed_sources_for_wishlists(db, wishlists)
+            skipped_filtered = 0
             for w in wishlists:
-                sources = allowed_sources_for_wishlist(db, w.id)
-
+                sources = allowed_map.get(w.id) or set()
                 if plugin.name not in sources:
-                    log(db, "info", component, "skipped_filtered_out", {"wishlist_id": str(w.id), "source": plugin.name})
+                    skipped_filtered += 1
                     continue
 
                 url = plugin.build_url(w.query)
@@ -100,6 +111,9 @@ def job_run_source_for_all_wishlists(source_name: str):
                     groups[url] = {"query": w.query, "wishlists": [w]}
                 else:
                     g["wishlists"].append(w)
+
+            if skipped_filtered:
+                log(db, "info", component, "filtered_out", {"source": plugin.name, "count": skipped_filtered})
 
             for url, g in groups.items():
                 log(db, "info", component, "job_started_group", {"query": g.get("query"), "url": url, "wishlists": len(g.get("wishlists") or [])})
@@ -168,7 +182,12 @@ def job_run_source_for_all_wishlists(source_name: str):
 
 
         except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             log(db, "error", f"scheduler_{source_name}", "job failed", {"error": str(e)})
+            db.commit()
 
 
 def start_scheduler() -> BackgroundScheduler:

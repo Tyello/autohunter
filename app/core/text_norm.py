@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from functools import lru_cache
 
 _RE_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _RE_WS = re.compile(r"\s+")
 
 
+@lru_cache(maxsize=4096)
 def normalize(text: str) -> str:
     """Lowercase, remove accents, convert punctuation to spaces, collapse whitespace."""
     if not text:

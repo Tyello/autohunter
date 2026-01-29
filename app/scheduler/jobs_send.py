@@ -68,4 +68,7 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
         "checked": len(queued),
     })
 
+    # persiste o SystemLog (o sender já faz commits por notificação)
+    db.commit()
+
     return sent

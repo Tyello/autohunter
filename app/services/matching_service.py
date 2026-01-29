@@ -3,14 +3,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Iterable
+from typing import Iterable, Sequence
+from collections import defaultdict
 
 from sqlalchemy.orm import Session
 
 from app.core.text_norm import tokens
 from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
-from app.models.wishlist_filter import WishlistFilter
 from app.services.wishlist_semantic_rules import semantic_match
 
 
@@ -88,6 +88,126 @@ def text_match(query: str, listing: CarListing) -> bool:
 
     hay_tokens = set(tokens(base))
     return all(t in hay_tokens for t in terms)
+
+
+def _hay_for_listing(listing: CarListing) -> str:
+    """Conteúdo de texto do anúncio usado para matching.
+
+    Importante: não inclui URL por padrão (evita tokens de tracking),
+    mas usa como fallback quando o título vem vazio.
+    """
+    base = " ".join([
+        listing.title or "",
+        listing.location or "",
+    ]).strip()
+    if not (listing.title or "").strip() and listing.url:
+        base = (base + " " + listing.url).strip()
+    return base
+
+
+def _build_listing_ctx(listings: Sequence[CarListing]) -> dict:
+    """Precomputações por listing para reduzir custo em loops."""
+    ctx: dict = {}
+    for l in listings:
+        base = _hay_for_listing(l)
+        ctx[l.id] = {
+            "hay_tokens": set(tokens(base)),
+            "year": _extract_year(l),
+            "hay_norm": None,  # calculado sob demanda para semantic rules
+        }
+    return ctx
+
+
+def _norm_sem(s: str) -> str:
+    s = (s or "").lower()
+    s = re.sub(r"[-_/]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _semantic_key(wishlist: Wishlist) -> str:
+    # mantém compat com wishlist_semantic_rules: usa name se existir, senão query
+    name = _norm_sem(getattr(wishlist, "name", "") or "")
+    return name or _norm_sem(getattr(wishlist, "query", "") or "")
+
+
+def match_listings_for_wishlists(
+    wishlists: Sequence[Wishlist],
+    listings: Sequence[CarListing],
+) -> dict:
+    """Batch matching: avalia vários anúncios contra várias wishlists.
+
+    Performance:
+    - listings já vêm carregados (1 query na camada de job)
+    - tokenização e extração de ano são precomputadas por listing
+    - evita N queries (uma por wishlist) no fluxo do scheduler
+    """
+    if not wishlists or not listings:
+        return {}
+
+    # Import local para evitar import circular
+    from app.services.wishlist_semantic_rules import RULES as SEM_RULES
+
+    listing_ctx = _build_listing_ctx(listings)
+
+    # prepara termos e filtros por wishlist
+    prepared = []
+    for w in wishlists:
+        terms = tokens(getattr(w, "query", "") or "")
+        filters = _get_filters(w)
+
+        rules = SEM_RULES.get(_semantic_key(w))
+        if rules:
+            # normaliza termos 1x
+            sem = {
+                "blocked": [_norm_sem(t) for t in (rules.blocked_any or [])],
+                "req_all": [_norm_sem(t) for t in (rules.required_all or [])],
+                "req_any": [[_norm_sem(t) for t in (g or [])] for g in (rules.required_any_groups or [])],
+            }
+        else:
+            sem = None
+
+        prepared.append((w, terms, filters, sem))
+
+    out = defaultdict(list)
+
+    for (w, terms, filters, sem) in prepared:
+        for l in listings:
+            lctx = listing_ctx.get(l.id) or {}
+
+            # filtros
+            if filters:
+                if not _apply_filters_fast(l, filters, lctx.get("year")):
+                    continue
+
+            # texto (AND por tokens)
+            if terms:
+                hay_tokens = lctx.get("hay_tokens") or set()
+                if not all(t in hay_tokens for t in terms):
+                    continue
+
+            # semantic rules (quando existir)
+            if sem:
+                hay_norm = lctx.get("hay_norm")
+                if hay_norm is None:
+                    hay_norm = _norm_sem(_hay_for_listing(l))
+                    lctx["hay_norm"] = hay_norm
+
+                if any(t and t in hay_norm for t in sem["blocked"]):
+                    continue
+                if any(t and t not in hay_norm for t in sem["req_all"]):
+                    continue
+                ok_groups = True
+                for g in sem["req_any"]:
+                    if g and not any(t in hay_norm for t in g):
+                        ok_groups = False
+                        break
+                if not ok_groups:
+                    continue
+
+            out[w.id].append(l)
+
+    return dict(out)
 
 
 def _cmp(a: Decimal, op: str, b: Decimal) -> bool:
@@ -173,6 +293,54 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
             continue
 
         # campo desconhecido → ignora (para não quebrar quando você evoluir)
+        continue
+
+    return True
+
+
+def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: int | None) -> bool:
+    """Versão mais rápida de _apply_filters.
+
+    Usa `year` pré-computado (ou None) para evitar regex repetido do ano.
+    """
+    for f in filters:
+        field = (f.field or "").lower()
+        op = (f.operator or "").lower()
+        val = (f.value or "").strip()
+
+        if field == "source":
+            if not listing.source:
+                return False
+            src = listing.source.lower()
+            target = val.lower()
+            if op == "eq" and src != target:
+                return False
+            if op == "neq" and src == target:
+                return False
+            continue
+
+        if field == "price":
+            price = getattr(listing, "price", None)
+            if price is None:
+                return False
+            target = _parse_decimal(val)
+            if target is None:
+                return False
+            if not _cmp(Decimal(price), op, target):
+                return False
+            continue
+
+        if field == "year":
+            if year is None:
+                return False
+            try:
+                ty = int(val)
+            except Exception:
+                return False
+            if not _cmp_int(int(year), op, ty):
+                return False
+            continue
+
         continue
 
     return True

@@ -1,11 +1,13 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+import os
 from typing import Any, Optional, Dict
+
 from sqlalchemy.orm import Session
 
 from app.models.system_log import SystemLog
-
-import os
-import json
-from datetime import datetime, timezone
 
 
 def _truthy(v: str | None) -> bool:
@@ -27,11 +29,26 @@ def _to_json(payload: Optional[Dict[str, Any]]) -> str:
         return str(payload)
 
 
-def log(db: Session, level: str, component: str, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
-    # 1) sempre persiste no banco (comportamento atual)
+def log(
+    db: Session,
+    level: str,
+    component: str,
+    message: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Registra um log no banco.
+
+    Importante: **não faz commit**.
+
+    Motivo:
+    - Commit por log destrói performance (principalmente no Raspberry Pi).
+    - Commit dentro do logger pode confirmar mudanças parciais do chamador.
+
+    Quem chama deve decidir quando commitar/rollback.
+    """
+
     row = SystemLog(level=level, component=component, message=message, payload=payload)
     db.add(row)
-    db.commit()
 
     # 2) opcional: espelha no stdout (pra journalctl)
     if _log_stdout_enabled():

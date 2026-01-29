@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select
 
 from app.core.settings import settings
@@ -15,7 +15,7 @@ from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context
 from app.services.source_runs_service import record_run
-from app.services.wishlist_sources_service import allowed_sources_for_wishlist
+from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
 
 
@@ -37,6 +37,7 @@ def run_source_for_all_wishlists(
     *,
     kind: str = "scheduler",
     force: bool = False,
+    ignore_backoff: bool = False,
 ) -> Dict[str, Any]:
     """Execute one source against all active wishlists (grouped by URL).
 
@@ -74,14 +75,18 @@ def run_source_for_all_wishlists(
     if (plugin.fetch_mode == "browser" or bool(cfg.force_browser)) and not bool(settings.enable_playwright):
         mark_skipped(db, src, "playwright_off")
         record_run(db, source=src, kind=kind, status="skipped", payload={"reason": "playwright_off"})
+        log(db, "warn", component, "playwright_off")
+        db.commit()
         return {"ok": True, "status": "skipped", "reason": "playwright_off"}
 
     # Backoff checks
-    if not force:
+    if not (force or ignore_backoff):
         avail = is_source_allowed(db, src)
         if not avail.is_allowed:
             mark_skipped(db, src, "backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
             record_run(db, source=src, kind=kind, status="skipped", payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
+            log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
+            db.commit()
             return {"ok": True, "status": "skipped", "reason": "backoff", "next_allowed_at": avail.next_allowed_at}
 
     # Schedule / due checks (based on last_effective_run_at)
@@ -95,13 +100,21 @@ def run_source_for_all_wishlists(
         if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
             return {"ok": True, "status": "skipped", "reason": "not_due"}
 
-    wishlists = db.query(Wishlist).filter(Wishlist.is_active == True).all()
+    wishlists = (
+        db.query(Wishlist)
+        .options(joinedload(Wishlist.filters))
+        .filter(Wishlist.is_active == True)
+        .all()
+    )
     if not wishlists:
+        log(db, "info", component, "no_active_wishlists")
+        db.commit()
         return {"ok": True, "status": "skipped", "reason": "no_active_wishlists"}
 
     groups: dict[str, dict] = {}
+    allowed_map = allowed_sources_for_wishlists(db, wishlists)
     for w in wishlists:
-        sources = allowed_sources_for_wishlist(db, w.id)
+        sources = allowed_map.get(w.id) or set()
         if src not in sources:
             continue
         url = plugin.build_url(w.query)
@@ -112,6 +125,8 @@ def run_source_for_all_wishlists(
             g["wishlists"].append(w)
 
     if not groups:
+        log(db, "info", component, "no_matching_wishlists")
+        db.commit()
         return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists"}
 
     ctx = build_scrape_context(db, src)
@@ -154,6 +169,7 @@ def run_source_for_all_wishlists(
                     error=f"blocked(backoff={minutes}m)",
                 )
                 log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url})
+                db.commit()
                 return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url}
 
             err = res.get("error") or "scrape_failed"
@@ -174,6 +190,7 @@ def run_source_for_all_wishlists(
                 error=f"{err} (backoff={minutes}m)",
             )
             log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes})
+            db.commit()
             return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url}
 
         total_found += int(res.get("found") or 0)
@@ -197,10 +214,11 @@ def run_source_for_all_wishlists(
         duration_ms=duration_ms,
         items_found=total_found,
         items_ingested=total_inserted,
-        matches_found=total_matched,
+        items_matched=total_matched,
         notifications_queued=total_queued,
     )
 
     log(db, "info", component, "run_ok", {"groups": len(groups), "found": total_found, "inserted": total_inserted, "queued": total_queued})
 
+    db.commit()
     return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}

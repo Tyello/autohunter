@@ -12,6 +12,8 @@ def job_send_notifications():
             n = send_queued_notifications(db, "sender", telegram_sender) or 0
             dt_ms = int((time.time() - t0) * 1000)
             log(db, "info", "sender", "job ok", {"sent": n, "ms": dt_ms})
+            db.commit()
         except Exception as e:
             dt_ms = int((time.time() - t0) * 1000)
             log(db, "error", "sender", "job failed", {"error": str(e), "ms": dt_ms})
+            db.commit()

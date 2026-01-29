@@ -21,26 +21,33 @@ def queue_notifications_for_matches(
     if not matched_listings:
         return 0
 
+    listing_ids = [getattr(l, "id", None) for l in matched_listings]
+    listing_ids = [i for i in listing_ids if i]
+    if not listing_ids:
+        return 0
+
+    # 1 query por wishlist (ao invés de 1 query por anúncio)
+    existing = (
+        db.query(Notification.car_listing_id)
+        .filter(Notification.wishlist_id == wishlist.id)
+        .filter(Notification.car_listing_id.in_(listing_ids))
+        .all()
+    )
+    existing_ids = {row[0] for row in (existing or [])}
+
     queued = 0
-
     for listing in matched_listings:
-        exists = (
-            db.query(Notification.id)
-            .filter(Notification.wishlist_id == wishlist.id)
-            .filter(Notification.car_listing_id == listing.id)
-            .first()
-        )
-        if exists:
+        if listing.id in existing_ids:
             continue
-
-        n = Notification(
-            user_id=wishlist.user_id,
-            wishlist_id=wishlist.id,
-            car_listing_id=listing.id,
-            status="queued",
-            error_message=None,
+        db.add(
+            Notification(
+                user_id=wishlist.user_id,
+                wishlist_id=wishlist.id,
+                car_listing_id=listing.id,
+                status="queued",
+                error_message=None,
+            )
         )
-        db.add(n)
         queued += 1
 
     # não commit aqui (o job/service que chama decide)

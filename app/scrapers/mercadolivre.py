@@ -469,7 +469,7 @@ def _extract_price_from_vip_html(html: str) -> Optional[int]:
         price_el = soup.select_one("span.andes-money-amount__fraction") or soup.select_one("span.price-tag-fraction")
         price_text = price_el.get_text(strip=True) if price_el else ""
         v = parse_brl_price(price_text)
-        return int(v) if isinstance(v, (int, float)) else None
+        return int(v) if v is not None else None
     except Exception:
         return None
 
