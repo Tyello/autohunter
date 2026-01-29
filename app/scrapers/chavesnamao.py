@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -93,14 +93,101 @@ def _parse_brl_price(text: str) -> Optional[Decimal]:
         return None
 
 
+def _abs_url(u: str) -> str:
+    if not u:
+        return ""
+    u = u.strip()
+    if u.startswith("//"):
+        return "https:" + u
+    if u.startswith("/"):
+        return "https://www.chavesnamao.com.br" + u
+    return u
+
+def _pick_from_srcset(srcset: str) -> Optional[str]:
+    # pega o último candidato (normalmente maior resolução)
+    if not srcset:
+        return None
+    parts = [p.strip() for p in srcset.split(",") if p.strip()]
+    if not parts:
+        return None
+    last = parts[-1]
+    # formato: "<url> 2x" ou "<url> 640w"
+    url = last.split()[0].strip()
+    return url or None
+
+def _extract_thumb_from_anchor(a) -> Optional[str]:
+    # 1) <img> dentro do <a>
+    img = a.select_one("img")
+    if img:
+        cand = (
+            img.get("data-src")
+            or img.get("data-original")
+            or img.get("data-lazy-src")
+            or img.get("src")
+        )
+        if not cand:
+            cand = _pick_from_srcset(img.get("data-srcset") or img.get("srcset") or "")
+        if cand:
+            return _abs_url(cand)
+
+    # 2) <source srcset> dentro de <picture>
+    src = a.select_one("source[srcset]")
+    if src:
+        cand = _pick_from_srcset(src.get("srcset") or "")
+        if cand:
+            return _abs_url(cand)
+
+    # 3) background-image inline (card css)
+    el = a.select_one("[style*='background-image']")
+    if el:
+        style = el.get("style") or ""
+        m = re.search(r"background-image\s*:\s*url\((['\"]?)([^'\")]+)\1\)", style, re.I)
+        if m:
+            return _abs_url(m.group(2))
+
+    return None
+
+def _extract_location_from_url(url: str) -> Optional[str]:
+    # Ex.: https://www.chavesnamao.com.br/carro/pr-curitiba/...
+    try:
+        p = urlparse(url)
+        segs = [s for s in (p.path or "").split("/") if s]
+    except Exception:
+        return None
+
+    if "carro" in segs:
+        i = segs.index("carro")
+        if i + 1 < len(segs):
+            loc = segs[i + 1]  # pr-curitiba
+            m = re.match(r"^([a-z]{2})-(.+)$", loc)
+            if m:
+                uf = m.group(1).upper()
+                city_slug = m.group(2)
+                city = " ".join([w for w in city_slug.split("-") if w]).title()
+                return f"{city}-{uf}" if city else uf
+    return None
+
 def _extract_location_from_anchor_text(text: str) -> Optional[str]:
     # exemplos visíveis no próprio texto do link: "Curitiba , PR" / "São Paulo , SP"
-    m = re.search(r"([A-Za-zÀ-ÿ\s]+)\s*,\s*([A-Z]{2})\b", text)
-    if not m:
+    # às vezes vem poluído: "223.000 km Gasolina Mecânico Curitiba , PR"
+    if not text:
         return None
-    city = " ".join(m.group(1).split())
+    matches = list(re.finditer(r"([A-Za-zÀ-ÿ\s]+)\s*,\s*([A-Z]{2})\b", text))
+    if not matches:
+        return None
+    m = matches[-1]  # pega a última ocorrência (mais perto do fim do texto)
+    city_raw = " ".join((m.group(1) or "").split())
     uf = m.group(2)
+
+    # remove lixo comum antes da cidade
+    noise = {"km", "gasolina", "mecânico", "mecanico"}
+    toks = [t for t in city_raw.split() if t.strip() and t.lower() not in noise]
+    city = " ".join(toks[-4:])  # cidade tende a estar no fim
     return f"{city}-{uf}" if city else uf
+
+
+
+DETAIL_THUMB_MAX = 3
 
 
 def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
@@ -132,17 +219,19 @@ def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
         m = re.search(r"(\d{6,})", url)
         external_id = m.group(1) if m else url
 
+
         price = _parse_brl_price(text)
-        location = _extract_location_from_anchor_text(text)
 
-        # thumb: algumas páginas trazem <img> dentro do <a>
-        thumb = None
-        img = a.select_one("img")
-        if img:
-            thumb = img.get("src") or img.get("data-src")
+        # location: primeiro tenta pela URL (mais confiável); fallback pro texto
+        location = _extract_location_from_url(url) or _extract_location_from_anchor_text(text)
 
-        # título: remove o preço do texto do link
-        title = text.split("R$")[0].strip() or None
+        # thumb: tenta extrair do card (img/srcset/background)
+        thumb = _extract_thumb_from_anchor(a)
+
+        # título: remove o preço e também tira o "Cidade , UF" do final
+        title_raw = (text.split("R$")[0].strip() or "").strip()
+        title_raw = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+\s*,\s*[A-Z]{2}\b\s*$", "", title_raw).strip()
+        title = title_raw or None
 
         out.append(
             {
@@ -169,5 +258,28 @@ def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
             continue
         seen.add(key)
         uniq.append(it)
+
+
+    # Enriquecimento barato: se alguns cards vierem sem thumb, tenta OG:image na página do anúncio.
+    missing = [it for it in uniq if not it.get("thumbnail_url") and it.get("url")]
+    if missing:
+        budget = DETAIL_THUMB_MAX
+        for it in missing:
+            if budget <= 0:
+                break
+            try:
+                html_d = fetch_html(it["url"])
+                s2 = BeautifulSoup(html_d, "html.parser")
+                meta = s2.select_one('meta[property="og:image"]') or s2.select_one('meta[name="twitter:image"]')
+                if meta and meta.get("content"):
+                    it["thumbnail_url"] = _abs_url(meta.get("content"))
+                    budget -= 1
+                    continue
+                img = s2.select_one("img[src]")
+                if img and img.get("src"):
+                    it["thumbnail_url"] = _abs_url(img.get("src"))
+                    budget -= 1
+            except Exception:
+                continue
 
     return uniq

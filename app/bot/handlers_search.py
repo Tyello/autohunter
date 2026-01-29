@@ -32,6 +32,34 @@ def _split(text: str, limit: int) -> tuple[str, str]:
     return text[:limit], text[limit:]
 
 
+_RE_KM = re.compile(r"\b(\d{1,3}(?:\.\d{3})*|\d+)\s*km\b", re.I)
+
+def _extract_km(title: str) -> str | None:
+    if not title:
+        return None
+    m = _RE_KM.search(title)
+    if not m:
+        return None
+    km = m.group(1)
+    if km.isdigit() and len(km) >= 4:
+        parts = []
+        s = km
+        while s:
+            parts.append(s[-3:])
+            s = s[:-3]
+        km = ".".join(reversed(parts))
+    return km
+
+def _clean_title_and_extract_km(title: str) -> tuple[str, str | None]:
+    t = re.sub(r"\s+", " ", (title or "")).strip()
+    km = _extract_km(t)
+    t = _RE_KM.sub("", t)
+    t = re.sub(r"\bGasolina\b", "", t, flags=re.I)
+    t = re.sub(r"\bMec[aâ]nico\b|\bMecanico\b", "", t, flags=re.I)
+    t = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+\s*,\s*[A-Z]{2}\b\s*$", "", t).strip()
+    t = re.sub(r"\s+", " ", t).strip()
+    return t or "Novo anúncio", km
+
 def _extract_year(title: str) -> int | None:
     t = title or ""
     m = re.search(r"\b(19\d{2}|20\d{2})\b", t)
@@ -78,12 +106,14 @@ def _build_text(item) -> str:
     src = (getattr(item, "source", None) or "—").strip()
     url = (getattr(item, "url", None) or "").strip()
 
-    year = _extract_year(title)
-    score = _score_from_title(title)
+    year = _extract_year(raw_title)
+    score = _score_from_title(raw_title)
 
     lines = [title]
     if year:
         lines.append(f"Ano: {year}")
+    if km:
+        lines.append(f"KM: {km}")
     lines.append(f"Fonte: {src}")
     lines.append(f"Preço: {price_text}")
     lines.append(f"Score: {score}/100")

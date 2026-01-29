@@ -39,6 +39,73 @@ def _clean_spaces(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 
+_RE_KM = re.compile(r"\b(\d{1,3}(?:\.\d{3})*|\d+)\s*km\b", re.I)
+
+def _extract_km(title: str) -> str | None:
+    if not title:
+        return None
+    m = _RE_KM.search(title)
+    if not m:
+        return None
+    km = m.group(1)
+    # normaliza: "223000" -> "223.000" (melhor esforço)
+    if km.isdigit() and len(km) >= 4:
+        # insere separador de milhar
+        parts = []
+        s = km
+        while s:
+            parts.append(s[-3:])
+            s = s[:-3]
+        km = ".".join(reversed(parts))
+    return km
+
+def _clean_title_and_extract_km(title: str) -> tuple[str, str | None]:
+    t = _clean_spaces(title or "")
+    km = _extract_km(t)
+
+    # remove KM do título (vai pra linha separada)
+    t = _RE_KM.sub("", t)
+
+    # remove combustível / câmbio por enquanto (pedido)
+    t = re.sub(r"\bGasolina\b", "", t, flags=re.I)
+    t = re.sub(r"\bMec[aâ]nico\b|\bMecanico\b", "", t, flags=re.I)
+
+    # remove "Cidade , UF" no fim (evita duplicar com Local)
+    t = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+\s*,\s*[A-Z]{2}\b\s*$", "", t).strip()
+
+    return _clean_spaces(t) or "Novo anúncio", km
+
+def _clean_location(loc: str) -> str:
+    s = _clean_spaces(loc or "")
+    if not s:
+        return ""
+
+    # Se vier poluído, tenta recuperar "Cidade-UF" no final
+    noise = {"km", "gasolina", "mecânico", "mecanico"}
+
+    # padrão "Curitiba , PR"
+    matches = list(re.finditer(r"([A-Za-zÀ-ÿ\s]+)\s*,\s*([A-Z]{2})\b", s))
+    if matches:
+        m = matches[-1]
+        city_raw = " ".join((m.group(1) or "").split())
+        uf = m.group(2)
+        toks = [t for t in city_raw.split() if t.lower() not in noise]
+        city = " ".join(toks[-4:])
+        return f"{city}-{uf}" if city else uf
+
+    # padrão "Curitiba-PR"
+    m2 = re.search(r"(.+)-([A-Z]{2})\b\s*$", s)
+    if m2:
+        city_raw = " ".join((m2.group(1) or "").split())
+        uf = m2.group(2)
+        toks = [t for t in city_raw.split() if t.lower() not in noise]
+        city = " ".join(toks[-4:])
+        return f"{city}-{uf}" if city else uf
+
+    return s
+
+
+
 def _strip_query_fragment(url: str) -> str:
     """Remove querystring e fragment.
 
@@ -53,6 +120,17 @@ def _strip_query_fragment(url: str) -> str:
         return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
     except Exception:
         return url.split("#")[0].split("?")[0]
+
+
+
+def _infer_referer(url: str) -> str:
+    try:
+        p = urlparse(url)
+        if p.scheme and p.netloc:
+            return f"{p.scheme}://{p.netloc}/"
+    except Exception:
+        pass
+    return "https://www.chavesnamao.com.br/"
 
 
 def _canonical_ml_url(external_id: str) -> str:
@@ -133,8 +211,9 @@ def _score_from_text(text: str) -> int:
 
 
 def _build_text(listing, notification=None) -> str:
-    title = _clean_spaces(getattr(listing, "title", None) or "Novo anúncio")
-    loc = _clean_spaces(getattr(listing, "location", None) or "")
+    raw_title = _clean_spaces(getattr(listing, "title", None) or "Novo anúncio")
+    title, km = _clean_title_and_extract_km(raw_title)
+    loc = _clean_location(getattr(listing, "location", None) or "")
     url = _normalize_listing_url(
         getattr(listing, "url", None) or "",
         getattr(listing, "source", None) or "",
@@ -142,8 +221,8 @@ def _build_text(listing, notification=None) -> str:
     )
     price_text = format_price(getattr(listing, "price", None))
 
-    year = _extract_year(title)
-    score = _score_from_text(" ".join([title, loc]))
+    year = _extract_year(raw_title)
+    score = _score_from_text(" ".join([raw_title, loc]))
 
     # Se no futuro você salvar FIPE/score no banco, aqui já “aparece” automaticamente:
     fipe = getattr(listing, "fipe_price", None)
@@ -157,6 +236,8 @@ def _build_text(listing, notification=None) -> str:
     lines = [title]
     if year:
         lines.append(f"Ano: {year}")
+    if km:
+        lines.append(f"KM: {km}")
     lines.append(f"Preço: {price_text}")
     if loc:
         lines.append(f"Local: {loc}")
@@ -195,7 +276,7 @@ def _download_image_bytes(url: str, timeout: int = 8) -> Optional[Tuple[bytes, s
         "User-Agent": "Mozilla/5.0 (X11; Linux arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-        "Referer": "https://www.olx.com.br/",
+        "Referer": _infer_referer(url),
     }
 
     try:

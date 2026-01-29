@@ -7,6 +7,7 @@ from .notification import Notification
 from .system_log import SystemLog
 from .source_state import SourceState
 from .source_run import SourceRun
+from .source_config import SourceConfig
 from .plan import Plan
 from .subscription import Subscription
 from .account import Account
@@ -23,6 +24,7 @@ __all__ = [
     "SystemLog",
     "SourceState",
     "SourceRun",
+    "SourceConfig",
     "Plan",
     "Subscription",
     "Account",

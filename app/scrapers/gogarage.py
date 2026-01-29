@@ -6,6 +6,8 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
+import requests
+
 from app.core.settings import settings
 from app.scrapers.base import FetchBlocked, fetch_html
 from app.scrapers.parsing import parse_brl_price
@@ -215,25 +217,84 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
     - Mantém fallback opcional via Playwright (desligado por padrão)
     """
 
-    try:
-        html = fetch_html(
-            search_url,
+    def _ctx_fallback_enabled() -> bool:
+        # Compatível com versões antigas do ScrapeContext
+        return bool(getattr(ctx, "browser_fallback_enabled", False))
+
+    def _fetch_http(url: str) -> str:
+        return fetch_html(
+            url,
             referer=GOGARAGE_BASE + "/",
             proxy=ctx.proxy_server,
             min_delay_ms=700,
             max_delay_ms=2200,
         )
+
+    def _fetch_browser(url: str) -> str:
+        res = fetch_html_browser(url, ctx=ctx)
+        return res.html
+
+    def _alt_urls(url: str) -> list[str]:
+        """Gera rotas alternativas quando o site muda (ex.: 404 em /?q=)."""
+        try:
+            from urllib.parse import urlparse, parse_qs, urlencode
+
+            p = urlparse(url)
+            qs = parse_qs(p.query or "")
+            qv = (qs.get("q") or [""])[0]
+
+            out: list[str] = []
+
+            # 1) força www
+            host = p.netloc
+            if host and not host.startswith("www."):
+                host_www = "www." + host
+                out.append(p._replace(netloc=host_www).geturl())
+
+            # 2) força /index.php?q=
+            if qv:
+                out.append(f"{GOGARAGE_BASE}/index.php?{urlencode({'q': qv})}")
+
+            # 3) alternativa antiga /?q=
+            if qv:
+                out.append(f"{GOGARAGE_BASE}/?{urlencode({'q': qv})}")
+
+            # dedupe mantendo ordem
+            seen = set()
+            uniq = []
+            for u in out:
+                if u in seen:
+                    continue
+                seen.add(u)
+                uniq.append(u)
+            return uniq
+        except Exception:
+            return []
+
+    html = ""
+    fetched_url = search_url
+    try:
+        html = _fetch_http(search_url)
     except FetchBlocked:
-        if settings.enable_playwright:
-            res = fetch_html_browser(search_url, ctx=ctx)
-            html = res.html
+        if settings.enable_playwright and _ctx_fallback_enabled():
+            html = _fetch_browser(search_url)
         else:
             raise
-    except Exception:
-        # ex.: HTTP 404/5xx na rota de busca -> tenta renderizar via Playwright
-        if settings.enable_playwright:
-            res = fetch_html_browser(search_url, ctx=ctx)
-            html = res.html
+    except requests.HTTPError as e:
+        # rota mudou / endpoint instável
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 404:
+            for alt in _alt_urls(search_url):
+                try:
+                    html = _fetch_http(alt)
+                    fetched_url = alt
+                    break
+                except Exception:
+                    continue
+
+            if not html and settings.enable_playwright and _ctx_fallback_enabled():
+                # última tentativa: renderiza via browser em uma rota alternativa (ou a original)
+                html = _fetch_browser(_alt_urls(search_url)[0] if _alt_urls(search_url) else search_url)
         else:
             raise
 
@@ -243,18 +304,20 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     urls = [u for u, _ in jsonld] if jsonld else _extract_from_anchors(html)
 
-    # Se a página veio vazia/placeholder (carrega via JS), tenta uma vez via browser
-    if (not urls) and settings.enable_playwright:
-        hlow = (html or '').lower()
-        if ('carregando os achados' in hlow) or ('gogarage' in hlow and 'ads/' not in hlow):
-            try:
-                res = fetch_html_browser(search_url, ctx=ctx)
-                html = res.html
-                jsonld = _extract_jsonld_itemlist(html)
-                jsonld_map = {u: n for u, n in jsonld}
-                urls = [u for u, _ in jsonld] if jsonld else _extract_from_anchors(html)
-            except Exception:
-                pass
+    # Se veio HTML placeholder (JS) sem resultados, tenta renderizar via browser se permitido.
+    if (
+        (not urls)
+        and settings.enable_playwright
+        and _ctx_fallback_enabled()
+        and any(s in html.lower() for s in ("carregando", "loading", "aguarde"))
+    ):
+        try:
+            html = _fetch_browser(fetched_url)
+            jsonld = _extract_jsonld_itemlist(html)
+            jsonld_map = {u: n for u, n in jsonld}
+            urls = [u for u, _ in jsonld] if jsonld else _extract_from_anchors(html)
+        except Exception:
+            pass
 
     out: List[dict] = []
     seen: set[str] = set()

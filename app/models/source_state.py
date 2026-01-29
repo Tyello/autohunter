@@ -27,6 +27,11 @@ class SourceState(TimestampMixin, Base):
 
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Última execução "efetiva" (quando houve scrape de fato). Útil para
+    # schedule dinâmico por DB (o tick pode acontecer, mas não necessariamente
+    # executa).
+    last_effective_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     consecutive_blocks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

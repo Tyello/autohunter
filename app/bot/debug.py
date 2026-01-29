@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,13 +12,26 @@ from app.models.wishlist_filter import WishlistFilter
 from app.services.wishlist_sources_service import allowed_sources_for_wishlist
 from app.services.source_availability_service import is_in_cooldown
 from app.services.search_urls_service import ml_url, olx_url
-from app.services.source_proxy_service import get_source_proxy_server
-from app.sources.types import ScrapeContext
+from app.services.source_configs_service import get_source_config, build_scrape_context
+
 from app.scheduler.jobs import scrape_ingest_match
 from app.scrapers.mercadolivre import scrape_mercadolivre
 from app.scrapers.olx import scrape_olx
 
-from app.core.settings import settings
+
+def _source_enabled_and_not_in_cooldown(db: Session, source: str) -> tuple[bool, str | None]:
+    cfg = get_source_config(db, source)
+    if cfg is None:
+        return True, None
+
+    if not bool(cfg.is_enabled):
+        return False, "disabled"
+
+    cooldown_m = int(cfg.cooldown_minutes or 0)
+    if cooldown_m > 0 and is_in_cooldown(db, source, cooldown_m):
+        return False, "cooldown"
+
+    return True, None
 
 
 def run_once_for_wishlist(db: Session, wishlist) -> dict:
@@ -25,16 +40,23 @@ def run_once_for_wishlist(db: Session, wishlist) -> dict:
 
     ml = ml_url(q)
     ml_res = None
-    if "mercadolivre" in sources:
-        ctx = ScrapeContext(source="mercadolivre", proxy_server=get_source_proxy_server("mercadolivre"))
-        ml_res = scrape_ingest_match(
-            db,
-            "scraper_mercadolivre_debug",
-            scrape_mercadolivre,
-            ml,
-            ctx=ctx,
-            wishlist=wishlist,
-        )
+    ml_skipped = None
+    if "mercadolivre" not in sources:
+        ml_skipped = "filtered_out"
+    else:
+        ok, reason = _source_enabled_and_not_in_cooldown(db, "mercadolivre")
+        if not ok:
+            ml_skipped = reason
+        else:
+            ctx = build_scrape_context(db, "mercadolivre")
+            ml_res = scrape_ingest_match(
+                db,
+                "scraper_mercadolivre_debug",
+                scrape_mercadolivre,
+                ml,
+                ctx=ctx,
+                wishlist=wishlist,
+            )
 
     olx = olx_url(q)
     olx_res = None
@@ -42,20 +64,20 @@ def run_once_for_wishlist(db: Session, wishlist) -> dict:
 
     if "olx" not in sources:
         olx_skipped = "filtered_out"
-    elif not settings.enable_olx:
-        olx_skipped = "disabled"
-    elif is_in_cooldown(db, "olx", settings.olx_cooldown_minutes):
-        olx_skipped = "cooldown"
     else:
-        ctx = ScrapeContext(source="olx", proxy_server=get_source_proxy_server("olx"))
-        olx_res = scrape_ingest_match(
-            db,
-            "scraper_olx_debug",
-            scrape_olx,
-            olx,
-            ctx=ctx,
-            wishlist=wishlist,
-        )
+        ok, reason = _source_enabled_and_not_in_cooldown(db, "olx")
+        if not ok:
+            olx_skipped = reason
+        else:
+            ctx = build_scrape_context(db, "olx")
+            olx_res = scrape_ingest_match(
+                db,
+                "scraper_olx_debug",
+                scrape_olx,
+                olx,
+                ctx=ctx,
+                wishlist=wishlist,
+            )
 
     return {
         "ok": True,
@@ -65,6 +87,7 @@ def run_once_for_wishlist(db: Session, wishlist) -> dict:
         "olx_url": olx,
         "ml_result": ml_res,
         "olx_result": olx_res,
+        "ml_skipped": ml_skipped,
         "olx_skipped": olx_skipped,
     }
 
@@ -111,16 +134,15 @@ def status_for_wishlist(db: Session, wishlist: Wishlist) -> dict:
         "wishlist": {"id": str(wishlist.id), "query": wishlist.query, "is_active": wishlist.is_active},
         "filters": [{"field": f.field, "operator": f.operator, "value": f.value} for f in filters],
         "notifications": status_counts,
-        "last_listings": [{
-            "source": x.source,
-            "price": str(x.price) if x.price is not None else None,
-            "title": (x.title or "")[:60],
-            "url": x.url,
-        } for x in listings],
+        "last_listings": [
+            {
+                "source": x.source,
+                "price": str(x.price) if x.price is not None else None,
+                "title": (x.title or "")[:60],
+                "url": x.url,
+            }
+            for x in listings
+        ],
         "dupes": [{"source": d[0], "external_id": d[1], "cnt": d[2]} for d in dupes],
-        "last_logs": [{
-            "level": l.level,
-            "component": l.component,
-            "message": l.message,
-        } for l in logs],
+        "last_logs": [{"level": l.level, "component": l.component, "message": l.message} for l in logs],
     }

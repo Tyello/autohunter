@@ -109,9 +109,10 @@ def webmotors_url(query: str) -> str:
 
 
 def gogarage_url(query: str) -> str:
-    # GoGarage também carrega via JS. Mantemos um URL estável para a página de busca.
+    # GoGarage é JS-heavy e historicamente alterna rotas.
+    # O mais estável tem sido o host com www + index.php (evita 404 em /?q=).
     q = quote_plus(query.strip())
-    return f"https://www.gogarage.com.br/?q={q}"
+    return f"https://www.gogarage.com.br/index.php?q={q}"
 
 
 def chavesnamao_url(query: str) -> str:

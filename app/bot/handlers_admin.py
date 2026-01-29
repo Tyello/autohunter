@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
@@ -14,6 +16,7 @@ from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
+from app.models.source_config import SourceConfig
 from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
@@ -21,6 +24,8 @@ from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
 from app.models.notification import Notification
 from app.sources.registry import list_sources
+from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
+from app.services.source_execution_service import run_source_for_all_wishlists
 
 
 @dataclass
@@ -118,13 +123,12 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin health | /admin users | /admin errors")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin health | /admin users | /admin errors")
         return
 
     action = args[0].lower()
     if action == "sources":
-        verbose = any(a.lower() in ("v", "-v", "verbose", "full", "details") for a in args[1:])
-        await _admin_sources(update, verbose=verbose)
+        await _admin_sources_dispatch(update, args[1:])
         return
     if action == "health":
         await _admin_health(update)
@@ -135,8 +139,282 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "errors":
         await _admin_errors(update, args[1:])
         return
+    if action == "runall":
+        await _admin_runall(update, args[1:])
+        return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin health | /admin users | /admin errors")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin health | /admin users | /admin errors")
+
+async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
+    """Subcomandos para operar SourceConfig (DB)."""
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+
+    if not args:
+        await _admin_sources(update, verbose=False)
+        return
+
+    # allow /admin sources verbose
+    if any(a.lower() in ("v", "-v", "verbose", "full", "details") for a in args):
+        await _admin_sources(update, verbose=True)
+        return
+
+    cmd = args[0].lower()
+
+    if cmd in ("list",):
+        await _admin_sources(update, verbose=False)
+        return
+
+    if cmd in ("show", "get") and len(args) >= 2:
+        await _admin_sources_show(update, args[1])
+        return
+
+    if cmd in ("enable", "on") and len(args) >= 2:
+        await _admin_sources_set_simple(update, args[1], "is_enabled", "true")
+        return
+
+    if cmd in ("disable", "off") and len(args) >= 2:
+        await _admin_sources_set_simple(update, args[1], "is_enabled", "false")
+        return
+
+    if cmd in ("sched", "schedule") and len(args) >= 3:
+        await _admin_sources_set_simple(update, args[1], "sched_minutes", args[2])
+        return
+
+    if cmd in ("cool", "cooldown") and len(args) >= 3:
+        await _admin_sources_set_simple(update, args[1], "cooldown_minutes", args[2])
+        return
+
+    if cmd in ("rate", "ratelimit", "rate_limit") and len(args) >= 3:
+        await _admin_sources_set_simple(update, args[1], "rate_limit_seconds", args[2])
+        return
+
+    if cmd == "proxy" and len(args) >= 3:
+        v = " ".join(args[2:])
+        if v.strip().lower() in ("off", "none", "null", "-"):
+            v = ""
+        await _admin_sources_set_simple(update, args[1], "proxy_server", v)
+        return
+
+    if cmd in ("fallback", "browser_fallback") and len(args) >= 3:
+        await _admin_sources_set_simple(update, args[1], "browser_fallback_enabled", args[2])
+        return
+
+    if cmd in ("force", "force_browser") and len(args) >= 3:
+        await _admin_sources_set_simple(update, args[1], "force_browser", args[2])
+        return
+
+    if cmd == "set" and len(args) >= 4:
+        source = args[1]
+        field = args[2]
+        value = " ".join(args[3:])
+        await _admin_sources_set_simple(update, source, field, value)
+        return
+
+    if cmd == "reset" and len(args) >= 2:
+        await _admin_sources_reset(update, args[1])
+        return
+
+    await update.message.reply_text(
+        "Uso:\n"
+        "/admin sources\n"
+        "/admin sources verbose\n"
+        "/admin sources show <source>\n"
+        "/admin sources enable <source>\n"
+        "/admin sources disable <source>\n"
+        "/admin sources sched <source> <minutes>\n"
+        "/admin sources cool <source> <minutes>\n"
+        "/admin sources rate <source> <seconds>\n"
+        "/admin sources proxy <source> <url|off>\n"
+        "/admin sources fallback <source> on|off\n"
+        "/admin sources force <source> on|off\n"
+        "/admin sources set <source> <field> <value>\n"
+        "/admin sources reset <source>"
+    )
+
+
+async def _admin_sources_show(update: Update, source: str):
+    with SessionLocal() as db:
+        ensure_source_configs(db)
+        cfg = get_source_config(db, source)
+        if not cfg:
+            await update.message.reply_text("Source não encontrada.")
+            return
+        lines = [
+            f"🧰 Admin — Source: {cfg.source}",
+            f"enabled={bool(cfg.is_enabled)}",
+            f"sched_minutes={int(cfg.sched_minutes or 0)}",
+            f"cooldown_minutes={int(cfg.cooldown_minutes or 0)}",
+            f"rate_limit_seconds={int(cfg.rate_limit_seconds or 0)}",
+            f"proxy_server={cfg.proxy_server or '-'}",
+            f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
+            f"force_browser={bool(cfg.force_browser)}",
+        ]
+        await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
+
+
+async def _admin_sources_set_simple(update: Update, source: str, field: str, value: str):
+    try:
+        with SessionLocal() as db:
+            ensure_source_configs(db)
+            cfg = set_source_field(db, source, field, value)
+
+            snap = {
+                "source": cfg.source,
+                "enabled": bool(cfg.is_enabled),
+                "sched": int(cfg.sched_minutes or 0),
+                "cool": int(cfg.cooldown_minutes or 0),
+                "rate": int(cfg.rate_limit_seconds or 0),
+                "proxy": cfg.proxy_server or "-",
+                "fallback": bool(cfg.browser_fallback_enabled),
+                "force": bool(cfg.force_browser),
+            }
+
+            db.commit()
+
+        await update.message.reply_text(
+            sanitize_for_telegram(
+                f"✅ Atualizado {snap['source']}: {field}={value}\n"
+                f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
+                f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
+            )
+        )
+    except Exception as e:
+        await update.message.reply_text(sanitize_for_telegram(f"Erro: {e}"))
+
+
+async def _admin_sources_reset(update: Update, source: str):
+    try:
+        with SessionLocal() as db:
+            ensure_source_configs(db)
+            cfg = reset_source_config(db, source)
+
+            snap = {
+                "source": cfg.source,
+                "enabled": bool(cfg.is_enabled),
+                "sched": int(cfg.sched_minutes or 0),
+                "cool": int(cfg.cooldown_minutes or 0),
+                "rate": int(cfg.rate_limit_seconds or 0),
+                "proxy": cfg.proxy_server or "-",
+                "fallback": bool(cfg.browser_fallback_enabled),
+                "force": bool(cfg.force_browser),
+            }
+
+            db.commit()
+
+        await update.message.reply_text(
+            sanitize_for_telegram(
+                f"✅ Resetado {snap['source']} para defaults\n"
+                f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
+                f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
+            )
+        )
+    except Exception as e:
+        await update.message.reply_text(sanitize_for_telegram(f"Erro: {e}"))
+
+
+def _chunk_lines(text: str, max_len: int = 3600) -> List[str]:
+    lines = (text or "").splitlines()
+    out: List[str] = []
+    buf: List[str] = []
+    size = 0
+    for ln in lines:
+        add = len(ln) + 1
+        if buf and (size + add > max_len):
+            out.append("\n".join(buf))
+            buf = []
+            size = 0
+        buf.append(ln)
+        size += add
+    if buf:
+        out.append("\n".join(buf))
+    return out
+
+
+async def _admin_runall(update: Update, raw_args: List[str]):
+    """Força execução de sources habilitadas (admin-only) e devolve resumo no chat."""
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
+        await update.message.reply_text("Sem permissão.")
+        return
+
+    wanted = [a.strip().lower() for a in (raw_args or []) if a.strip()]
+
+    await update.message.reply_text("🚀 runall iniciado… (forçando execução)")
+
+    def _run_sync() -> str:
+        plugins = list_sources()
+        with SessionLocal() as db:
+            ensure_source_configs(db)
+            cfgs = {c.source: c for c in db.query(SourceConfig).all()}
+
+            lines: List[str] = []
+            lines.append("🧯 AutoHunter — runall (admin)")
+            lines.append(f"UTC: {_fmt_dt(datetime.now(timezone.utc))}")
+            if wanted:
+                lines.append("Sources: " + ", ".join(wanted))
+            lines.append("")
+
+            ran = 0
+            for p in plugins:
+                src = p.name
+                if wanted and src not in wanted:
+                    continue
+
+                cfg = cfgs.get(src)
+                if cfg is not None and not bool(cfg.is_enabled):
+                    lines.append(f"- {src}: 🚫 disabled")
+                    continue
+
+                if p.scrape is None:
+                    lines.append(f"- {src}: ⚪ skipped (not_implemented)")
+                    continue
+
+                res = run_source_for_all_wishlists(
+                    db,
+                    src,
+                    kind="admin",
+                    force=True,
+                    ignore_backoff=True,
+                )
+                ran += 1
+                st = res.get("status")
+
+                if st == "success":
+                    lines.append(
+                        f"- {src}: ✅ success found={res.get('found')} ins={res.get('inserted')} "
+                        f"match={res.get('matched')} queued={res.get('queued')} dur={res.get('duration_ms')}ms"
+                    )
+                elif st == "blocked":
+                    lines.append(
+                        f"- {src}: 🟠 blocked http={res.get('http_status')} backoff={res.get('backoff_minutes')}m dur={res.get('duration_ms')}ms"
+                    )
+                elif st == "error":
+                    lines.append(
+                        f"- {src}: ⚪ error backoff={res.get('backoff_minutes')}m err={_short(str(res.get('error')), 160)}"
+                    )
+                elif st == "no_work":
+                    lines.append(f"- {src}: ⚪ no_work eligible={res.get('eligible_wishlists')}")
+                elif st == "not_due":
+                    lines.append(f"- {src}: ⚪ not_due")
+                elif st == "backoff":
+                    lines.append(f"- {src}: ⏳ backoff until={_fmt_dt(res.get('next_allowed_at'))}")
+                elif st == "skipped":
+                    lines.append(f"- {src}: ⚪ skipped reason={res.get('reason')}")
+                elif st == "disabled":
+                    lines.append(f"- {src}: 🚫 disabled")
+                else:
+                    lines.append(f"- {src}: ⚪ {st}")
+
+            if ran == 0:
+                lines.append("(nenhuma fonte executada)")
+
+            return "\n".join(lines)
+
+    text = await asyncio.to_thread(_run_sync)
+    safe = sanitize_for_telegram(text)
+    for chunk in _chunk_lines(safe, max_len=3600):
+        await update.message.reply_text(chunk)
+
 
 
 async def _admin_sources(update: Update, verbose: bool = False):
@@ -156,6 +434,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
         return
 
     with SessionLocal() as db:
+        ensure_source_configs(db)
+        cfgs = {c.source: c for c in db.query(SourceConfig).all()}
         states = {s.source: s for s in db.query(SourceState).all()}
 
         # last run per source (qualquer status)
@@ -230,9 +510,14 @@ async def _admin_sources(update: Update, verbose: bool = False):
     lines.append("")
 
     for i, p in enumerate(plugins, start=1):
-        enabled = _get_bool_setting(p.enabled_setting, True)
-        sched_m = _get_int_setting(p.sched_minutes_setting)
-        cooldown_m = _get_int_setting(p.cooldown_minutes_setting, 0) or 0
+        cfg = cfgs.get(p.name)
+        enabled = bool(cfg.is_enabled) if cfg is not None else bool(getattr(p, 'default_enabled', True))
+        sched_m = int(cfg.sched_minutes or 0) if cfg is not None else int(getattr(p, 'default_sched_minutes', 0) or 0)
+        cooldown_m = int(cfg.cooldown_minutes or 0) if cfg is not None else int(getattr(p, 'default_cooldown_minutes', 0) or 0)
+        rate_s = int(cfg.rate_limit_seconds or 0) if cfg is not None else int(getattr(p, 'default_rate_limit_seconds', 0) or 0)
+        proxy = (cfg.proxy_server if cfg is not None else getattr(p, 'default_proxy_server', None))
+        fb = bool(cfg.browser_fallback_enabled) if cfg is not None else bool(getattr(p, 'default_browser_fallback_enabled', False))
+        force_b = bool(cfg.force_browser) if cfg is not None else bool(getattr(p, 'default_force_browser', False))
         implemented = p.scrape is not None
 
         st = states.get(p.name)
@@ -256,6 +541,14 @@ async def _admin_sources(update: Update, verbose: bool = False):
             flags.append(f"sched={sched_m}m")
         if cooldown_m:
             flags.append(f"cool={cooldown_m}m")
+        if verbose:
+            flags.append(f"rate={rate_s}s")
+            if proxy:
+                flags.append("proxy=on")
+            if fb:
+                flags.append("fallback=on")
+            if force_b:
+                flags.append("force=on")
 
         # causa (usa last_effective se last=skipped)
         lr_cause = lr
@@ -270,8 +563,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
         if not enabled:
             kind = "DISABLED"
             emoji = "🚫"
-            why = "setting disabled"
-            action = "habilitar a fonte nas settings"
+            why = "disabled via source_configs"
+            action = "use: /admin sources enable <source>"
         else:
             if lr_cause is None:
                 kind = "ERR"
