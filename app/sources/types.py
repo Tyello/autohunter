@@ -8,12 +8,19 @@ from typing import Callable, Optional, List, Dict, Any, Literal
 class ScrapeContext:
     """Runtime context passed to scrapers.
 
+    This is the *operational* configuration for a source at runtime, sourced
+    from the DB table `source_configs`.
+
     - source: source name (e.g. 'olx', 'webmotors'). Used for session/browser stickiness.
     - proxy_server: full proxy URL (http://... or socks5://...). Optional.
+    - browser_fallback_enabled: allow HTTP -> Playwright fallback on failures/blocks.
+    - force_browser: force Playwright first (no HTTP attempt).
     """
 
     source: str
     proxy_server: Optional[str] = None
+    browser_fallback_enabled: bool = False
+    force_browser: bool = False
 
 
 ScrapeFn = Callable[[str, ScrapeContext], List[Dict[str, Any]]]
@@ -25,24 +32,15 @@ FetchMode = Literal["http", "browser"]
 class SourcePlugin:
     """Defines a listing source.
 
-    - build_url(query) returns a URL that shows a list of listings.
-    - scrape(url, ctx) returns a list of normalized listing dicts.
+    Plugins are declarative. The DB (`source_configs`) is the source of truth for
+    runtime config (enabled/schedule/cooldown/rate-limit/proxy/browser flags).
 
-    Plugins are declarative: they wire into Settings by attribute-name strings.
-
-    fetch_mode is informational (used for logging / ops); scraping may still
-    use either http or browser under the hood.
+    The `default_*` fields are only used as SEED values when a row is missing.
     """
 
     name: str
     build_url: BuildUrlFn
     scrape: Optional[ScrapeFn] = None
-
-    # Wiring to settings.py (attribute names)
-    enabled_setting: Optional[str] = None
-    sched_minutes_setting: Optional[str] = None
-    cooldown_minutes_setting: Optional[str] = None
-    rate_limit_seconds_setting: Optional[str] = None
 
     # Behavior flags
     supports_manual_search: bool = True
@@ -50,3 +48,19 @@ class SourcePlugin:
 
     # Ops hint
     fetch_mode: FetchMode = "http"
+
+    # Defaults used only for DB seed
+    default_enabled: bool = True
+    default_sched_minutes: int = 60
+    default_cooldown_minutes: int = 0
+    default_rate_limit_seconds: int = 0
+    default_proxy_server: Optional[str] = None
+    default_browser_fallback_enabled: bool = False
+    default_force_browser: bool = False
+    default_extra: Optional[Dict[str, Any]] = None
+
+    # Legacy wiring (kept for backward-compatibility; no longer used)
+    enabled_setting: Optional[str] = None
+    sched_minutes_setting: Optional[str] = None
+    cooldown_minutes_setting: Optional[str] = None
+    rate_limit_seconds_setting: Optional[str] = None

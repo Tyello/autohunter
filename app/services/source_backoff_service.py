@@ -51,6 +51,7 @@ def _compute_backoff_minutes(base_minutes: int, exponent: int) -> int:
 def mark_success(db: Session, source: str, *, rate_limit_seconds: int = 0, payload: Optional[Dict[str, Any]] = None) -> None:
     st = _get_or_create_state(db, source)
     st.last_run_at = _utcnow()
+    st.last_effective_run_at = st.last_run_at
     st.consecutive_blocks = 0
     st.consecutive_failures = 0
 
@@ -86,6 +87,7 @@ def mark_blocked(
     """Marca bloqueio e retorna minutos de backoff aplicado."""
     st = _get_or_create_state(db, source)
     st.last_run_at = _utcnow()
+    st.last_effective_run_at = st.last_run_at
     st.consecutive_blocks = int(st.consecutive_blocks or 0) + 1
     st.consecutive_failures = 0
 
@@ -111,6 +113,7 @@ def mark_error(
     """Marca erro e retorna minutos de backoff aplicado."""
     st = _get_or_create_state(db, source)
     st.last_run_at = _utcnow()
+    st.last_effective_run_at = st.last_run_at
     st.consecutive_failures = int(st.consecutive_failures or 0) + 1
     # não zera blocks completamente — mas deixa o signal principal como failure
     st.consecutive_blocks = 0

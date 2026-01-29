@@ -159,14 +159,14 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
         )
     except FetchBlocked:
         # Fallback controlado
-        if settings.enable_playwright:
+        if settings.enable_playwright and getattr(ctx, 'browser_fallback_enabled', False):
             res = fetch_html_browser(search_url, ctx=ctx)
             # Sem parser pesado aqui: se chegou ao browser, apenas abandona (ops decide).
             # Retornamos vazio para não derrubar o job.
             return []
         raise
     except Exception:
-        if settings.enable_playwright:
+        if settings.enable_playwright and getattr(ctx, 'browser_fallback_enabled', False):
             return []
         raise
 

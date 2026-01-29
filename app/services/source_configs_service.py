@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Any, Dict, Tuple, List
+from typing import Optional, Any, Dict, List
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.core.settings import settings
 from app.models.source_config import SourceConfig
-from app.sources.registry import list_sources
+from app.sources.registry import list_sources, get_source
 from app.sources.types import ScrapeContext
 
 
@@ -63,19 +62,16 @@ def get_source_config(db: Session, source: str) -> Optional[SourceConfig]:
 
 
 def list_source_configs(db: Session) -> List[SourceConfig]:
-    return list(
-        db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all()
-    )
+    return list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
 
 
 def ensure_source_configs(db: Session) -> int:
-    """Garante que existe 1 row em source_configs para cada plugin registrado.
+    """Ensure 1 row in `source_configs` for every registered plugin.
 
-    ⚠️ Nesta fase (patch parcial), fazemos seed a partir dos Settings legado
-    (enabled/sched/cooldown/rate_limit/proxy/flags) *somente quando a row ainda não existe*.
-    Depois, runtime deve usar o DB como fonte de verdade.
+    DB is the source of truth. `default_*` fields in plugins are used only as seed
+    when a row does not exist yet.
 
-    Retorna quantas rows foram criadas.
+    Returns number of rows created (not committed).
     """
     created = 0
     for plugin in list_sources():
@@ -85,44 +81,16 @@ def ensure_source_configs(db: Session) -> int:
         if get_source_config(db, src):
             continue
 
-        # Seeds legacy (settings) only once
-        is_enabled = True
-        if getattr(plugin, "enabled_setting", None):
-            is_enabled = bool(getattr(settings, plugin.enabled_setting, True))
-
-        sched_minutes = 60
-        if getattr(plugin, "sched_minutes_setting", None):
-            sched_minutes = int(getattr(settings, plugin.sched_minutes_setting, 60) or 60)
-
-        cooldown_minutes = 0
-        if getattr(plugin, "cooldown_minutes_setting", None):
-            cooldown_minutes = int(getattr(settings, plugin.cooldown_minutes_setting, 0) or 0)
-
-        rate_limit_seconds = 0
-        if getattr(plugin, "rate_limit_seconds_setting", None):
-            rate_limit_seconds = int(getattr(settings, plugin.rate_limit_seconds_setting, 0) or 0)
-
-        # proxy per-source (pattern: source_proxy_<name>)
-        proxy_attr = f"source_proxy_{src}"
-        proxy_server = getattr(settings, proxy_attr, None)
-
-        # browser flags (special cases)
-        browser_fallback_enabled = False
-        force_browser = False
-        if src == "olx":
-            browser_fallback_enabled = bool(getattr(settings, "enable_olx_browser_fallback", False))
-            force_browser = bool(getattr(settings, "olx_force_browser", False))
-
         row = SourceConfig(
             source=src,
-            is_enabled=is_enabled,
-            sched_minutes=sched_minutes,
-            cooldown_minutes=cooldown_minutes,
-            rate_limit_seconds=rate_limit_seconds,
-            proxy_server=proxy_server,
-            browser_fallback_enabled=browser_fallback_enabled,
-            force_browser=force_browser,
-            extra=None,
+            is_enabled=bool(getattr(plugin, "default_enabled", True)),
+            sched_minutes=int(getattr(plugin, "default_sched_minutes", 60) or 60),
+            cooldown_minutes=int(getattr(plugin, "default_cooldown_minutes", 0) or 0),
+            rate_limit_seconds=int(getattr(plugin, "default_rate_limit_seconds", 0) or 0),
+            proxy_server=getattr(plugin, "default_proxy_server", None),
+            browser_fallback_enabled=bool(getattr(plugin, "default_browser_fallback_enabled", False)),
+            force_browser=bool(getattr(plugin, "default_force_browser", False)),
+            extra=getattr(plugin, "default_extra", None),
         )
         db.add(row)
         created += 1
@@ -162,12 +130,56 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Update
     return UpdateResult(False, f"campo não suportado: {field}")
 
 
-def build_scrape_context(db: Session, source: str) -> ScrapeContext:
-    """Constrói ScrapeContext usando config do banco.
 
-    Patch parcial: ScrapeContext só carrega proxy. Flags browser ainda serão
-    consumidas no patch final.
+def reset_source_config(db: Session, source: str) -> SourceConfig:
+    """Reset a single source config to plugin defaults (DB is source of truth).
+
+    If the row does not exist yet, it is created (not committed).
+    Raises ValueError if source/plugin is unknown.
     """
     src = source.strip().lower()
+    plugin = get_source(src)
+    if not plugin:
+        raise ValueError(f"source não encontrada: {src}")
+
     cfg = get_source_config(db, src)
-    return ScrapeContext(source=src, proxy_server=(cfg.proxy_server if cfg else None))
+    if not cfg:
+        cfg = SourceConfig(source=src)
+        db.add(cfg)
+
+    cfg.is_enabled = bool(getattr(plugin, "default_enabled", True))
+    cfg.sched_minutes = int(getattr(plugin, "default_sched_minutes", 60) or 60)
+    cfg.cooldown_minutes = int(getattr(plugin, "default_cooldown_minutes", 0) or 0)
+    cfg.rate_limit_seconds = int(getattr(plugin, "default_rate_limit_seconds", 0) or 0)
+    cfg.proxy_server = getattr(plugin, "default_proxy_server", None)
+    cfg.browser_fallback_enabled = bool(getattr(plugin, "default_browser_fallback_enabled", False))
+    cfg.force_browser = bool(getattr(plugin, "default_force_browser", False))
+    cfg.extra = getattr(plugin, "default_extra", None)
+    return cfg
+
+
+
+def build_scrape_context(db: Session, source: str) -> ScrapeContext:
+    """Build ScrapeContext using DB config (source_configs)."""
+    src = source.strip().lower()
+    cfg = get_source_config(db, src)
+    if not cfg:
+        ensure_source_configs(db)
+        cfg = get_source_config(db, src)
+
+    # If still missing, fallback to plugin defaults
+    if not cfg:
+        plugin = get_source(src)
+        return ScrapeContext(
+            source=src,
+            proxy_server=getattr(plugin, "default_proxy_server", None) if plugin else None,
+            browser_fallback_enabled=bool(getattr(plugin, "default_browser_fallback_enabled", False)) if plugin else False,
+            force_browser=bool(getattr(plugin, "default_force_browser", False)) if plugin else False,
+        )
+
+    return ScrapeContext(
+        source=src,
+        proxy_server=cfg.proxy_server,
+        browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
+        force_browser=bool(cfg.force_browser),
+    )

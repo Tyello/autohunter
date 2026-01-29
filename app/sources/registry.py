@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
-from app.core.settings import settings
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+
+from app.models.source_config import SourceConfig
 
 from .types import SourcePlugin
 
@@ -27,14 +30,24 @@ def list_sources() -> List[SourcePlugin]:
     return list(_REGISTRY.values())
 
 
-def _is_enabled(plugin: SourcePlugin) -> bool:
-    if plugin.enabled_setting is None:
-        return True
-    return bool(getattr(settings, plugin.enabled_setting, False))
+def list_enabled_sources(db: Optional[Session] = None) -> List[SourcePlugin]:
+    """Returns enabled sources.
 
+    - If `db` is provided, DB (`source_configs`) is the source of truth.
+    - If `db` is None (e.g. during very early startup), fall back to plugin defaults.
+    """
+    plugins = list_sources()
+    if db is None:
+        return [p for p in plugins if bool(getattr(p, "default_enabled", True))]
 
-def list_enabled_sources() -> List[SourcePlugin]:
-    return [p for p in list_sources() if _is_enabled(p)]
+    try:
+        enabled: Set[str] = set(
+            s for s in db.execute(select(SourceConfig.source).where(SourceConfig.is_enabled == True)).scalars().all()
+        )
+        return [p for p in plugins if p.name in enabled]
+    except Exception:
+        # In case migrations were not applied yet, fall back to defaults.
+        return [p for p in plugins if bool(getattr(p, "default_enabled", True))]
 
 
 # Import builtins so they register themselves.

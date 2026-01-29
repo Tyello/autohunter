@@ -2,25 +2,24 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.core.settings import settings
+from sqlalchemy.orm import Session
+
+from app.models.source_config import SourceConfig
+from sqlalchemy import select
 
 
-def get_source_proxy_server(source: str) -> Optional[str]:
-    """Return proxy server URL for a given source, if configured in Settings.
+def get_source_proxy_server(source: str, db: Optional[Session] = None) -> Optional[str]:
+    """Return proxy server URL for a given source.
 
-    Env vars (loaded via Settings):
-      SOURCE_PROXY_OLX
-      SOURCE_PROXY_WEBMOTORS
-      SOURCE_PROXY_GOGARAGE
+    Source-level proxy is stored in DB (`source_configs.proxy_server`).
 
-    If not set, returns None and the system runs without proxy.
+    `db` is optional for backward-compatibility (returns None if not provided).
     """
-
     src = (source or "").lower().strip()
-    if src == "olx":
-        return settings.source_proxy_olx
-    if src == "webmotors":
-        return settings.source_proxy_webmotors
-    if src == "gogarage":
-        return settings.source_proxy_gogarage
-    return None
+    if not src:
+        return None
+    if db is None:
+        return None
+
+    cfg = db.execute(select(SourceConfig).where(SourceConfig.source == src)).scalar_one_or_none()
+    return cfg.proxy_server if cfg else None
