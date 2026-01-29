@@ -174,6 +174,7 @@ def fetch_details(url: str, *, ctx: ScrapeContext) -> Dict[str, Any]:
     """(Opcional) Completa campos essenciais de um anúncio."""
     html = fetch_html(
         url,
+        ctx=ctx,
         referer=GOGARAGE_BASE + "/",
         proxy=ctx.proxy_server,
         min_delay_ms=700,
@@ -224,6 +225,7 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
     def _fetch_http(url: str) -> str:
         return fetch_html(
             url,
+            ctx=ctx,
             referer=GOGARAGE_BASE + "/",
             proxy=ctx.proxy_server,
             min_delay_ms=700,

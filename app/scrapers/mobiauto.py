@@ -42,7 +42,7 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     html_text: str
     try:
-        html_text = fetch_html(search_url, proxy=ctx.proxy_server, timeout=25)
+        html_text = fetch_html(search_url, ctx=ctx, proxy=ctx.proxy_server, timeout=25)
     except FetchBlocked:
         if not settings.enable_playwright:
             raise

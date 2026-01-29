@@ -404,6 +404,7 @@ def _fetch_http_hybrid(search_url: str, ctx: ScrapeContext, *, min_delay_ms: int
     # 2) Fallback: requests hardened (pode ser bloqueado)
     html = fetch_html(
         search_url,
+        ctx=ctx,
         referer=referer,
         proxy=ctx.proxy_server,
         min_delay_ms=0,

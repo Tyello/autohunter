@@ -149,6 +149,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     try:
         payload = fetch_json(
             api_url,
+            ctx=ctx,
             referer=WEBMOTORS_BASE + "/",
             proxy=ctx.proxy_server,
             min_delay_ms=700,

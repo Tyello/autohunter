@@ -20,6 +20,7 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
     try:
         return fetch_html(
             url,
+            ctx=ctx,
             timeout=timeout,
             referer="https://lista.mercadolivre.com.br/",
             proxy=proxy,

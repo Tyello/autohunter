@@ -48,8 +48,12 @@ class Settings(BaseSettings):
 
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
-    # APScheduler thread pool. For Raspberry Pi 3, 2-4 is usually safer.
-    scheduler_workers: int = 4
+    # APScheduler thread pool. For Raspberry Pi 3, 2 is usually safer (override via env).
+    scheduler_workers: int = 2
+
+    # Max parallel *scraping* jobs running at once (sender/heartbeat are not gated).
+    # 1 is the safest default for Raspberry Pi 3.
+    scheduler_max_parallel_sources: int = 1
 
     # Backoff automatico (protects product and helps avoid bans)
     source_backoff_max_minutes: int = 720
