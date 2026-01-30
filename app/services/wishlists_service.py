@@ -55,6 +55,169 @@ _YEAR_RANGE_PATTERNS = [
 ]
 
 
+# Aceita diretivas de preço (BRL) embutidas na query:
+#  - "entre 200k e 300k" / "200k-300k" / "de R$ 80.000 a R$ 120.000"
+#  - "a partir de 80k" / "até 120k"
+#  - "preço<=120k" / "valor >= 100000"
+_PRICE_RANGE_PATTERNS = [
+    re.compile(
+        r"\bentre\s+(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\s+e\s+(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bde\s+(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\s+a\s+(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b([0-9\.,]+\s*[kKmM]?)\s*(?:-|–|—)\s*([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+]
+
+_PRICE_MAX_PATTERNS = [
+    re.compile(
+        r"\b(?:ate|até)\s+(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:preco|preço|valor|price)\s*(?:<=|=<|≤)\s*(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+]
+
+_PRICE_MIN_PATTERNS = [
+    re.compile(
+        r"\b(?:a\s+partir\s+de|apartir\s+de|desde)\s+(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:preco|preço|valor|price)\s*(?:>=|=>|≥)\s*(?:r\$\s*)?([0-9\.,]+\s*[kKmM]?)\b",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _parse_human_money_to_int(raw: str) -> Optional[int]:
+    """Converte valores do tipo '200k', '1.2m', '120.000', 'R$ 80.000' em inteiro (centavos ignorados).
+
+    Regras:
+      - 'k' = mil, 'm' = milhão
+      - aceita '.' ou ',' como separadores (pt-BR)
+      - decimais são ignorados (tratamos como unidade inteira de BRL)
+    """
+    if not raw:
+        return None
+
+    s = raw.strip().lower()
+    s = s.replace("r$", "").strip()
+    s = re.sub(r"\s+", "", s)
+
+    mult = 1
+    if s.endswith("k"):
+        mult = 1_000
+        s = s[:-1]
+    elif s.endswith("m"):
+        mult = 1_000_000
+        s = s[:-1]
+
+    # normaliza: remove milhares e mantém decimal como '.' (se existir)
+    # Ex: '120.000' -> '120000'
+    # Ex: '1.2' -> '1.2'
+    # Ex: '1,2' -> '1.2'
+    s = s.replace(".", "") if re.search(r"\d\.\d{3}", s) else s
+    s = s.replace(",", ".")
+
+    # remove qualquer lixo restante
+    s = re.sub(r"[^0-9\.]+", "", s)
+    if not s:
+        return None
+
+    try:
+        num = float(s)
+    except Exception:
+        return None
+
+    if num <= 0:
+        return None
+
+    val = int(round(num * mult))
+    if val <= 0:
+        return None
+    return val
+
+
+def _is_plausible_price(v: int) -> bool:
+    # compatível com NUMERIC(12,2): valor absoluto < 10^10 (R$ 9.999.999.999)
+    return 1 <= v <= 9_999_999_999
+
+
+def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[int]]:
+    """Extrai diretivas de preço (min/max/range) e limpa a query.
+
+    Exemplos:
+      - "audi a6 entre 200k e 300k"  -> price_min=200000, price_max=300000
+      - "civic até 90k"             -> price_max=90000
+      - "preço>=80k"                -> price_min=80000
+      - "R$ 80.000 a R$ 120.000"    -> price_min=80000, price_max=120000
+    """
+    q = (query or "").strip()
+    if not q:
+        return q, None, None
+
+    pmin: Optional[int] = None
+    pmax: Optional[int] = None
+
+    # Range primeiro
+    for rx in _PRICE_RANGE_PATTERNS:
+        m = rx.search(q)
+        if not m:
+            continue
+
+        v1 = _parse_human_money_to_int(m.group(1) or "")
+        v2 = _parse_human_money_to_int(m.group(2) or "")
+        if not v1 or not v2:
+            continue
+        if not (_is_plausible_price(v1) and _is_plausible_price(v2)):
+            continue
+
+        pmin, pmax = (v1, v2) if v1 <= v2 else (v2, v1)
+        q = _clean_span(q, m.start(), m.end())
+        break
+
+    # Max
+    if pmax is None:
+        for rx in _PRICE_MAX_PATTERNS:
+            m = rx.search(q)
+            if not m:
+                continue
+            raw = (m.group(1) or "").strip()
+            v = _parse_human_money_to_int(raw)
+
+            # evita confundir "até 2020" com preço
+            if v is None and raw.isdigit() and len(raw) == 4:
+                continue
+
+            if v and _is_plausible_price(v):
+                pmax = v
+                q = _clean_span(q, m.start(), m.end())
+                break
+
+    # Min
+    if pmin is None:
+        for rx in _PRICE_MIN_PATTERNS:
+            m = rx.search(q)
+            if not m:
+                continue
+            raw = (m.group(1) or "").strip()
+            v = _parse_human_money_to_int(raw)
+            if v and _is_plausible_price(v):
+                pmin = v
+                q = _clean_span(q, m.start(), m.end())
+                break
+
+    return q, pmin, pmax
+
+
 def _clean_span(q: str, start: int, end: int) -> str:
     q = (q[:start] + " " + q[end:]).strip()
     q = re.sub(r"\s+", " ", q).strip()
@@ -223,7 +386,11 @@ def add_wishlist(db: Session, user_id, query: str):
     if count >= max_wishlists:
         return False, f"Limite atingido: {max_wishlists} wishlists no seu plano."
 
+    # 1) Ano (range/min/max)
     cleaned_query, year_min, year_max = _extract_year_directives(query)
+    # 2) Preço (range/min/max) — roda em cima da query já limpa de diretivas de ano
+    cleaned_query, price_min, price_max = _extract_price_directives(cleaned_query)
+
     cleaned_query = (cleaned_query or "").strip()
     if not cleaned_query:
         return False, "Query inválida. Ex: /wishlist_add audi a6 entre 2014 e 2020"
@@ -241,12 +408,17 @@ def add_wishlist(db: Session, user_id, query: str):
         return False, "Erro ao salvar wishlist. Tente novamente."
 
     
-    # auto-filtros de ano (quando houver diretivas)
+    # auto-filtros (quando houver diretivas)
     filters = []
     if year_min:
         filters.append(WishlistFilter(wishlist_id=w.id, field="year", operator="gte", value=str(year_min)))
     if year_max:
         filters.append(WishlistFilter(wishlist_id=w.id, field="year", operator="lte", value=str(year_max)))
+
+    if price_min:
+        filters.append(WishlistFilter(wishlist_id=w.id, field="price", operator="gte", value=str(price_min)))
+    if price_max:
+        filters.append(WishlistFilter(wishlist_id=w.id, field="price", operator="lte", value=str(price_max)))
 
     if filters:
         db.add_all(filters)

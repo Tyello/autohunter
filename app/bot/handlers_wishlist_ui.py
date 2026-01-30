@@ -118,13 +118,16 @@ async def cmd_wishlist_add_start(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(
         "Digite os termos da wishlist.\n"
         "Ex: civic si\n\n"
-        "Dica: você pode incluir diretivas de ano (cria filtros automáticos).
-"
-        "Ex: audi a6 entre 2014 e 2020
-"
-        "Ex: civic a partir de 1993
-"
-        "Ex: daihatsu cuore até 2005"
+        "Dica: você pode incluir diretivas que viram filtros automáticos (ano e preço).\n"
+        "Exemplos (ano):\n"
+        "• audi a6 entre 2014 e 2020\n"
+        "• civic a partir de 1993\n"
+        "• daihatsu cuore até 2005\n\n"
+        "Exemplos (preço - BRL):\n"
+        "• audi a6 entre 200k e 300k\n"
+        "• civic até 90k\n"
+        "• preço>=80k\n\n"
+        "Dica: /wishlist help mostra todas as opções"
     )
     return WADD_QUERY
 
