@@ -33,7 +33,8 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
     Kavak frequently blocks HTTP clients. We render with Playwright and then
     extract card links to /br/venda/...
     """
-    res = fetch_html_browser(search_url, ctx=ctx, timeout_ms=45000, wait_until="networkidle")
+    # networkidle can hang forever on modern apps; domcontentloaded is more stable.
+    res = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded")
     html_text = res.html
 
     doc = lxml_html.fromstring(html_text)

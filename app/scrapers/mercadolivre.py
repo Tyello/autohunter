@@ -16,6 +16,18 @@ from app.services.browser_fetcher import fetch_html_browser
 def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
     proxy = getattr(ctx, "proxy_server", None)
 
+    # 0) Playwright-first when explicitly forced via DB config
+    if settings.enable_playwright and getattr(ctx, "force_browser", False):
+        res = fetch_html_browser(
+            url,
+            ctx=ctx,
+            timeout_ms=timeout * 1000,
+            wait_until="domcontentloaded",
+            min_delay_ms=250,
+            max_delay_ms=900,
+        )
+        return res.html
+
     # 1) HTTP normal
     try:
         return fetch_html(
@@ -58,8 +70,8 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
     except Exception:
         pass
 
-    # 3) fallback browser (se habilitado)
-    if getattr(settings, "enable_playwright", False) and ctx is not None:
+    # 3) fallback browser (se habilitado via DB config)
+    if settings.enable_playwright and getattr(ctx, "browser_fallback_enabled", False):
         res = fetch_html_browser(
             url,
             ctx=ctx,

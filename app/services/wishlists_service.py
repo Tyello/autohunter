@@ -24,6 +24,10 @@ KNOWN_SOURCES = {
     "webmotors",
     "chavesnamao",
     "gogarage",
+    "icarros",
+    "mobiauto",
+    "kavak",
+    "facebook_marketplace",
 }
 
 # Aceita "até 2004" / "ate 2004" / "até ano 2004" / "ano<=2004"

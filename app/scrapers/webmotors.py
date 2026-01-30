@@ -1,19 +1,162 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urljoin, urlparse
 
+import requests
+
 from app.core.settings import settings
 from app.scrapers.base import FetchBlocked, fetch_json
 from app.scrapers.parsing import parse_brl_price
-from app.services.browser_fetcher import fetch_html_browser
+from app.services.browser_fetcher import fetch_html_browser, fetch_json_browser
 from app.sources.types import ScrapeContext
 
 
 WEBMOTORS_BASE = "https://www.webmotors.com.br"
 WEBMOTORS_SEARCH_API = "https://www.webmotors.com.br/api/search/car"
+WEBMOTORS_GENAI_API = "https://www.webmotors.com.br/api/gen-ai/search"
+
+# Cache leve em memória (Pi-friendly) para reduzir chamadas extras.
+_GENAI_CACHE: dict[str, tuple[float, str]] = {}
+_GENAI_LOCK = threading.Lock()
+
+_WARMUP_AT: dict[str, float] = {}
+_WARMUP_LOCK = threading.Lock()
+
+
+def _looks_like_bot_challenge(text: str) -> bool:
+    h = (text or "").lower()
+    return (
+        "captcha" in h
+        or "verify you are" in h
+        or "cloudflare" in h
+        or "incapsula" in h
+        or "datadome" in h
+        or "perimeterx" in h
+        or "access denied" in h
+    )
+
+
+def _extract_prompt_from_search_url(search_url: str) -> Optional[str]:
+    """Extrai o termo do parâmetro `search=` (quando build_url usa esse formato)."""
+    try:
+        p = urlparse(search_url)
+        qs = p.query or ""
+        m = re.search(r"(?:^|&)search=([^&]+)", qs)
+        if not m:
+            return None
+        raw = m.group(1)
+        # decode básico (sem depender de parse_qs para manter leve)
+        try:
+            from urllib.parse import unquote_plus
+
+            s = unquote_plus(raw)
+        except Exception:
+            s = raw
+        s = (s or "").strip()
+        return s if s else None
+    except Exception:
+        return None
+
+
+def _genai_resolve_stock_url(prompt: str, ctx: ScrapeContext) -> Optional[str]:
+    """Best-effort: usa /api/gen-ai/search para converter prompt em URL canônica.
+
+    Observação: esse endpoint pode ser protegido (cookies/PerimeterX). Então:
+    - falhas não quebram o scraper;
+    - cache (24h) evita bater de novo no mesmo prompt.
+    """
+    p = (prompt or "").strip()
+    if not p:
+        return None
+
+    now = time.time()
+    with _GENAI_LOCK:
+        cached = _GENAI_CACHE.get(p.lower())
+        if cached and (now - cached[0]) < 24 * 3600:
+            return cached[1] or None
+
+    headers = {
+        "Accept": "*/*",
+        "Content-Type": "application/json",
+        "Origin": WEBMOTORS_BASE,
+        "Referer": WEBMOTORS_BASE + "/",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    }
+
+    proxies = None
+    if ctx.proxy_server:
+        proxies = {"http": ctx.proxy_server, "https": ctx.proxy_server}
+
+    try:
+        resp = requests.post(
+            WEBMOTORS_GENAI_API,
+            json={"prompt": p},
+            headers=headers,
+            timeout=(6, 25),
+            proxies=proxies,
+        )
+
+        if resp.status_code in (403, 429):
+            raise FetchBlocked(resp.status_code, WEBMOTORS_GENAI_API, reason="http_status")
+        if resp.status_code == 200 and _looks_like_bot_challenge(resp.text or ""):
+            raise FetchBlocked(200, WEBMOTORS_GENAI_API, reason="bot_challenge")
+        resp.raise_for_status()
+
+        data = resp.json() if resp.text else {}
+        url = None
+        if isinstance(data, dict):
+            r = data.get("response")
+            if isinstance(r, dict):
+                url = r.get("url")
+        url = (url or "").strip() if isinstance(url, str) else None
+        if url and url.startswith("/"):
+            url = urljoin(WEBMOTORS_BASE, url)
+        if url and url.startswith("http"):
+            with _GENAI_LOCK:
+                _GENAI_CACHE[p.lower()] = (now, url)
+            return url
+    except FetchBlocked:
+        # Não propaga: é só um "upgrade" opcional de URL.
+        return None
+    except Exception:
+        return None
+
+    with _GENAI_LOCK:
+        _GENAI_CACHE[p.lower()] = (now, "")
+    return None
+
+
+def _maybe_warmup(ctx: ScrapeContext) -> None:
+    """Warmup leve para reduzir chance de challenge no primeiro hit.
+
+    Faz no máximo 1 vez a cada 6h por proxy.
+    """
+    key = (ctx.proxy_server or "__no_proxy__") + "::webmotors"
+    now = time.time()
+    with _WARMUP_LOCK:
+        last = _WARMUP_AT.get(key)
+        if last and (now - last) < 6 * 3600:
+            return
+        _WARMUP_AT[key] = now
+
+    try:
+        fetch_html_browser(
+            WEBMOTORS_BASE + "/",
+            ctx=ctx,
+            timeout_ms=18000,
+            wait_until="domcontentloaded",
+            min_delay_ms=60,
+            max_delay_ms=180,
+        )
+    except Exception:
+        # Warmup é best-effort.
+        pass
 
 
 def _to_decimal_brl(v: Any) -> Optional[Decimal]:
@@ -135,41 +278,100 @@ def _extract_results(payload: dict) -> List[dict]:
     return sr if isinstance(sr, list) else []
 
 
-def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
-    """Scraper HTTP-first para Webmotors.
+def _capture_search_payload_browser(page_url: str, ctx: ScrapeContext) -> dict:
+    """Abre a página de estoque no browser e captura o JSON do XHR /api/search/car."""
+    _maybe_warmup(ctx)
+    r = fetch_json_browser(
+        page_url,
+        ctx=ctx,
+        timeout_ms=35000,
+        wait_until="domcontentloaded",
+        capture_mode="url_contains:/api/search/car",
+        min_delay_ms=120,
+        max_delay_ms=520,
+    )
+    if not isinstance(r.data, dict):
+        raise RuntimeError("Browser JSON capture returned non-dict payload")
+    return r.data
 
-    Estratégia:
-    - Usa o endpoint interno XHR: GET /api/search/car
-    - Mantém fallback opcional via Playwright (desligado por padrão)
+
+def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
+    """Webmotors é tipicamente hostil a clients HTTP (BLOCKED com HTTP 200).
+
+    Estratégia (Pi-friendly, mas robusta):
+    - Browser-first (Playwright) capturando o JSON do XHR /api/search/car (sem parser pesado de HTML)
+    - Fallback HTTP apenas se Playwright estiver indisponível/desligado
+    - Best-effort: tenta converter `search=` em URL canônica via /api/gen-ai/search (cache 24h)
     """
 
-    url2 = _encode_url_param(search_url)
-    api_url = f"{WEBMOTORS_SEARCH_API}?url={url2}&actualPage=1&displayPerPage=60"
+    # 1) Tenta “upgrade” do URL para filtros canônicos (marca/modelo) quando vier no formato `search=`.
+    page_url = search_url
+    prompt = _extract_prompt_from_search_url(search_url)
+    if prompt:
+        upgraded = _genai_resolve_stock_url(prompt, ctx)
+        if upgraded:
+            page_url = upgraded
 
-    try:
-        payload = fetch_json(
-            api_url,
-            ctx=ctx,
-            referer=WEBMOTORS_BASE + "/",
-            proxy=ctx.proxy_server,
-            min_delay_ms=700,
-            max_delay_ms=2200,
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-            },
-        )
-    except FetchBlocked:
-        # Fallback controlado
-        if settings.enable_playwright and getattr(ctx, 'browser_fallback_enabled', False):
-            res = fetch_html_browser(search_url, ctx=ctx)
-            # Sem parser pesado aqui: se chegou ao browser, apenas abandona (ops decide).
-            # Retornamos vazio para não derrubar o job.
-            return []
-        raise
-    except Exception:
-        if settings.enable_playwright and getattr(ctx, 'browser_fallback_enabled', False):
-            return []
-        raise
+    # 2) Browser-first: captura do XHR /api/search/car
+    payload: Optional[dict] = None
+    browser_capture_error: Optional[Exception] = None
+    browser_capture_no_json = False
+
+    if bool(getattr(settings, "enable_playwright", False)):
+        try:
+            payload = _capture_search_payload_browser(page_url, ctx)
+        except FetchBlocked:
+            raise
+        except RuntimeError as e:
+            msg = str(e).lower()
+            if "playwright disabled for source" in msg:
+                # Gate/config desligado -> tenta HTTP
+                browser_capture_error = e
+            elif "no json response matched" in msg or "capture failed" in msg:
+                browser_capture_no_json = True
+                browser_capture_error = e
+            else:
+                browser_capture_error = e
+        except Exception as e:
+            browser_capture_error = e
+
+    # Se force_browser está ligado, falha cedo (não tenta HTTP).
+    if payload is None and getattr(ctx, "force_browser", False):
+        if browser_capture_no_json:
+            raise FetchBlocked(200, page_url, reason="no_json_capture")
+        if browser_capture_error:
+            raise browser_capture_error
+        raise RuntimeError("force_browser=true but Playwright is unavailable")
+
+    # 3) Fallback HTTP (quando Playwright indisponível/desligado ou falhou)
+    if payload is None:
+        url2 = _encode_url_param(page_url)
+        api_url = f"{WEBMOTORS_SEARCH_API}?url={url2}&actualPage=1&displayPerPage=60"
+        try:
+            payload_any = fetch_json(
+                api_url,
+                ctx=ctx,
+                referer=WEBMOTORS_BASE + "/",
+                proxy=ctx.proxy_server,
+                min_delay_ms=650,
+                max_delay_ms=2100,
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+            payload = payload_any if isinstance(payload_any, dict) else {}
+        except FetchBlocked:
+            # Se browser tentou mas não conseguiu capturar nada, marca como blocked (challenge/hard block).
+            if browser_capture_no_json and bool(getattr(settings, "enable_playwright", False)):
+                raise FetchBlocked(200, page_url, reason="no_json_capture")
+            raise
+        except Exception:
+            # Último recurso: quando browser fallback está habilitado, tenta só checar challenge e sair.
+            if bool(getattr(settings, "enable_playwright", False)) and getattr(ctx, "browser_fallback_enabled", False):
+                try:
+                    fetch_html_browser(page_url, ctx=ctx, timeout_ms=20000, wait_until="domcontentloaded")
+                except FetchBlocked:
+                    raise
+                return []
+            raise
 
     results = _extract_results(payload if isinstance(payload, dict) else {})
 

@@ -26,8 +26,9 @@ _sessions: dict[str, requests.Session] = {}
 _sessions_lock = threading.Lock()
 
 
-def _get_session(proxy: Optional[str]) -> requests.Session:
-    key = proxy or "__default__"
+def _get_session(proxy: Optional[str], session_key: Optional[str] = None) -> requests.Session:
+    sk = (session_key or "__global__").strip().lower() or "__global__"
+    key = f"{sk}::{proxy or '__default__'}"
     with _sessions_lock:
         sess = _sessions.get(key)
         if sess is None:
@@ -43,13 +44,18 @@ def get_session_stats() -> dict:
 
 retries = Retry(
     total=2,
-    backoff_factor=0.8,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"],
+    connect=2,
+    read=1,
+    status=2,
+    backoff_factor=0.6,
+    status_forcelist=[500, 502, 503, 504],
+    allowed_methods=["GET", "HEAD"],
     raise_on_status=False,
+    respect_retry_after_header=True,
 )
 
-adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+# Pool smaller to save RAM on Raspberry Pi; block instead of spawning sockets.
+adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=10, pool_block=True)
 
 
 def _init_session(sess: requests.Session) -> requests.Session:
@@ -85,23 +91,95 @@ def _ensure_session_fingerprint(sess: requests.Session) -> None:
 
 
 def _looks_like_bot_challenge(html: str) -> bool:
-    h = html.lower()
-    # Marcadores comuns de challenge / captcha.
-    return (
-        "captcha" in h
-        or "verify you are" in h
-        or "cloudflare" in h
-        or "incapsula" in h
-        or "datadome" in h
-        or "perimeterx" in h
-        or "access denied" in h
+    """Heuristic bot-challenge detection.
+
+    Important: avoid false positives.
+    Some legit pages contain the word "captcha" in scripts or footer.
+    We only treat it as a challenge when paired with stronger markers.
+    """
+    h = (html or "").lower()
+
+    cloudflare = (
+        "cloudflare" in h and ("just a moment" in h or "cf-chl" in h or "checking your browser" in h)
     )
+    incapsula = "incapsula" in h
+    datadome = "datadome" in h and ("captcha" in h or "geetest" in h or "challenge" in h)
+    perimeterx = "perimeterx" in h and ("captcha" in h or "px-captcha" in h or "challenge" in h)
+
+    # Captcha-only markers (more specific than plain "captcha")
+    captcha = (
+        "hcaptcha" in h
+        or "g-recaptcha" in h
+        or ("recaptcha" in h and ("sitekey" in h or "data-sitekey" in h))
+        or "data-sitekey" in h
+    )
+
+    access_denied = "access denied" in h
+    verify = "verify you are" in h or "are you human" in h
+
+    return bool(cloudflare or incapsula or datadome or perimeterx or captcha or access_denied or verify)
+
+def _resolve_proxy(proxy: Optional[str], ctx: Optional[object]) -> Optional[str]:
+    if proxy:
+        return proxy
+    if ctx is None:
+        return None
+    return getattr(ctx, 'proxy_server', None)
+
+def _resolve_session_key(ctx: Optional[object]) -> Optional[str]:
+    if ctx is None:
+        return None
+    src = getattr(ctx, 'source', None)
+    return str(src).strip().lower() if src else None
+
+def _resolve_delay(min_delay_ms: int, max_delay_ms: int, ctx: Optional[object]) -> tuple[int, int]:
+    if ctx is None:
+        return min_delay_ms, max_delay_ms
+    mn = getattr(ctx, 'http_min_delay_ms', None)
+    mx = getattr(ctx, 'http_max_delay_ms', None)
+    try:
+        mn_i = int(mn) if mn is not None else None
+    except Exception:
+        mn_i = None
+    try:
+        mx_i = int(mx) if mx is not None else None
+    except Exception:
+        mx_i = None
+    return (mn_i if mn_i is not None else min_delay_ms, mx_i if mx_i is not None else max_delay_ms)
+
+def _resolve_timeout(timeout: int | float | tuple[float, float], ctx: Optional[object]) -> tuple[float, float]:
+    # ctx overrides
+    if ctx is not None:
+        ct = getattr(ctx, 'http_connect_timeout_s', None)
+        rt = getattr(ctx, 'http_read_timeout_s', None)
+        tt = getattr(ctx, 'http_timeout_s', None)
+        try:
+            if ct is not None or rt is not None:
+                c = float(ct) if ct is not None else 5.0
+                r = float(rt) if rt is not None else (float(tt) if tt is not None else 20.0)
+                return (max(1.0, c), max(1.0, r))
+            if tt is not None:
+                t = float(tt)
+                c = min(5.0, t) if t >= 5.0 else t
+                return (max(1.0, c), max(1.0, t))
+        except Exception:
+            pass
+
+    # Back-compat: int timeout means read timeout; connect is capped.
+    if isinstance(timeout, (int, float)):
+        t = float(timeout)
+        c = min(5.0, t) if t >= 5.0 else t
+        return (max(1.0, c), max(1.0, t))
+    # already a tuple
+    return (float(timeout[0]), float(timeout[1]))
+
 
 
 def fetch_html(
     url: str,
     *,
-    timeout: int = 25,
+    timeout: int | float | tuple[float, float] = 25,
+    ctx: Optional[object] = None,
     headers: Optional[dict] = None,
     referer: Optional[str] = None,
     proxy: Optional[str] = None,
@@ -139,6 +217,7 @@ def fetch_html(
     resp = fetch_response(
         url,
         timeout=timeout,
+        ctx=ctx,
         headers=base_headers,
         proxy=proxy,
         min_delay_ms=min_delay_ms,
@@ -150,7 +229,8 @@ def fetch_html(
 def fetch_response(
     url: str,
     *,
-    timeout: int = 25,
+    timeout: int | float | tuple[float, float] = 25,
+    ctx: Optional[object] = None,
     headers: Optional[dict] = None,
     referer: Optional[str] = None,
     proxy: Optional[str] = None,
@@ -171,10 +251,12 @@ def fetch_response(
     """
 
     if not _skip_delay:
-        delay = random.randint(min_delay_ms, max_delay_ms) / 1000.0
+        mn, mx = _resolve_delay(min_delay_ms, max_delay_ms, ctx)
+        delay = random.randint(mn, mx) / 1000.0
         time.sleep(delay)
 
-    sess = _get_session(proxy)
+    proxy = _resolve_proxy(proxy, ctx)
+    sess = _get_session(proxy, _resolve_session_key(ctx))
     _ensure_session_fingerprint(sess)
 
     base_headers = {}
@@ -187,10 +269,12 @@ def fetch_response(
     if proxy:
         proxies = {"http": proxy, "https": proxy}
 
+    req_timeout = _resolve_timeout(timeout, ctx)
+
     resp = sess.get(
         url,
         headers=base_headers,
-        timeout=timeout,
+        timeout=req_timeout,
         allow_redirects=allow_redirects,
         proxies=proxies,
     )
@@ -210,7 +294,8 @@ def fetch_response(
 def fetch_json(
     url: str,
     *,
-    timeout: int = 25,
+    timeout: int | float | tuple[float, float] = 25,
+    ctx: Optional[object] = None,
     headers: Optional[dict] = None,
     referer: Optional[str] = None,
     proxy: Optional[str] = None,
@@ -241,6 +326,7 @@ def fetch_json(
     resp = fetch_response(
         url,
         timeout=timeout,
+        ctx=ctx,
         headers=base_headers,
         proxy=proxy,
         min_delay_ms=min_delay_ms,

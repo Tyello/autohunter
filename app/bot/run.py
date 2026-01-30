@@ -44,6 +44,21 @@ def main():
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN não configurado no .env")
 
+    # Smoke test Playwright no boot (somente alerta admins em caso de bug/config)
+    if bool(getattr(settings, "playwright_smoke_on_boot", True)):
+        try:
+            from app.services.playwright_smoke import assert_playwright_ready
+            from app.services.admin_programming_alerts import maybe_alert_programming_error
+            try:
+                assert_playwright_ready()
+            except Exception as e:
+                try:
+                    maybe_alert_programming_error("boot/playwright(bot)", e)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     app = Application.builder().token(token).post_init(_post_init).build()
 
     # core

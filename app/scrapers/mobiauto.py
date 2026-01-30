@@ -41,16 +41,21 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """
 
     html_text: str
-    try:
-        html_text = fetch_html(search_url, ctx=ctx, proxy=ctx.proxy_server, timeout=25)
-    except FetchBlocked:
-        if not settings.enable_playwright:
-            raise
-        html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=35000).html
-    except Exception:
-        if not settings.enable_playwright:
-            raise
-        html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=35000).html
+
+    # If ops decided to force browser (DB flag), skip the HTTP attempt.
+    if bool(getattr(ctx, "force_browser", False)):
+        html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+    else:
+        try:
+            html_text = fetch_html(search_url, ctx=ctx, proxy=ctx.proxy_server, timeout=25)
+        except FetchBlocked:
+            if not settings.enable_playwright:
+                raise
+            html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+        except Exception:
+            if not settings.enable_playwright:
+                raise
+            html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
 
     doc = lxml_html.fromstring(html_text)
     doc.make_links_absolute(search_url)

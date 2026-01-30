@@ -22,6 +22,7 @@ from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
+from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.sources.registry import list_sources
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
@@ -94,12 +95,20 @@ def _classify_error(source: str, err: str | None, http_status: Optional[int]) ->
     # BLOCKED: anti-bot
     if http_status in (403, 429):
         return ("BLOCKED", f"HTTP {http_status}", "browser warmup/cookies/fingerprint; ajustar backoff")
+    # Algumas fontes retornam challenge/captcha com HTTP 200 (ex.: Webmotors/PerimeterX)
+    if http_status == 200 and any(k in e_l for k in ("no_json_capture", "bot_challenge", "perimeterx", "px", "captcha", "cloudflare", "access denied")):
+        why = "HTTP 200 (anti-bot/challenge)"
+        if "no_json_capture" in e_l:
+            why = "HTTP 200 (no_json_capture)"
+        if "perimeterx" in e_l or "px" in e_l:
+            why = "HTTP 200 (PerimeterX)"
+        return ("BLOCKED", why, "browser warmup + cookies; validar captura do XHR; aumentar backoff de blocked; trocar proxy se persistir")
     if any(k in e_l for k in ("cloudflare", "captcha", "attention required")):
         return ("BLOCKED", "Cloudflare/captcha", "browser warmup + cookies; marcar como blocked no pipeline")
 
     # NET: rede/timeout/DNS/SSL
-    if any(k in e_l for k in ("timed out", "timeout", "connection", "dns", "name or service not known", "temporary failure", "ssl", "tls")):
-        return ("NET", "rede/timeout/dns/ssl", "verificar conectividade/proxy/DNS; aumentar timeout e retries")
+    if any(k in e_l for k in ("playwright worker timed out", "net::err_timed_out", "timed out", "timeout", "connection", "dns", "name or service not known", "temporary failure", "ssl", "tls")):
+        return ("NET", "rede/timeout/dns/ssl", "verificar conectividade/proxy/DNS; aumentar timeout e retries (browser/HTTP)")
 
     # DATA: endpoint/parser
     if http_status == 404 or ("404" in e_l and "not found" in e_l):
@@ -123,7 +132,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin health | /admin users | /admin errors")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin health | /admin users | /admin errors")
         return
 
     action = args[0].lower()
@@ -143,7 +152,15 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _admin_runall(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin health | /admin users | /admin errors")
+    if action == "matchdebug":
+        await _admin_matchdebug(update, args[1:])
+        return
+
+    if action == "requeue":
+        await _admin_requeue(update, args[1:])
+        return
+
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin health | /admin users | /admin errors")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     """Subcomandos para operar SourceConfig (DB)."""
@@ -329,6 +346,206 @@ def _chunk_lines(text: str, max_len: int = 3600) -> List[str]:
         out.append("\n".join(buf))
     return out
 
+
+async def _admin_matchdebug(update: Update, raw_args: List[str]):
+    """Debug de matching.
+
+    Uso:
+      /admin matchdebug <source> [N]
+    """
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
+        await update.message.reply_text("Sem permissão.")
+        return
+
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if not args:
+        await update.message.reply_text("Use: /admin matchdebug <source> [N]")
+        return
+
+    src = args[0].lower()
+    try:
+        n = int(args[1]) if len(args) > 1 else 8
+        n = max(3, min(n, 20))
+    except Exception:
+        n = 8
+
+    await update.message.reply_text(f"🔎 matchdebug iniciado… source={src} amostra={n}")
+
+    def _run_sync() -> str:
+        from app.services.wishlist_sources_service import allowed_sources_for_wishlists
+        from app.services.matching_service import explain_match
+
+        with SessionLocal() as db:
+            wls = (
+                db.query(Wishlist)
+                .options(joinedload(Wishlist.filters))
+                .filter(Wishlist.is_active == True)
+                .all()
+            )
+            allowed = allowed_sources_for_wishlists(db, wls)
+            eligible = [w for w in wls if src in (allowed.get(w.id) or set())]
+
+            listings = (
+                db.query(CarListing)
+                .filter(CarListing.source == src)
+                .order_by(CarListing.created_at.desc())
+                .limit(n)
+                .all()
+            )
+
+            lines: List[str] = []
+            lines.append("🔎 AutoHunter — matchdebug (admin)")
+            lines.append(f"UTC: {_fmt_dt(datetime.now(timezone.utc))}")
+            lines.append(f"Source: {src}")
+            lines.append(f"Wishlists elegíveis (ativas): {len(eligible)}")
+            lines.append(f"Amostra de anúncios (DB): {len(listings)}")
+            lines.append("")
+
+            if not eligible:
+                lines.append("⚠️ Nenhuma wishlist ativa aceita essa source.")
+                lines.append("Dica: se você tem filtros 'source eq', inclua também essa source.")
+                return "\n".join(lines)
+
+            if not listings:
+                lines.append("⚠️ Não há anúncios dessa source no DB ainda.")
+                lines.append("Dica: rode /admin runall " + src)
+                return "\n".join(lines)
+
+            lines.append("Wishlists (amostra):")
+            for w in eligible[:5]:
+                flt = [f"{f.field}{f.operator}{f.value}" for f in (getattr(w, "filters", []) or [])]
+                lines.append(f"- {str(w.id)[:8]}: '{(w.query or '')}' filters={','.join(flt) if flt else '-'}")
+            if len(eligible) > 5:
+                lines.append(f"… +{len(eligible)-5} outras")
+            lines.append("")
+
+            reason_totals: dict[str,int] = {}
+            matched_totals = 0
+            for l in listings:
+                for w in eligible:
+                    r = explain_match(w, l)
+                    reason_totals[r] = reason_totals.get(r, 0) + 1
+                    if r == "ok":
+                        matched_totals += 1
+
+            items = sorted(reason_totals.items(), key=lambda kv: kv[1], reverse=True)
+            lines.append(f"Matches na amostra (wishlist x listing): {matched_totals}")
+            lines.append("Top motivos:")
+            for (r, c) in items[:8]:
+                lines.append(f"- {r}: {c}")
+
+            lines.append("")
+            lines.append("Leitura rápida:")
+            lines.append("- text_terms: query tem termos que não existem no título/location (ex: 'a partir', anos).")
+            lines.append("- filter_price_missing: source não traz preço e você tem filtro de preço.")
+            lines.append("- filter_year_*: ano não está sendo extraído (título/URL) ou filtro está restrito.")
+            return "\n".join(lines)
+
+    try:
+        text = await asyncio.to_thread(_run_sync)
+    except Exception as e:
+        text = f"Erro no matchdebug: {_short(str(e), 240)}"
+    await update.message.reply_text(sanitize_for_telegram(text))
+
+async def _admin_requeue(update: Update, raw_args: List[str]):
+    """Reprocessa matching em anúncios já existentes e re-enfileira notifications ausentes.
+
+    Uso:
+      /admin requeue <source> [hours=24] [limit=200]
+    """
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
+        await update.message.reply_text("Sem permissão.")
+        return
+
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if not args:
+        await update.message.reply_text("Use: /admin requeue <source> [hours=24] [limit=200]")
+        return
+
+    src = args[0].lower()
+    try:
+        hours = int(args[1]) if len(args) > 1 else 24
+        hours = max(1, min(hours, 168))
+    except Exception:
+        hours = 24
+
+    try:
+        limit = int(args[2]) if len(args) > 2 else 200
+        limit = max(20, min(limit, 500))
+    except Exception:
+        limit = 200
+
+    await update.message.reply_text(f"🧪 requeue iniciado… source={src} hours={hours} limit={limit}")
+
+    def _run_sync() -> str:
+        from datetime import timedelta
+        from app.services.wishlist_sources_service import allowed_sources_for_wishlists
+        from app.services.matching_service import match_listings_for_wishlists
+        from app.services.notifications_queue_service import queue_notifications_for_matches
+
+        with SessionLocal() as db:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+            wls = (
+                db.query(Wishlist)
+                .options(joinedload(Wishlist.filters))
+                .filter(Wishlist.is_active == True)
+                .all()
+            )
+            allowed = allowed_sources_for_wishlists(db, wls)
+            eligible = [w for w in wls if src in (allowed.get(w.id) or set())]
+
+            listings = (
+                db.query(CarListing)
+                .filter(CarListing.source == src)
+                .filter(CarListing.created_at >= cutoff)
+                .order_by(CarListing.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+
+            lines: List[str] = []
+            lines.append("🧪 AutoHunter — requeue (admin)")
+            lines.append(f"UTC: {_fmt_dt(datetime.now(timezone.utc))}")
+            lines.append(f"Source: {src}")
+            lines.append(f"Cutoff: {_fmt_dt(cutoff)} (últimas {hours}h)")
+            lines.append(f"Wishlists elegíveis: {len(eligible)}")
+            lines.append(f"Listings no DB: {len(listings)}")
+            lines.append("")
+
+            if not eligible:
+                lines.append("⚠️ Nenhuma wishlist ativa aceita essa source.")
+                return "\n".join(lines)
+            if not listings:
+                lines.append("⚠️ Nenhum listing no DB nessa janela.")
+                return "\n".join(lines)
+
+            matches_by = match_listings_for_wishlists(eligible, listings)
+
+            total_matched = 0
+            total_queued = 0
+            for w in eligible:
+                matched_listings = matches_by.get(w.id) or []
+                m = len(matched_listings)
+                total_matched += m
+                if m:
+                    total_queued += int(queue_notifications_for_matches(db, w, matched_listings) or 0)
+
+            db.commit()
+            lines.append(f"Matched (wishlist x listing): {total_matched}")
+            lines.append(f"Queued (novas notifications): {total_queued}")
+            lines.append("")
+            lines.append("Obs: isso não 'reenvia' duplicado (dedupe por wishlist+listing).")
+            lines.append("Se queued > 0 e você não recebe, verifique o sender/scheduler.")
+            return "\n".join(lines)
+
+    try:
+        text = await asyncio.to_thread(_run_sync)
+    except Exception as e:
+        text = f"Erro no requeue: {_short(str(e), 240)}"
+    await update.message.reply_text(sanitize_for_telegram(text))
 
 async def _admin_runall(update: Update, raw_args: List[str]):
     """Força execução de sources habilitadas (admin-only) e devolve resumo no chat."""
@@ -578,8 +795,26 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 elif lr_cause.status == "blocked":
                     kind = "BLOCKED"
                     emoji = "🟠"
-                    why = f"HTTP {lr_cause.http_status or 403}"
-                    action = "browser warmup/cookies/fingerprint; ajustar backoff"
+                    hs = lr_cause.http_status or 403
+                    e_l = (lr_cause.error or "").lower()
+                    if hs == 200 and ("no_json_capture" in e_l):
+                        why = "HTTP 200 (no_json_capture)"
+                        action = (
+                            "browser warmup/cookies/fingerprint; verificar captura do XHR (/api/search/*); "
+                            "aumentar backoff de blocked; trocar proxy se persistir"
+                        )
+                    elif hs == 200 and ("perimeterx" in e_l or "_px" in e_l or " px" in e_l):
+                        why = "HTTP 200 (PerimeterX)"
+                        action = (
+                            "browser warmup + cookies; reduzir agressividade; proxy residencial/rotativo; "
+                            "aumentar backoff de blocked"
+                        )
+                    elif hs == 200:
+                        why = "HTTP 200 (anti-bot/challenge)"
+                        action = "browser warmup/cookies/fingerprint; checar challenge; aumentar backoff; avaliar proxy"
+                    else:
+                        why = f"HTTP {hs}"
+                        action = "browser warmup/cookies/fingerprint; ajustar backoff"
                 elif lr_cause.status == "skipped":
                     kind = "SKIP"
                     emoji = "⏳"

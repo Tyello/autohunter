@@ -127,3 +127,54 @@ def mark_error(
     st.last_payload = {"url": url, "backoff_minutes": minutes}
     db.add(st)
     return minutes
+
+
+def mark_bug(
+    db: Session,
+    source: str,
+    *,
+    error: str,
+    url: Optional[str] = None,
+) -> int:
+    """Marca erro de programação/init e retorna minutos de retry curto (sem backoff exponencial).
+
+    BUG != rede/bloqueio. Aqui não escalamos exponencialmente para evitar janelas longas.
+    """
+    st = _get_or_create_state(db, source)
+    st.last_run_at = _utcnow()
+    st.last_effective_run_at = st.last_run_at
+
+    # zera contadores para não escalar exponencialmente
+    st.consecutive_failures = 0
+    st.consecutive_blocks = 0
+
+    minutes = int(getattr(settings, "source_bug_retry_minutes", 2) or 2)
+    jitter_s = int(getattr(settings, "source_backoff_jitter_seconds", 20) or 20)
+
+    if minutes <= 0:
+        st.next_allowed_at = None
+    else:
+        st.next_allowed_at = _utcnow() + timedelta(minutes=minutes, seconds=jitter_s)
+
+    st.last_status = "error"
+    st.last_error = (error or "bug")[:800]
+    st.last_payload = {"url": url, "bug": True, "backoff_minutes": minutes}
+    db.add(st)
+    return minutes
+
+
+def clear_backoff(db: Session, source: str, *, clear_last_effective: bool = False) -> None:
+    """Manually clear backoff counters/state for a source.
+
+    Use when a source is stuck skipping due to a long backoff window.
+    """
+    st = _get_or_create_state(db, source)
+    st.next_allowed_at = None
+    st.consecutive_blocks = 0
+    st.consecutive_failures = 0
+    if clear_last_effective:
+        st.last_effective_run_at = None
+    st.last_status = "unpaused"
+    st.last_error = None
+    st.last_payload = {"unpaused": True, "clear_last_effective": bool(clear_last_effective)}
+    db.add(st)

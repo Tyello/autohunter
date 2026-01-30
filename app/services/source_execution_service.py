@@ -12,7 +12,7 @@ from app.models.source_state import SourceState
 from app.models.wishlist import Wishlist
 from app.scheduler.jobs import scrape_ingest_match_many
 from app.services.system_logs_service import log
-from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
+from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context
 from app.services.source_runs_service import record_run
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
@@ -171,6 +171,28 @@ def run_source_for_all_wishlists(
                 log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url})
                 db.commit()
                 return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url}
+
+            if bool(res.get("is_bug")):
+                err = res.get("error") or "scrape_failed"
+                minutes = mark_bug(db, src, error=err, url=res.get("url") or url)
+                record_run(
+                    db,
+                    source=src,
+                    kind=kind,
+                    status="error",
+                    url=res.get("url") or url,
+                    duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                    error=f"{err} (bug_retry={minutes}m)",
+                )
+                log(
+                    db,
+                    "error",
+                    component,
+                    "scrape_failed_bug",
+                    {"error": err, "url": res.get("url") or url, "retry_minutes": minutes},
+                )
+                db.commit()
+                return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url}
 
             err = res.get("error") or "scrape_failed"
             minutes = mark_error(

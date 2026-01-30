@@ -21,6 +21,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Campos: price | year | source\n"
         "Ops price/year: lt lte gt gte eq neq\n"
         "Ops source: eq neq\n"
+        "Fontes (source): mercadolivre | olx | webmotors | chavesnamao | gogarage | icarros | mobiauto | kavak | facebook_marketplace\n\n"
         "Exemplos:\n"
         "• /wishlist_filter_add 1 year lte 2005\n"
         "• /wishlist_filter_add 1 price lte 90000\n"

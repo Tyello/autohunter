@@ -54,6 +54,12 @@ register_source(
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="http",
+        default_extra={
+            "http_connect_timeout_s": 5,
+            "http_read_timeout_s": 20,
+            "http_min_delay_ms": 120,
+            "http_max_delay_ms": 420,
+        },
     )
 )
 
@@ -72,6 +78,13 @@ register_source(
         supports_wishlist_monitoring=True,
         # Primário via HTTP; pode cair para browser internamente quando bloqueado.
         fetch_mode="http",
+        default_browser_fallback_enabled=True,
+        default_extra={
+            "http_connect_timeout_s": 6,
+            "http_read_timeout_s": 22,
+            "http_min_delay_ms": 600,
+            "http_max_delay_ms": 1500,
+        },
     )
 )
 
@@ -88,11 +101,18 @@ register_source(
         rate_limit_seconds_setting="rate_limit_chavesnamao_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
+        default_extra={
+            "http_connect_timeout_s": 5,
+            "http_read_timeout_s": 20,
+            "http_min_delay_ms": 180,
+            "http_max_delay_ms": 650,
+        },
     )
 )
 
 
-# Webmotors: HTTP-first via endpoint XHR (sem Playwright como padrão).
+# Webmotors: tipicamente bloqueia HTTP (challenge com HTTP 200).
+# Browser-first capturando XHR JSON (Playwright) é o caminho mais estável.
 register_source(
     SourcePlugin(
         name="webmotors",
@@ -104,7 +124,10 @@ register_source(
         rate_limit_seconds_setting="rate_limit_webmotors_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="http",
+        fetch_mode="browser",
+        default_sched_minutes=90,
+        default_browser_fallback_enabled=True,
+        default_force_browser=True,
     )
 )
 
@@ -135,8 +158,9 @@ register_source(
         cooldown_minutes_setting="icarros_cooldown_minutes",
         rate_limit_seconds_setting="rate_limit_icarros_seconds",
         supports_manual_search=False,
-        supports_wishlist_monitoring=False,
-        fetch_mode="http",
+        supports_wishlist_monitoring=True,
+        fetch_mode="browser",
+        default_force_browser=True,
     )
 )
 
@@ -150,8 +174,9 @@ register_source(
         cooldown_minutes_setting="mobiauto_cooldown_minutes",
         rate_limit_seconds_setting="rate_limit_mobiauto_seconds",
         supports_manual_search=False,
-        supports_wishlist_monitoring=False,
+        supports_wishlist_monitoring=True,
         fetch_mode="http",
+        default_browser_fallback_enabled=True,
     )
 )
 
@@ -165,8 +190,9 @@ register_source(
         cooldown_minutes_setting="kavak_cooldown_minutes",
         rate_limit_seconds_setting="rate_limit_kavak_seconds",
         supports_manual_search=False,
-        supports_wishlist_monitoring=False,
-        fetch_mode="http",
+        supports_wishlist_monitoring=True,
+        fetch_mode="browser",
+        default_force_browser=True,
     )
 )
 
@@ -180,7 +206,9 @@ register_source(
         cooldown_minutes_setting="facebook_marketplace_cooldown_minutes",
         rate_limit_seconds_setting="rate_limit_facebook_marketplace_seconds",
         supports_manual_search=False,
-        supports_wishlist_monitoring=False,
+        supports_wishlist_monitoring=True,
         fetch_mode="browser",
+        default_force_browser=True,
+        default_cooldown_minutes=180,
     )
 )

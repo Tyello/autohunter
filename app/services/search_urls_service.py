@@ -31,6 +31,7 @@ _MODEL_TO_BRAND = {
     "cr-v": "honda",
     "golf": "volkswagen",
     "jetta": "volkswagen",
+    "virtus": "volkswagen",
     "gol": "volkswagen",
     "polo": "volkswagen",
     "up": "volkswagen",
@@ -53,6 +54,13 @@ _MODEL_TO_BRAND = {
     "fiesta": "ford",
     "focus": "ford",
     "ecosport": "ford",
+
+    # JDM / entusiastas (recall alto em buscas curtas)
+    "lancer": "mitsubishi",
+    "impreza": "subaru",
+    "wrx": "subaru",
+    "brz": "subaru",
+    "supra": "toyota",
 }
 
 
@@ -102,9 +110,57 @@ def olx_url(query: str) -> str:
 
 
 def webmotors_url(query: str) -> str:
-    # Webmotors é SPA e a busca real acontece via endpoints internos.
-    # Para MVP, guardamos o URL de estoque (ainda útil para debug / futura implementação).
-    q = quote_plus(query.strip())
+    """Webmotors URL builder.
+
+    - Mantém compatibilidade com `...&search=`
+    - Quando possível, tenta construir filtros canônicos (`marca1`/`modelo1`) a partir do texto.
+      Isso reduz ruído e melhora recall/precisão.
+    """
+
+    raw = (query or "").strip()
+    q = quote_plus(raw)
+
+    brand, model = _infer_brand_model(raw)
+    if brand and model:
+        def _brand_display(b: str) -> str:
+            b = (b or "").strip().lower()
+            if b in ("vw", "volkswagen"):
+                return "Volkswagen"
+            if b in ("gm", "chevrolet"):
+                return "Chevrolet"
+            if b == "bmw":
+                return "BMW"
+            if b == "kia":
+                return "Kia"
+            return b.capitalize()
+
+        def _model_display(m: str) -> str:
+            m = (m or "").strip().lower()
+            # alguns modelos usam hífen e siglas
+            if m in ("hr-v", "cr-v", "mx-5", "gt-r"):
+                return m.upper()
+            if m in ("brz", "wrx", "sti", "gti"):
+                return m.upper()
+            # padrão: título (Virtus, Civic, Golf)
+            return m.replace("-", " ").title()
+
+        b_disp = quote_plus(_brand_display(brand))
+        m_disp = quote_plus(_model_display(model))
+
+        # tenta preservar “resto” do prompt como search (ex.: "virtus gts")
+        rest = ""
+        slug = _slugify(raw)
+        parts = [p for p in slug.split("-") if p]
+        if parts:
+            # se o usuário não começou pela marca, a inferência normalmente pega o primeiro token como modelo
+            if parts[0] == model:
+                rest = " ".join(parts[1:]).strip()
+
+        url = f"https://www.webmotors.com.br/carros/estoque?tipoveiculo=carros&marca1={b_disp}&modelo1={m_disp}"
+        if rest:
+            url += f"&search={quote_plus(rest)}"
+        return url
+
     return f"https://www.webmotors.com.br/carros/estoque?tipoveiculo=carros&search={q}"
 
 

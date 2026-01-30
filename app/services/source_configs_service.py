@@ -98,39 +98,41 @@ def ensure_source_configs(db: Session) -> int:
     return created
 
 
-def set_source_field(db: Session, source: str, field: str, value: str) -> UpdateResult:
-    src = source.strip().lower()
-    key = _FIELD_ALIASES.get(field.strip().lower())
+def set_source_field(db: Session, source: str, field: str, value: str) -> SourceConfig:
+    """Set a single field for a source config row and return the updated row (not committed).
+
+    This function is used by /admin sources <field> ... commands.
+    It raises ValueError for invalid input so handlers can show a clean message.
+    """
+    src = (source or "").strip().lower()
+    key = _FIELD_ALIASES.get((field or "").strip().lower())
     if not key:
-        return UpdateResult(False, f"campo inválido: {field}")
+        raise ValueError(f"campo inválido: {field}")
 
     row = get_source_config(db, src)
     if not row:
-        return UpdateResult(False, f"source não encontrada: {src}")
+        raise ValueError(f"source não encontrada: {src}")
 
     if key in ("is_enabled", "browser_fallback_enabled", "force_browser"):
         b = _coerce_bool(value)
         if b is None:
-            return UpdateResult(False, f"valor boolean inválido: {value}")
+            raise ValueError(f"valor boolean inválido: {value}")
         setattr(row, key, b)
-        return UpdateResult(True)
+        return row
 
     if key in ("sched_minutes", "cooldown_minutes", "rate_limit_seconds"):
         i = _coerce_int(value)
         if i is None or i < 0:
-            return UpdateResult(False, f"valor int inválido: {value}")
+            raise ValueError(f"valor int inválido: {value}")
         setattr(row, key, i)
-        return UpdateResult(True)
+        return row
 
     if key == "proxy_server":
         v = (value or "").strip()
         setattr(row, key, v if v else None)
-        return UpdateResult(True)
+        return row
 
-    return UpdateResult(False, f"campo não suportado: {field}")
-
-
-
+    raise ValueError(f"campo não suportado: {field}")
 def reset_source_config(db: Session, source: str) -> SourceConfig:
     """Reset a single source config to plugin defaults (DB is source of truth).
 

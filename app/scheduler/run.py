@@ -1,211 +1,52 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
-from app.core.settings import settings
-
-from app.db.session import SessionLocal
-
-import time
-import random
 import threading
 
-from app.services.system_logs_service import log
-from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
-from app.services.source_runs_service import record_run
+from app.core.settings import settings
+from app.db.session import SessionLocal
 from app.sources import list_sources
-from app.services.wishlist_sources_service import allowed_sources_for_wishlists
-from app.services.source_proxy_service import get_source_proxy_server
-from app.services.source_rate_limit_service import get_source_rate_limit_seconds
-from app.services.source_configs_service import build_scrape_context
-from app.sources.types import ScrapeContext
-
-from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
 from app.scheduler.heartbeat import heartbeat
 
-from app.models.wishlist import Wishlist
-
-from sqlalchemy.orm import joinedload
+from app.services.system_logs_service import log
+from app.services.source_backoff_service import mark_skipped
+from app.services.source_runs_service import record_run
+from app.services.source_execution_service import run_source_for_all_wishlists as _exec_source_for_all_wishlists
 
 
 # Hard cap parallel scraping jobs (protects Raspberry Pi CPU/RAM and reduces ban risk)
-_MAX_PAR = int(getattr(settings, 'scheduler_max_parallel_sources', 1) or 1)
+_MAX_PAR = int(getattr(settings, "scheduler_max_parallel_sources", 1) or 1)
 _SOURCE_JOBS_SEM = threading.BoundedSemaphore(_MAX_PAR if _MAX_PAR > 0 else 1)
 
 
-
 def job_run_source_for_all_wishlists(source_name: str):
+    """Scheduler tick for one source (DB-driven).
+
+    Cadence and operational config come from DB:
+    - source_configs: enable/schedule/cooldown/rate-limit/proxy/browser flags
+    - source_states: backoff and last_effective_run_at (due checks)
+    """
     # Non-blocking: if another source is running, skip this tick.
     if not _SOURCE_JOBS_SEM.acquire(blocking=False):
         with SessionLocal() as db:
-            src = (source_name or '').lower().strip()
-            mark_skipped(db, src, 'parallel_limit')
-            record_run(db, source=src, kind='scheduler', status='skipped', payload={'reason': 'parallel_limit'})
+            src = (source_name or "").lower().strip()
+            mark_skipped(db, src, "parallel_limit")
+            record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "parallel_limit"})
             db.commit()
         return
+
     try:
         with SessionLocal() as db:
             try:
-                component = f"scheduler_{source_name}"
-                log(db, "info", component, "job tick")
-
-                # Eager load filters para evitar N+1 queries no matching.
-                wishlists = (
-                    db.query(Wishlist)
-                    .options(joinedload(Wishlist.filters))
-                    .filter(Wishlist.is_active == True)
-                    .all()
-                )
-                if not wishlists:
-                    log(db, "info", component, "no active wishlists")
-                    db.commit()
-                    return
-
-                plugin = next((p for p in list_sources() if p.name == source_name), None)
-                if plugin is None:
-                    log(db, "error", component, "unknown_source", {"source": source_name})
-                    db.commit()
-                    return
-
-                # Global checks (per-source)
-                # Browser sources require Playwright
-                if plugin.fetch_mode == 'browser' and not settings.enable_playwright:
-                    mark_skipped(db, plugin.name, 'playwright_off')
-                    record_run(db, source=plugin.name, kind='scheduler', status='skipped', payload={'reason': 'playwright_off'})
-                    log(db, 'warn', component, 'playwright_off')
-                    db.commit()
-                    return
-
-
-                if plugin.enabled_setting and not getattr(settings, plugin.enabled_setting, False):
-                    mark_skipped(db, plugin.name, "disabled", {"enabled_setting": plugin.enabled_setting})
-                    record_run(db, source=plugin.name, kind="scheduler", status="skipped", payload={"reason": "disabled"})
-                    db.commit()
-                    return
-
-                cooldown = 0
-                if plugin.cooldown_minutes_setting:
-                    cooldown = int(getattr(settings, plugin.cooldown_minutes_setting, 0) or 0)
-
-                avail = is_source_allowed(db, plugin.name)
-                if not avail.is_allowed:
-                    mark_skipped(db, plugin.name, "backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
-                    record_run(db, source=plugin.name, kind="scheduler", status="skipped", payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
-                    log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
-                    db.commit()
-                    return
-
-                if plugin.scrape is None:
-                    mark_skipped(db, plugin.name, "not_implemented")
-                    record_run(db, source=plugin.name, kind="scheduler", status="skipped", payload={"reason": "not_implemented"})
-                    log(db, "warn", component, "not_implemented")
-                    db.commit()
-                    return
-
-                t0 = time.perf_counter()
-                total_found = 0
-                total_inserted = 0
-                total_matched = 0
-                total_queued = 0
-                ran_any = False
-                final_status = "success"
-                final_http_status = None
-                final_error = None
-
-                # Collapse duplicate work: many users can share the same query/URL per source.
-                # We scrape+ingest once per unique URL, then match/queue for all wishlists in that group.
-                groups: dict[str, dict] = {}
-                allowed_map = allowed_sources_for_wishlists(db, wishlists)
-                skipped_filtered = 0
-                for w in wishlists:
-                    sources = allowed_map.get(w.id) or set()
-                    if plugin.name not in sources:
-                        skipped_filtered += 1
-                        continue
-
-                    url = plugin.build_url(w.query)
-                    g = groups.get(url)
-                    if g is None:
-                        groups[url] = {"query": w.query, "wishlists": [w]}
-                    else:
-                        g["wishlists"].append(w)
-
-                if skipped_filtered:
-                    log(db, "info", component, "filtered_out", {"source": plugin.name, "count": skipped_filtered})
-
-                for url, g in groups.items():
-                    log(db, "info", component, "job_started_group", {"query": g.get("query"), "url": url, "wishlists": len(g.get("wishlists") or [])})
-
-                    ran_any = True
-                    ctx = build_scrape_context(db, plugin.name)
-                    res = scrape_ingest_match_many(db, component, plugin.scrape, url, ctx=ctx, wishlists=g.get("wishlists") or [])
-
-                    if res.get("ok") is True:
-                        total_found += int(res.get("found") or 0)
-                        total_inserted += int(res.get("inserted") or 0)
-                        total_matched += int(res.get("matched") or 0)
-                        total_queued += int(res.get("queued") or 0)
-                    else:
-                        reason = res.get("reason")
-                        if reason == "blocked":
-                            final_status = "blocked"
-                            final_http_status = res.get("status_code")
-                            minutes = mark_blocked(db, plugin.name, base_cooldown_minutes=max(cooldown, 1), http_status=final_http_status, url=res.get("url"))
-                            final_error = f"blocked(backoff={minutes}m)"
-                            log(db, "warn", component, "backoff_applied", {"source": plugin.name, "minutes": minutes})
-                            break
-                        else:
-                            final_status = "error"
-                            final_error = res.get("error") or "scrape_failed"
-                            minutes = mark_error(db, plugin.name, base_cooldown_minutes=max(cooldown, 1), error=final_error, url=res.get("url"))
-                            log(db, "error", component, "backoff_applied", {"source": plugin.name, "minutes": minutes, "error": final_error})
-                            break
-
-                    log(db, "info", component, "job_finished_group", {"query": g.get("query"), "url": url, "result": res})
-
-                    # Evita "rajada" no mesmo tick do scheduler (sinal forte de bot em fontes sensíveis).
-                    # Para OLX especificamente, adiciona um pacing humano entre grupos.
-                    if plugin.name == "olx":
-                        time.sleep(random.randint(8, 25))
-
-                duration_ms = int((time.perf_counter() - t0) * 1000)
-
-                if not ran_any:
-                    final_status = "skipped"
-                    mark_skipped(db, plugin.name, "no_work")
-                elif final_status == "success":
-                    mark_success(db, plugin.name, rate_limit_seconds=get_source_rate_limit_seconds(plugin.name, db), payload={
-                        "found": total_found,
-                        "inserted": total_inserted,
-                        "matched": total_matched,
-                        "queued": total_queued,
-                        "duration_ms": duration_ms,
-                    })
-
-                record_run(
-                    db,
-                    source=plugin.name,
-                    kind="scheduler",
-                    status=final_status,
-                    duration_ms=duration_ms,
-                    http_status=final_http_status,
-                    items_found=total_found if ran_any else None,
-                    items_ingested=total_inserted if ran_any else None,
-                    items_matched=total_matched if ran_any else None,
-                    notifications_queued=total_queued if ran_any else None,
-                    error=final_error,
-                )
-
+                _exec_source_for_all_wishlists(db, source_name, kind="scheduler", force=False, ignore_backoff=False)
                 db.commit()
-
-
             except Exception as e:
+                # last-resort guard: don't let the scheduler thread die
                 try:
-                    db.rollback()
+                    log(db, "error", f"scheduler_{source_name}", "tick_failed", {"err": str(e)[:300]})
+                    db.commit()
                 except Exception:
                     pass
-                log(db, "error", f"scheduler_{source_name}", "job failed", {"error": str(e)})
-                db.commit()
-
     finally:
         try:
             _SOURCE_JOBS_SEM.release()
@@ -224,25 +65,41 @@ def start_scheduler() -> BackgroundScheduler:
         },
     )
 
-    # Pluggable sources: schedule every registered plugin that declares an interval.
-    # This keeps scaling sources O(1): add plugin -> scheduler picks it up.
+    # Smoke test Playwright no boot (falha cedo em caso de bug/config/permissões)
+    if bool(getattr(settings, "playwright_smoke_on_boot", True)):
+        try:
+            from app.services.playwright_smoke import assert_playwright_ready
+            from app.services.admin_programming_alerts import maybe_alert_programming_error
+
+            with SessionLocal() as db:
+                try:
+                    assert_playwright_ready()
+                except Exception as e:
+                    log(db, "error", "boot", "playwright_smoke_failed", {"err": f"{type(e).__name__}: {e}"})
+                    db.commit()
+                    try:
+                        maybe_alert_programming_error("boot/playwright", e)
+                    except Exception:
+                        pass
+        except Exception:
+            # nunca deixa o scheduler morrer por causa do smoke
+            pass
+
+    # Pluggable sources: schedule a small "tick" for each source.
+    # Real cadence is DB-driven (source_configs.sched_minutes + source_states.last_effective_run_at).
+    tick_seconds = int(getattr(settings, "scheduler_tick_seconds", 60) or 60)
+    tick_seconds = max(15, min(tick_seconds, 300))  # clamp: 15s..5m
+
     for plugin in list_sources():
         if not plugin.supports_wishlist_monitoring:
             continue
-        if not plugin.sched_minutes_setting:
-            continue
-
-        minutes = int(getattr(settings, plugin.sched_minutes_setting, 0) or 0)
-        if minutes <= 0:
-            # allow disabling a job by setting interval to 0
-            continue
-
-        job_id = f"{plugin.name}_job"
+        job_id = f"{plugin.name}_tick"
         sched.add_job(
             lambda n=plugin.name: job_run_source_for_all_wishlists(n),
             "interval",
-            minutes=minutes,
+            seconds=tick_seconds,
             id=job_id,
+            replace_existing=True,
         )
 
     def _job_heartbeat():
@@ -264,15 +121,14 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True
     )
 
-
     # Admin monitor (erro/bloqueio -> alerta no Telegram)
-    if getattr(settings, 'admin_monitor_enabled', True):
+    if getattr(settings, "admin_monitor_enabled", True):
         from app.scheduler.admin_monitor_job import job_admin_monitor
         sched.add_job(
             job_admin_monitor,
-            'interval',
-            seconds=int(getattr(settings, 'admin_monitor_seconds', 60) or 60),
-            id='admin_monitor',
+            "interval",
+            seconds=int(getattr(settings, "admin_monitor_seconds", 60) or 60),
+            id="admin_monitor",
             replace_existing=True,
         )
 
@@ -284,6 +140,14 @@ def start_scheduler() -> BackgroundScheduler:
         hours=24,
         id="cleanup_notifications",
     )
+
+    # Warm up Playwright worker thread (cheap) to reduce first-cold-start latency.
+    if getattr(settings, "enable_playwright", False) and getattr(settings, "playwright_warmup_on_start", False):
+        try:
+            from app.services.playwright_pool import get_playwright_pool
+            get_playwright_pool().start()
+        except Exception:
+            pass
 
     sched.start()
     return sched

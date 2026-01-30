@@ -46,6 +46,8 @@ class _PlaywrightCore:
         self._p = None
         self._browsers: Dict[str, Any] = {}                # proxy_key -> Browser
         self._contexts: Dict[Tuple[str, str], Any] = {}    # (proxy_key, source) -> BrowserContext
+        self._ctx_last_used: Dict[Tuple[str, str], float] = {}
+        self._evicted_contexts: int = 0
 
     def start(self) -> None:
         if self._booted:
@@ -85,11 +87,19 @@ class _PlaywrightCore:
         self._booted = False
 
     def stats(self) -> dict:
+        # evict idle contexts before reporting
+        try:
+            self._cleanup_contexts()
+        except Exception:
+            pass
         return {
             "started": self._booted,
             "browsers": len(self._browsers),
             "contexts": len(self._contexts),
             "proxy_keys": list(self._browsers.keys())[:10],
+            "evicted_contexts": self._evicted_contexts,
+            "max_contexts": int(getattr(settings, 'playwright_max_contexts', 0) or 0),
+            "context_ttl_s": int(getattr(settings, 'playwright_context_ttl_seconds', 0) or 0),
         }
 
     def _storage_path(self, proxy_key: str, source: str) -> str:
@@ -99,7 +109,17 @@ class _PlaywrightCore:
         safe_source = source.replace(":", "_").replace("/", "_")
         return str(base / f"storage_{safe_source}__{safe_proxy}.json")
 
-    def _block_heavy_resources(self, page: Any) -> None:
+    def _block_heavy_resources(self, page: Any, *, source: str) -> None:
+        """Block heavy resources to reduce RAM/CPU on small machines.
+
+        IMPORTANT: Some anti-bot challenges rely on fetching images or other
+        resources. For a small allowlist of "hostile" sources we do NOT block.
+        """
+        src = (source or "").strip().lower()
+        allow_heavy = src in {"mobiauto", "facebook_marketplace"}
+        if allow_heavy:
+            return
+
         # Best-effort: some page impls might not support route
         try:
             def _route(route):
@@ -156,7 +176,18 @@ class _PlaywrightCore:
     def _launch_browser(self, *, proxy_server: Optional[str], headless: bool) -> Any:
         assert self._p is not None
 
-        launch_kwargs: Dict[str, Any] = {"headless": headless}
+        # Anti-detection hardening:
+        # - Disable AutomationControlled blink feature.
+        # - Remove Playwright's default "--enable-automation" flag.
+        # Note: this is best-effort; some sites will still require proxy/cookies.
+        launch_kwargs: Dict[str, Any] = {
+            "headless": headless,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+            ],
+            # Remove the automation flag when possible
+            "ignore_default_args": ["--enable-automation"],
+        }
         if proxy_server:
             launch_kwargs["proxy"] = {"server": proxy_server}
 
@@ -216,11 +247,14 @@ class _PlaywrightCore:
         return b
 
     def _get_or_create_context(self, *, proxy_server: Optional[str], source: str) -> Any:
+        # keep memory stable
+        self._cleanup_contexts()
         src = (source or "unknown").lower().strip() or "unknown"
         proxy_key = proxy_server or "__no_proxy__"
         key = (proxy_key, src)
         ctx = self._contexts.get(key)
         if ctx is not None:
+            self._ctx_last_used[key] = time.time()
             return ctx
 
         browser = self._get_or_create_browser(proxy_server)
@@ -243,19 +277,92 @@ class _PlaywrightCore:
             storage_state=storage_state,
         )
 
-        # Block heavy resources by default (speed + memory)
+        # Basic stealth: hide webdriver and add minimal chrome object.
+        # This helps with simple headless detections.
         try:
-            def _route(route):
-                rtype = route.request.resource_type
-                if rtype in ("image", "media", "font"):
-                    return route.abort()
-                return route.continue_()
-            ctx.route("**/*", _route)
+            ctx.add_init_script(
+                """
+                // Hide webdriver
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                // Minimal chrome object
+                window.chrome = window.chrome || { runtime: {} };
+                // Languages
+                Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR','pt','en-US','en'] });
+                """
+            )
+        except Exception:
+            pass
+
+        # Block heavy resources by default (speed + memory).
+        # BUT: for some anti-bot challenges, blocking images/fonts can prevent the
+        # challenge from completing. Keep them for these sources.
+        try:
+            heavy_ok_sources = {"mobiauto", "facebook_marketplace"}
+            if src not in heavy_ok_sources:
+                def _route(route):
+                    rtype = route.request.resource_type
+                    if rtype in ("image", "media", "font"):
+                        return route.abort()
+                    return route.continue_()
+                ctx.route("**/*", _route)
         except Exception:
             pass
 
         self._contexts[key] = ctx
+        self._ctx_last_used[key] = time.time()
         return ctx
+
+
+
+    def _cleanup_contexts(self) -> None:
+        """Evict idle contexts to keep RAM stable on small machines."""
+        ttl = int(getattr(settings, "playwright_context_ttl_seconds", 0) or 0)
+        max_ctx = int(getattr(settings, "playwright_max_contexts", 0) or 0)
+        now = time.time()
+
+        # TTL eviction
+        if ttl > 0:
+            stale = []
+            for k, ts in list(self._ctx_last_used.items()):
+                if (now - float(ts)) > ttl:
+                    stale.append(k)
+            for k in stale:
+                ctx = self._contexts.pop(k, None)
+                self._ctx_last_used.pop(k, None)
+                if ctx is not None:
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+                    self._evicted_contexts += 1
+
+        # Hard cap eviction (oldest first)
+        if max_ctx > 0 and len(self._contexts) > max_ctx:
+            ordered = sorted(self._ctx_last_used.items(), key=lambda kv: kv[1])  # oldest first
+            for k, _ts in ordered:
+                if len(self._contexts) <= max_ctx:
+                    break
+                ctx = self._contexts.pop(k, None)
+                self._ctx_last_used.pop(k, None)
+                if ctx is not None:
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+                    self._evicted_contexts += 1
+
+        # Close browsers that no longer have contexts
+        try:
+            alive_proxy_keys = {proxy_key for (proxy_key, _src) in self._contexts.keys()}
+            for proxy_key, br in list(self._browsers.items()):
+                if proxy_key not in alive_proxy_keys:
+                    try:
+                        br.close()
+                    except Exception:
+                        pass
+                    self._browsers.pop(proxy_key, None)
+        except Exception:
+            pass
 
     def fetch(
         self,
@@ -273,12 +380,37 @@ class _PlaywrightCore:
         ctx = self._get_or_create_context(proxy_server=proxy_server, source=source)
 
         page = ctx.new_page()
-        self._block_heavy_resources(page)
+        # Context-level routing is preferred, but keep this as a safety net.
+        try:
+            self._block_heavy_resources(page, source=source)
+        except Exception:
+            pass
         try:
             page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-            page.wait_for_timeout(500)
-            html = page.content()
+
+            # Give JS challenges time to complete (Cloudflare/PerimeterX/DataDome patterns).
+            # We re-check page content a few times before giving up.
+            # This dramatically reduces false "blocked" when the challenge auto-solves.
+            html = ""
             final_url = page.url
+            for i in range(0, 10):
+                page.wait_for_timeout(800 if i == 0 else 1200)
+                html = page.content()
+                final_url = page.url
+                h = (html or "").lower()
+                is_challenge = (
+                    "captcha" in h
+                    or "verify you are" in h
+                    or "cloudflare" in h
+                    or "incapsula" in h
+                    or "datadome" in h
+                    or "perimeterx" in h
+                    or "access denied" in h
+                    or "just a moment" in h
+                )
+                if not is_challenge:
+                    break
+            # done
         finally:
             try:
                 page.close()
@@ -351,8 +483,9 @@ class _PlaywrightCore:
         pred = json_url_predicate or _pred_from_capture_mode(capture_mode)
 
         page = ctx.new_page()
-        self._block_heavy_resources(page)
+        self._block_heavy_resources(page, source=source)
 
+        final_url = url
         try:
             with page.expect_response(lambda r: pred(r.url, r.headers, r.status), timeout=timeout_ms) as resp_info:
                 page.goto(url, wait_until=wait_until, timeout=timeout_ms)

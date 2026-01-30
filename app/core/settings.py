@@ -44,6 +44,34 @@ class Settings(BaseSettings):
     playwright_cache_ttl_seconds: int = 30
     playwright_cache_max_entries: int = 16
 
+    # Restrict Playwright usage to a subset of sources (comma-separated).
+    # Runtime is DB-driven (source_configs.force_browser / browser_fallback_enabled).
+    # This setting is an optional safety gate:
+    # - empty: no restriction (DB decides when to use browser)
+    # - '*': allow any source
+    # - 'none'/'off': disable browser for all sources
+    # - 'olx,mercadolivre': allow only specific sources
+    playwright_sources: str = ""
+
+    # Playwright memory guardrails
+    # - context TTL: close idle contexts to free RAM
+    # - max contexts: hard cap to avoid RAM blowups on small machines
+    playwright_context_ttl_seconds: int = 900  # 15 minutes
+    playwright_max_contexts: int = 2
+
+    # Warm up the Playwright worker thread at scheduler start (cheap; does not launch Chromium yet).
+    playwright_warmup_on_start: bool = True
+
+    # Smoke test no boot (scheduler/bot)
+    playwright_smoke_on_boot: bool = True
+
+    # Bug retry (sem backoff exponencial)
+    source_bug_retry_minutes: int = 2
+
+    # Alarmes de erro de programação (somente admins)
+    admin_programming_errors_enabled: bool = True
+    admin_programming_errors_throttle_seconds: int = 600  # 10 min
+
     default_alert_limit: int = 30
 
     # Scheduler tuning (DEV)
@@ -54,6 +82,10 @@ class Settings(BaseSettings):
     # Max parallel *scraping* jobs running at once (sender/heartbeat are not gated).
     # 1 is the safest default for Raspberry Pi 3.
     scheduler_max_parallel_sources: int = 1
+
+    # Scheduler tick frequency for source jobs. Sources are DB-driven (source_configs.sched_minutes).
+    # Keep this small (<=60s) to react quickly, but not too small to avoid DB churn.
+    scheduler_tick_seconds: int = 60
 
     # Backoff automatico (protects product and helps avoid bans)
     source_backoff_max_minutes: int = 720

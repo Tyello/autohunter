@@ -2,6 +2,10 @@ from sqlalchemy.orm import Session
 
 from app.scrapers.base import FetchBlocked
 
+import traceback
+
+from app.services.admin_programming_alerts import maybe_alert_programming_error
+
 from app.services.system_logs_service import log
 from app.services.notifications_service import create_queued
 from app.services.notifications_queue_service import queue_notifications_for_matches
@@ -11,6 +15,19 @@ from app.services.listings_service import ingest_listings
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
+
+
+def _is_bug_type(exc_type: str) -> bool:
+    return exc_type in {
+        "AttributeError",
+        "ImportError",
+        "ModuleNotFoundError",
+        "SyntaxError",
+        "NameError",
+        "TypeError",
+        "PlaywrightInitError",
+    }
+
 
 
 def queue_notifications_for_new_listings(db: Session, component: str, new_listing_ids: list):
@@ -49,9 +66,23 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url})
         return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
     except Exception as e:
-        err = str(e)
-        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url})
-        return {"ok": False, "reason": "error", "error": err, "url": search_url}
+        exc_type = type(e).__name__
+        err = f"{exc_type}: {e}"
+        tb = traceback.format_exc(limit=6)
+        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url, "tb": tb})
+        # alerta só admins (throttled) quando for erro de programação
+        try:
+            maybe_alert_programming_error(job_name, e, url=search_url)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "reason": "error",
+            "error": err,
+            "url": search_url,
+            "exc_type": exc_type,
+            "is_bug": _is_bug_type(exc_type),
+        }
 
     found = len(listings or [])
 
@@ -94,9 +125,23 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url})
         return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
     except Exception as e:
-        err = str(e)
-        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url})
-        return {"ok": False, "reason": "error", "error": err, "url": search_url}
+        exc_type = type(e).__name__
+        err = f"{exc_type}: {e}"
+        tb = traceback.format_exc(limit=6)
+        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url, "tb": tb})
+        # alerta só admins (throttled) quando for erro de programação
+        try:
+            maybe_alert_programming_error(job_name, e, url=search_url)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "reason": "error",
+            "error": err,
+            "url": search_url,
+            "exc_type": exc_type,
+            "is_bug": _is_bug_type(exc_type),
+        }
 
     found = len(listings or [])
 
