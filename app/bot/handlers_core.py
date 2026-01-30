@@ -6,6 +6,35 @@ from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot
 
 
+def _wishlist_help_text() -> str:
+    return (
+        "🧰 Wishlist — ajuda rápida\n\n"
+        "Criar (assistente):\n"
+        "• /wishlist_add\n"
+        "  Depois digite, por exemplo:\n"
+        "  - audi a6 entre 2014 e 2020\n"
+        "  - audi a6 a partir de 2014\n"
+        "  - audi a6 até 2020\n\n"
+        "Criar (modo antigo):\n"
+        "• /wishlist add audi a6\n\n"
+        "Filtro de ano (entre 2014 e 2020):\n"
+        "• /wishlist_filter_add <n> year gte 2014\n"
+        "• /wishlist_filter_add <n> year lte 2020\n\n"
+        "Outros filtros úteis:\n"
+        "• /wishlist_filter_add <n> price lte 90000\n"
+        "• /wishlist_filter_add <n> source eq icarros\n\n"
+        "Ver/remover filtros:\n"
+        "• /wishlist_filter_list <n>\n"
+        "• /wishlist_filter_remove <n> <k>\n\n"
+        "Dica: /wishlist mostra o número <n>."
+    )
+
+
+async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(_wishlist_help_text())
+
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📌 Comandos do AutoHunter\n\n"

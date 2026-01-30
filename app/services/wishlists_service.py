@@ -30,7 +30,10 @@ KNOWN_SOURCES = {
     "facebook_marketplace",
 }
 
-# Aceita "até 2004" / "ate 2004" / "até ano 2004" / "ano<=2004"
+# Aceita:
+#  - "até 2004" / "ate 2004" / "ano<=2004"
+#  - "a partir de 2014" / "ano>=2014"
+#  - "entre 2014 e 2020" / "2014 até 2020" / "2014-2020"
 _YEAR_MAX_PATTERNS = [
     re.compile(r"(?:\bate\b|\baté\b)\s+(\d{4})", re.IGNORECASE),
     re.compile(r"(?:\bate\b|\baté\b)\s+ano\s+(\d{4})", re.IGNORECASE),
@@ -38,38 +41,88 @@ _YEAR_MAX_PATTERNS = [
     re.compile(r"\byear\s*(?:<=|=<|≤)\s*(\d{4})", re.IGNORECASE),
 ]
 
+_YEAR_MIN_PATTERNS = [
+    re.compile(r"\b(?:a\s+partir\s+de|apartir\s+de|desde)\s+(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\bano\s*(?:>=|=>|≥)\s*(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\byear\s*(?:>=|=>|≥)\s*(\d{4})\b", re.IGNORECASE),
+]
 
-def _extract_year_max_directive(query: str) -> Tuple[str, Optional[int]]:
-    """Extrai uma diretiva de ano máximo e limpa a query.
+_YEAR_RANGE_PATTERNS = [
+    re.compile(r"\bentre\s+(\d{4})\s+e\s+(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\bde\s+(\d{4})\s+a\s+(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\b(\d{4})\s*(?:\bate\b|\baté\b)\s*(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\b(\d{4})\s*(?:-|–|—)\s*(\d{4})\b", re.IGNORECASE),
+]
+
+
+def _clean_span(q: str, start: int, end: int) -> str:
+    q = (q[:start] + " " + q[end:]).strip()
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
+def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[int]]:
+    """Extrai diretivas de ano (min/max/range) e limpa a query.
 
     Exemplos:
-      - "defender até 2004"
-      - "defender até ano 2004"
-      - "defender ano<=2004"
-
-    Retorna (query_limpa, year_max).
+      - "audi a6 entre 2014 e 2020"  -> year_min=2014, year_max=2020
+      - "civic 1993 até 2004"       -> year_min=1993, year_max=2004
+      - "defender até 2004"         -> year_max=2004
+      - "civic a partir de 2014"    -> year_min=2014
     """
     q = (query or "").strip()
     if not q:
-        return q, None
+        return q, None, None
 
+    year_min: Optional[int] = None
     year_max: Optional[int] = None
-    for rx in _YEAR_MAX_PATTERNS:
+
+    # Range primeiro (mais específico)
+    for rx in _YEAR_RANGE_PATTERNS:
         m = rx.search(q)
         if not m:
             continue
         try:
-            y = int(m.group(1))
+            y1 = int(m.group(1))
+            y2 = int(m.group(2))
         except Exception:
-            y = None
-        if y and 1900 <= y <= 2100:
-            year_max = y
-            q = (q[: m.start()] + " " + q[m.end() :]).strip()
-            q = re.sub(r"\s+", " ", q).strip()
+            y1 = y2 = None
+        if y1 and y2 and 1900 <= y1 <= 2100 and 1900 <= y2 <= 2100:
+            year_min, year_max = (y1, y2) if y1 <= y2 else (y2, y1)
+            q = _clean_span(q, m.start(), m.end())
             break
 
-    return q, year_max
+    # Max
+    if year_max is None:
+        for rx in _YEAR_MAX_PATTERNS:
+            m = rx.search(q)
+            if not m:
+                continue
+            try:
+                y = int(m.group(1))
+            except Exception:
+                y = None
+            if y and 1900 <= y <= 2100:
+                year_max = y
+                q = _clean_span(q, m.start(), m.end())
+                break
 
+    # Min
+    if year_min is None:
+        for rx in _YEAR_MIN_PATTERNS:
+            m = rx.search(q)
+            if not m:
+                continue
+            try:
+                y = int(m.group(1))
+            except Exception:
+                y = None
+            if y and 1900 <= y <= 2100:
+                year_min = y
+                q = _clean_span(q, m.start(), m.end())
+                break
+
+    return q, year_min, year_max
 
 def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
     """Retorna um snapshot dos limites do plano do usuário.
@@ -155,7 +208,7 @@ def list_wishlists(db: Session, user_id):
 
 
 def add_wishlist(db: Session, user_id, query: str):
-    """Cria wishlist e opcionalmente cria filtro de ano (lte) se a diretiva existir.
+    """Cria wishlist e opcionalmente cria filtros de ano (gte/lte) se diretivas existirem.
 
     Importante: faz rollback preventivo para não herdar transação abortada.
     """
@@ -170,10 +223,10 @@ def add_wishlist(db: Session, user_id, query: str):
     if count >= max_wishlists:
         return False, f"Limite atingido: {max_wishlists} wishlists no seu plano."
 
-    cleaned_query, year_max = _extract_year_max_directive(query)
+    cleaned_query, year_min, year_max = _extract_year_directives(query)
     cleaned_query = (cleaned_query or "").strip()
     if not cleaned_query:
-        return False, "Query inválida. Ex: /wishlist add defender até 2004"
+        return False, "Query inválida. Ex: /wishlist_add audi a6 entre 2014 e 2020"
 
     w = Wishlist(id=uuid.uuid4(), user_id=user_id, query=cleaned_query, is_active=True)
     db.add(w)
@@ -187,16 +240,23 @@ def add_wishlist(db: Session, user_id, query: str):
         db.rollback()
         return False, "Erro ao salvar wishlist. Tente novamente."
 
-    # auto-filtro de ano
+    
+    # auto-filtros de ano (quando houver diretivas)
+    filters = []
+    if year_min:
+        filters.append(WishlistFilter(wishlist_id=w.id, field="year", operator="gte", value=str(year_min)))
     if year_max:
-        row = WishlistFilter(wishlist_id=w.id, field="year", operator="lte", value=str(year_max))
-        db.add(row)
+        filters.append(WishlistFilter(wishlist_id=w.id, field="year", operator="lte", value=str(year_max)))
+
+    if filters:
+        db.add_all(filters)
         try:
             db.commit()
         except Exception:
             db.rollback()
 
     return True, "Wishlist criada."
+
 
 
 def remove_wishlist(db: Session, user_id, index: int):

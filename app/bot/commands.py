@@ -12,6 +12,7 @@ COMMANDS = [
 
     BotCommand("wishlist", "Listar wishlists"),
     BotCommand("wishlist_add", "Criar wishlist (assistente)"),
+    BotCommand("wishlist_help", "Ajuda de wishlists (filtros e exemplos)"),
     BotCommand("wishlist_remove", "Remover wishlist"),
     BotCommand("wishlist_clear", "Remover todas as wishlists"),
 

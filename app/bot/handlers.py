@@ -17,6 +17,7 @@ from app.models.plan import Plan
 from app.models.subscription import Subscription
 
 from app.bot.admin import is_admin
+from app.bot.handlers_core import _wishlist_help_text
 
 
 def _get_active_subscription_and_plan(db, user: User):
@@ -72,7 +73,18 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
 
-        # /wishlist listar
+        
+        # /wishlist help
+        if sub in ("help", "ajuda"):
+            await update.message.reply_text(_wishlist_help_text())
+            return
+
+        # /wishlist add help
+        if sub == "add" and len(args) >= 2 and args[1].lower() in ("help", "ajuda"):
+            await update.message.reply_text(_wishlist_help_text())
+            return
+
+# /wishlist listar
         if sub in ("listar",):
             w = list_wishlists(db, user.id)
             if not w:
