@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, Optional
-from urllib.parse import urljoin
+from typing import Optional
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from lxml import html as lxml_html
 
@@ -14,190 +13,173 @@ from app.sources.types import ScrapeContext
 
 _ICARROS_BASE = "https://www.icarros.com.br"
 
+# Canonical iCarros listing pattern:
+# https://www.icarros.com.br/comprar/<city-uf>/<make>/<model>/<year>/d<id>
+_LISTING_ID_RE = re.compile(r"^https?://(?:www\.)?icarros\.com\.br/comprar/.+/\d{4}/d(\d+)(?:$|[/?#])", re.I)
+_LISTING_URL_RE = re.compile(r'https?://(?:www\.)?icarros\.com\.br/comprar/[^\"\'\s]+?/\d{4}/d\d+(?:\?[^\"\'\s]*)?', re.I)
+
 
 def _clean_text(t: str) -> str:
     return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
 
+def _canonical_url(url: str) -> str:
+    """Drop query/fragment to avoid duplicates coming from 'pos=...' etc."""
+    sp = urlsplit(url)
+    return urlunsplit((sp.scheme, sp.netloc, sp.path, "", ""))
+
+
 def _external_id(url: str) -> Optional[str]:
+    m = re.search(r"/d(\d+)", url)
+    return m.group(1) if m else None
+
+
+def _is_listing_url(url: str) -> bool:
+    return bool(_LISTING_ID_RE.match(url))
+
+
+def _extract_price(text: str):
+    """Parse a BRL-looking price substring from arbitrary card text."""
+    if not text:
+        return None
+    m = re.search(r"R\$\s*[0-9\.]+(?:,[0-9]{1,2})?", text)
+    if not m:
+        return None
+    return parse_brl_price(m.group(0))
+
+
+def _pick_from_srcset(srcset: str, *, max_width: int = 900) -> Optional[str]:
+    """Pick a reasonable URL from a srcset string.
+
+    Prefer the highest width <= max_width; otherwise take the smallest candidate.
+    Handles 'url 540w, url2 1080w' and 'url 2x' formats.
     """
-    Prefer the canonical iCarros pattern '/d<digits>' (detail pages), then fallback
-    to any 6+ digit group.
-    """
-    m = re.search(r"/d(\d{6,})\b", url)
-    if m:
-        return m.group(1)
-    m = re.search(r"(\d{6,})", url)
-    if m:
-        return m.group(1)
+    if not srcset:
+        return None
+
+    candidates: list[tuple[int, str]] = []
+    for part in srcset.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split()
+        url = bits[0].strip()
+        size = 0
+        if len(bits) >= 2:
+            token = bits[1].strip().lower()
+            if token.endswith("w"):
+                try:
+                    size = int(token[:-1])
+                except Exception:
+                    size = 0
+            elif token.endswith("x"):
+                # treat density as width-like ordering
+                try:
+                    size = int(float(token[:-1]) * 1000)
+                except Exception:
+                    size = 0
+        candidates.append((size, url))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0] or 0)
+    under = [c for c in candidates if c[0] and c[0] <= max_width]
+    if under:
+        return under[-1][1]
+
+    # No widths under threshold (or no widths at all) -> pick the smallest to reduce bytes.
+    return candidates[0][1]
+
+
+def _normalize_asset_url(raw: str, base_url: str) -> Optional[str]:
+    if not raw:
+        return None
+    u = raw.strip()
+    if not u or u.startswith("data:"):
+        return None
+    if u.startswith("//"):
+        u = "https:" + u
+    if u.startswith("/"):
+        u = urljoin(base_url, u)
+    return u
+
+
+def _extract_thumbnail(card, base_url: str) -> Optional[str]:
+    """Try multiple lazy-load patterns used by iCarros."""
+
+    # 1) <img ...> with various attributes
+    imgs = card.xpath(".//img")
+    if imgs:
+        img = imgs[0]
+        for attr in ("data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"):
+            v = img.get(attr)
+            if not v:
+                continue
+            if "srcset" in attr:
+                picked = _pick_from_srcset(v)
+                if picked:
+                    return _normalize_asset_url(picked, base_url)
+            else:
+                return _normalize_asset_url(v, base_url)
+
+    # 2) <picture><source srcset=...>
+    srcsets = card.xpath(".//picture//source[@srcset]/@srcset")
+    for ss in srcsets:
+        picked = _pick_from_srcset(ss)
+        if picked:
+            return _normalize_asset_url(picked, base_url)
+
+    # 3) background-image style
+    style_nodes = card.xpath(
+        ".//*[@style and contains(translate(@style,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'background-image')]"
+    )
+    for n in style_nodes:
+        st = (n.get("style") or "")
+        m = re.search(r"background-image\s*:\s*url\(([^)]+)\)", st, flags=re.I)
+        if m:
+            raw = m.group(1).strip().strip('"\'')
+            u = _normalize_asset_url(raw, base_url)
+            if u:
+                return u
+
     return None
 
 
-def _is_detail_url(url: str) -> bool:
-    # Keep it strict to avoid dealer/stock pages like /ache/estoque.jsp?id=...
-    # iCarros detail links typically are under /comprar/.../d<id>
-    return "icarros.com.br" in url and "/comprar/" in url and re.search(r"/d\d{6,}\b", url) is not None
-
-
-def _find_card_root(a) -> Any:
-    """
-    Walk up a few levels trying to find a "card-like" container that contains a price marker.
-    This improves price extraction because iCarros usually doesn't put the price in the <a> text.
-    """
-    node = a
-    for _ in range(7):
-        parent = node.getparent()
-        if parent is None:
+def _find_card(a):
+    """Return a reasonable card container to extract price/thumb/title."""
+    cur = a
+    for _ in range(6):
+        text = _clean_text(cur.text_content())
+        if "R$" in text or cur.xpath(".//img") or cur.xpath(".//picture"):
+            return cur
+        p = cur.getparent()
+        if p is None:
             break
-        node = parent
-        # Avoid scanning the whole page if we climbed too far
-        txt = (node.text_content() or "")
-        if "R$" in txt and len(txt) < 6000:
-            return node
-    p = a.getparent()
-    return p if p is not None else a
+        cur = p
+    return a
 
 
-def _title_from_card(card, fallback_text: str) -> Optional[str]:
-    # Prefer headings inside the card
-    for xp in (".//h2//text()", ".//h3//text()", ".//*[@data-testid='card-title']//text()"):
-        parts = [_clean_text(x) for x in card.xpath(xp)]
-        parts = [p for p in parts if p]
-        if parts:
-            title = _clean_text(" ".join(parts))
-            if 6 <= len(title) <= 160:
-                return title
+def _extract_title(card, a) -> Optional[str]:
+    # Prefer header-like nodes
+    for xp in (".//h1", ".//h2", ".//h3"):
+        for n in card.xpath(xp):
+            t = _clean_text(n.text_content())
+            if t and "R$" not in t and 6 <= len(t) <= 140:
+                return t
 
-    # Common fallback: image alt
-    alts = [_clean_text(x) for x in card.xpath(".//img[1]/@alt")]
-    alts = [a for a in alts if a]
-    if alts:
-        title = alts[0]
-        if 6 <= len(title) <= 160:
-            return title
-
-    # Last resort: anchor text
-    t = _clean_text(fallback_text)
-    if 6 <= len(t) <= 160:
+    # fall back to anchor title attr or text content
+    t = _clean_text(a.get("title") or "") or _clean_text(a.text_content())
+    if t and "R$" not in t and 6 <= len(t) <= 160:
         return t
     return None
-
-
-def _thumb_from_card(card) -> Optional[str]:
-    for xp in (".//img[1]/@src", ".//img[1]/@data-src"):
-        img = card.xpath(xp)
-        if img and img[0]:
-            return img[0]
-    return None
-
-
-def _extract_candidates_from_next_data(doc, base_url: str) -> list[dict]:
-    """
-    Try extracting listing data from Next.js payload (if present). This is typically the
-    most stable way to get price/title without depending on DOM classes.
-    """
-    scripts = doc.xpath("//script[@id='__NEXT_DATA__' and @type='application/json']/text()")
-    if not scripts:
-        return []
-
-    try:
-        data = json.loads(scripts[0])
-    except Exception:
-        return []
-
-    out: dict[str, dict] = {}
-
-    PRICE_KEYS = ("price", "preco", "valor", "salePrice", "listingPrice", "value")
-    TITLE_KEYS = ("title", "name", "nome", "model", "modelo", "version", "versao")
-    URL_KEYS = ("url", "href", "link", "permalink")
-
-    def coerce_price(v: Any) -> Optional[float]:
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            if v <= 0:
-                return None
-            # assume BRL cents sometimes appear; keep as-is (ingest will sanitize extremes)
-            return float(v)
-        if isinstance(v, str):
-            if "R$" in v:
-                p = parse_brl_price(v)
-                return float(p) if p is not None else None
-            # sometimes it's only digits with separators
-            if re.search(r"\d", v):
-                p = parse_brl_price("R$ " + v)
-                return float(p) if p is not None else None
-        return None
-
-    def best_title(d: dict) -> Optional[str]:
-        for k in TITLE_KEYS:
-            v = d.get(k)
-            if isinstance(v, str) and 4 <= len(v) <= 160:
-                return _clean_text(v)
-        # compose if we have pieces
-        make = d.get("make") or d.get("marca")
-        model = d.get("model") or d.get("modelo")
-        ver = d.get("version") or d.get("versao")
-        parts = [_clean_text(x) for x in (make, model, ver) if isinstance(x, str) and x.strip()]
-        if parts:
-            t = _clean_text(" ".join(parts))
-            if 6 <= len(t) <= 160:
-                return t
-        return None
-
-    def best_url(d: dict) -> Optional[str]:
-        for k in URL_KEYS:
-            v = d.get(k)
-            if isinstance(v, str) and "/comprar/" in v:
-                return v
-        return None
-
-    def walk(obj: Any) -> None:
-        if isinstance(obj, dict):
-            u = best_url(obj)
-            if isinstance(u, str):
-                url = u if u.startswith("http") else urljoin(base_url, u)
-                if _is_detail_url(url):
-                    ext = _external_id(url)
-                    if ext:
-                        price = None
-                        for pk in PRICE_KEYS:
-                            if pk in obj:
-                                price = coerce_price(obj.get(pk))
-                                if price is not None:
-                                    break
-                        cur = out.get(url) or {
-                            "source": "icarros",
-                            "external_id": ext,
-                            "url": url,
-                            "title": None,
-                            "price": None,
-                            "thumbnail_url": None,
-                            "location": None,
-                        }
-                        t = best_title(obj)
-                        if cur.get("title") is None and t:
-                            cur["title"] = t
-                        if cur.get("price") is None and price is not None:
-                            cur["price"] = price
-                        out[url] = cur
-
-            for v in obj.values():
-                walk(v)
-        elif isinstance(obj, list):
-            for v in obj:
-                walk(v)
-
-    walk(data)
-    return list(out.values())
 
 
 def scrape_icarros(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """iCarros scraper (Playwright-first).
 
-    iCarros often blocks plain HTTP clients; rely on Playwright.
-    This scraper is defensive: filters only detail URLs and tries __NEXT_DATA__ first,
-    then falls back to DOM-based extraction.
+    iCarros often blocks plain HTTP clients; rely on Playwright. We avoid
+    wait_until='networkidle' because modern pages can keep network busy forever.
     """
     res = fetch_html_browser(search_url, ctx=ctx, timeout_ms=45000, wait_until="domcontentloaded")
     html_text = res.html
@@ -205,36 +187,36 @@ def scrape_icarros(search_url: str, ctx: ScrapeContext) -> list[dict]:
     doc = lxml_html.fromstring(html_text)
     doc.make_links_absolute(res.final_url or search_url)
 
+    by_ext: dict[str, dict] = {}
     base_url = res.final_url or search_url
 
-    # 1) Best effort: Next.js payload
-    listings = _extract_candidates_from_next_data(doc, base_url=base_url)
-    if listings:
-        return listings
-
-    # 2) DOM-based extraction
-    by_url: dict[str, dict] = {}
     for a in doc.xpath("//a[@href]"):
         href = a.get("href") or ""
         if not href:
             continue
 
         url = urljoin(base_url, href)
-        if not _is_detail_url(url):
+        if "icarros.com.br" not in url:
+            continue
+
+        url = _canonical_url(url)
+
+        # Keep only real listing pages (avoid dealership/stock pages like /ache/estoque.jsp?id=...)
+        if not _is_listing_url(url):
             continue
 
         ext = _external_id(url)
         if not ext:
             continue
 
-        card = _find_card_root(a)
+        card = _find_card(a)
+
         card_text = _clean_text(card.text_content())
-        price = parse_brl_price(card_text) if "R$" in card_text else None
+        price = _extract_price(card_text)
+        thumb = _extract_thumbnail(card, base_url=base_url)
+        title = _extract_title(card, a)
 
-        title = _title_from_card(card, a.text_content())
-        thumb = _thumb_from_card(card)
-
-        cur = by_url.get(url) or {
+        cur = by_ext.get(ext) or {
             "source": "icarros",
             "external_id": ext,
             "url": url,
@@ -251,25 +233,27 @@ def scrape_icarros(search_url: str, ctx: ScrapeContext) -> list[dict]:
         if cur.get("thumbnail_url") is None and thumb:
             cur["thumbnail_url"] = thumb
 
-        by_url[url] = cur
+        by_ext[ext] = cur
 
-    # 3) Last fallback: regex URLs (still filtered to detail pages)
-    if not by_url:
-        for m in re.finditer(r"https?://www\.icarros\.com\.br/[^\"\'\s<>]*", html_text):
-            url = m.group(0)
-            if not _is_detail_url(url):
+    # fallback: regex over the raw HTML (strict listing URLs)
+    if not by_ext:
+        for full_url in _LISTING_URL_RE.findall(html_text):
+            canonical = _canonical_url(full_url)
+            if not _is_listing_url(canonical):
                 continue
-            ext = _external_id(url)
+            ext = _external_id(canonical)
             if not ext:
                 continue
-            by_url[url] = {
+            if ext in by_ext:
+                continue
+            by_ext[ext] = {
                 "source": "icarros",
                 "external_id": ext,
-                "url": url,
+                "url": canonical,
                 "title": None,
                 "price": None,
                 "thumbnail_url": None,
                 "location": None,
             }
 
-    return list(by_url.values())
+    return list(by_ext.values())

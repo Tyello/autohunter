@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import time
 
 from sqlalchemy.orm import Session
@@ -14,12 +14,16 @@ from app.services.source_runs_service import record_run
 from app.services.system_logs_service import log
 
 
-def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
+def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[List[str]] = None) -> List[CarListing]:
     # Ensure configs exist (seed defaults once)
     ensure_source_configs(db)
 
+    sources_norm = [s.lower() for s in sources] if sources else None
+
     # Pluggable sources: iterate registry
     for plugin in list_sources():
+        if sources_norm is not None and plugin.name.lower() not in sources_norm:
+            continue
         if not plugin.supports_manual_search:
             continue
         if plugin.scrape is None:
@@ -105,6 +109,9 @@ def manual_search(db: Session, query: str, limit: int = 5) -> List[CarListing]:
     terms = [t for t in query.lower().split() if t]
 
     q = db.query(CarListing)
+
+    if sources_norm:
+        q = q.filter(CarListing.source.in_(sources_norm))
 
     for t in terms:
         q = q.filter((CarListing.title.ilike(f"%{t}%")) | (CarListing.location.ilike(f"%{t}%")))

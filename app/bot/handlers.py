@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import re
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -7,6 +9,7 @@ from app.bot.formatting import format_price
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
+from app.sources import list_sources
 from app.services.wishlists_service import (
     list_wishlists, add_wishlist, remove_wishlist,
     add_filter, list_filters, remove_filter,
@@ -17,7 +20,6 @@ from app.models.plan import Plan
 from app.models.subscription import Subscription
 
 from app.bot.admin import is_admin
-from app.bot.handlers_core import _wishlist_help_text
 
 
 def _get_active_subscription_and_plan(db, user: User):
@@ -38,15 +40,84 @@ def _get_active_subscription_and_plan(db, user: User):
     return sub, plan
 
 
+def _get_known_sources() -> set[str]:
+    try:
+        return {p.name.lower() for p in list_sources()}
+    except Exception:
+        return set()
+
+
+def _parse_query_and_sources(args: list[str] | None) -> tuple[str, list[str] | None]:
+    """Parse /buscar args and extract optional source selector.
+
+    Supported:
+      - @mobiauto
+      - source:mobiauto  / source=mobiauto
+      - src:mobiauto     / src=mobiauto
+      - legacy: last token == source name (e.g. "a5 mobiauto")
+    """
+    args = args or []
+    known = _get_known_sources()
+
+    sources: list[str] = []
+    cleaned: list[str] = []
+
+    for tok in args:
+        t = (tok or "").strip()
+        if not t:
+            continue
+
+        low = t.lower()
+        name: str | None = None
+
+        if low.startswith("@"):
+            name = low[1:]
+        elif low.startswith("source:") or low.startswith("src:"):
+            name = low.split(":", 1)[1]
+        elif low.startswith("source=") or low.startswith("src="):
+            name = low.split("=", 1)[1]
+
+        if name:
+            # allow comma-separated sources in one token
+            parts = [p.strip() for p in re.split(r"[,\s]+", name) if p.strip()]
+            ok = [p for p in parts if p in known]
+            if ok:
+                sources.extend(ok)
+                continue
+
+        cleaned.append(t)
+
+    # legacy: if last token is a known source, treat as selector
+    if not sources and cleaned:
+        last = cleaned[-1].lower()
+        if last in known:
+            sources = [last]
+            cleaned = cleaned[:-1]
+
+    # dedupe while preserving order
+    if sources:
+        seen = set()
+        uniq: list[str] = []
+        for s in sources:
+            if s not in seen:
+                uniq.append(s)
+                seen.add(s)
+        sources = uniq
+
+    query = " ".join(cleaned).strip()
+    return query, (sources or None)
+
+
+
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args).strip()
+    query, sources = _parse_query_and_sources(context.args)
     if not query:
-        await update.message.reply_text("Use: /buscar <termos>\nEx: /buscar civic 2019")
+        await update.message.reply_text("Use: /buscar <termos>\nEx: /buscar civic 2019\nDica: /buscar audi a5 @mobiauto")
         return
 
     with SessionLocal() as db:
         _user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        results = manual_search(db, query=query, limit=5)
+        results = manual_search(db, query=query, limit=5, sources=sources)
 
     if not results:
         await update.message.reply_text("Nada encontrado agora.")
@@ -73,18 +144,7 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
 
-        
-        # /wishlist help
-        if sub in ("help", "ajuda"):
-            await update.message.reply_text(_wishlist_help_text())
-            return
-
-        # /wishlist add help
-        if sub == "add" and len(args) >= 2 and args[1].lower() in ("help", "ajuda"):
-            await update.message.reply_text(_wishlist_help_text())
-            return
-
-# /wishlist listar
+        # /wishlist listar
         if sub in ("listar",):
             w = list_wishlists(db, user.id)
             if not w:
