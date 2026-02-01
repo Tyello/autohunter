@@ -259,16 +259,16 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
             }
 
 
-# Enrich a few items missing title/thumbnail (cheap backfill)
-needs = [x for x in by_url.values() if not x.get("thumbnail_url") or not x.get("title")]
-for cur in needs[:8]:
-    try:
-        det = _detail_enrich(cur["url"], ctx)
-        if not cur.get("title") and det.get("title"):
-            cur["title"] = det["title"]
-        if not cur.get("thumbnail_url") and det.get("thumbnail_url"):
-            cur["thumbnail_url"] = det["thumbnail_url"]
-    except Exception:
-        continue
+    # Enrich a few items missing title/thumbnail (cheap backfill)
+    needs = [x for x in by_url.values() if not x.get("thumbnail_url") or not x.get("title")]
+    for cur in needs[:8]:
+        try:
+            det = _detail_enrich(cur["url"], ctx)
+            if not cur.get("title") and det.get("title"):
+                cur["title"] = det["title"]
+            if not cur.get("thumbnail_url") and det.get("thumbnail_url"):
+                cur["thumbnail_url"] = det["thumbnail_url"]
+        except Exception:
+            continue
 
-return list(by_url.values())
+    return list(by_url.values())
