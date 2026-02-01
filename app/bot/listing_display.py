@@ -4,17 +4,31 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
-from app.core.enthusiast import compute_enthusiast_score, detect_signals
-from app.bot.formatting import format_price
-
 
 KM_RE = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{1,7})\s*km\b", re.IGNORECASE)
 FUEL_WORDS_RE = re.compile(r"\b(gasolina|etanol|flex|diesel|gnv|h[ií]brido|el[eé]trico)\b", re.IGNORECASE)
+
+NOISE_WORDS_RE = re.compile(
+    r"\b(comparar|simular|ver\s+parcelas|financiamento|detalhes)\b",
+    re.IGNORECASE,
+)
+
 GEARBOX_WORDS_RE = re.compile(r"\b(mec[aâ]nico|manual|autom[aá]tico|cvt|tiptronic)\b", re.IGNORECASE)
 
 
 def _norm_spaces(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
+
+
+def _deconcat(s: str) -> str:
+    """Insere espaços quando o scraper devolve texto 'colado' (Mobiauto etc)."""
+    s = s or ""
+    # letra->número / número->letra
+    s = re.sub(r"([A-Za-zÀ-ÿ])([0-9])", r"\1 \2", s)
+    s = re.sub(r"([0-9])([A-Za-zÀ-ÿ])", r"\1 \2", s)
+    # separa 'kmGuarulhos' -> 'km Guarulhos'
+    s = re.sub(r"(km)([A-Za-zÀ-ÿ])", r"\1 \2", s, flags=re.IGNORECASE)
+    return _norm_spaces(s)
 
 
 def _strip_trailing_punct(s: str) -> str:
@@ -37,10 +51,14 @@ def clean_title_remove_fuel_gearbox(title: str) -> str:
     Remove fuel + gearbox words from title (temporary requirement).
     Also removes isolated 'km' chunks from title if any.
     """
-    t = _norm_spaces(title)
+    t = _deconcat(title)
 
     # remove "223.000 km" from title
     t = KM_RE.sub("", t)
+
+    # remove UI/noise tokens (Mobiauto)
+    t = NOISE_WORDS_RE.sub("", t)
+    t = re.sub(r"\b[aà]\s*0\s*km\b", "", t, flags=re.IGNORECASE)
 
     # remove fuel/gearbox words
     t = FUEL_WORDS_RE.sub("", t)
@@ -124,25 +142,6 @@ def listing_fields_for_telegram(listing: Any) -> Dict[str, Optional[str]]:
     title_clean = clean_title_remove_fuel_gearbox(title)
     location_clean = normalize_location(location)
 
-    # Signals / derived fields (cheap)
-    sig = detect_signals(title, location_clean or location)
-    if not year and sig.year:
-        year = str(sig.year)
-
-    if score in (None, "", "None"):
-        try:
-            score = str(compute_enthusiast_score(title, location_clean or location))
-        except Exception:
-            score = None
-
-    auction_label = None
-    if sig.is_auction and sig.is_salvage:
-        auction_label = "⚠️ LEILÃO / SINISTRO"
-    elif sig.is_auction:
-        auction_label = "⚠️ LEILÃO"
-    elif sig.is_salvage:
-        auction_label = "⚠️ SINISTRO / SUCATA"
-
     return {
         "title": title_clean or title,
         "year": year,
@@ -152,7 +151,6 @@ def listing_fields_for_telegram(listing: Any) -> Dict[str, Optional[str]]:
         "score": score,
         "url": url,
         "source": source,
-        "auction_label": auction_label,
     }
 
 
@@ -166,24 +164,17 @@ def format_listing_message_telegram(listing: Any) -> str:
     if f["title"]:
         lines.append(f["title"])
 
+    if f.get("source"):
+        lines.append(f"Fonte: {f['source']}")
+
     if f["year"]:
         lines.append(f"Ano: {f['year']}")
 
     if f["km"]:
         lines.append(f"KM: {f['km']}")
 
-    if f.get("auction_label"):
-        lines.append(f["auction_label"])
-
     if f["price"]:
-        # price might be Decimal
-        try:
-            lines.append(f"Preço: {format_price(f['price'])}")
-        except Exception:
-            lines.append(f"Preço: {f['price']}")
-
-    if f.get("source"):
-        lines.append(f"Fonte: {f['source']}")
+        lines.append(f"Preço: {f['price']}")
 
     if f["location"]:
         lines.append(f"Local: {f['location']}")

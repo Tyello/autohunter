@@ -1,11 +1,17 @@
 from datetime import datetime, timezone
 
 import re
+import io
+
+import requests
 
 from telegram import Update
 from telegram.ext import ContextTypes
+from telegram.error import BadRequest
 
 from app.bot.formatting import format_price
+from app.bot.text_sanitize import sanitize_for_telegram
+from app.bot.listing_display import format_listing_message_telegram
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
@@ -112,7 +118,11 @@ def _parse_query_and_sources(args: list[str] | None) -> tuple[str, list[str] | N
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query, sources = _parse_query_and_sources(context.args)
     if not query:
-        await update.message.reply_text("Use: /buscar <termos>\nEx: /buscar civic 2019\nDica: /buscar audi a5 @mobiauto")
+        await update.message.reply_text(
+            "Use: /buscar <termos>\n"
+            "Ex: /buscar civic 1999\n"
+            "Dica: /buscar audi a5 @mobiauto"
+        )
         return
 
     with SessionLocal() as db:
@@ -123,18 +133,183 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nada encontrado agora.")
         return
 
-    for item in results:
-        text = (
-            f"{item.title or 'Anúncio'}\n"
-            f"Fonte: {item.source}\n"
-            f"Preço: {format_price(item.price)}\n"
-            f"{item.url}"
-        )
+    def _truncate(text: str, limit: int) -> str:
+        if not text:
+            return ""
+        return text if len(text) <= limit else (text[: max(0, limit - 1)] + "…")
 
-        if item.thumbnail_url:
-            await update.message.reply_photo(photo=item.thumbnail_url, caption=text)
-        else:
-            await update.message.reply_text(text)
+    def _split(text: str, limit: int) -> tuple[str, str]:
+        if not text:
+            return "", ""
+        if len(text) <= limit:
+            return text, ""
+        return text[:limit], text[limit:]
+
+    def _score_enthusiast(text: str) -> int:
+        # score offline, rápido (0..100)
+        t = (text or "").lower()
+        score = 50
+
+        plus = [
+            ("turbo", 12), ("manual", 10), ("vtec", 10), ("vti", 10),
+            ("si", 10), ("type r", 12), ("gti", 10), ("gts", 8),
+            ("jdm", 12), ("hot hatch", 10), ("hatch", 6),
+            ("awd", 8), ("quattro", 8), ("limited", 6),
+            ("track", 6), ("cup", 6),
+        ]
+        minus = [
+            ("leil", -18), ("sinistr", -20), ("batid", -18),
+            ("recuperad", -20), ("sucata", -35),
+        ]
+
+        for k, w in plus:
+            if k in t:
+                score += w
+        for k, w in minus:
+            if k in t:
+                score += w
+
+        # bônus por ano "antigo" (entusiasta)
+        m = re.search(r"\b(19\d{2}|20\d{2})\b", t)
+        if m:
+            try:
+                y = int(m.group(1))
+                if y <= 1985:
+                    score += 8
+                elif y <= 1999:
+                    score += 4
+            except Exception:
+                pass
+
+        return max(0, min(100, int(score)))
+
+    def _auction_flag(text: str) -> str | None:
+        t = (text or "").lower()
+        if any(k in t for k in ("leil", "leilão", "leilao", "hasta", "alienação", "alienacao")):
+            return "⚠️ LEILÃO / RECUPERADO (confira a procedência)"
+        return None
+
+    def _download_image_bytes(url: str, timeout: int = 8) -> tuple[bytes, str] | None:
+        # Baixa no nosso lado e manda bytes pro Telegram.
+        # Isso evita os 400:
+        # - "Failed to get http url content"
+        # - "Wrong type of the web page content"
+        if not url:
+            return None
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
+            "Referer": url,
+        }
+
+        try:
+            with requests.get(url, headers=headers, stream=True, timeout=timeout, allow_redirects=True) as r:
+                if r.status_code != 200:
+                    return None
+                ctype = (r.headers.get("Content-Type") or "").lower()
+                if not ctype.startswith("image/"):
+                    return None
+
+                max_bytes = 3_500_000
+                buf = bytearray()
+                for chunk in r.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    buf.extend(chunk)
+                    if len(buf) > max_bytes:
+                        return None
+
+                return bytes(buf), ctype
+        except Exception:
+            return None
+
+    def _mobiauto_thumb_from_detail(detail_url: str) -> str | None:
+        # Backfill “on demand” (só se vier sem thumb do DB).
+        try:
+            r = requests.get(
+                detail_url,
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*"},
+                timeout=10,
+                allow_redirects=True,
+            )
+            if r.status_code != 200:
+                return None
+            html = r.text or ""
+
+            # pega primeira imagem “real” (evita logo)
+            # aceita jpg/png/webp (com ou sem querystring)
+            imgs = re.findall(r'https?://[^\s"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?', html, flags=re.I)
+            for u in imgs:
+                low = u.lower()
+                if "logo" in low or "sprite" in low or "icon" in low:
+                    continue
+                return u
+        except Exception:
+            return None
+        return None
+
+    for item in results:
+        raw_title = (item.title or "Anúncio").strip()
+        raw_loc = (item.location or "").strip()
+        price_txt = format_price(item.price)
+
+        blob = " ".join([raw_title, raw_loc, item.url or ""])
+        score = _score_enthusiast(blob)
+        flag = _auction_flag(blob)
+
+        payload = {
+            "title": raw_title,
+            "price": price_txt,
+            "location": raw_loc,
+            "score": score,
+            "url": item.url,
+            "source": item.source,
+        }
+        full_text = format_listing_message_telegram(payload)
+        if flag:
+            full_text = f"{flag}\n" + full_text
+
+        full_text = sanitize_for_telegram(full_text)
+
+        TELEGRAM_CAPTION_MAX = 1024
+        TELEGRAM_TEXT_MAX = 4096
+        caption, remainder = _split(full_text, TELEGRAM_CAPTION_MAX)
+        caption = _truncate(caption, TELEGRAM_CAPTION_MAX)
+
+        thumb = (item.thumbnail_url or "").strip() if getattr(item, "thumbnail_url", None) else ""
+        if not thumb and (item.source or "").lower() == "mobiauto":
+            thumb = _mobiauto_thumb_from_detail(item.url)
+
+        sent = False
+        if thumb:
+            img = _download_image_bytes(thumb)
+            if img:
+                img_bytes, ctype = img
+                bio = io.BytesIO(img_bytes)
+                # python-telegram-bot usa o atributo name como hint de filename
+                ext = "jpg" if "jpeg" in ctype else (ctype.split("/", 1)[-1] or "jpg")
+                bio.name = f"thumb.{ext}"
+
+                try:
+                    await update.message.reply_photo(photo=bio, caption=caption)
+                    sent = True
+                except BadRequest:
+                    sent = False
+                except Exception:
+                    sent = False
+
+        if not sent:
+            await update.message.reply_text(_truncate(full_text, TELEGRAM_TEXT_MAX), disable_web_page_preview=True)
+            continue
+
+        if remainder.strip():
+            await update.message.reply_text(
+                _truncate(remainder.strip(), TELEGRAM_TEXT_MAX),
+                disable_web_page_preview=True,
+            )
+            continue
 
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -30,125 +30,142 @@ def _extract_external_id(url: str) -> Optional[str]:
 def _clean_text(t: str) -> str:
     return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
+def _deconcat(s: str) -> str:
+    s = s or ""
+    s = re.sub(r"([A-Za-zÀ-ÿ])([0-9])", r"\1 \2", s)
+    s = re.sub(r"([0-9])([A-Za-zÀ-ÿ])", r"\1 \2", s)
+    s = re.sub(r"(km)([A-Za-zÀ-ÿ])", r"\1 \2", s, flags=re.IGNORECASE)
+    return _clean_text(s)
 
-_RE_NOISE_TOKENS = re.compile(
-    r"\b(comparar|ver\s*detalhes|financiamento|simular|parcelas|0\s*km|a\s*\d+\s*km)\b",
+
+_NOISE_RE = re.compile(
+    r"\b(comparar|simular|ver\s+parcelas|financiamento|detalhes)\b",
     re.IGNORECASE,
 )
 
 
-def _clean_title_blob(text: str) -> str:
-    t = _clean_text(text)
-    if not t:
-        return ""
-    # remove UI noise
-    t = _RE_NOISE_TOKENS.sub("", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    # trim very long blobs (cards sometimes include multiple fields)
-    return t[:140].strip()
+def _strip_title_noise(t: str) -> str:
+    t = _deconcat(t)
+    # corta no primeiro 'Comparar' (e também tira 'a 0 km')
+    t = re.split(r"\bcomparar\b", t, flags=re.IGNORECASE)[0]
+    t = re.sub(r"\b[aà]\s*0\s*km\b", "", t, flags=re.IGNORECASE)
+
+    # se aparecer preço, corta antes dele
+    if "R$" in t:
+        t = t.split("R$", 1)[0]
+
+    # corta ao encontrar quilometragem / separador
+    t = re.split(r"\b\d{1,3}(?:\.\d{3})*\s*km\b", t, flags=re.IGNORECASE)[0]
+    t = t.split("|", 1)[0]
+
+    # remove tokens UI que sobraram
+    t = _NOISE_RE.sub("", t)
+    return _clean_text(t)
 
 
-def _pick_best_image(doc) -> Optional[str]:
-    """Pick the most likely car photo url from a DOM.
-
-    Mobiauto mixes logos/score icons with the actual photo.
-    This heuristic favors jpg/webp/http urls and ignores obvious icons.
-    """
-
-    def _candidate_urls(img) -> list[str]:
-        urls: list[str] = []
-        for attr in ("src", "data-src", "data-lazy", "data-original"):
-            v = img.get(attr)
-            if v:
-                urls.append(v)
-        # srcset: take the last (usually highest-res)
-        ss = img.get("srcset") or ""
-        if ss:
-            parts = [p.strip().split(" ")[0] for p in ss.split(",") if p.strip()]
-            if parts:
-                urls.append(parts[-1])
-        return urls
-
-    best: tuple[int, str] | None = None
-    for img in doc.xpath("//img"):
-        alt = _clean_text(img.get("alt") or "").lower()
-        for u in _candidate_urls(img):
-            url = (u or "").strip()
-            if not url or not url.startswith("http"):
-                continue
-            low = url.lower()
-            score = 0
-            if any(ext in low for ext in (".jpg", ".jpeg", ".png", ".webp")):
-                score += 3
-            if any(k in low for k in ("cdn", "cloudfront", "images", "img", "photo", "fotos")):
-                score += 2
-            if alt and any(k in alt for k in ("logo", "fipe", "ícone", "icone")):
-                score -= 6
-            if any(k in low for k in ("logo", "icon", "sprite", "favicon")):
-                score -= 6
-            if best is None or score > best[0]:
-                best = (score, url)
-
-    # background-image urls (some cards use div style)
-    for el in doc.xpath("//*[@style]"):
-        st = (el.get("style") or "")
-        m = re.search(r"background-image\s*:\s*url\(['\"]?(.*?)['\"]?\)", st, re.I)
-        if not m:
-            continue
-        url = (m.group(1) or "").strip()
-        if not url.startswith("http"):
-            continue
-        low = url.lower()
-        score = 2
-        if any(ext in low for ext in (".jpg", ".jpeg", ".png", ".webp")):
-            score += 2
-        if any(k in low for k in ("logo", "icon", "sprite", "favicon")):
-            score -= 6
-        if best is None or score > best[0]:
-            best = (score, url)
-
-    if best is None:
+def _extract_price_from_text(t: str):
+    # pega um pedaço pequeno ao redor do "R$" pra reduzir falso positivo
+    if not t or "R$" not in t:
         return None
-    return best[1]
+    i = t.find("R$")
+    snippet = t[i:i+40]
+    return parse_brl_price(snippet)
 
 
-def _enrich_from_detail(url: str, *, ctx: ScrapeContext) -> dict:
-    """Fetch detail page and pull better title/thumbnail/location (cheap SSR when available)."""
+def _pick_thumb_from_element(el, base_url: str) -> Optional[str]:
+    candidates: list[str] = []
 
-    try:
-        html = fetch_html(url, ctx=ctx, proxy=ctx.proxy_server, timeout=30, referer=_MOBIAUTO_BASE + "/")
-    except FetchBlocked:
-        if not settings.enable_playwright:
-            raise
-        html = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+    # <img src=...> e lazy attrs
+    for xp in (".//img/@src", ".//img/@data-src", ".//img/@data-original", ".//img/@data-lazy-src"):
+        candidates.extend(el.xpath(xp))
 
-    doc = lxml_html.fromstring(html)
+    # srcset
+    for xp in (".//img/@srcset", ".//source/@srcset"):
+        for ss in el.xpath(xp):
+            parts = [p.strip() for p in (ss or "").split(",") if p.strip()]
+            if not parts:
+                continue
+            # pega o último (tende a ser maior)
+            last = parts[-1].split(" ")[0].strip()
+            if last:
+                candidates.append(last)
+
+    # style="background-image:url(...)"
+    for st in el.xpath(".//*[@style]/@style"):
+        if "background-image" in (st or ""):
+            m = re.search(r"url\(['\"]?([^'\")]+)", st)
+            if m:
+                candidates.append(m.group(1))
+
+    # normalize + filter
+    out: list[str] = []
+    for c in candidates:
+        if not c:
+            continue
+        if c.startswith("data:"):
+            continue
+        u = urljoin(base_url, c)
+        low = u.lower()
+        if any(x in low for x in ("logo", "sprite", "icon")):
+            continue
+        # aceita imagens mesmo sem extensão (mas prefere com)
+        out.append(u)
+
+    # prefer extension
+    for u in out:
+        if re.search(r"\.(jpg|jpeg|png|webp)($|\?)", u, flags=re.I):
+            return u
+    return out[0] if out else None
+
+
+def _detail_enrich(url: str, ctx: ScrapeContext) -> dict:
+    """Extrai title + thumb direto da página de detalhe (fallback)."""
+    if bool(getattr(ctx, "force_browser", False)):
+        html_text = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+    else:
+        try:
+            html_text = fetch_html(url, ctx=ctx, proxy=ctx.proxy_server, timeout=25)
+        except FetchBlocked:
+            if not settings.enable_playwright:
+                raise
+            html_text = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+        except Exception:
+            if not settings.enable_playwright:
+                raise
+            html_text = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+
+    doc = lxml_html.fromstring(html_text)
     doc.make_links_absolute(url)
 
-    # Title: h1/h2 are usually clean
-    h1 = _clean_text(" ".join([t for t in doc.xpath("//h1//text()") if t and t.strip()]))
-    h2 = _clean_text(" ".join([t for t in doc.xpath("//h2//text()") if t and t.strip()]))
-    title = _clean_title_blob(" ".join([h1, h2]).strip())
-    if not title:
-        tt = doc.xpath("//title/text()")
-        if tt:
-            title = _clean_title_blob(tt[0])
+    h1 = _clean_text(" ".join(doc.xpath("//h1[1]//text()")))
+    h2 = _clean_text(" ".join(doc.xpath("//h2[1]//text()")))
+    title = _clean_text(" ".join([x for x in (h1, h2) if x])) or None
 
-    # Price: first plausible BRL price in the HTML
-    price = parse_brl_price(html)
+    # tenta pegar imagem de galeria
+    candidates = doc.xpath("//img/@src | //img/@data-src | //img/@data-lazy-src")
+    thumb = None
+    for c in candidates:
+        u = urljoin(url, c)
+        low = u.lower()
+        if any(x in low for x in ("logo", "sprite", "icon")):
+            continue
+        if re.search(r"\.(jpg|jpeg|png|webp)($|\?)", u, flags=re.I):
+            thumb = u
+            break
+    if not thumb:
+        # regex no HTML todo (último recurso)
+        imgs = re.findall(r'https?://[^\s"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?', html_text, flags=re.I)
+        for u in imgs:
+            low = u.lower()
+            if any(x in low for x in ("logo", "sprite", "icon")):
+                continue
+            thumb = u
+            break
 
-    # Location: best-effort around the "Cidade" label
-    location = None
-    try:
-        city_nodes = doc.xpath("//*[normalize-space()='Cidade']/following::*[1]//text()")
-        city = _clean_text(" ".join(city_nodes))
-        if city:
-            location = city
-    except Exception:
-        location = None
+    return {"title": title, "thumbnail_url": thumb}
 
-    thumb = _pick_best_image(doc)
-    return {"title": title or None, "price": price, "thumbnail_url": thumb, "location": location}
+
+
 
 
 def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
@@ -195,23 +212,14 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
         if not external_id:
             continue
 
-        text = _clean_text(a.text_content())
+        text = _strip_title_noise(a.get('aria-label') or a.get('title') or a.text_content())
         if not text or text.lower() in ("enviar mensagem", "ver detalhes", "detalhes"):
             text = ""
 
-        price = None
-        if "R$" in text or re.search(r"\d\.\d{3}", text):
-            price = parse_brl_price(text)
+        price = _extract_price_from_text(a.text_content())
 
         # thumbnail (best-effort)
-        thumb = None
-        try:
-            # prefer image inside the anchor/card
-            img_el = a.xpath(".//img[1]")
-            if img_el:
-                thumb = _pick_best_image(img_el[0].getparent() or a)  # parent tends to have srcset
-        except Exception:
-            thumb = None
+        thumb = _pick_thumb_from_element(a, search_url)
 
         cur = by_url.get(url) or {
             "source": "mobiauto",
@@ -221,15 +229,11 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
             "price": None,
             "thumbnail_url": None,
             "location": None,
-            "currency": "BRL",
         }
 
-        # Title heuristic: non-price, reasonable length
-        if not cur.get("title") and text and (price is None):
-            cand = _clean_title_blob(text)
-            # if the anchor text is a full card blob, only accept if it looks like a title
-            if 6 <= len(cand) <= 140 and "comparar" not in cand.lower():
-                cur["title"] = cand
+        # Title heuristic
+        if not cur.get("title") and text and len(text) >= 6 and len(text) <= 140:
+            cur["title"] = text
 
         if cur.get("price") is None and price is not None:
             cur["price"] = price
@@ -252,27 +256,19 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 "price": None,
                 "thumbnail_url": None,
                 "location": None,
-                "currency": "BRL",
             }
 
-    # Detail enrichment budget: fixes missing thumbnail / noisy titles.
-    budget = 8
-    out = []
-    for item in by_url.values():
-        if budget > 0 and (not item.get("thumbnail_url") or not item.get("title") or "comparar" in str(item.get("title") or "").lower()):
-            try:
-                d = _enrich_from_detail(item["url"], ctx=ctx)
-                budget -= 1
-                if d.get("title"):
-                    item["title"] = d["title"]
-                if item.get("price") is None and d.get("price") is not None:
-                    item["price"] = d["price"]
-                if not item.get("thumbnail_url") and d.get("thumbnail_url"):
-                    item["thumbnail_url"] = d["thumbnail_url"]
-                if not item.get("location") and d.get("location"):
-                    item["location"] = d["location"]
-            except Exception:
-                budget -= 1
-        out.append(item)
 
-    return out
+# Enrich a few items missing title/thumbnail (cheap backfill)
+needs = [x for x in by_url.values() if not x.get("thumbnail_url") or not x.get("title")]
+for cur in needs[:8]:
+    try:
+        det = _detail_enrich(cur["url"], ctx)
+        if not cur.get("title") and det.get("title"):
+            cur["title"] = det["title"]
+        if not cur.get("thumbnail_url") and det.get("thumbnail_url"):
+            cur["thumbnail_url"] = det["thumbnail_url"]
+    except Exception:
+        continue
+
+return list(by_url.values())
