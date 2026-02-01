@@ -9,6 +9,7 @@ import requests
 from app.core.settings import settings
 from app.bot.formatting import format_price
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.core.enthusiast import compute_enthusiast_score, detect_signals
 
 
 # Telegram limits
@@ -170,44 +171,16 @@ def _normalize_listing_url(url: str, source: str | None, external_id: str | None
     return _strip_query_fragment(url)
 
 
-def _extract_year(title: str) -> int | None:
-    t = title or ""
-    m = re.search(r"\b(19\d{2}|20\d{2})\b", t)
-    if not m:
+def _auction_label(signals) -> str | None:
+    if not signals:
         return None
-    try:
-        y = int(m.group(1))
-        if 1900 <= y <= 2100:
-            return y
-    except Exception:
-        return None
+    if getattr(signals, "is_auction", False) and getattr(signals, "is_salvage", False):
+        return "⚠️ LEILÃO / SINISTRO"
+    if getattr(signals, "is_auction", False):
+        return "⚠️ LEILÃO"
+    if getattr(signals, "is_salvage", False):
+        return "⚠️ SINISTRO / SUCATA"
     return None
-
-
-def _score_from_text(text: str) -> int:
-    # Score simples, imediato e 100% offline.
-    t = (text or "").lower()
-
-    score = 50
-    plus = [
-        ("turbo", 10), ("manual", 8), ("si", 8), ("vti", 8), ("vtec", 6),
-        ("hatch", 5), ("hatchback", 5), ("jdm", 7), ("swap", 8),
-        ("k20", 6), ("b16", 6), ("track", 4),
-    ]
-    minus = [
-        ("batido", -20), ("sinistr", -20), ("leil", -15),
-        ("sucata", -30), ("recuperad", -20), ("multa", -8),
-        ("documento", -8),
-    ]
-
-    for k, w in plus:
-        if k in t:
-            score += w
-    for k, w in minus:
-        if k in t:
-            score += w
-
-    return max(0, min(100, int(score)))
 
 
 def _build_text(listing, notification=None) -> str:
@@ -220,9 +193,11 @@ def _build_text(listing, notification=None) -> str:
         getattr(listing, "external_id", None) or "",
     )
     price_text = format_price(getattr(listing, "price", None))
+    src = (getattr(listing, "source", None) or "—").strip()
 
-    year = _extract_year(raw_title)
-    score = _score_from_text(" ".join([raw_title, loc]))
+    signals = detect_signals(raw_title, loc)
+    year = signals.year
+    score = compute_enthusiast_score(raw_title, loc)
 
     # Se no futuro você salvar FIPE/score no banco, aqui já “aparece” automaticamente:
     fipe = getattr(listing, "fipe_price", None)
@@ -238,6 +213,11 @@ def _build_text(listing, notification=None) -> str:
         lines.append(f"Ano: {year}")
     if km:
         lines.append(f"KM: {km}")
+    lab = _auction_label(signals)
+    if lab:
+        lines.append(lab)
+    if src and src != "—":
+        lines.append(f"Fonte: {src}")
     lines.append(f"Preço: {price_text}")
     if loc:
         lines.append(f"Local: {loc}")

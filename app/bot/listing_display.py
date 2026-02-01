@@ -4,6 +4,9 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
+from app.core.enthusiast import compute_enthusiast_score, detect_signals
+from app.bot.formatting import format_price
+
 
 KM_RE = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{1,7})\s*km\b", re.IGNORECASE)
 FUEL_WORDS_RE = re.compile(r"\b(gasolina|etanol|flex|diesel|gnv|h[ií]brido|el[eé]trico)\b", re.IGNORECASE)
@@ -111,6 +114,7 @@ def listing_fields_for_telegram(listing: Any) -> Dict[str, Optional[str]]:
     price = get("price")
     url = get("url")
     score = get("score")
+    source = get("source")
 
     # Build normalized
     km = get("km")
@@ -120,6 +124,25 @@ def listing_fields_for_telegram(listing: Any) -> Dict[str, Optional[str]]:
     title_clean = clean_title_remove_fuel_gearbox(title)
     location_clean = normalize_location(location)
 
+    # Signals / derived fields (cheap)
+    sig = detect_signals(title, location_clean or location)
+    if not year and sig.year:
+        year = str(sig.year)
+
+    if score in (None, "", "None"):
+        try:
+            score = str(compute_enthusiast_score(title, location_clean or location))
+        except Exception:
+            score = None
+
+    auction_label = None
+    if sig.is_auction and sig.is_salvage:
+        auction_label = "⚠️ LEILÃO / SINISTRO"
+    elif sig.is_auction:
+        auction_label = "⚠️ LEILÃO"
+    elif sig.is_salvage:
+        auction_label = "⚠️ SINISTRO / SUCATA"
+
     return {
         "title": title_clean or title,
         "year": year,
@@ -128,6 +151,8 @@ def listing_fields_for_telegram(listing: Any) -> Dict[str, Optional[str]]:
         "location": location_clean or location,
         "score": score,
         "url": url,
+        "source": source,
+        "auction_label": auction_label,
     }
 
 
@@ -147,8 +172,18 @@ def format_listing_message_telegram(listing: Any) -> str:
     if f["km"]:
         lines.append(f"KM: {f['km']}")
 
+    if f.get("auction_label"):
+        lines.append(f["auction_label"])
+
     if f["price"]:
-        lines.append(f"Preço: {f['price']}")
+        # price might be Decimal
+        try:
+            lines.append(f"Preço: {format_price(f['price'])}")
+        except Exception:
+            lines.append(f"Preço: {f['price']}")
+
+    if f.get("source"):
+        lines.append(f"Fonte: {f['source']}")
 
     if f["location"]:
         lines.append(f"Local: {f['location']}")

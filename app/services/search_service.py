@@ -91,6 +91,22 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
             log(db, "warn", f"scraper_{plugin.name}", "source_blocked", {"status_code": getattr(e, "status_code", None), "url": getattr(e, "url", url), "backoff_minutes": minutes})
         except Exception as e:
             err = str(e)
+            # If Playwright is globally enabled but restricted by PLAYWRIGHT_SOURCES,
+            # treat as a 'skipped' run (do not penalize source backoff).
+            if "playwright disabled for source" in err.lower():
+                record_run(
+                    db,
+                    source=plugin.name,
+                    kind="manual",
+                    status="skipped",
+                    query=query,
+                    url=url,
+                    duration_ms=int((time.perf_counter() - t0) * 1000),
+                    error=err,
+                    payload={"reason": "playwright_sources_restricted"},
+                )
+                continue
+
             minutes = mark_error(db, plugin.name, base_cooldown_minutes=max(cooldown, 1), error=err, url=url)
             record_run(
                 db,
