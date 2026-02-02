@@ -109,7 +109,10 @@ def _find_card_container(el, *, max_depth: int = 12):
 
         cur = cur.getparent()
 
-    return best or el
+
+    # NOTE: lxml elements have confusing truthiness (historically depended on
+    # children count). Avoid `best or el` to prevent FutureWarning.
+    return best if best is not None else el
 
 
 def _is_bad_image_url(u: str) -> bool:
