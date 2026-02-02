@@ -297,7 +297,7 @@ class _PlaywrightCore:
         # BUT: for some anti-bot challenges, blocking images/fonts can prevent the
         # challenge from completing. Keep them for these sources.
         try:
-            heavy_ok_sources = {"mobiauto", "facebook_marketplace"}
+            heavy_ok_sources = {"mobiauto", "icarros", "facebook_marketplace"}
             if src not in heavy_ok_sources:
                 def _route(route):
                     rtype = route.request.resource_type

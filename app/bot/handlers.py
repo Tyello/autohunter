@@ -46,7 +46,7 @@ def _get_active_subscription_and_plan(db, user: User):
 
 
 
-MAX_IMAGE_BYTES = 900 * 1024  # 900KB; Telegram aceita bem e protege RAM
+MAX_IMAGE_BYTES = 2500 * 1024 #MAX_IMAGE_BYTES = 900 * 1024  # 900KB; Telegram aceita bem e protege RAM
 
 def _download_image_bytes(url: str, *, referer: str | None = None, timeout: int = 8):
     """Baixa imagem e retorna (bytes, content_type) ou None.
