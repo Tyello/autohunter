@@ -184,12 +184,21 @@ def kavak_url(query: str) -> str:
 
 
 def mobiauto_url(query: str) -> str:
-    # Mobiauto supports pretty URLs by brand/model. We'll infer brand when possible.
-    brand, model = _infer_brand_model(query)
+    """Mobiauto URL builder.
+
+    Mobiauto tem URLs canônicas por marca/modelo:
+      https://www.mobiauto.com.br/comprar/carros/brasil/<marca>/<modelo>
+    """
+
+    raw = (query or '').strip()
+
+    # Inferência padrão (quando usuário informa marca/modelo)
+    brand, model = _infer_brand_model(raw)
     if brand and model:
-        return f"https://www.mobiauto.com.br/comprar/carros-usados/brasil/{brand}/{model}"
-    # Fallback: broad listing; scraper will keyword-filter on title.
-    return "https://www.mobiauto.com.br/comprar/carros-usados/brasil"
+        return f"https://www.mobiauto.com.br/comprar/carros/brasil/{brand}/{model}"
+
+    # Fallback: broad listing (o filtro por termos acontece no pós-processamento)
+    return 'https://www.mobiauto.com.br/comprar/carros/brasil'
 
 
 def icarros_url(query: str) -> str:
