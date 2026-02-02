@@ -58,26 +58,11 @@ def _extract_km(title: str) -> str | None:
 
 def _clean_title_and_extract_km(title: str) -> tuple[str, str | None]:
     t = re.sub(r"\s+", " ", (title or "")).strip()
-
-    # Mobiauto e alguns SSRs colam UI no meio do texto
-    t = re.sub(r"\b(comparar|ver\s+parcelas|enviar\s+mensagem)\b", "", t, flags=re.I)
-
-    # Distância até a loja: "| a 0 km" (não é odômetro)
-    t = re.sub(r"\|\s*a\s*\d[\d\.,]*\s*km\b", "", t, flags=re.I)
-
     km = _extract_km(t)
-
-    # Remove odômetro do título (vamos mostrar em linha separada)
     t = _RE_KM.sub("", t)
-
-    # Por enquanto, remove combustível/transmissão para não poluir
     t = re.sub(r"\bGasolina\b", "", t, flags=re.I)
     t = re.sub(r"\bMec[aâ]nico\b|\bMecanico\b", "", t, flags=re.I)
-
-    # Remove localização colada no final (formatos com vírgula e com hífen)
     t = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+\s*,\s*[A-Z]{2}\b\s*$", "", t).strip()
-    t = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+\s*-\s*[A-Z]{2}\b\s*$", "", t).strip()
-
     t = re.sub(r"\s+", " ", t).strip()
     return t or "Novo anúncio", km
 
@@ -144,6 +129,12 @@ def _build_text(item) -> str:
     raw_title = (getattr(item, "title", None) or "Anúncio").strip()
     title, km = _clean_title_and_extract_km(raw_title)
 
+    # If the scraper already extracted KM/year, prefer that (more reliable than parsing title).
+    if not km:
+        km_field = getattr(item, "km", None)
+        if km_field:
+            km = str(km_field).strip()
+
     price_text = format_price(getattr(item, "price", None))
     src = (getattr(item, "source", None) or "—").strip()
     url = (getattr(item, "url", None) or "").strip()
@@ -153,7 +144,13 @@ def _build_text(item) -> str:
     score = compute_enthusiast_score(raw_title, loc)
 
     lines = [title]
-    if signals.year:
+    year_field = getattr(item, "year", None)
+    if year_field:
+        try:
+            lines.append(f"Ano: {int(year_field)}")
+        except Exception:
+            lines.append(f"Ano: {str(year_field).strip()}")
+    elif signals.year:
         lines.append(f"Ano: {signals.year}")
     if km:
         lines.append(f"KM: {km}")
