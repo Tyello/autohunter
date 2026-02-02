@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional, Tuple
 from urllib.parse import urlparse, urlunparse
@@ -254,8 +255,8 @@ def _build_text(listing, notification=None) -> str:
     if deal_score is not None:
         lines.append(f"Deal: {deal_score}")
 
-    if url:
-        lines.append(url)
+    # Não imprimimos URL no texto para economizar espaço.
+    # O link vai no botão "Abrir anúncio" (Inline Keyboard).
 
     text = "\n".join(lines)
     text = sanitize_for_telegram(text)
@@ -325,6 +326,17 @@ def telegram_sender(notification, listing, user):
 
     sent_photo = False
 
+    open_url = _normalize_listing_url(
+        getattr(listing, "url", None) or "",
+        getattr(listing, "source", None) or None,
+        getattr(listing, "external_id", None) or "",
+    )
+    reply_markup = (
+        json.dumps({"inline_keyboard": [[{"text": "Abrir anúncio", "url": open_url}]]}, ensure_ascii=False)
+        if open_url
+        else None
+    )
+
     if getattr(listing, "thumbnail_url", None):
         img = _download_image_bytes(listing.thumbnail_url, referer=getattr(listing, 'url', None))
         if img:
@@ -332,7 +344,7 @@ def telegram_sender(notification, listing, user):
             url = f"https://api.telegram.org/bot{token}/sendPhoto"
             resp = requests.post(
                 url,
-                data={"chat_id": chat_id, "caption": caption},
+                data={"chat_id": chat_id, "caption": caption, **({"reply_markup": reply_markup} if reply_markup else {})},
                 files={"photo": ("thumb", img_bytes, ctype)},
                 timeout=20,
             )
@@ -344,7 +356,12 @@ def telegram_sender(notification, listing, user):
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         resp = requests.post(
             url,
-            data={"chat_id": chat_id, "text": full_text, "disable_web_page_preview": True},
+            data={
+                "chat_id": chat_id,
+                "text": full_text,
+                "disable_web_page_preview": True,
+                **({"reply_markup": reply_markup} if reply_markup else {}),
+            },
             timeout=20,
         )
         if resp.status_code >= 400:

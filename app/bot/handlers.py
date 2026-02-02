@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app.bot.formatting import format_price
@@ -24,6 +24,7 @@ from app.models.plan import Plan
 from app.models.subscription import Subscription
 
 from app.bot.admin import is_admin
+from app.bot.open_ad import normalize_listing_url
 
 
 def _get_active_subscription_and_plan(db, user: User):
@@ -178,11 +179,21 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for item in results:
+        open_url = normalize_listing_url(
+            getattr(item, "url", None) or "",
+            source=getattr(item, "source", None) or None,
+            external_id=getattr(item, "external_id", None) or None,
+        )
+
+        keyboard = None
+        if open_url:
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Abrir anúncio", url=open_url)]])
+
+        # Texto curto: o link vai no botão.
         text = (
             f"{item.title or 'Anúncio'}\n"
             f"Fonte: {item.source}\n"
-            f"Preço: {format_price(item.price)}\n"
-            f"{item.url}"
+            f"Preço: {format_price(item.price)}"
         )
 
         if item.thumbnail_url:
@@ -191,11 +202,11 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 img_bytes, _ctype = img
                 bio = BytesIO(img_bytes)
                 bio.name = "thumb.jpg"
-                await update.message.reply_photo(photo=bio, caption=text)
+                await update.message.reply_photo(photo=bio, caption=text, reply_markup=keyboard)
             else:
-                await update.message.reply_text(text)
+                await update.message.reply_text(text, reply_markup=keyboard, disable_web_page_preview=True)
         else:
-            await update.message.reply_text(text)
+            await update.message.reply_text(text, reply_markup=keyboard, disable_web_page_preview=True)
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = [a.strip() for a in (context.args or []) if a.strip()]
