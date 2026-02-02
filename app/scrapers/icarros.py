@@ -106,12 +106,15 @@ def _normalize_asset_url(raw: str, base_url: str) -> Optional[str]:
 
 
 def _extract_thumbnail(card, base_url: str) -> Optional[str]:
-    """Try multiple lazy-load patterns used by iCarros."""
+    """Try multiple lazy-load patterns used by iCarros.
+
+    iCarros cards often contain multiple <img> tags (logos/icons).
+    We collect candidates and pick the most likely vehicle photo.
+    """
+    candidates: list[str] = []
 
     # 1) <img ...> with various attributes
-    imgs = card.xpath(".//img")
-    if imgs:
-        img = imgs[0]
+    for img in card.xpath(".//img"):
         for attr in ("data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"):
             v = img.get(attr)
             if not v:
@@ -119,16 +122,18 @@ def _extract_thumbnail(card, base_url: str) -> Optional[str]:
             if "srcset" in attr:
                 picked = _pick_from_srcset(v)
                 if picked:
-                    return _normalize_asset_url(picked, base_url)
+                    candidates.append(picked)
+                else:
+                    # raw srcset fallback
+                    candidates.append(v.split(",")[0].strip().split(" ")[0])
             else:
-                return _normalize_asset_url(v, base_url)
+                candidates.append(v)
 
     # 2) <picture><source srcset=...>
-    srcsets = card.xpath(".//picture//source[@srcset]/@srcset")
-    for ss in srcsets:
+    for ss in card.xpath(".//picture//source[@srcset]/@srcset"):
         picked = _pick_from_srcset(ss)
         if picked:
-            return _normalize_asset_url(picked, base_url)
+            candidates.append(picked)
 
     # 3) background-image style
     style_nodes = card.xpath(
@@ -139,12 +144,57 @@ def _extract_thumbnail(card, base_url: str) -> Optional[str]:
         m = re.search(r"background-image\s*:\s*url\(([^)]+)\)", st, flags=re.I)
         if m:
             raw = m.group(1).strip().strip('"\'')
-            u = _normalize_asset_url(raw, base_url)
-            if u:
-                return u
+            candidates.append(raw)
 
-    return None
+    def _score(url: str) -> int:
+        u = (url or "").lower()
+        if not u:
+            return -10
+        s = 0
+        if u.startswith("data:"):
+            return -50
+        if "logo" in u or "icon" in u or "sprite" in u:
+            s -= 8
+        if u.endswith(".svg") or "svg" in u:
+            s -= 8
+        if re.search(r"\.(jpe?g|png|webp)\b", u):
+            s += 6
+        if "icarros" in u:
+            s += 2
+        if any(k in u for k in ("image", "foto", "fotos", "photo", "car")):
+            s += 2
+        if "thumb" in u:
+            s += 1
+        # width hint
+        mw = re.search(r"[?&]w=(\d+)", u)
+        if mw:
+            try:
+                s += min(int(mw.group(1)) // 200, 4)
+            except Exception:
+                pass
+        mwh = re.search(r"(\d{2,4})x(\d{2,4})", u)
+        if mwh:
+            try:
+                w = int(mwh.group(1))
+                h = int(mwh.group(2))
+                s += min((w * h) // (300 * 300), 4)
+            except Exception:
+                pass
+        return s
 
+    best_url: Optional[str] = None
+    best_score = -10**9
+
+    for raw in candidates:
+        u = _normalize_asset_url(raw, base_url)
+        if not u:
+            continue
+        sc = _score(u)
+        if sc > best_score:
+            best_score = sc
+            best_url = u
+
+    return best_url
 
 def _find_card(a):
     """Return a reasonable card container to extract price/thumb/title."""

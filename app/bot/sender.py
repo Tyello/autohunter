@@ -184,61 +184,9 @@ def _extract_year(title: str) -> int | None:
     return None
 
 
-
-def _auction_badge(text: str) -> str | None:
-    t = (text or "").lower()
-    if any(k in t for k in ("leil", "leilão", "leilao", "hasta", "alienação", "alienacao")):
-        return "⚠️ LEILÃO / RECUPERADO (confira procedência)"
-    if any(k in t for k in ("sinistr", "batid", "recuperad")):
-        return "⚠️ POSSÍVEL SINISTRO/RECUPERADO"
-    return None
-
-
 def _score_from_text(text: str) -> int:
     # Score simples, imediato e 100% offline.
-    # Ideia: ser "opinião de entusiasta" (idade + esportividade + câmbio, etc).
     t = (text or "").lower()
-    score = 50
-
-    # Ano (entusiasta gosta do “mais antigo”)
-    m = re.search(r"\b(19\d{2}|20\d{2})\b", t)
-    if m:
-        try:
-            y = int(m.group(1))
-            if y <= 1985:
-                score += 12
-            elif y <= 1999:
-                score += 8
-            elif y <= 2005:
-                score += 4
-            elif y >= 2018:
-                score -= 6
-        except Exception:
-            pass
-
-    plus = [
-        ("turbo", 12), ("aspirado", 3), ("manual", 10),
-        ("vtec", 10), ("vti", 10), ("k20", 8), ("b16", 8),
-        ("jdm", 12), ("hot hatch", 10), ("hatch", 6),
-        ("type r", 14), ("si", 10), ("gti", 10), ("rs", 10),
-        ("cup", 8), ("st", 8), ("quattro", 8), ("awd", 8),
-        ("limited", 6), ("track", 6), ("swap", 10),
-        ("lsd", 8), ("brembo", 6),
-    ]
-    minus = [
-        ("leil", -18), ("sinistr", -20), ("batid", -18),
-        ("recuperad", -20), ("sucata", -35), ("documento", -10),
-        ("multa", -10), ("financiado", -4),
-    ]
-
-    for k, w in plus:
-        if k in t:
-            score += w
-    for k, w in minus:
-        if k in t:
-            score += w
-
-    return max(0, min(100, int(score)))
 
     score = 50
     plus = [
@@ -286,9 +234,6 @@ def _build_text(listing, notification=None) -> str:
         deal_score = getattr(notification, "deal_score", None)
 
     lines = [title]
-    badge = _auction_badge(' '.join([raw_title, loc, url]))
-    if badge:
-        lines.append(badge)
     if year:
         lines.append(f"Ano: {year}")
     if km:
@@ -317,7 +262,7 @@ def _build_text(listing, notification=None) -> str:
     return _truncate(text, TELEGRAM_TEXT_MAX)
 
 
-def _download_image_bytes(url: str, timeout: int = 8) -> Optional[Tuple[bytes, str]]:
+def _download_image_bytes(url: str, *, referer: str | None = None, timeout: int = 8) -> Optional[Tuple[bytes, str]]:
     """Baixa a imagem e valida Content-Type.
 
     Evita os erros 400 do Telegram quando você manda uma URL que:
@@ -331,7 +276,7 @@ def _download_image_bytes(url: str, timeout: int = 8) -> Optional[Tuple[bytes, s
         "User-Agent": "Mozilla/5.0 (X11; Linux arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-        "Referer": _infer_referer(url),
+        "Referer": (referer or _infer_referer(url)),
     }
 
     try:
@@ -381,7 +326,7 @@ def telegram_sender(notification, listing, user):
     sent_photo = False
 
     if getattr(listing, "thumbnail_url", None):
-        img = _download_image_bytes(listing.thumbnail_url)
+        img = _download_image_bytes(listing.thumbnail_url, referer=getattr(listing, 'url', None))
         if img:
             img_bytes, ctype = img
             url = f"https://api.telegram.org/bot{token}/sendPhoto"

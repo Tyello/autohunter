@@ -275,8 +275,17 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     html = ""
     fetched_url = search_url
+
+    # GoGarage é 100% JS na listagem. Se forçado, tenta renderizar primeiro.
+    if getattr(ctx, "force_browser", False) and settings.enable_playwright:
+        try:
+            html = _fetch_browser(search_url)
+        except Exception:
+            html = ""
+
     try:
-        html = _fetch_http(search_url)
+        if not html:
+            html = _fetch_http(search_url)
     except FetchBlocked:
         if settings.enable_playwright and _ctx_fallback_enabled():
             html = _fetch_browser(search_url)
@@ -310,7 +319,6 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
     if (
         (not urls)
         and settings.enable_playwright
-        and _ctx_fallback_enabled()
         and any(s in html.lower() for s in ("carregando", "loading", "aguarde"))
     ):
         try:

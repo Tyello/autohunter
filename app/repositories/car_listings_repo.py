@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func
+from sqlalchemy import func, case
 from app.models.car_listing import CarListing
 
 def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
@@ -25,7 +25,21 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
         index_elements=["source", "external_id"],
         set_={
             # mantém valores já existentes quando não-null; caso contrário, preenche do novo scrape
-            "title": func.coalesce(CarListing.title, stmt.excluded.title),
+            "title": case(
+    (
+        # atualiza título quando o existente é claramente "ruim" (ruído de UI / concat quebrada)
+        (
+            CarListing.title.is_(None)
+            | (func.length(CarListing.title) < 6)
+            | CarListing.title.ilike('%comparar%')
+            | CarListing.title.ilike('reservado%')
+            | CarListing.title.ilike('%| a%')
+        )
+        & stmt.excluded.title.isnot(None),
+        stmt.excluded.title,
+    ),
+    else_=CarListing.title,
+),
             "thumbnail_url": func.coalesce(CarListing.thumbnail_url, stmt.excluded.thumbnail_url),
             "price": func.coalesce(CarListing.price, stmt.excluded.price),
             "location": func.coalesce(CarListing.location, stmt.excluded.location),
