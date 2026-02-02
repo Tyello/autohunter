@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from io import BytesIO
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -10,6 +11,7 @@ from app.services.users_service import get_or_create_user_by_chat
 from app.services.search_service import manual_search
 from app.bot.formatting import format_price
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.bot.sender import _download_image_bytes
 from app.core.enthusiast import compute_enthusiast_score, detect_signals
 from app.models.source_run import SourceRun
 
@@ -57,12 +59,27 @@ def _extract_km(title: str) -> str | None:
     return km
 
 def _clean_title_and_extract_km(title: str) -> tuple[str, str | None]:
-    t = re.sub(r"\s+", " ", (title or "")).strip()
+    # Normalize spacing for sources that concatenate tokens (ex: Mobiauto)
+    t = (title or "").replace(" ", " ")
+    t = re.sub(r"([A-Za-zÀ-ÿ])([0-9])", r"\1 \2", t)
+    t = re.sub(r"([0-9])([A-Za-zÀ-ÿ])", r"\1 \2", t)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    # Remove UI noise
+    t = re.split(r"\bComparar\b", t, flags=re.I)[0]
+    t = re.sub(r"\bSimular\b.*$", "", t, flags=re.I)
+    t = t.split("|", 1)[0]
+    t = re.sub(r"\b[aà]\s*0\s*km\b", "", t, flags=re.I)
+
     km = _extract_km(t)
     t = _RE_KM.sub("", t)
     t = re.sub(r"\bGasolina\b", "", t, flags=re.I)
     t = re.sub(r"\bMec[aâ]nico\b|\bMecanico\b", "", t, flags=re.I)
+
+    # drop trailing location suffixes: "Cidade, UF" or "Cidade-UF"
     t = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+\s*,\s*[A-Z]{2}\b\s*$", "", t).strip()
+    t = re.sub(r"\s+[A-Za-zÀ-ÿ\s]+-[A-Z]{2}\b\s*$", "", t).strip()
+
     t = re.sub(r"\s+", " ", t).strip()
     return t or "Novo anúncio", km
 
@@ -240,7 +257,23 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 continue
             except Exception:
-                # fallback pro texto
-                pass
+                # Some sources block hotlinking; try fetching the bytes with Referer and re-sending.
+                try:
+                    img_bytes = _download_image_bytes(item.thumbnail_url, referer=getattr(item, "url", None))
+                    if img_bytes:
+                        bio = BytesIO(img_bytes)
+                        bio.name = "photo.jpg"
+                        await update.message.reply_photo(
+                            photo=bio,
+                            caption=_truncate(caption, TELEGRAM_CAPTION_MAX),
+                        )
+                        if remainder.strip():
+                            await update.message.reply_text(
+                                _truncate(remainder.strip(), TELEGRAM_TEXT_MAX),
+                                disable_web_page_preview=True,
+                            )
+                        continue
+                except Exception:
+                    pass
 
         await update.message.reply_text(full_text, disable_web_page_preview=True)

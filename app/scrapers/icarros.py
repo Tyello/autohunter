@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -115,7 +116,7 @@ def _extract_thumbnail(card, base_url: str) -> Optional[str]:
 
     # 1) <img ...> with various attributes
     for img in card.xpath(".//img"):
-        for attr in ("data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"):
+        for attr in ("data-src", "data-lazy-src", "data-original", "data-src-mobile", "data-src-desktop", "data-lazy-srcset", "data-srcset", "srcset", "src"):
             v = img.get(attr)
             if not v:
                 continue
@@ -197,17 +198,48 @@ def _extract_thumbnail(card, base_url: str) -> Optional[str]:
     return best_url
 
 def _find_card(a):
-    """Return a reasonable card container to extract price/thumb/title."""
+    """Return the best ancestor that resembles a full listing card.
+
+    iCarros frequently nests the click target (<a>) inside several wrappers.
+    The photo/price typically live higher up.
+    """
     cur = a
-    for _ in range(6):
-        text = _clean_text(cur.text_content())
-        if "R$" in text or cur.xpath(".//img") or cur.xpath(".//picture"):
-            return cur
-        p = cur.getparent()
-        if p is None:
+    best = a
+    best_score = -1
+
+    for _ in range(12):
+        if cur is None:
             break
-        cur = p
-    return a
+
+        try:
+            txt = _clean_text(cur.text_content())
+        except Exception:
+            txt = ""
+
+        score = 0
+        if "R$" in txt:
+            score += 10
+        if re.search(r"\b\d{4}\b", txt):
+            score += 2
+
+        try:
+            score += len(cur.xpath(".//img")) * 3
+            score += len(cur.xpath(".//picture")) * 2
+        except Exception:
+            pass
+
+        cls = (cur.get("class") or "").lower()
+        if any(k in cls for k in ("card", "listing", "anuncio", "result")):
+            score += 3
+
+        score += min(len(txt), 600) // 120
+
+        if score > best_score:
+            best, best_score = cur, score
+
+        cur = cur.getparent()
+
+    return best or a
 
 
 def _extract_title(card, a) -> Optional[str]:
@@ -223,6 +255,111 @@ def _extract_title(card, a) -> Optional[str]:
     if t and "R$" not in t and 6 <= len(t) <= 160:
         return t
     return None
+
+
+
+def _is_bad_image_url(u: str) -> bool:
+    low = (u or "").lower()
+    return any(x in low for x in ("logo", "sprite", "icon")) or low.endswith(".svg")
+
+
+def _json_loads_best_effort(raw: str):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        try:
+            raw2 = raw.rstrip(";\n ")
+            return json.loads(raw2)
+        except Exception:
+            return None
+
+
+def _find_first_image_in_obj(obj) -> Optional[str]:
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        s = obj.strip()
+        if s.startswith("http") and re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", s, flags=re.I):
+            return s
+        return None
+    if isinstance(obj, dict):
+        for k in ("image", "images", "photo", "photos", "thumbnail", "thumbnailUrl", "url"):
+            if k in obj:
+                found = _find_first_image_in_obj(obj.get(k))
+                if found:
+                    return found
+        for v in obj.values():
+            found = _find_first_image_in_obj(v)
+            if found:
+                return found
+        return None
+    if isinstance(obj, (list, tuple)):
+        for v in obj:
+            found = _find_first_image_in_obj(v)
+            if found:
+                return found
+        return None
+    return None
+
+
+def _extract_head_image(doc, base_url: str) -> Optional[str]:
+    xps = (
+        "//meta[@property='og:image']/@content",
+        "//meta[@name='og:image']/@content",
+        "//meta[@property='twitter:image']/@content",
+        "//meta[@name='twitter:image']/@content",
+        "//link[@rel='preload' and @as='image']/@href",
+    )
+    for xp in xps:
+        for c in doc.xpath(xp):
+            c = (c or "").strip()
+            if not c:
+                continue
+            u = _normalize_asset_url(c, base_url)
+            if not u or u.startswith("data:") or _is_bad_image_url(u):
+                continue
+            return u
+    return None
+
+
+def _extract_structured_image(doc, base_url: str) -> Optional[str]:
+    for raw in doc.xpath("//script[@type='application/ld+json']/text()"): 
+        data = _json_loads_best_effort(raw)
+        if data is None:
+            continue
+        found = _find_first_image_in_obj(data)
+        if found:
+            u = _normalize_asset_url(found, base_url)
+            if u and not _is_bad_image_url(u):
+                return u
+    raw_next = doc.xpath("//script[@id='__NEXT_DATA__']/text()")[::]
+    if raw_next:
+        data = _json_loads_best_effort(raw_next[0])
+        found = _find_first_image_in_obj(data)
+        if found:
+            u = _normalize_asset_url(found, base_url)
+            if u and not _is_bad_image_url(u):
+                return u
+    return None
+
+
+def _detail_enrich(url: str, ctx: ScrapeContext) -> dict:
+    res = fetch_html_browser(url, ctx=ctx, timeout_ms=45000, wait_until="domcontentloaded")
+    html_text = res.html
+    base = res.final_url or url
+
+    doc = lxml_html.fromstring(html_text)
+    doc.make_links_absolute(base)
+
+    title = _clean_text(" ".join(doc.xpath("//h1[1]//text()"))) or None
+    if not title:
+        title = _clean_text(" ".join(doc.xpath("//meta[@property='og:title']/@content"))) or None
+
+    thumb = _extract_head_image(doc, base) or _extract_structured_image(doc, base)
+    return {"title": title, "thumbnail_url": thumb}
 
 
 def scrape_icarros(search_url: str, ctx: ScrapeContext) -> list[dict]:
@@ -306,4 +443,17 @@ def scrape_icarros(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 "location": None,
             }
 
+
+
+    # Enrich a few items missing title/thumbnail (cheap backfill)
+    needs = [x for x in by_ext.values() if not x.get("thumbnail_url") or not x.get("title")]
+    for cur in needs[:4]:
+        try:
+            det = _detail_enrich(cur["url"], ctx)
+            if not cur.get("title") and det.get("title"):
+                cur["title"] = det["title"]
+            if not cur.get("thumbnail_url") and det.get("thumbnail_url"):
+                cur["thumbnail_url"] = det["thumbnail_url"]
+        except Exception:
+            continue
     return list(by_ext.values())

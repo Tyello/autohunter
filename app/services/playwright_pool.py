@@ -116,7 +116,7 @@ class _PlaywrightCore:
         resources. For a small allowlist of "hostile" sources we do NOT block.
         """
         src = (source or "").strip().lower()
-        allow_heavy = src in {"mobiauto", "facebook_marketplace"}
+        allow_heavy = src in {"mobiauto", "facebook_marketplace", "icarros"}
         if allow_heavy:
             return
 
