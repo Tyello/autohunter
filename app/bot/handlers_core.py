@@ -1,6 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot
@@ -40,12 +41,12 @@ def _wishlist_help_text() -> str:
 
 
 async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(_wishlist_help_text())
-
+    await reply_text(update, _wishlist_help_text())
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "📌 Comandos do AutoHunter\n\n"
         "Wishlist:\n"
         "• /wishlist — listar\n"
@@ -81,7 +82,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 AutoHunter (bot) — appv4")
+    await reply_text(update, "🤖 AutoHunter (bot) — appv4")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,7 +97,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     dal_txt = str(dal) if dal is not None else "—"
 
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "📊 Status\n\n"
         f"Plano: {plan_code}\n"
         f"Wishlists: {len(w)}/{max_w}\n"

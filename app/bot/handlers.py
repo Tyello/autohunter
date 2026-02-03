@@ -1,12 +1,13 @@
-from datetime import datetime, timezone
-
 import re
+from datetime import datetime, timezone
+from functools import lru_cache
 from io import BytesIO
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app.bot.formatting import format_price
 from app.bot.media import download_image_bytes
+from app.bot.utils import normalize_args, parse_int, reply_text
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
@@ -42,6 +43,7 @@ def _get_active_subscription_and_plan(db, user: User):
     return sub, plan
 
 
+@lru_cache(maxsize=1)
 def _get_known_sources() -> set[str]:
     try:
         return {p.name.lower() for p in list_sources()}
@@ -110,11 +112,30 @@ def _parse_query_and_sources(args: list[str] | None) -> tuple[str, list[str] | N
     return query, (sources or None)
 
 
+def _resolve_target_chat_id(args: list[str], default_chat_id: int) -> tuple[int | None, str | None]:
+    if len(args) >= 2:
+        chat_id = parse_int(args[1])
+        if chat_id is None:
+            return None, "telegram_chat_id inválido (deve ser número)."
+        return chat_id, None
+    return default_chat_id, None
+
+
+async def _ensure_admin(update: Update) -> bool:
+    chat_id = update.effective_chat.id
+    if is_admin(chat_id):
+        return True
+    await reply_text(update, "Sem permissão.")
+    return False
+
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query, sources = _parse_query_and_sources(context.args)
     if not query:
-        await update.message.reply_text("Use: /buscar <termos>\nEx: /buscar civic 2019\nDica: /buscar audi a5 @mobiauto")
+        await reply_text(
+            update,
+            "Use: /buscar <termos>\nEx: /buscar civic 2019\nDica: /buscar audi a5 @mobiauto",
+        )
         return
 
     with SessionLocal() as db:
@@ -122,7 +143,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         results = manual_search(db, query=query, limit=5, sources=sources)
 
     if not results:
-        await update.message.reply_text("Nada encontrado agora.")
+        await reply_text(update, "Nada encontrado agora.")
         return
 
     for item in results:
@@ -151,12 +172,13 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 bio.name = "thumb.jpg"
                 await update.message.reply_photo(photo=bio, caption=text, reply_markup=keyboard)
             else:
-                await update.message.reply_text(text, reply_markup=keyboard, disable_web_page_preview=True)
+                await reply_text(update, text, reply_markup=keyboard, disable_web_page_preview=True)
         else:
-            await update.message.reply_text(text, reply_markup=keyboard, disable_web_page_preview=True)
+            await reply_text(update, text, reply_markup=keyboard, disable_web_page_preview=True)
+
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = [a.strip() for a in (context.args or []) if a.strip()]
+    args = normalize_args(context.args)
     sub = (args[0].lower() if args else "listar")
 
     with SessionLocal() as db:
@@ -166,7 +188,8 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub in ("listar",):
             w = list_wishlists(db, user.id)
             if not w:
-                await update.message.reply_text(
+                await reply_text(
+                    update,
                     "Você não tem wishlists.\n"
                     "Opções:\n"
                     "• /wishlist_add (assistente)\n"
@@ -174,32 +197,33 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             lines = [f"{i+1}. {x.query}" for i, x in enumerate(w)]
-            await update.message.reply_text("Wishlists:\n" + "\n".join(lines))
+            await reply_text(update, "Wishlists:\n" + "\n".join(lines))
             return
 
         # /wishlist add <termos>
         if sub == "add":
             query = " ".join(args[1:]).strip()
             if not query:
-                await update.message.reply_text("Use: /wishlist add <termos>")
+                await reply_text(update, "Use: /wishlist add <termos>")
                 return
             ok, msg = add_wishlist(db, user.id, query)
-            await update.message.reply_text(msg)
+            await reply_text(update, msg)
             return
 
         # /wishlist rm <numero>
         if sub == "rm":
-            if len(args) < 2 or not args[1].isdigit():
-                await update.message.reply_text("Use: /wishlist rm <numero>")
+            if len(args) < 2 or parse_int(args[1]) is None:
+                await reply_text(update, "Use: /wishlist rm <numero>")
                 return
             ok, msg = remove_wishlist(db, user.id, int(args[1]))
-            await update.message.reply_text(msg)
+            await reply_text(update, msg)
             return
 
         # /wishlist filter ...
         if sub == "filter":
             if len(args) < 2:
-                await update.message.reply_text(
+                await reply_text(
+                    update,
                     "Use:\n"
                     "/wishlist filter add <n> price lte 90000\n"
                     "/wishlist filter add <n> source eq mercadolivre\n"
@@ -217,53 +241,53 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return w[n-1]
 
             if action == "list":
-                if len(args) < 3 or not args[2].isdigit():
-                    await update.message.reply_text("Use: /wishlist filter list <n>")
+                if len(args) < 3 or parse_int(args[2]) is None:
+                    await reply_text(update, "Use: /wishlist filter list <n>")
                     return
                 wi = int(args[2])
                 wl = get_wishlist_by_index(wi)
                 if not wl:
-                    await update.message.reply_text("Wishlist inválida. Use /wishlist listar.")
+                    await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
                     return
                 fs = list_filters(db, wl.id)
                 if not fs:
-                    await update.message.reply_text("Sem filtros. Use /wishlist filter add ...")
+                    await reply_text(update, "Sem filtros. Use /wishlist filter add ...")
                     return
                 lines = [f"{i+1}. {f.field} {f.operator} {f.value}" for i, f in enumerate(fs)]
-                await update.message.reply_text("Filtros:\n" + "\n".join(lines))
+                await reply_text(update, "Filtros:\n" + "\n".join(lines))
                 return
 
             if action == "add":
-                if len(args) < 6 or not args[2].isdigit():
-                    await update.message.reply_text("Use: /wishlist filter add <n> <field> <op> <value>")
+                if len(args) < 6 or parse_int(args[2]) is None:
+                    await reply_text(update, "Use: /wishlist filter add <n> <field> <op> <value>")
                     return
                 wi = int(args[2])
                 wl = get_wishlist_by_index(wi)
                 if not wl:
-                    await update.message.reply_text("Wishlist inválida. Use /wishlist listar.")
+                    await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
                     return
                 field, op, value = args[3], args[4], args[5]
                 ok, msg = add_filter(db, wl.id, field, op, value)
-                await update.message.reply_text(msg)
+                await reply_text(update, msg)
                 return
 
             if action == "rm":
-                if len(args) < 4 or (not args[2].isdigit()) or (not args[3].isdigit()):
-                    await update.message.reply_text("Use: /wishlist filter rm <n> <filter_num>")
+                if len(args) < 4 or parse_int(args[2]) is None or parse_int(args[3]) is None:
+                    await reply_text(update, "Use: /wishlist filter rm <n> <filter_num>")
                     return
                 wi = int(args[2])
                 wl = get_wishlist_by_index(wi)
                 if not wl:
-                    await update.message.reply_text("Wishlist inválida. Use /wishlist listar.")
+                    await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
                     return
                 ok, msg = remove_filter(db, wl.id, int(args[3]))
-                await update.message.reply_text(msg)
+                await reply_text(update, msg)
                 return
 
-            await update.message.reply_text("Ação inválida. Use: add|list|rm")
+            await reply_text(update, "Ação inválida. Use: add|list|rm")
             return
 
-        await update.message.reply_text("Use: /wishlist listar | /wishlist add <termos> | /wishlist rm <numero>")
+        await reply_text(update, "Use: /wishlist listar | /wishlist add <termos> | /wishlist rm <numero>")
 
 
 async def cmd_alertas(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -271,7 +295,8 @@ async def cmd_alertas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         limit = get_daily_limit_for_user(db, user.id)
 
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "Alertas do AutoHunter:\n"
         "- Monitoramento: a cada 30 min (Mercado Livre e OLX)\n"
         f"- Limite: {limit} alertas/dia\n"
@@ -308,7 +333,7 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"- Override: {override}\n"
 
     text += "\nUse /upgrade para ver opções de aumento."
-    await update.message.reply_text(text)
+    await reply_text(update, text)
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -321,49 +346,44 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if not plans:
-        await update.message.reply_text("Sem planos disponíveis no momento.")
+        await reply_text(update, "Sem planos disponíveis no momento.")
         return
 
     lines = ["🚀 Upgrade AutoHunter", ""]
     for p in plans:
         lines.append(f"- {p.code}: {p.daily_alert_limit} alertas/dia | até {p.max_wishlists} wishlists")
     lines += ["", "Para upgrade, fale com o admin do bot.", "Dica: use /plan para ver seu consumo hoje."]
-    await update.message.reply_text("\n".join(lines))
+    await reply_text(update, "\n".join(lines))
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if not is_admin(chat_id):
-        await update.message.reply_text("Sem permissão.")
+    if not await _ensure_admin(update):
         return
 
-    args = [a.strip() for a in (context.args or []) if a.strip()]
+    args = normalize_args(context.args)
     if not args:
-        await update.message.reply_text("Use: /setplan <free|pro|ultra> [telegram_chat_id]")
+        await reply_text(update, "Use: /setplan <free|pro|ultra> [telegram_chat_id]")
         return
 
     plan_code = args[0].lower()
 
-    if len(args) >= 2:
-        if not args[1].isdigit():
-            await update.message.reply_text("telegram_chat_id inválido (deve ser número).")
-            return
-        chat_id = int(args[1])
-    else:
-        chat_id = int(update.effective_chat.id)
+    chat_id, error = _resolve_target_chat_id(args, int(update.effective_chat.id))
+    if error:
+        await reply_text(update, error)
+        return
 
     with SessionLocal() as db:
         u = db.query(User).filter(User.telegram_chat_id == chat_id).first()
         if not u:
-            await update.message.reply_text("Usuário não encontrado nesse chat_id.")
+            await reply_text(update, "Usuário não encontrado nesse chat_id.")
             return
         if not u.account_id:
-            await update.message.reply_text("Usuário sem account_id (verifique users_service).")
+            await reply_text(update, "Usuário sem account_id (verifique users_service).")
             return
 
         plan = db.query(Plan).filter(Plan.code == plan_code).first()
         if not plan:
-            await update.message.reply_text("Plano inválido. Use: free|pro|ultra")
+            await reply_text(update, "Plano inválido. Use: free|pro|ultra")
             return
 
         # cancela subscription ativa (se existir)
@@ -390,37 +410,32 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         db.commit()
 
-    await update.message.reply_text(f"✅ Plano atualizado para {plan_code} (chat_id={chat_id}).")
+    await reply_text(update, f"✅ Plano atualizado para {plan_code} (chat_id={chat_id}).")
 
 
 async def cmd_setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if not is_admin(chat_id):
-        await update.message.reply_text("Sem permissão.")
+    if not await _ensure_admin(update):
         return
 
-    args = [a.strip() for a in (context.args or []) if a.strip()]
+    args = normalize_args(context.args)
     if not args:
-        await update.message.reply_text("Use: /setlimit <numero|none> [telegram_chat_id]")
+        await reply_text(update, "Use: /setlimit <numero|none> [telegram_chat_id]")
         return
 
     raw = args[0].lower()
 
-    if len(args) >= 2:
-        if not args[1].isdigit():
-            await update.message.reply_text("telegram_chat_id inválido (deve ser número).")
-            return
-        chat_id = int(args[1])
-    else:
-        chat_id = int(update.effective_chat.id)
+    chat_id, error = _resolve_target_chat_id(args, int(update.effective_chat.id))
+    if error:
+        await reply_text(update, error)
+        return
 
     with SessionLocal() as db:
         u = db.query(User).filter(User.telegram_chat_id == chat_id).first()
         if not u:
-            await update.message.reply_text("Usuário não encontrado nesse chat_id.")
+            await reply_text(update, "Usuário não encontrado nesse chat_id.")
             return
         if not u.account_id:
-            await update.message.reply_text("Usuário sem account_id (verifique users_service).")
+            await reply_text(update, "Usuário sem account_id (verifique users_service).")
             return
 
         active = (
@@ -431,20 +446,20 @@ async def cmd_setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .first()
         )
         if not active:
-            await update.message.reply_text("Usuário sem subscription ativa.")
+            await reply_text(update, "Usuário sem subscription ativa.")
             return
 
         if raw == "none":
             active.daily_alert_limit_override = None
             db.commit()
-            await update.message.reply_text(f"✅ Override removido (chat_id={chat_id}).")
+            await reply_text(update, f"✅ Override removido (chat_id={chat_id}).")
             return
 
-        if not raw.isdigit():
-            await update.message.reply_text("Use um número (ex: 50) ou 'none'.")
+        if parse_int(raw) is None:
+            await reply_text(update, "Use um número (ex: 50) ou 'none'.")
             return
 
         active.daily_alert_limit_override = int(raw)
         db.commit()
 
-    await update.message.reply_text(f"✅ Override diário setado para {raw} (chat_id={chat_id}).")
+    await reply_text(update, f"✅ Override diário setado para {raw} (chat_id={chat_id}).")
