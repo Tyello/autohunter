@@ -8,7 +8,6 @@ from app.services.admin_programming_alerts import maybe_alert_programming_error
 
 from app.services.system_logs_service import log
 from app.services.telemetry_events_service import emit_event
-from app.services.notifications_service import create_queued
 from app.services.notifications_queue_service import queue_notifications_for_matches
 from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists
 from app.services.listings_service import ingest_listings
@@ -32,29 +31,43 @@ def _is_bug_type(exc_type: str) -> bool:
 
 
 def queue_notifications_for_new_listings(db: Session, component: str, new_listing_ids: list):
-    listings = db.query(CarListing).filter(CarListing.id.in_(new_listing_ids)).all()
-    if not listings:
+    listing_rows = db.query(CarListing.id).filter(CarListing.id.in_(new_listing_ids)).all()
+    listing_ids = [row[0] for row in listing_rows]
+    if not listing_ids:
         return
 
-    wishlists = db.query(Wishlist).filter(Wishlist.is_active == True).all()
+    wishlists = db.query(Wishlist).filter(Wishlist.is_active.is_(True)).all()
+    if not wishlists:
+        return
 
-    queued = 0
+    wishlist_ids = [w.id for w in wishlists]
+    existing = db.query(Notification.user_id, Notification.wishlist_id, Notification.car_listing_id).filter(
+        Notification.wishlist_id.in_(wishlist_ids),
+        Notification.car_listing_id.in_(listing_ids),
+    ).all()
+    existing_keys = {(row[0], row[1], row[2]) for row in existing}
+
+    new_notifications = []
     for w in wishlists:
-        for listing in listings:
-            exists = (
-                db.query(Notification.id)
-                .filter(Notification.user_id == w.user_id)
-                .filter(Notification.wishlist_id == w.id)
-                .filter(Notification.car_listing_id == listing.id)
-                .first()
-            )
-            if exists:
+        for listing_id in listing_ids:
+            key = (w.user_id, w.id, listing_id)
+            if key in existing_keys:
                 continue
+            new_notifications.append(Notification(
+                user_id=w.user_id,
+                wishlist_id=w.id,
+                car_listing_id=listing_id,
+                status="queued",
+            ))
 
-            create_queued(db, user_id=w.user_id, wishlist_id=w.id, car_listing_id=listing.id)
-            queued += 1
+    if new_notifications:
+        db.add_all(new_notifications)
 
-    log(db, "info", component, "queued notifications", {"queued": queued, "listings": len(listings), "wishlists": len(wishlists)})
+    log(db, "info", component, "queued notifications", {
+        "queued": len(new_notifications),
+        "listings": len(listing_ids),
+        "wishlists": len(wishlists),
+    })
     db.commit()
 
 
