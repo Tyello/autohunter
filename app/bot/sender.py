@@ -3,13 +3,12 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-import requests
-
 from app.core.settings import settings
 from app.bot.formatting import format_price
 from app.bot.media import download_image_bytes
 from app.bot.open_ad import normalize_listing_url, open_ad_reply_markup_json
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.services.http_session import get_shared_session
 
 
 # Telegram limits
@@ -228,12 +227,14 @@ def telegram_sender(notification, listing, user):
     )
     reply_markup = open_ad_reply_markup_json(open_url) if open_url else None
 
+    session = get_shared_session("telegram")
+
     if getattr(listing, "thumbnail_url", None):
         img = download_image_bytes(listing.thumbnail_url, referer=getattr(listing, "url", None))
         if img:
             img_bytes, ctype = img
             url = f"https://api.telegram.org/bot{token}/sendPhoto"
-            resp = requests.post(
+            resp = session.post(
                 url,
                 data={"chat_id": chat_id, "caption": caption, **({"reply_markup": reply_markup} if reply_markup else {})},
                 files={"photo": ("thumb", img_bytes, ctype)},
@@ -245,7 +246,7 @@ def telegram_sender(notification, listing, user):
 
     if not sent_photo:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        resp = requests.post(
+        resp = session.post(
             url,
             data={
                 "chat_id": chat_id,
@@ -262,7 +263,7 @@ def telegram_sender(notification, listing, user):
     if remainder.strip():
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         extra = _truncate(remainder.strip(), TELEGRAM_TEXT_MAX)
-        resp2 = requests.post(
+        resp2 = session.post(
             url,
             data={"chat_id": chat_id, "text": extra, "disable_web_page_preview": True},
             timeout=20,
@@ -284,7 +285,7 @@ def send_daily_limit_notice_http(user, limit: int):
     )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    resp = requests.post(
+    resp = get_shared_session("telegram").post(
         url,
         data={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
         timeout=15,
