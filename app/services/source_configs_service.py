@@ -73,12 +73,15 @@ def ensure_source_configs(db: Session) -> int:
 
     Returns number of rows created (not committed).
     """
+    existing_sources = set(
+        db.execute(select(SourceConfig.source)).scalars().all()
+    )
     created = 0
     for plugin in list_sources():
         src = plugin.name.strip().lower()
         if not src:
             continue
-        if get_source_config(db, src):
+        if src in existing_sources:
             continue
 
         row = SourceConfig(
