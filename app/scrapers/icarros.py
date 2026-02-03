@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 from lxml import html as lxml_html
 
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.utils import clean_text, normalize_asset_url, pick_from_srcset
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
@@ -26,10 +27,6 @@ _LISTING_URL_RE = re.compile(r'https?://(?:www\.)?icarros\.com\.br/comprar/[^"\'
 _RE_PRICE = re.compile(r"R\$\s*[0-9\.]+(?:,[0-9]{1,2})?", re.I)
 _RE_YEAR_IN_URL = re.compile(r"/(19\d{2}|20\d{2})/d\d+(?:$|[/?#])")
 _RE_KM = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{1,7})\s*km\b", re.I)
-
-
-def _clean_text(t: str) -> str:
-    return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
 
 def _canonical_url(url: str) -> str:
@@ -226,56 +223,6 @@ def _best_price(text: str) -> Optional[Decimal]:
     return max(vals)
 
 
-def _pick_from_srcset(srcset: str, *, max_width: int = 2048) -> Optional[str]:
-    """Pick a good URL from a srcset string."""
-    if not srcset:
-        return None
-
-    candidates: list[tuple[int, str]] = []
-    for part in srcset.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        bits = part.split()
-        url = bits[0].strip()
-        size = 0
-        if len(bits) >= 2:
-            token = bits[1].strip().lower()
-            if token.endswith("w"):
-                try:
-                    size = int(token[:-1])
-                except Exception:
-                    size = 0
-            elif token.endswith("x"):
-                try:
-                    size = int(float(token[:-1]) * 1000)
-                except Exception:
-                    size = 0
-        candidates.append((size, url))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda x: x[0] or 0)
-    under = [c for c in candidates if c[0] and c[0] <= max_width]
-    if under:
-        return under[-1][1]
-    return candidates[-1][1]  # if no widths, pick the last (often best)
-
-
-def _normalize_asset_url(raw: str, base_url: str) -> Optional[str]:
-    if not raw:
-        return None
-    u = raw.strip()
-    if not u or u.startswith("data:"):
-        return None
-    if u.startswith("//"):
-        u = "https:" + u
-    if u.startswith("/"):
-        u = urljoin(base_url, u)
-    return u
-
-
 def _upgrade_image_url(url: str) -> str:
     """Try to upgrade thumbnail URLs to higher resolution."""
     if not url:
@@ -346,7 +293,7 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
             if not v:
                 continue
             if "srcset" in attr:
-                picked = _pick_from_srcset(v)
+                picked = pick_from_srcset(v)
                 if picked:
                     candidates.append(picked)
                 else:
@@ -356,7 +303,7 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
 
     # picture sources
     for ss in node.xpath(".//picture//source[@srcset]/@srcset"):
-        picked = _pick_from_srcset(ss)
+        picked = pick_from_srcset(ss)
         if picked:
             candidates.append(picked)
 
@@ -403,7 +350,7 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
     best_score = -10**9
 
     for raw in candidates:
-        u = _normalize_asset_url(raw, base_url)
+        u = normalize_asset_url(raw, base_url)
         if not u:
             continue
         sc = _score(u)
@@ -487,19 +434,19 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         # Title: prefer og:title, then h1, then any strong header-like node
         title = None
         ogt = doc.xpath("string(//meta[@property='og:title']/@content)") or ""
-        ogt = _clean_text(ogt)
+        ogt = clean_text(ogt)
         if ogt and len(ogt) <= 180:
             title = ogt
 
         if _looks_generic_title(title):
-            h1 = _clean_text(doc.xpath("string(//h1[1])") or "")
+            h1 = clean_text(doc.xpath("string(//h1[1])") or "")
             if h1 and 6 <= len(h1) <= 180:
                 title = h1
 
         if _looks_generic_title(title):
             for xp in ("//h2", "//h3"):
                 for n in doc.xpath(xp):
-                    t = _clean_text(n.text_content())
+                    t = clean_text(n.text_content())
                     if t and "R$" not in t and 10 <= len(t) <= 180:
                         title = t
                         break
@@ -536,13 +483,13 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
                 break
 
         if price is None:
-            price = _best_price(_clean_text(doc.text_content()))
+            price = _best_price(clean_text(doc.text_content()))
 
         # Thumbnail
         thumb = _extract_thumbnail_any(doc, base_url=base_url)
 
         # KM
-        km = _extract_km(_clean_text(doc.text_content()))
+        km = _extract_km(clean_text(doc.text_content()))
 
         # Location
         location = listing.get("location") or _extract_location_from_url(base_url)
@@ -586,19 +533,19 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         # Title: prefer og:title, then h1, then any strong header-like node
         title = None
         ogt = doc.xpath("string(//meta[@property='og:title']/@content)") or ""
-        ogt = _clean_text(ogt)
+        ogt = clean_text(ogt)
         if ogt and len(ogt) <= 180:
             title = ogt
 
         if _looks_generic_title(title):
-            h1 = _clean_text(doc.xpath("string(//h1[1])") or "")
+            h1 = clean_text(doc.xpath("string(//h1[1])") or "")
             if h1 and 6 <= len(h1) <= 180:
                 title = h1
 
         if _looks_generic_title(title):
             for xp in ("//h2", "//h3"):
                 for n in doc.xpath(xp):
-                    t = _clean_text(n.text_content())
+                    t = clean_text(n.text_content())
                     if t and "R$" not in t and 10 <= len(t) <= 180:
                         title = t
                         break
@@ -637,13 +584,13 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
 
         if price is None:
             # fallback: best price from visible text
-            price = _best_price(_clean_text(doc.text_content()))
+            price = _best_price(clean_text(doc.text_content()))
 
         # Thumbnail: prefer richer sources on detail
         thumb = _extract_thumbnail_any(doc, base_url=base_url)
 
         # KM: from detail text (more reliable)
-        km = _extract_km(_clean_text(doc.text_content()))
+        km = _extract_km(clean_text(doc.text_content()))
 
         # Location: from URL (detail has it)
         location = listing.get("location") or _extract_location_from_url(base_url)

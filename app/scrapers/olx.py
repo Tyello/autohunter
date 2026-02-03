@@ -15,6 +15,7 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
+from app.scrapers.parsing import parse_brl_price
 from app.core.settings import settings
 from app.services.browser_fetcher import fetch_html_browser, fetch_json_browser
 from app.sources.types import ScrapeContext
@@ -169,18 +170,6 @@ def build_olx_search_url(query: str, page: int = 1) -> str:
     return f"https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q={q}&o={page}"
 
 
-def _parse_brl_price_to_decimal(text: str) -> Optional[Decimal]:
-    if not text:
-        return None
-    t = text.strip()
-    t = t.replace("R$", "").strip()
-    t = t.replace(".", "").replace(",", ".")
-    try:
-        return Decimal(t)
-    except Exception:
-        return None
-
-
 def _walk(obj: Any) -> Iterable[Any]:
     """Percorre estrutura JSON (dict/list) produzindo todos os nós."""
     if isinstance(obj, dict):
@@ -252,7 +241,7 @@ def _extract_items_from_next_data(next_data: dict) -> list[OlxItem]:
 
             # preço (pode vir em priceValue ou price)
             price_text = node.get("priceValue") or node.get("price") or ""
-            price = _parse_brl_price_to_decimal(price_text)
+            price = parse_brl_price(price_text)
 
             # localização (quando vier)
             loc = None
@@ -531,7 +520,7 @@ def _fallback_parse_from_cards(html: str) -> list[OlxItem]:
             price_el = container.select_one(".olx-adcard__price")
             if price_el:
                 price_text = price_el.get_text(strip=True)
-                price = _parse_brl_price_to_decimal(price_text)
+                price = parse_brl_price(price_text)
 
         img = None
         if container:

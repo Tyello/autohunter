@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 
 from app.core.text_norm import normalize
 from app.scrapers.base import fetch_html
+from app.scrapers.parsing import parse_brl_price
+from app.scrapers.utils import normalize_asset_url, pick_from_srcset
 
 
 @dataclass
@@ -77,43 +79,7 @@ def build_chavesnamao_search_url(query: str, page: int = 1) -> str:
     return url
 
 
-_RE_PRICE = re.compile(r"R\$\s*([\d\.]+)")
-
-
-def _parse_brl_price(text: str) -> Optional[Decimal]:
-    if not text:
-        return None
-    m = _RE_PRICE.search(text)
-    if not m:
-        return None
-    raw = m.group(1).replace(".", "")
-    try:
-        return Decimal(raw)
-    except Exception:
-        return None
-
-
-def _abs_url(u: str) -> str:
-    if not u:
-        return ""
-    u = u.strip()
-    if u.startswith("//"):
-        return "https:" + u
-    if u.startswith("/"):
-        return "https://www.chavesnamao.com.br" + u
-    return u
-
-def _pick_from_srcset(srcset: str) -> Optional[str]:
-    # pega o último candidato (normalmente maior resolução)
-    if not srcset:
-        return None
-    parts = [p.strip() for p in srcset.split(",") if p.strip()]
-    if not parts:
-        return None
-    last = parts[-1]
-    # formato: "<url> 2x" ou "<url> 640w"
-    url = last.split()[0].strip()
-    return url or None
+_CHAVES_BASE = "https://www.chavesnamao.com.br"
 
 def _extract_thumb_from_anchor(a) -> Optional[str]:
     # 1) <img> dentro do <a>
@@ -126,16 +92,16 @@ def _extract_thumb_from_anchor(a) -> Optional[str]:
             or img.get("src")
         )
         if not cand:
-            cand = _pick_from_srcset(img.get("data-srcset") or img.get("srcset") or "")
+            cand = pick_from_srcset(img.get("data-srcset") or img.get("srcset") or "", prefer_last=True)
         if cand:
-            return _abs_url(cand)
+            return normalize_asset_url(cand, _CHAVES_BASE)
 
     # 2) <source srcset> dentro de <picture>
     src = a.select_one("source[srcset]")
     if src:
-        cand = _pick_from_srcset(src.get("srcset") or "")
+        cand = pick_from_srcset(src.get("srcset") or "", prefer_last=True)
         if cand:
-            return _abs_url(cand)
+            return normalize_asset_url(cand, _CHAVES_BASE)
 
     # 3) background-image inline (card css)
     el = a.select_one("[style*='background-image']")
@@ -143,7 +109,7 @@ def _extract_thumb_from_anchor(a) -> Optional[str]:
         style = el.get("style") or ""
         m = re.search(r"background-image\s*:\s*url\((['\"]?)([^'\")]+)\1\)", style, re.I)
         if m:
-            return _abs_url(m.group(2))
+            return normalize_asset_url(m.group(2), _CHAVES_BASE)
 
     return None
 
@@ -220,7 +186,7 @@ def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
         external_id = m.group(1) if m else url
 
 
-        price = _parse_brl_price(text)
+        price = parse_brl_price(text)
 
         # location: primeiro tenta pela URL (mais confiável); fallback pro texto
         location = _extract_location_from_url(url) or _extract_location_from_anchor_text(text)
@@ -272,12 +238,12 @@ def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
                 s2 = BeautifulSoup(html_d, "html.parser")
                 meta = s2.select_one('meta[property="og:image"]') or s2.select_one('meta[name="twitter:image"]')
                 if meta and meta.get("content"):
-                    it["thumbnail_url"] = _abs_url(meta.get("content"))
+                    it["thumbnail_url"] = normalize_asset_url(meta.get("content"), _CHAVES_BASE)
                     budget -= 1
                     continue
                 img = s2.select_one("img[src]")
                 if img and img.get("src"):
-                    it["thumbnail_url"] = _abs_url(img.get("src"))
+                    it["thumbnail_url"] = normalize_asset_url(img.get("src"), _CHAVES_BASE)
                     budget -= 1
             except Exception:
                 continue
