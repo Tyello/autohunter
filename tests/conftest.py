@@ -32,7 +32,7 @@ os.environ.setdefault("OLX_HEALTH_PATH", str(_DATA_DIR / "olx_health.json"))
 # ---------------------------------------------------------------------------
 
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 
 @compiles(JSONB, "sqlite")
@@ -45,6 +45,12 @@ def _compile_jsonb_sqlite(type_, compiler, **kw):  # noqa: ANN001
 def _compile_uuid_sqlite(type_, compiler, **kw):  # noqa: ANN001
     # Use a plain char field; UUID type will still bind/process UUID values.
     return "CHAR(36)"
+
+
+@compiles(ARRAY, "sqlite")
+def _compile_array_sqlite(type_, compiler, **kw):  # noqa: ANN001
+    # Persist arrays as TEXT for SQLite-only test runs.
+    return "TEXT"
 
 
 # Now it is safe to import app modules.
