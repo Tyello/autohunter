@@ -10,6 +10,7 @@ from telegram.ext import (
 )
 
 from app.db.session import SessionLocal
+from app.bot.utils import normalize_args, parse_int, reply_text
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import (
     list_wishlists,
@@ -35,19 +36,21 @@ async def cmd_wishlist_remove(update: Update, context: ContextTypes.DEFAULT_TYPE
         wishlists = list_wishlists(db, user.id)
 
         if not wishlists:
-            await update.message.reply_text("Você não tem wishlists. Use /wishlist_add.")
+            await reply_text(update, "Você não tem wishlists. Use /wishlist_add.")
             return
 
-        if context.args and str(context.args[0]).isdigit():
-            n = int(context.args[0])
+        args = normalize_args(context.args)
+        n = parse_int(args[0]) if args else None
+        if n is not None:
             _ok, msg = remove_wishlist(db, user.id, n)
-            await update.message.reply_text(msg)
+            await reply_text(update, msg)
             return
 
     lines = [f"{i+1}. {w.query}" for i, w in enumerate(wishlists)]
     sug = "\n".join([f"/wishlist_remove {i+1}" for i in range(min(len(wishlists), 9))])
 
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "🗑️ Remover wishlist\n\n"
         "Escolha o número e envie um dos comandos abaixo:\n\n"
         + sug
@@ -63,7 +66,8 @@ async def cmd_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("❌ Cancelar", callback_data="W:CLEAR:NO"),
         ]
     ])
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "⚠️ Tem certeza que deseja remover TODAS as wishlists?",
         reply_markup=kb,
     )
@@ -109,13 +113,15 @@ async def cmd_wishlist_add_start(update: Update, context: ContextTypes.DEFAULT_T
         max_w = get_max_wishlists_for_user(db, user.id)
 
         if len(wishlists) >= max_w:
-            await update.message.reply_text(
+            await reply_text(
+                update,
                 f"Limite atingido: {max_w} wishlists no seu plano. Use /wishlist_remove."
             )
             return ConversationHandler.END
 
     context.user_data.pop("wadd_query", None)
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "Digite os termos da wishlist.\n"
         "Ex: civic si\n\n"
         "Dica: você pode incluir diretivas que viram filtros automáticos (ano e preço).\n"
@@ -135,12 +141,13 @@ async def cmd_wishlist_add_start(update: Update, context: ContextTypes.DEFAULT_T
 async def cmd_wishlist_add_on_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = (update.message.text or "").strip()
     if len(query) < 3:
-        await update.message.reply_text("Texto muito curto. Ex: civic si")
+        await reply_text(update, "Texto muito curto. Ex: civic si")
         return WADD_QUERY
 
     context.user_data["wadd_query"] = query
 
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "Confirma criar esta wishlist?\n\n"
         f"🔎 {query}",
         reply_markup=_confirm_kb(),
@@ -176,7 +183,7 @@ async def cb_wishlist_add_confirm(update: Update, context: ContextTypes.DEFAULT_
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("wadd_query", None)
-    await update.message.reply_text("Cancelado.")
+    await reply_text(update, "Cancelado.")
     return ConversationHandler.END
 
 
@@ -199,27 +206,29 @@ def wishlist_add_conversation() -> ConversationHandler:
 
 async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Use: /wishlist_filter_list <n>"""
-    if not context.args or not str(context.args[0]).isdigit():
-        await update.message.reply_text("Use: /wishlist_filter_list <n>")
+    args = normalize_args(context.args)
+    n = parse_int(args[0]) if args else None
+    if n is None:
+        await reply_text(update, "Use: /wishlist_filter_list <n>")
         return
-    n = int(context.args[0])
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
         if n < 1 or n > len(wishlists):
-            await update.message.reply_text("Wishlist inválida. Use /wishlist listar.")
+            await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
             return
 
         wl = wishlists[n - 1]
         fs = list_filters(db, wl.id)
 
     if not fs:
-        await update.message.reply_text("(sem filtros)\nDica: /wishlist_filter_add <n> year lte 2005")
+        await reply_text(update, "(sem filtros)\nDica: /wishlist_filter_add <n> year lte 2005")
         return
 
     lines = [f"{i+1}. {f.field} {f.operator} {f.value}" for i, f in enumerate(fs)]
-    await update.message.reply_text(
+    await reply_text(
+        update,
         "Filtros da wishlist:\n"
         f"🔎 {wl.query}\n\n"
         + "\n".join(lines)
@@ -229,7 +238,8 @@ async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT
 async def cmd_wishlist_filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Use: /wishlist_filter_add <n> <field> <op> <value>"""
     if len(context.args or []) < 4:
-        await update.message.reply_text(
+        await reply_text(
+            update,
             "Use: /wishlist_filter_add <n> <campo> <op> <valor>\n"
             "Ex: /wishlist_filter_add 1 year lte 2005"
         )
@@ -238,45 +248,44 @@ async def cmd_wishlist_filter_add(update: Update, context: ContextTypes.DEFAULT_
     n_s, field, op = context.args[0], context.args[1], context.args[2]
     value = " ".join(context.args[3:])
 
-    if not str(n_s).isdigit():
-        await update.message.reply_text("Primeiro argumento deve ser o número da wishlist.")
+    n = parse_int(n_s)
+    if n is None:
+        await reply_text(update, "Primeiro argumento deve ser o número da wishlist.")
         return
-    n = int(n_s)
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
         if n < 1 or n > len(wishlists):
-            await update.message.reply_text("Wishlist inválida. Use /wishlist listar.")
+            await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
             return
 
         wl = wishlists[n - 1]
         _ok, msg = add_filter(db, wl.id, field, op, value)
 
-    await update.message.reply_text(msg)
+    await reply_text(update, msg)
 
 
 async def cmd_wishlist_filter_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Use: /wishlist_filter_remove <n> <k>"""
     if len(context.args or []) < 2:
-        await update.message.reply_text("Use: /wishlist_filter_remove <n> <k>")
+        await reply_text(update, "Use: /wishlist_filter_remove <n> <k>")
         return
 
-    if (not str(context.args[0]).isdigit()) or (not str(context.args[1]).isdigit()):
-        await update.message.reply_text("Use: /wishlist_filter_remove <n> <k>")
+    n = parse_int(context.args[0])
+    k = parse_int(context.args[1])
+    if n is None or k is None:
+        await reply_text(update, "Use: /wishlist_filter_remove <n> <k>")
         return
-
-    n = int(context.args[0])
-    k = int(context.args[1])
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
         if n < 1 or n > len(wishlists):
-            await update.message.reply_text("Wishlist inválida. Use /wishlist listar.")
+            await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
             return
 
         wl = wishlists[n - 1]
         _ok, msg = remove_filter(db, wl.id, k)
 
-    await update.message.reply_text(msg)
+    await reply_text(update, msg)
