@@ -7,15 +7,12 @@ from urllib.parse import urljoin
 from lxml import html as lxml_html
 
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.utils import clean_text
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
 
 _KAVAK_BASE = "https://www.kavak.com"
-
-
-def _clean_text(t: str) -> str:
-    return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
 
 def _external_id_from_url(url: str) -> str:
@@ -52,7 +49,7 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
             tag = getattr(cur, "tag", "") or ""
             if tag.lower() in ("article", "li", "section", "div"):
                 # card típico: tem um h2/h3 OU tem algum preço/km dentro
-                txt = _clean_text(cur.text_content() or "")
+                txt = clean_text(cur.text_content() or "")
                 if (cur.xpath(".//h1|.//h2|.//h3") or "r$" in txt.lower() or KM_RE.search(txt)):
                     return cur
             cur = cur.getparent()
@@ -121,16 +118,16 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
         for xp in (".//h1", ".//h2", ".//h3"):
             nodes = card.xpath(xp)
             if nodes:
-                t = _clean_text(nodes[0].text_content())
+                t = clean_text(nodes[0].text_content())
                 if t and len(t) >= 4:
                     return t
         # fallback: texto do link, mas limpo
-        t = _clean_text(fallback_text)
+        t = clean_text(fallback_text)
         # remove preço/km colados
         t = PRICE_RE.sub("", t)
         t = KM_RE.sub("", t)
         t = re.sub(r"\bReservado\b", "", t, flags=re.IGNORECASE)
-        t = _clean_text(t)
+        t = clean_text(t)
         return t or None
 
     def extract_location(card, card_text: str) -> Optional[str]:
@@ -145,13 +142,13 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
         ):
             nodes = card.xpath(xp)
             for n in nodes[:3]:
-                t = _clean_text(n.text_content())
+                t = clean_text(n.text_content())
                 # evita pegar o próprio título
                 if t and len(t) <= 40 and "r$" not in t.lower() and not KM_RE.search(t):
                     return t
 
         # heurística: último "token" capitalizado (ex: 'São Paulo')
-        tail = _clean_text(card_text)
+        tail = clean_text(card_text)
         # corta em 'Automático'/'Manual' e pega o que sobrou
         tail = re.sub(r"^.*\b(autom[aá]tico|manual)\b", "", tail, flags=re.IGNORECASE).strip()
         tail = re.sub(r"\bReservado\b", "", tail, flags=re.IGNORECASE).strip()
@@ -170,8 +167,8 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
             continue
 
         card = find_card(a)
-        card_text = _clean_text(card.text_content() or "")
-        a_text = _clean_text(a.text_content() or "")
+        card_text = clean_text(card.text_content() or "")
+        a_text = clean_text(a.text_content() or "")
 
         external_id = _external_id_from_url(url)
 
