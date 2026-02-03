@@ -1,5 +1,5 @@
-from typing import List, Optional
 import time
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -14,11 +14,15 @@ from app.services.source_runs_service import record_run
 from app.services.system_logs_service import log
 
 
+def _duration_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
 def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[List[str]] = None) -> List[CarListing]:
     # Ensure configs exist (seed defaults once)
     ensure_source_configs(db)
 
-    sources_norm = [s.lower() for s in sources] if sources else None
+    sources_norm = [s.strip().lower() for s in sources] if sources else None
 
     # Pluggable sources: iterate registry
     for plugin in list_sources():
@@ -65,17 +69,19 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 status="success",
                 query=query,
                 url=url,
-                duration_ms=int((time.perf_counter() - t0) * 1000),
+                duration_ms=_duration_ms(t0),
                 items_found=len(items or []),
                 items_ingested=len(inserted_ids or []),
             )
         except FetchBlocked as e:
+            err_url = getattr(e, "url", url)
+            err_status = getattr(e, "status_code", None)
             minutes = mark_blocked(
                 db,
                 plugin.name,
                 base_cooldown_minutes=max(cooldown, 1),
-                http_status=getattr(e, "status_code", None),
-                url=getattr(e, "url", url),
+                http_status=err_status,
+                url=err_url,
             )
             record_run(
                 db,
@@ -83,12 +89,18 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 kind="manual",
                 status="blocked",
                 query=query,
-                url=getattr(e, "url", url),
-                http_status=getattr(e, "status_code", None),
-                duration_ms=int((time.perf_counter() - t0) * 1000),
+                url=err_url,
+                http_status=err_status,
+                duration_ms=_duration_ms(t0),
                 error=f"blocked(backoff={minutes}m)",
             )
-            log(db, "warn", f"scraper_{plugin.name}", "source_blocked", {"status_code": getattr(e, "status_code", None), "url": getattr(e, "url", url), "backoff_minutes": minutes})
+            log(
+                db,
+                "warn",
+                f"scraper_{plugin.name}",
+                "source_blocked",
+                {"status_code": err_status, "url": err_url, "backoff_minutes": minutes},
+            )
         except Exception as e:
             err = str(e)
             # If Playwright is globally enabled but restricted by PLAYWRIGHT_SOURCES,
@@ -101,7 +113,7 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                     status="skipped",
                     query=query,
                     url=url,
-                    duration_ms=int((time.perf_counter() - t0) * 1000),
+                    duration_ms=_duration_ms(t0),
                     error=err,
                     payload={"reason": "playwright_sources_restricted"},
                 )
@@ -115,10 +127,16 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 status="error",
                 query=query,
                 url=url,
-                duration_ms=int((time.perf_counter() - t0) * 1000),
+                duration_ms=_duration_ms(t0),
                 error=f"{err} (backoff={minutes}m)",
             )
-            log(db, "error", f"scraper_{plugin.name}", "scrape_failed", {"error": err, "url": url, "backoff_minutes": minutes})
+            log(
+                db,
+                "error",
+                f"scraper_{plugin.name}",
+                "scrape_failed",
+                {"error": err, "url": url, "backoff_minutes": minutes},
+            )
 
     db.commit()
 
