@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
-import requests
+from app.services.http_session import get_shared_session
 
 # RPi-friendly guardrails
 MAX_IMAGE_BYTES = 3_500_000  # ~3.5MB
@@ -47,7 +47,13 @@ def download_image_bytes(
         headers["Referer"] = ref
 
     try:
-        with requests.get(url, headers=headers, stream=True, timeout=timeout, allow_redirects=True) as r:
+        with get_shared_session("media").get(
+            url,
+            headers=headers,
+            stream=True,
+            timeout=timeout,
+            allow_redirects=True,
+        ) as r:
             if r.status_code != 200:
                 return None
             ctype = (r.headers.get("Content-Type") or "").lower()

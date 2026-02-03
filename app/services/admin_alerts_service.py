@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from typing import Iterable, List
-import requests
 
 from app.core.settings import settings
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.services.http_session import get_shared_session
 
 
 TELEGRAM_TEXT_MAX = 4096
@@ -46,9 +46,10 @@ def send_admin_text(text: str) -> None:
         msg = msg[: TELEGRAM_TEXT_MAX - 1] + "…"
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    session = get_shared_session("telegram")
     for chat_id in iter_admin_chat_ids():
         try:
-            requests.post(
+            session.post(
                 url,
                 data={"chat_id": chat_id, "text": msg, "disable_web_page_preview": True},
                 timeout=15,
