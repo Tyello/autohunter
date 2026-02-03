@@ -1,21 +1,24 @@
-# Documentação geral do projeto (AutoHunter)
+# AutoHunter — Visão geral do projeto
 
 ## Objetivo
 
-O AutoHunter monitora anúncios de carros em múltiplas fontes e envia alertas para usuários no Telegram.
+O AutoHunter monitora anúncios de carros em múltiplas fontes e envia alertas no Telegram quando aparecem itens compatíveis com as wishlists do usuário.
 
-Pilares:
+Princípios:
+
 - **MVP pragmático:** pouca magia, muita previsibilidade.
-- **Deduplicação forte:** `source + external_id`.
-- **Escala por plugins:** novas fontes entram sem explodir o scheduler.
+- **Deduplicação forte:** chave `source + external_id`.
+- **Escala por plugins:** fontes entram sem explodir o scheduler.
 
 ## Visão de alto nível
 
-Entradas:
+**Entradas**
+
 - Comandos do usuário no Telegram (busca/wishlist)
 - Scheduler coletando anúncios continuamente
 
-Saídas:
+**Saídas**
+
 - Notificações no Telegram
 - Persistência no Postgres (Supabase ou Postgres local)
 
@@ -26,11 +29,13 @@ Saídas:
 **Caminho:** `app/bot/*`
 
 Responsável por:
+
 - receber comandos (`/buscar`, `/wishlist`, `/alertas`, ...)
 - criar/alterar registros no banco (usuário, wishlists, limites)
 - formatar e enviar respostas
 
 Entrypoint:
+
 - `python -m app.bot.run`
 
 ### 2) Scheduler
@@ -38,11 +43,13 @@ Entrypoint:
 **Caminho:** `app/scheduler/*`
 
 Responsável por:
+
 - rodar jobs por fonte
 - coletar anúncios -> ingerir -> fazer matching -> gerar notifications
 - enviar notificações pendentes (sender job)
 
 Entrypoints:
+
 - standalone: `python -m app.scheduler.cli`
 - embutido na API (opcional): `ENABLE_SCHEDULER_IN_API=true`
 
@@ -51,11 +58,13 @@ Entrypoints:
 **Caminho:** `app/main.py`
 
 Endpoints simples (MVP):
+
 - `/health`
 - `/db-check`
 - `/listings`
 
 Entrypoint:
+
 - `uvicorn app.main:app --reload`
 
 ### 4) Scrapers
@@ -63,6 +72,7 @@ Entrypoint:
 **Caminho:** `app/scrapers/*`
 
 Regras:
+
 - retornar `list[dict]` compatível com `ingest_listings`
 - lançar `FetchBlocked` quando houver bloqueio
 
@@ -71,10 +81,11 @@ Regras:
 **Caminho:** `app/services/*`
 
 Onde vivem as regras do negócio:
+
 - ingest/dedupe
-- matching wishlist
+- matching de wishlist
 - limites de alertas
-- logs
+- logs e auditoria
 
 ## Banco de dados (tabelas principais)
 
@@ -111,6 +122,7 @@ O scheduler não tem mais `if/elif` por fonte: ele percorre o registry e agenda 
 ### Adicionar uma nova fonte
 
 Checklist:
+
 1) implementar scraper (`app/scrapers/`)
 2) implementar builder de URL (`app/services/search_urls_service.py`)
 3) registrar plugin (`app/sources/builtins.py`)
@@ -118,16 +130,18 @@ Checklist:
 
 ## Operação e observabilidade
 
-- Bloqueios e erros de scrape viram registros em `system_logs`
-- Configure cooldowns por fonte para reduzir ban
+- Bloqueios e erros de scrape viram registros em `system_logs`.
+- Configure cooldowns por fonte para reduzir risco de ban.
 
 ## Deploy (visão)
 
 O projeto roda bem em 2 processos:
+
 - `bot` (polling)
 - `scheduler` (APScheduler)
 
 E opcionalmente um 3º:
+
 - `api`
 
-No Supabase, você só precisa apontar `DATABASE_URL`.
+No Supabase, basta apontar `DATABASE_URL`.
