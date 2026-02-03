@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, List, Dict, Any, Literal
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ScrapeContext:
     """Runtime context passed to scrapers.
 
@@ -28,7 +28,7 @@ BuildUrlFn = Callable[[str], str]
 FetchMode = Literal["http", "browser"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourcePlugin:
     """Defines a listing source.
 
