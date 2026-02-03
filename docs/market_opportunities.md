@@ -1,4 +1,4 @@
-# AutoHunter — Oportunidades de Mercado (entusiastas)
+# AutoHunter — Oportunidades de mercado (entusiastas)
 
 ## 1) Dor real (o que o público compra)
 
@@ -19,16 +19,16 @@ O MVP do AutoHunter ataca a dor mais valiosa: **velocidade + cobertura**.
 
 O padrão que mais paga: gente que já olha anúncio todo dia.
 
-## 3) Diferenciais (moat) que cabem no seu produto
+## 3) Diferenciais (moat) que cabem no produto
 
-- **Matching “semântico” por wishlist** (seu código já começou isso): evita falsos positivos e aumenta confiança
+- **Matching semântico por wishlist** (seu código já começou isso): evita falsos positivos e aumenta confiança
 - **Deal Score** (já tem FIPE + score simples): destacar “abaixo de FIPE” e “raridade”
 - **Rarity Score**: quantos anúncios daquela wishlist aparecem por semana/mês
 - **Alertas com contexto**: “apareceu 1 anúncio novo em 3 dias” / “preço 18% abaixo da média recente”
 
-Esses itens viram “assinatura” (não é só scraping).
+Esses itens viram assinatura (não é só scraping).
 
-## 4) Loop de crescimento (sem gastar em ads)
+## 4) Loop de crescimento (sem ads)
 
 - Alertas bons viram print no grupo → usuários novos
 - “Melhores achados da semana” (1x/semana) vira conteúdo e retenção
@@ -41,7 +41,7 @@ Esses itens viram “assinatura” (não é só scraping).
 - **Mecânica especializada** (inspeção pré-compra)
 - **Crédito/seguro** (lead qualificado quando usuário clica “quero negociar”)
 
-No começo: foque em 1 parceiro por vertical (pra não virar catálogo).
+No começo: foque em 1 parceiro por vertical (para não virar catálogo).
 
 ## 6) Riscos e como mitigar
 
@@ -53,4 +53,4 @@ No começo: foque em 1 parceiro por vertical (pra não virar catálogo).
 
 - Filtros por ano/km/cidade (mesmo simples já muda o jogo)
 - “Negociação rápida”: botão para abrir WhatsApp com mensagem pronta (copy inteligente)
-- “Watchlist tags”: *ex.:* “EK9”, “K20”, “AP1” para entusiastas hardcore
+- “Watchlist tags”: ex.: “EK9”, “K20”, “AP1” para entusiastas hardcore

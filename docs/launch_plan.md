@@ -1,4 +1,4 @@
-# AutoHunter — Plano de Lançamento (público controlado)
+# AutoHunter — Plano de lançamento (público controlado)
 
 ## Meta
 
@@ -19,10 +19,12 @@ Validar 3 coisas com o mínimo de barulho:
 **Entrada:** convite (código) via grupos de entusiastas.
 
 **Entrega:**
+
 - Free + Founders (anual) já disponível
 - Grupo privado no Telegram (suporte/feedback)
 
 **Métricas que importam:**
+
 - Ativação: usuário cria 1 wishlist e recebe 1 alerta relevante em 48h
 - Retenção: volta a usar /buscar ou /wishlist em 7 dias
 - Conversão: % que vira Founders/Enthusiast
@@ -41,6 +43,7 @@ Validar 3 coisas com o mínimo de barulho:
 ## Fase 3 — Lançamento público
 
 Só quando:
+
 - 2–3 fontes estáveis
 - backoff funcionando bem
 - suporte mínimo (FAQ + comando /status)
@@ -57,6 +60,7 @@ Só quando:
 **“O bot que encontra seu carro antes de todo mundo.”**
 
 Subtexto:
+
 - cobre várias fontes
 - alerta só quando é relevante
 - destaque de oportunidade vs FIPE

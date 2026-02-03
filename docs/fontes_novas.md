@@ -1,6 +1,6 @@
-# Novas fontes de anúncios (Roadmap)
+# Novas fontes de anúncios (roadmap)
 
-## O que já está plugado neste commit
+## O que já está plugado
 
 - **Chaves na Mão (SSR)**: scraping leve por HTML.
   - Status: **ON por padrão** (`enable_chavesnamao=true`).
@@ -36,7 +36,7 @@ SCHED_GOGARAGE_MINUTES=180
 
 ## Próximo passo técnico (se for implementar Webmotors/GoGarage)
 
-1. Descobrir endpoint de listagem (Network tab) e autenticação/headers.
-2. Implementar scraper via `httpx` (se for JSON) ou Playwright (se for JS + Cloudflare/Turnstile).
-3. Integrar no mesmo contrato: `scrape_<source>() -> list[dict]` com chaves:
+1) Descobrir endpoint de listagem (Network tab) e autenticação/headers.
+2) Implementar scraper via `httpx` (se for JSON) ou Playwright (se for JS + Cloudflare/Turnstile).
+3) Integrar no mesmo contrato: `scrape_<source>() -> list[dict]` com chaves:
    - source, external_id, title, url, thumbnail_url, price, currency, location

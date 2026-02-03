@@ -1,21 +1,23 @@
 # AutoHunter
 
-Bot do Telegram + scheduler para monitorar anúncios de carros e notificar o usuário quando aparecerem novos anúncios que batem com suas wishlists.
+Bot do Telegram + scheduler para monitorar anúncios de carros em múltiplas fontes e avisar quando aparecer algo que bate com as wishlists do usuário.
 
-## MVP (o que já existe)
+## Visão rápida
+
+**O que o projeto entrega hoje**
 
 - Busca manual via bot (`/buscar`)
 - Wishlists monitoradas (até 3 por usuário)
-- Alertas de novos anúncios (com foto/thumbnail + link)
+- Alertas com foto/thumbnail + link
 - Preço FIPE (quando disponível) + score simples (abaixo/dentro/acima)
 
-### Fontes (hoje)
+**Fontes ativas**
 
 - `mercadolivre` (Mercado Livre)
 - `olx` (scraping leve)
 - `chavesnamao` (SSR; scraping leve)
 
-Fontes plugadas mas **desligadas/placeholder** (SPA/JS-heavy):
+**Fontes plugadas, porém desligadas (SPA/JS-heavy)**
 
 - `webmotors`
 - `gogarage`
@@ -70,7 +72,7 @@ GOGARAGE_COOLDOWN_MINUTES=180
 
 ### 3) Banco e migrations
 
-Este projeto usa Alembic.
+Este projeto usa Alembic:
 
 ```bash
 alembic upgrade head
@@ -102,15 +104,16 @@ Se quiser que a API também suba o scheduler no startup:
 ENABLE_SCHEDULER_IN_API=true
 ```
 
-## Testes (funcionais essenciais)
+## Testes
 
-Os testes são **offline** (sem rede/Playwright) e usam SQLite automaticamente.
+Os testes são **offline** (sem rede/Playwright) e usam SQLite automaticamente:
 
 ```bash
 pytest
 ```
 
-O que eles cobrem:
+Cobertura principal:
+
 - Smoke tests da API (`/health`, `/db-check`, `/listings`, `/admin/health`)
 - Matching “anti-falso-positivo” (ex.: `civic si` não casa com `civic 2015`)
 - Sender de notifications respeitando limite diário (e aviso 1x por dia)
@@ -131,20 +134,20 @@ UPDATE_CONTRACT=1 pytest -k openapi_contract_snapshot
 
 ### CI (GitHub Actions)
 
-O repositório já vem com um workflow minimalista em `.github/workflows/ci.yml`:
+Workflow minimalista em `.github/workflows/ci.yml`:
 
 - roda em `push` e `pull_request`
 - instala dependências + `requirements.dev.txt`
 - executa `pytest`
 
-## Comandos do Bot (principais)
+## Comandos principais do bot
 
 - `/buscar <termos>`: busca manual (ingere resultados no banco e devolve os mais recentes)
 - `/wishlist`: cria/lista wishlists
 - `/alertas`: mostra alertas recentes
 - `/plan`, `/upgrade`, `/setplan`, `/setlimit`: controle de limites/planos (MVP)
 
-## Arquitetura (visão rápida)
+## Arquitetura (resumo)
 
 ### Componentes
 
@@ -156,7 +159,7 @@ O repositório já vem com um workflow minimalista em `.github/workflows/ci.yml`
 
 ### Fluxo de dados
 
-1) Usuário cria wishlist (query) no bot
+1) Usuário cria wishlist (query)
 2) Scheduler roda periodicamente por fonte
 3) Para cada wishlist ativa:
    - monta a URL de busca da fonte
@@ -165,9 +168,9 @@ O repositório já vem com um workflow minimalista em `.github/workflows/ci.yml`
    - faz match e cria `notifications`
 4) Sender job envia notificações pendentes no Telegram
 
-## Framework de Fontes (Pluginável)
+## Framework de fontes (pluginável)
 
-Agora as fontes são plugins registrados em `app/sources`.
+As fontes são plugins registrados em `app/sources`.
 
 ### Onde ficam
 
@@ -178,11 +181,13 @@ Agora as fontes são plugins registrados em `app/sources`.
 ### Por que isso importa
 
 Sem isso, cada nova fonte vira:
+
 - mais `if/elif` no scheduler
 - mais import e boilerplate no manual search
-- mais risco de esquecer de adicionar em defaults
+- mais risco de esquecer de adicionar defaults
 
 Com o registry:
+
 - adicionou plugin -> scheduler pega automaticamente
 - defaults de wishlist passam a ser “todas as fontes implementadas”
 
@@ -230,11 +235,11 @@ register_source(
 
 Pronto: o scheduler já agenda automaticamente e a busca manual já passa a ingerir.
 
-## Observações importantes (anti-ban)
+## Boas práticas (anti-ban)
 
 - Respeite `cooldown_minutes` e não rode fontes agressivas a cada 10s.
 - Trate `FetchBlocked` e registre logs (já existe infra em `system_logs`).
-- Para fontes SPA/Cloudflare/Turnstile (ex: Webmotors), **não** vale insistir com `requests+bs4`.
+- Para fontes SPA/Cloudflare/Turnstile (ex.: Webmotors), **não** vale insistir com `requests + bs4`.
 
 ## Roadmap sugerido
 
@@ -242,8 +247,13 @@ Pronto: o scheduler já agenda automaticamente e a busca manual já passa a inge
 - Cache + backoff por fonte
 - Headless isolado como microserviço (se realmente for implementar SPA)
 
----
+## Documentações adicionais
 
-Docs adicionais:
-
-- `docs/fontes_novas.md`
+- `docs/projeto.md`: visão geral e arquitetura
+- `docs/matching_guide.md`: guia de matching e semântica
+- `docs/fontes_novas.md`: status das fontes e roadmap
+- `docs/raspberry_pi_3.md`: deploy no Raspberry Pi 3
+- `docs/security.md`: segurança de secrets
+- `docs/pricing.md`: proposta de planos e preços
+- `docs/launch_plan.md`: plano de lançamento
+- `docs/market_opportunities.md`: oportunidades de mercado
