@@ -50,15 +50,16 @@ def _compute_backoff_minutes(base_minutes: int, exponent: int) -> int:
 
 def mark_success(db: Session, source: str, *, rate_limit_seconds: int = 0, payload: Optional[Dict[str, Any]] = None) -> None:
     st = _get_or_create_state(db, source)
-    st.last_run_at = _utcnow()
-    st.last_effective_run_at = st.last_run_at
+    now = _utcnow()
+    st.last_run_at = now
+    st.last_effective_run_at = now
     st.consecutive_blocks = 0
     st.consecutive_failures = 0
 
     # Apply throttling (min interval) using next_allowed_at.
     rl = int(rate_limit_seconds or 0)
     if rl > 0:
-        st.next_allowed_at = _utcnow() + timedelta(seconds=rl)
+        st.next_allowed_at = now + timedelta(seconds=rl)
     else:
         st.next_allowed_at = None
 
@@ -86,14 +87,15 @@ def mark_blocked(
 ) -> int:
     """Marca bloqueio e retorna minutos de backoff aplicado."""
     st = _get_or_create_state(db, source)
-    st.last_run_at = _utcnow()
-    st.last_effective_run_at = st.last_run_at
+    now = _utcnow()
+    st.last_run_at = now
+    st.last_effective_run_at = now
     st.consecutive_blocks = int(st.consecutive_blocks or 0) + 1
     st.consecutive_failures = 0
 
     minutes = _compute_backoff_minutes(base_cooldown_minutes, st.consecutive_blocks)
     jitter_s = int(getattr(settings, "source_backoff_jitter_seconds", 20) or 20)
-    st.next_allowed_at = _utcnow() + timedelta(minutes=minutes, seconds=jitter_s)
+    st.next_allowed_at = now + timedelta(minutes=minutes, seconds=jitter_s)
 
     st.last_status = "blocked"
     st.last_error = None
@@ -112,15 +114,16 @@ def mark_error(
 ) -> int:
     """Marca erro e retorna minutos de backoff aplicado."""
     st = _get_or_create_state(db, source)
-    st.last_run_at = _utcnow()
-    st.last_effective_run_at = st.last_run_at
+    now = _utcnow()
+    st.last_run_at = now
+    st.last_effective_run_at = now
     st.consecutive_failures = int(st.consecutive_failures or 0) + 1
     # não zera blocks completamente — mas deixa o signal principal como failure
     st.consecutive_blocks = 0
 
     minutes = _compute_backoff_minutes(base_cooldown_minutes, st.consecutive_failures)
     jitter_s = int(getattr(settings, "source_backoff_jitter_seconds", 20) or 20)
-    st.next_allowed_at = _utcnow() + timedelta(minutes=minutes, seconds=jitter_s)
+    st.next_allowed_at = now + timedelta(minutes=minutes, seconds=jitter_s)
 
     st.last_status = "error"
     st.last_error = error[:800]  # evita crescer infinito
@@ -141,8 +144,9 @@ def mark_bug(
     BUG != rede/bloqueio. Aqui não escalamos exponencialmente para evitar janelas longas.
     """
     st = _get_or_create_state(db, source)
-    st.last_run_at = _utcnow()
-    st.last_effective_run_at = st.last_run_at
+    now = _utcnow()
+    st.last_run_at = now
+    st.last_effective_run_at = now
 
     # zera contadores para não escalar exponencialmente
     st.consecutive_failures = 0
@@ -154,7 +158,7 @@ def mark_bug(
     if minutes <= 0:
         st.next_allowed_at = None
     else:
-        st.next_allowed_at = _utcnow() + timedelta(minutes=minutes, seconds=jitter_s)
+        st.next_allowed_at = now + timedelta(minutes=minutes, seconds=jitter_s)
 
     st.last_status = "error"
     st.last_error = (error or "bug")[:800]
