@@ -1,23 +1,20 @@
 from __future__ import annotations
 
-import json
 import re
-from typing import Optional, Tuple
-from urllib.parse import urlparse, urlunparse
+from typing import Tuple
 
 import requests
 
 from app.core.settings import settings
 from app.bot.formatting import format_price
+from app.bot.media import download_image_bytes
+from app.bot.open_ad import normalize_listing_url, open_ad_reply_markup_json
 from app.bot.text_sanitize import sanitize_for_telegram
 
 
 # Telegram limits
 TELEGRAM_CAPTION_MAX = 1024
 TELEGRAM_TEXT_MAX = 4096
-
-# RPi-friendly guardrails
-MAX_IMAGE_BYTES = 3_500_000  # ~3.5MB
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -107,70 +104,6 @@ def _clean_location(loc: str) -> str:
 
 
 
-def _strip_query_fragment(url: str) -> str:
-    """Remove querystring e fragment.
-
-    Isso evita:
-    - URLs gigantes no Telegram
-    - tokens de tracking causando falsos positivos no matching
-    """
-    if not url:
-        return ""
-    try:
-        p = urlparse(url)
-        return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
-    except Exception:
-        return url.split("#")[0].split("?")[0]
-
-
-
-def _infer_referer(url: str) -> str:
-    try:
-        p = urlparse(url)
-        if p.scheme and p.netloc:
-            return f"{p.scheme}://{p.netloc}/"
-    except Exception:
-        pass
-    return "https://www.chavesnamao.com.br/"
-
-
-def _canonical_ml_url(external_id: str) -> str:
-    """URL canônica curta para anúncios de veículos do Mercado Livre."""
-    m = re.match(r"^MLB[-]?(\d+)$", (external_id or "").upper())
-    if not m:
-        return ""
-    return f"https://carro.mercadolivre.com.br/MLB-{m.group(1)}-_JM"
-
-
-def _normalize_listing_url(url: str, source: str | None, external_id: str | None) -> str:
-    """Normaliza URLs antes de mandar pro Telegram.
-
-    Regras:
-    - Sempre remove ?query e #fragment
-    - MercadoLivre: se tiver MLB id (external_id), usa URL canônica curta.
-      Isso evita mandar URLs de tracking (click1...) para o usuário.
-    """
-    url = _clean_spaces(url or "")
-    if not url:
-        return ""
-
-    src = (source or "").lower()
-    if src == "mercadolivre":
-        canonical = _canonical_ml_url(external_id or "")
-        if canonical:
-            return canonical
-
-        # fallback: tenta extrair MLB-123... do path
-        try:
-            m = re.search(r"MLB-(\d+)", url)
-            if m:
-                return f"https://carro.mercadolivre.com.br/MLB-{m.group(1)}-_JM"
-        except Exception:
-            pass
-
-    return _strip_query_fragment(url)
-
-
 def _extract_year(title: str) -> int | None:
     t = title or ""
     m = re.search(r"\b(19\d{2}|20\d{2})\b", t)
@@ -215,7 +148,7 @@ def _build_text(listing, notification=None) -> str:
     raw_title = _clean_spaces(getattr(listing, "title", None) or "Novo anúncio")
     title, km = _clean_title_and_extract_km(raw_title)
     loc = _clean_location(getattr(listing, "location", None) or "")
-    url = _normalize_listing_url(
+    url = normalize_listing_url(
         getattr(listing, "url", None) or "",
         getattr(listing, "source", None) or "",
         getattr(listing, "external_id", None) or "",
@@ -255,50 +188,12 @@ def _build_text(listing, notification=None) -> str:
     if deal_score is not None:
         lines.append(f"Deal: {deal_score}")
 
-    # Não imprimimos URL no texto para economizar espaço.
-    # O link vai no botão "Abrir anúncio" (Inline Keyboard).
+    if url:
+        lines.append(url)
 
     text = "\n".join(lines)
     text = sanitize_for_telegram(text)
     return _truncate(text, TELEGRAM_TEXT_MAX)
-
-
-def _download_image_bytes(url: str, *, referer: str | None = None, timeout: int = 8) -> Optional[Tuple[bytes, str]]:
-    """Baixa a imagem e valida Content-Type.
-
-    Evita os erros 400 do Telegram quando você manda uma URL que:
-    - não é imagem (HTML/403/redirect)
-    - é lenta/bloqueada para o fetch do Telegram
-    """
-    if not url:
-        return None
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-        "Referer": (referer or _infer_referer(url)),
-    }
-
-    try:
-        with requests.get(url, headers=headers, stream=True, timeout=timeout, allow_redirects=True) as r:
-            if r.status_code != 200:
-                return None
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            if not ctype.startswith("image/"):
-                return None
-
-            buf = bytearray()
-            for chunk in r.iter_content(chunk_size=64 * 1024):
-                if not chunk:
-                    continue
-                buf.extend(chunk)
-                if len(buf) > MAX_IMAGE_BYTES:
-                    return None
-
-            return bytes(buf), ctype
-    except Exception:
-        return None
 
 
 def telegram_sender(notification, listing, user):
@@ -326,19 +221,15 @@ def telegram_sender(notification, listing, user):
 
     sent_photo = False
 
-    open_url = _normalize_listing_url(
+    open_url = normalize_listing_url(
         getattr(listing, "url", None) or "",
         getattr(listing, "source", None) or None,
         getattr(listing, "external_id", None) or "",
     )
-    reply_markup = (
-        json.dumps({"inline_keyboard": [[{"text": "Abrir anúncio", "url": open_url}]]}, ensure_ascii=False)
-        if open_url
-        else None
-    )
+    reply_markup = open_ad_reply_markup_json(open_url) if open_url else None
 
     if getattr(listing, "thumbnail_url", None):
-        img = _download_image_bytes(listing.thumbnail_url, referer=getattr(listing, 'url', None))
+        img = download_image_bytes(listing.thumbnail_url, referer=getattr(listing, "url", None))
         if img:
             img_bytes, ctype = img
             url = f"https://api.telegram.org/bot{token}/sendPhoto"

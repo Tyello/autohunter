@@ -2,14 +2,11 @@ from datetime import datetime, timezone
 
 import re
 from io import BytesIO
-from urllib.parse import urlparse
-
-import requests
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app.bot.formatting import format_price
+from app.bot.media import download_image_bytes
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
@@ -44,56 +41,6 @@ def _get_active_subscription_and_plan(db, user: User):
     sub, plan = row
     return sub, plan
 
-
-
-MAX_IMAGE_BYTES = 2500 * 1024 #MAX_IMAGE_BYTES = 900 * 1024  # 900KB; Telegram aceita bem e protege RAM
-
-def _download_image_bytes(url: str, *, referer: str | None = None, timeout: int = 8):
-    """Baixa imagem e retorna (bytes, content_type) ou None.
-
-    Evita erros 400 do Telegram quando o BOT manda uma URL e:
-    - o host bloqueia o fetch do Telegram (403, cloudfront, etc)
-    - a URL responde HTML em vez de imagem
-    """
-    if not url:
-        return None
-
-    # Referer: se não veio, usa o próprio host da imagem
-    ref = referer
-    if not ref:
-        try:
-            p = urlparse(url)
-            if p.scheme and p.netloc:
-                ref = f"{p.scheme}://{p.netloc}/"
-        except Exception:
-            ref = None
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-    }
-    if ref:
-        headers["Referer"] = ref
-
-    try:
-        with requests.get(url, headers=headers, stream=True, timeout=timeout, allow_redirects=True) as r:
-            if r.status_code != 200:
-                return None
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            if not ctype.startswith("image/"):
-                return None
-
-            buf = bytearray()
-            for chunk in r.iter_content(chunk_size=64 * 1024):
-                if not chunk:
-                    continue
-                buf.extend(chunk)
-                if len(buf) > MAX_IMAGE_BYTES:
-                    return None
-            return bytes(buf), ctype
-    except Exception:
-        return None
 
 def _get_known_sources() -> set[str]:
     try:
@@ -197,7 +144,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         if item.thumbnail_url:
-            img = _download_image_bytes(item.thumbnail_url, referer=item.url)
+            img = download_image_bytes(item.thumbnail_url, referer=item.url)
             if img:
                 img_bytes, _ctype = img
                 bio = BytesIO(img_bytes)
