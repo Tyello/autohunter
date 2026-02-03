@@ -15,6 +15,7 @@ from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context
 from app.services.source_runs_service import record_run
+from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
 
@@ -74,8 +75,27 @@ def run_source_for_all_wishlists(
     # Playwright checks
     if (plugin.fetch_mode == "browser" or bool(cfg.force_browser)) and not bool(settings.enable_playwright):
         mark_skipped(db, src, "playwright_off")
-        record_run(db, source=src, kind=kind, status="skipped", payload={"reason": "playwright_off"})
-        log(db, "warn", component, "playwright_off")
+        run_row = record_run(
+            db,
+            source=src,
+            kind=kind,
+            status="skipped",
+            payload={"reason": "playwright_off"},
+            proxy_server=cfg.proxy_server,
+            browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
+            force_browser=bool(cfg.force_browser),
+        )
+        emit_event(
+            db,
+            level="warn",
+            event_type="playwright_off",
+            source=src,
+            run_id=run_row.id,
+            message="playwright_off",
+            evidence={"reason": "playwright_off", "kind": kind},
+            tags=[kind, "ops"],
+        )
+        log(db, "warn", component, "playwright_off", source=src, run_id=run_row.id, event_type="playwright_off", tags=[kind, "ops"])
         db.commit()
         return {"ok": True, "status": "skipped", "reason": "playwright_off"}
 
@@ -84,8 +104,27 @@ def run_source_for_all_wishlists(
         avail = is_source_allowed(db, src)
         if not avail.is_allowed:
             mark_skipped(db, src, "backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
-            record_run(db, source=src, kind=kind, status="skipped", payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
-            log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
+            run_row = record_run(
+                db,
+                source=src,
+                kind=kind,
+                status="skipped",
+                payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None},
+                proxy_server=cfg.proxy_server,
+                browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
+                force_browser=bool(cfg.force_browser),
+            )
+            emit_event(
+                db,
+                level="info",
+                event_type="skipped_backoff",
+                source=src,
+                run_id=run_row.id,
+                message="skipped_backoff",
+                evidence={"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None, "kind": kind},
+                tags=[kind, "ops"],
+            )
+            log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None}, source=src, run_id=run_row.id, event_type="skipped_backoff", tags=[kind, "ops"])
             db.commit()
             return {"ok": True, "status": "skipped", "reason": "backoff", "next_allowed_at": avail.next_allowed_at}
 
@@ -131,6 +170,9 @@ def run_source_for_all_wishlists(
 
     ctx = build_scrape_context(db, src)
 
+    groups_count = len(groups)
+    total_wishlists = sum(len(g.get("wishlists") or []) for g in groups.values())
+
     t0 = datetime.now(timezone.utc)
     total_found = 0
     total_inserted = 0
@@ -158,7 +200,7 @@ def run_source_for_all_wishlists(
                     http_status=res.get("status_code"),
                     url=res.get("url") or url,
                 )
-                record_run(
+                run_row = record_run(
                     db,
                     source=src,
                     kind=kind,
@@ -166,23 +208,55 @@ def run_source_for_all_wishlists(
                     url=res.get("url") or url,
                     http_status=res.get("status_code"),
                     duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                    groups=groups_count,
+                    wishlists=total_wishlists,
+                    proxy_server=ctx.proxy_server,
+                    browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+                    force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m)",
+                    payload={"backoff_minutes": minutes},
                 )
-                log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url})
+                emit_event(
+                    db,
+                    level="warn",
+                    event_type="source_blocked",
+                    source=src,
+                    run_id=run_row.id,
+                    message="source_blocked",
+                    evidence={"minutes": minutes, "url": res.get("url") or url, "http_status": res.get("status_code"), "kind": kind},
+                    tags=[kind, "blocked"],
+                )
+                log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, "blocked"])
                 db.commit()
                 return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url}
 
             if bool(res.get("is_bug")):
                 err = res.get("error") or "scrape_failed"
                 minutes = mark_bug(db, src, error=err, url=res.get("url") or url)
-                record_run(
+                run_row = record_run(
                     db,
                     source=src,
                     kind=kind,
                     status="error",
                     url=res.get("url") or url,
                     duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                    groups=groups_count,
+                    wishlists=total_wishlists,
+                    proxy_server=ctx.proxy_server,
+                    browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+                    force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
+                    payload={"retry_minutes": minutes, "is_bug": True},
+                )
+                emit_event(
+                    db,
+                    level="error",
+                    event_type="scrape_failed_bug",
+                    source=src,
+                    run_id=run_row.id,
+                    message="scrape_failed_bug",
+                    evidence={"error": err, "url": res.get("url") or url, "retry_minutes": minutes, "kind": kind},
+                    tags=[kind, "bug"],
                 )
                 log(
                     db,
@@ -190,6 +264,10 @@ def run_source_for_all_wishlists(
                     component,
                     "scrape_failed_bug",
                     {"error": err, "url": res.get("url") or url, "retry_minutes": minutes},
+                    source=src,
+                    run_id=run_row.id,
+                    event_type="scrape_failed_bug",
+                    tags=[kind, "bug"],
                 )
                 db.commit()
                 return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url}
@@ -202,16 +280,32 @@ def run_source_for_all_wishlists(
                 error=err,
                 url=res.get("url") or url,
             )
-            record_run(
+            run_row = record_run(
                 db,
                 source=src,
                 kind=kind,
                 status="error",
                 url=res.get("url") or url,
                 duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                groups=groups_count,
+                wishlists=total_wishlists,
+                proxy_server=ctx.proxy_server,
+                browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+                force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
+                payload={"backoff_minutes": minutes},
             )
-            log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes})
+            emit_event(
+                db,
+                level="error",
+                event_type="scrape_failed",
+                source=src,
+                run_id=run_row.id,
+                message="scrape_failed",
+                evidence={"error": err, "url": res.get("url") or url, "backoff_minutes": minutes, "kind": kind},
+                tags=[kind, "error"],
+            )
+            log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes}, source=src, run_id=run_row.id, event_type="scrape_failed", tags=[kind, "error"])
             db.commit()
             return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url}
 
@@ -228,19 +322,35 @@ def run_source_for_all_wishlists(
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
         payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued},
     )
-    record_run(
+    run_row = record_run(
         db,
         source=src,
         kind=kind,
         status="success",
         duration_ms=duration_ms,
+        groups=groups_count,
+        wishlists=total_wishlists,
         items_found=total_found,
         items_ingested=total_inserted,
         items_matched=total_matched,
         notifications_queued=total_queued,
+        proxy_server=ctx.proxy_server,
+        browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+        force_browser=bool(ctx.force_browser),
     )
 
-    log(db, "info", component, "run_ok", {"groups": len(groups), "found": total_found, "inserted": total_inserted, "queued": total_queued})
+    emit_event(
+        db,
+        level="info",
+        event_type="run_ok",
+        source=src,
+        run_id=run_row.id,
+        message="run_ok",
+        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "duration_ms": duration_ms, "kind": kind},
+        tags=[kind, "ok"],
+    )
+
+    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
     return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}

@@ -132,7 +132,31 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
         )
 
-    # Limpeza leve: mantém notifications enxutas (evita crescimento infinito)
+    # Autopilot (detecta regressões/bloqueios e manda alertas compactos)
+    if getattr(settings, "autopilot_enabled", True):
+        from app.scheduler.autopilot_job import job_autopilot_scan, job_autopilot_daily_digest
+        sched.add_job(
+            job_autopilot_scan,
+            "interval",
+            seconds=int(getattr(settings, "autopilot_scan_seconds", 60) or 60),
+            id="autopilot_scan",
+            replace_existing=True,
+        )
+
+        # Digest diário (hora UTC configurável)
+        if getattr(settings, "autopilot_daily_digest_enabled", True):
+            h = int(getattr(settings, "autopilot_daily_digest_hour_utc", 12) or 12)
+            h = max(0, min(h, 23))
+            sched.add_job(
+                job_autopilot_daily_digest,
+                "cron",
+                hour=h,
+                minute=0,
+                id="autopilot_daily_digest",
+                replace_existing=True,
+            )
+
+    # Limpeza leve: mantém notifications enxutas (evita crescimento infinito) (evita crescimento infinito)
     from app.scheduler.cleanup_job import job_cleanup_notifications
     sched.add_job(
         job_cleanup_notifications,

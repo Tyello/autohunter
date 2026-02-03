@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, Iterable
+import uuid
 
 from sqlalchemy.orm import Session
 
 from app.models.system_log import SystemLog
+from app.utils.fingerprint import compute_fingerprint
 
 
 def _truthy(v: str | None) -> bool:
@@ -35,22 +37,48 @@ def log(
     component: str,
     message: str,
     payload: Optional[Dict[str, Any]] = None,
+    *,
+    source: Optional[str] = None,
+    run_id: Optional[uuid.UUID] = None,
+    event_type: Optional[str] = None,
+    fingerprint: Optional[str] = None,
+    tags: Optional[Iterable[str]] = None,
 ) -> None:
-    """Registra um log no banco.
+    """Registra um log no banco (alto volume).
 
     Importante: **não faz commit**.
 
-    Motivo:
-    - Commit por log destrói performance (principalmente no Raspberry Pi).
-    - Commit dentro do logger pode confirmar mudanças parciais do chamador.
+    Campos extras (source/event_type/fingerprint/tags) são opcionais, e servem para
+    permitir que o Autopilot/agents consultem o DB sem precisar fazer parsing de JSONB.
 
     Quem chama deve decidir quando commitar/rollback.
     """
 
-    row = SystemLog(level=level, component=component, message=message, payload=payload)
+    fp = fingerprint
+    if event_type and not fp:
+        # Use payload as evidence by default (caller can pass a custom fingerprint if needed)
+        fp = compute_fingerprint(
+            source=source,
+            event_type=event_type,
+            message=message,
+            evidence=payload,
+            tags=tags,
+        )
+
+    row = SystemLog(
+        level=level,
+        component=component,
+        message=message,
+        payload=payload,
+        source=source,
+        run_id=run_id,
+        event_type=event_type,
+        fingerprint=fp,
+        tags=list(tags) if tags else None,
+    )
     db.add(row)
 
-    # 2) opcional: espelha no stdout (pra journalctl)
+    # opcional: espelha no stdout (pra journalctl)
     if _log_stdout_enabled():
         try:
             ts = datetime.now(timezone.utc).isoformat()

@@ -91,6 +91,19 @@ class Settings(BaseSettings):
     source_backoff_max_minutes: int = 720
     source_backoff_jitter_seconds: int = 20
 
+
+    # Autopilot (observabilidade + detecção de regressões)
+    autopilot_enabled: bool = True
+    # janela de análise (minutos) para detectar spikes
+    autopilot_window_minutes: int = 30
+    autopilot_scan_seconds: int = 60
+    # mínimo de ocorrências do mesmo fingerprint para abrir finding
+    autopilot_min_hits: int = 3
+    # throttle por finding (segundos) para alertas no Telegram
+    autopilot_alert_throttle_seconds: int = 1800  # 30 min
+    # digest diário para admins (UTC hour, ex: 12 = 09:00 America/Sao_Paulo)
+    autopilot_daily_digest_enabled: bool = True
+    autopilot_daily_digest_hour_utc: int = 12
     telegram_text_max: int = 4000
     safe_chunk: int = 3800
 

@@ -159,7 +159,8 @@ def _guess_price(blob: str) -> Optional[Decimal]:
 
 def _guess_thumb(doc_el, card_el=None) -> Optional[str]:
     try:
-        el = card_el or doc_el
+        # lxml Elements are changing truthiness semantics; be explicit.
+        el = card_el if card_el is not None else doc_el
         if el is None:
             return None
         imgs = el.xpath('.//img/@src')

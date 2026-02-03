@@ -7,6 +7,7 @@ import traceback
 from app.services.admin_programming_alerts import maybe_alert_programming_error
 
 from app.services.system_logs_service import log
+from app.services.telemetry_events_service import emit_event
 from app.services.notifications_service import create_queued
 from app.services.notifications_queue_service import queue_notifications_for_matches
 from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists
@@ -63,13 +64,15 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
-        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url})
+        emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
+        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
         return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
         tb = traceback.format_exc(limit=6)
-        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url, "tb": tb})
+        emit_event(db, level="error", event_type="scrape_failed", source=ctx.source, message="scrape_failed", evidence={"error": err, "url": search_url, "exc_type": exc_type}, tags=["error"])
+        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url, "tb": tb}, source=ctx.source, event_type="scrape_failed", tags=["error"])
         # alerta só admins (throttled) quando for erro de programação
         try:
             maybe_alert_programming_error(job_name, e, url=search_url)
@@ -98,6 +101,15 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         if matched:
             queued = queue_notifications_for_matches(db, wishlist, matched_listings)
 
+    emit_event(db, level="info", event_type="pipeline_summary", source=ctx.source, message="pipeline_summary", evidence={
+        "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
+        "url": search_url,
+        "found": found,
+        "inserted": inserted,
+        "matched": matched,
+        "queued": queued,
+    }, tags=["ok"])
+
     log(db, "info", job_name, "pipeline_summary", {
         "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
         "url": search_url,
@@ -105,7 +117,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "inserted": inserted,
         "matched": matched,
         "queued": queued,
-    })
+    }, source=ctx.source, event_type="pipeline_summary", tags=["ok"])
 
     db.commit()
 
@@ -122,13 +134,15 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
-        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url})
+        emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
+        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
         return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
         tb = traceback.format_exc(limit=6)
-        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url, "tb": tb})
+        emit_event(db, level="error", event_type="scrape_failed", source=ctx.source, message="scrape_failed", evidence={"error": err, "url": search_url, "exc_type": exc_type}, tags=["error"])
+        log(db, "error", job_name, "scrape_failed", {"error": err, "url": search_url, "tb": tb}, source=ctx.source, event_type="scrape_failed", tags=["error"])
         # alerta só admins (throttled) quando for erro de programação
         try:
             maybe_alert_programming_error(job_name, e, url=search_url)
@@ -164,6 +178,15 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             total_matched += m
             total_queued += int(queue_notifications_for_matches(db, w, matched_listings) or 0)
 
+    emit_event(db, level="info", event_type="pipeline_summary_many", source=ctx.source, message="pipeline_summary_many", evidence={
+        "url": search_url,
+        "wishlists": len(wishlists or []),
+        "found": found,
+        "inserted": inserted,
+        "matched": total_matched,
+        "queued": total_queued,
+    }, tags=["ok"])
+
     log(db, "info", job_name, "pipeline_summary_many", {
         "url": search_url,
         "wishlists": len(wishlists or []),
@@ -171,7 +194,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "inserted": inserted,
         "matched": total_matched,
         "queued": total_queued,
-    })
+    }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"])
 
     db.commit()
 

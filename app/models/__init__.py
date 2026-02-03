@@ -5,6 +5,7 @@ from .car_listing import CarListing
 from .fipe_price import FipePrice
 from .notification import Notification
 from .system_log import SystemLog
+from .telemetry_event import TelemetryEvent
 from .source_state import SourceState
 from .source_run import SourceRun
 from .source_config import SourceConfig
@@ -22,6 +23,7 @@ __all__ = [
     "FipePrice",
     "Notification",
     "SystemLog",
+    "TelemetryEvent",
     "SourceState",
     "SourceRun",
     "SourceConfig",
