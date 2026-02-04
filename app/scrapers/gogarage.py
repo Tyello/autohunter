@@ -10,6 +10,7 @@ import requests
 
 from app.core.settings import settings
 from app.scrapers.base import FetchBlocked, fetch_html
+from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
@@ -173,13 +174,14 @@ def _guess_thumb(doc_el, card_el=None) -> Optional[str]:
 
 def fetch_details(url: str, *, ctx: ScrapeContext) -> Dict[str, Any]:
     """(Opcional) Completa campos essenciais de um anúncio."""
-    html = fetch_html(
+    html = fetch_html_with_browser_fallback(
         url,
         ctx=ctx,
         referer=GOGARAGE_BASE + "/",
         proxy=ctx.proxy_server,
         min_delay_ms=700,
         max_delay_ms=2000,
+        wait_until="domcontentloaded",
     )
 
     title = ""
