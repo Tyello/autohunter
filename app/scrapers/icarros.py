@@ -431,6 +431,8 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         doc = lxml_html.fromstring(html_text)
         doc.make_links_absolute(base_url)
 
+        text_blob = clean_text(doc.text_content())
+
         # Title: prefer og:title, then h1, then any strong header-like node
         title = None
         ogt = doc.xpath("string(//meta[@property='og:title']/@content)") or ""
@@ -483,15 +485,14 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
                 break
 
         if price is None:
-            price = _best_price(clean_text(doc.text_content()))
+            price = _best_price(text_blob)
 
         # Thumbnail
         thumb = _extract_thumbnail_any(doc, base_url=base_url)
 
         # KM
-        km = _extract_km(clean_text(doc.text_content()))
+        km = _extract_km(text_blob)
 
-        # Location
         # Location: from URL
         location = listing.get("location") or _extract_location_from_url(base_url)
 
@@ -517,101 +518,6 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         y = listing.get("year") or _extract_year_from_url(base_url)
         if y and not listing.get("year"):
             listing["year"] = y
-
-    except Exception:
-        return listing
-
-    return listing
-
-    try:
-        res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
-        html_text = res.html
-        base_url = res.final_url or url
-
-        doc = lxml_html.fromstring(html_text)
-        doc.make_links_absolute(base_url)
-
-        # Title: prefer og:title, then h1, then any strong header-like node
-        title = None
-        ogt = doc.xpath("string(//meta[@property='og:title']/@content)") or ""
-        ogt = clean_text(ogt)
-        if ogt and len(ogt) <= 180:
-            title = ogt
-
-        if _looks_generic_title(title):
-            h1 = clean_text(doc.xpath("string(//h1[1])") or "")
-            if h1 and 6 <= len(h1) <= 180:
-                title = h1
-
-        if _looks_generic_title(title):
-            for xp in ("//h2", "//h3"):
-                for n in doc.xpath(xp):
-                    t = clean_text(n.text_content())
-                    if t and "R$" not in t and 10 <= len(t) <= 180:
-                        title = t
-                        break
-                if not _looks_generic_title(title):
-                    break
-
-        # Price: first try JSON-LD offers.price
-        price: Optional[Decimal] = None
-        for raw in doc.xpath("//script[@type='application/ld+json']/text()"):
-            raw = (raw or "").strip()
-            if not raw:
-                continue
-            try:
-                data = json.loads(raw)
-            except Exception:
-                continue
-            # data can be list or dict
-            objs = data if isinstance(data, list) else [data]
-            for obj in objs:
-                if not isinstance(obj, dict):
-                    continue
-                offers = obj.get("offers")
-                if isinstance(offers, dict):
-                    p = offers.get("price")
-                    cur = offers.get("priceCurrency")
-                    if p is not None and (cur in (None, "", "BRL")):
-                        try:
-                            price = Decimal(str(p))
-                            break
-                        except Exception:
-                            pass
-                if price is not None:
-                    break
-            if price is not None:
-                break
-
-        if price is None:
-            # fallback: best price from visible text
-            price = _best_price(clean_text(doc.text_content()))
-
-        # Thumbnail: prefer richer sources on detail
-        thumb = _extract_thumbnail_any(doc, base_url=base_url)
-
-        # KM: from detail text (more reliable)
-        km = _extract_km(clean_text(doc.text_content()))
-
-        # Location: from URL (detail has it)
-        location = listing.get("location") or _extract_location_from_url(base_url)
-        # Pack year/km into title (avoid extra DB columns)
-        y = _extract_year_from_url(base_url)
-        km = _extract_km(_clean_text(doc.text_content()))
-        if title:
-            if y and not re.search(r"\b(19\d{2}|20\d{2})\b", title):
-                title = f"{title} {y}"
-            if km and "km" not in title.lower():
-                title = f"{title} • {km:,}".replace(",", ".") + " km"
-
-        if title and not _looks_generic_title(title):
-            listing["title"] = title
-        if price is not None:
-            listing["price"] = price
-        if thumb and (not listing.get("thumbnail_url") or _is_tiny_image(listing.get("thumbnail_url") or "")):
-            listing["thumbnail_url"] = thumb
-        if location and not listing.get("location"):
-            listing["location"] = location
 
     except Exception:
         return listing
