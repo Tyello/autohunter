@@ -6,10 +6,8 @@ from urllib.parse import urljoin
 
 from lxml import html as lxml_html
 
-from app.core.settings import settings
-from app.scrapers.base import FetchBlocked, fetch_html
+from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
-from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
 
@@ -148,19 +146,14 @@ def _pick_thumb_from_element(el, base_url: str) -> Optional[str]:
 
 def _detail_enrich(url: str, ctx: ScrapeContext) -> dict:
     """Extrai title + thumb direto da página de detalhe (fallback)."""
-    if bool(getattr(ctx, "force_browser", False)):
-        html_text = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
-    else:
-        try:
-            html_text = fetch_html(url, ctx=ctx, proxy=ctx.proxy_server, timeout=25)
-        except FetchBlocked:
-            if not settings.enable_playwright:
-                raise
-            html_text = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
-        except Exception:
-            if not settings.enable_playwright:
-                raise
-            html_text = fetch_html_browser(url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+    html_text = fetch_html_with_browser_fallback(
+        url,
+        ctx=ctx,
+        timeout=25,
+        proxy=ctx.proxy_server,
+        wait_until="domcontentloaded",
+        timeout_ms=60000,
+    )
 
     doc = lxml_html.fromstring(html_text)
     doc.make_links_absolute(url)
@@ -250,19 +243,14 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
     html_text: str
 
     # If ops decided to force browser (DB flag), skip the HTTP attempt.
-    if bool(getattr(ctx, "force_browser", False)):
-        html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
-    else:
-        try:
-            html_text = fetch_html(search_url, ctx=ctx, proxy=ctx.proxy_server, timeout=25)
-        except FetchBlocked:
-            if not settings.enable_playwright:
-                raise
-            html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
-        except Exception:
-            if not settings.enable_playwright:
-                raise
-            html_text = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded").html
+    html_text = fetch_html_with_browser_fallback(
+        search_url,
+        ctx=ctx,
+        timeout=25,
+        proxy=ctx.proxy_server,
+        wait_until="domcontentloaded",
+        timeout_ms=60000,
+    )
 
     doc = lxml_html.fromstring(html_text)
     doc.make_links_absolute(search_url)
