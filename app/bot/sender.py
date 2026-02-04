@@ -187,8 +187,7 @@ def _build_text(listing, notification=None) -> str:
     if deal_score is not None:
         lines.append(f"Deal: {deal_score}")
 
-    if url:
-        lines.append(url)
+    # URL não vai no corpo para economizar espaço; use o botão "Abrir anúncio".
 
     text = "\n".join(lines)
     text = sanitize_for_telegram(text)

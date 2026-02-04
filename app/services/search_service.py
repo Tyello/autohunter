@@ -8,7 +8,7 @@ from app.models.car_listing import CarListing
 from app.scrapers.base import FetchBlocked
 from app.sources import list_sources
 from app.services.listings_service import ingest_listings
-from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success
+from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, get_source_config, build_scrape_context
 from app.services.source_runs_service import record_run
 from app.services.system_logs_service import log
@@ -18,7 +18,7 @@ def _duration_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
 
 
-def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[List[str]] = None) -> List[CarListing]:
+def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[List[str]] = None, *, force_scrape: bool = False) -> List[CarListing]:
     # Ensure configs exist (seed defaults once)
     ensure_source_configs(db)
 
@@ -35,6 +35,11 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
 
         cfg = get_source_config(db, plugin.name)
         if cfg and not bool(cfg.is_enabled):
+            record_run(db, source=plugin.name, kind="manual", status="skipped", query=query, url=plugin.build_url(query), error="disabled", payload={"reason": "disabled"})
+            try:
+                mark_skipped(db, plugin.name, reason="disabled", payload={"manual_query": query})
+            except Exception:
+                pass
             continue
 
         # Browser sources require Playwright (or forced browser via DB)
@@ -43,8 +48,20 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
             continue
 
         avail = is_source_allowed(db, plugin.name)
-        if not avail.is_allowed:
+        if not avail.is_allowed and not force_scrape:
+            payload = {"reason": avail.reason or "backoff"}
+            if getattr(avail, "next_allowed_at", None):
+                try:
+                    payload["next_allowed_at"] = avail.next_allowed_at.isoformat()
+                except Exception:
+                    pass
+            record_run(db, source=plugin.name, kind="manual", status="skipped", query=query, url=plugin.build_url(query), error="backoff", payload=payload)
+            try:
+                mark_skipped(db, plugin.name, reason=avail.reason or "backoff", payload=payload)
+            except Exception:
+                pass
             continue
+        forced_backoff = (not avail.is_allowed and force_scrape)
 
         url = plugin.build_url(query)
         cooldown = int(cfg.cooldown_minutes or 0) if cfg else 0
@@ -60,7 +77,7 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 db,
                 plugin.name,
                 rate_limit_seconds=rate_limit_seconds,
-                payload={"manual_query": query, "inserted": len(inserted_ids or [])},
+                payload={"manual_query": query, "inserted": len(inserted_ids or []), "forced_backoff": bool(forced_backoff)},
             )
             record_run(
                 db,
@@ -150,4 +167,4 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
     for t in terms:
         q = q.filter((CarListing.title.ilike(f"%{t}%")) | (CarListing.location.ilike(f"%{t}%")))
 
-    return q.order_by(CarListing.updated_at.desc(), CarListing.created_at.desc()).limit(limit).all()
+    return q.order_by(CarListing.created_at.desc()).limit(limit).all()

@@ -217,6 +217,33 @@ def _upgrade_image_url(url: str) -> str:
     return url
 
 
+def _extract_dbimg_from_raw_html(html_text: str, base_url: str) -> Optional[str]:
+    """Fallback to find image URLs embedded in raw HTML/JS.
+
+    iCarros sometimes renders a video as the first media; in these cases og:image may be a
+    generic logo, while real image URLs still exist in inline JSON.
+    """
+    if not html_text:
+        return None
+
+    # absolute dbimg URLs
+    for m in re.finditer(r"https?://img\d+\.icarros\.com/dbimg/[^\s\"\']+\.(?:jpe?g|png|webp)", html_text, flags=re.I):
+        u = m.group(0)
+        ul = u.lower()
+        if "logo_icarros_compartilhar" in ul:
+            continue
+        if ".mp4" in ul or "video" in ul:
+            continue
+        return _upgrade_image_url(u)
+
+    # relative dbimg paths
+    m = re.search(r"(/dbimg/[^\s\"\']+\.(?:jpe?g|png|webp))", html_text, flags=re.I)
+    if m:
+        return _upgrade_image_url(urljoin(base_url, m.group(1)))
+
+    return None
+
+
 def _is_tiny_image(url: str) -> bool:
     u = (url or "").lower()
     if "thumb" in u:
@@ -279,6 +306,8 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
             return -50
         if "logo_icarros_compartilhar" in ul:
             return -200
+        if ".mp4" in ul or "/video" in ul or "video" in ul:
+            return -120
         if "logo" in ul or "icon" in ul or "sprite" in ul:
             s -= 10
         if ul.endswith(".svg"):
@@ -474,115 +503,6 @@ def _extract_price_from_structured(doc) -> Optional[Decimal]:
     return None
 
 
-
-def _extract_price_from_meta(doc) -> Optional[Decimal]:
-    """Best-effort extraction from meta tags (often stable even when the body is JS-rendered)."""
-    try:
-        vals = doc.xpath(
-            "//meta[@property='product:price:amount']/@content"
-            " | //meta[@property='og:price:amount']/@content"
-            " | //meta[@property='og:price']/@content"
-            " | //meta[@property='product:price']/@content"
-            " | //meta[@itemprop='price']/@content"
-            " | //meta[@name='twitter:data1']/@content"
-            " | //meta[@name='twitter:data2']/@content"
-            " | //meta[@name='description']/@content"
-        )
-    except Exception:
-        vals = []
-
-    for v in vals or []:
-        s = (v or "").strip()
-        if not s:
-            continue
-        if re.fullmatch(r"\d+(?:\.\d+)?", s):
-            try:
-                d = Decimal(s)
-                if d > 0:
-                    return d
-            except Exception:
-                pass
-        d = parse_brl_price(s)
-        if d is not None:
-            return d
-    return None
-
-
-def _extract_price_from_dom(doc) -> Optional[Decimal]:
-    """Try to find price-like nodes in the rendered DOM."""
-    xpaths = [
-        # common price containers
-        "//*[contains(translate(@class,'PRECO','preco'),'preco') or contains(translate(@class,'PRICE','price'),'price')]",
-        "//*[contains(translate(@data-testid,'PRICE','price'),'price') or contains(translate(@data-qa,'PRICE','price'),'price')]",
-        # label -> value patterns
-        "//*[contains(translate(normalize-space(.),'PREÇO','preço'),'preço') or contains(translate(normalize-space(.),'PRECO','preco'),'preco')]",
-    ]
-    texts: list[str] = []
-    for xp in xpaths:
-        try:
-            for el in doc.xpath(xp):
-                try:
-                    t = _clean_text(el.text_content() or "")
-                except Exception:
-                    t = ""
-                if t and ("R$" in t or "preço" in t.lower() or "preco" in t.lower()):
-                    texts.append(t)
-        except Exception:
-            continue
-
-    # Prefer a direct BRL match near the beginning
-    for t in texts:
-        m = re.search(r"(R\$\s*[0-9\.]+(?:,[0-9]{2})?)", t)
-        if m:
-            d = parse_brl_price(m.group(1))
-            if d is not None:
-                return d
-
-    # fallback: pick best from the combined snippets
-    if texts:
-        return _best_price(" ".join(texts))
-    return None
-
-
-def _extract_price_from_scripts(html_text: str) -> Optional[Decimal]:
-    """Scan inline scripts for common price keys."""
-    if not html_text:
-        return None
-
-    # Keyed BRL string first (priceValue/preco/valor)
-    pats = [
-        r'"(?:priceValue|listingPrice|preco|valor|price)"\s*:\s*"(R\$\s*[0-9\.]+(?:,[0-9]{2})?)"',
-        r"'(?:priceValue|listingPrice|preco|valor|price)'\s*:\s*'(R\$\s*[0-9\.]+(?:,[0-9]{2})?)'",
-    ]
-    for p in pats:
-        m = re.search(p, html_text, flags=re.I)
-        if m:
-            d = parse_brl_price(m.group(1))
-            if d is not None:
-                return d
-
-    # Numeric price fields: capture multiple and pick a plausible max
-    nums: list[Decimal] = []
-    for m in re.finditer(r'"(?:priceValue|listingPrice|preco|valor|price)"\s*:\s*([0-9]{4,8})(?:\.[0-9]{1,2})?', html_text, flags=re.I):
-        try:
-            d = Decimal(m.group(1))
-            if Decimal(5000) <= d <= Decimal(20000000):
-                nums.append(d)
-        except Exception:
-            pass
-
-    return max(nums) if nums else None
-
-
-def _extract_price_any(*, html_text: str, doc) -> Optional[Decimal]:
-    return (
-        _extract_price_from_structured(doc)
-        or _extract_price_from_meta(doc)
-        or _extract_price_from_dom(doc)
-        or _extract_price_from_scripts(html_text)
-        or _best_price(_clean_text(getattr(doc, "text_content", lambda: "")() or ""))
-    )
-
 def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int = 35000) -> dict:
     """Fetch detail page to improve title/price/thumb/km/location.
 
@@ -596,7 +516,7 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
     logger = logging.getLogger(__name__)
 
     # 1) fetch initial URL
-    res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
+    res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="networkidle")
     html_text = res.html or ""
     base_url = res.final_url or url
     final_url = _canonical_url(base_url)
@@ -612,7 +532,7 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         resolved = _resolve_listing_url_from_fallback_page(html_text, base_url, url)
         if resolved and resolved != final_url:
             logger.info("[icarros] detail resolve requested_url=%s final_url=%s resolved_url=%s", url, base_url, resolved)
-            res2 = fetch_html_browser(resolved, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
+            res2 = fetch_html_browser(resolved, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="networkidle")
             html_text = res2.html or ""
             base_url = res2.final_url or resolved
             final_url = _canonical_url(base_url)
@@ -658,12 +578,19 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
     if thumb:
         thumb = _upgrade_image_url(thumb)
 
+    if not thumb:
+        thumb = _extract_dbimg_from_raw_html(html_text, base_url)
+
     # 5) price
     price = listing.get("price")
     if price is None:
-        price = _extract_price_any(html_text=html_text, doc=doc)
+        structured = _extract_price_from_structured(doc)
+        if structured is not None:
+            price = structured
+        else:
+            price = _best_price(_clean_text(doc.text_content() or ""))
 
-# 6) year/km hints (append to title; do NOT add keys)
+    # 6) year/km hints (append to title; do NOT add keys)
     y = _extract_year_from_url(final_url) or _extract_year_from_url(url)
     km = _extract_km(doc.text_content() or "")
 

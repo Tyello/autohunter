@@ -98,87 +98,51 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
     stmt = stmt.on_conflict_do_update(
         index_elements=["source", "external_id"],
         set_={
-            # Regra: manter o que já existe quando é bom; completar/atualizar quando o existente é "ruim".
-            #
-            # Isso resolve casos reais onde o primeiro ingest vem genérico ("comprar ...") / sem foto,
-            # e um scrape posterior (detail/enrich) consegue preencher com dados bons.
+            # mantém valores já existentes quando não-null; caso contrário, preenche do novo scrape
             "title": case(
-                (
-                    (
-                        CarListing.title.is_(None)
-                        | (func.length(CarListing.title) < 6)
-                        | CarListing.title.ilike("%comparar%")
-                        | CarListing.title.ilike("reservado%")
-                        | CarListing.title.ilike("%| a%")
-                        | CarListing.title.ilike("comprar%")
-                        | CarListing.title.ilike("foto %")
-                    )
-                    & stmt.excluded.title.isnot(None)
-                    & (func.length(stmt.excluded.title) >= 6)
-                    & ~stmt.excluded.title.ilike("comprar%")
-                    & ~stmt.excluded.title.ilike("%comparar%")
-                    & ~stmt.excluded.title.ilike("reservado%")
-                    & ~stmt.excluded.title.ilike("%| a%")
-                    ,
-                    stmt.excluded.title,
-                ),
-                else_=CarListing.title,
-            ),
+    (
+        # atualiza título quando o existente é claramente "ruim" (ruído de UI / concat quebrada)
+        (
+            CarListing.title.is_(None)
+            | (func.length(CarListing.title) < 6)
+            | CarListing.title.ilike('%comparar%')
+            | CarListing.title.ilike('reservado%')
+            | CarListing.title.ilike('%| a%')
+            | CarListing.title.ilike('comprar%')
+        )
+        & stmt.excluded.title.isnot(None),
+        stmt.excluded.title,
+    ),
+    else_=CarListing.title,
+),
             "thumbnail_url": case(
-                (
-                    stmt.excluded.thumbnail_url.isnot(None)
-                    & (
-                        CarListing.thumbnail_url.is_(None)
-                        | CarListing.thumbnail_url.ilike("%logo_icarros_compartilhar%")
-                        | CarListing.thumbnail_url.ilike("%/comum/imagens/logo_%")
-                        | CarListing.thumbnail_url.ilike("%/comum/imagens/%logo%")
-                        | CarListing.thumbnail_url.ilike("%fit-in/320%")
-                        | CarListing.thumbnail_url.ilike("%fit-in/400%")
-                        | CarListing.thumbnail_url.ilike("%fit-in/480%")
-                        | CarListing.thumbnail_url.ilike("%w=320%")
-                        | CarListing.thumbnail_url.ilike("%width=320%")
-                        | CarListing.title.is_(None)
-                        | CarListing.title.ilike("comprar%")
-                        | CarListing.title.ilike("%comparar%")
-                    ),
-                    stmt.excluded.thumbnail_url,
-                ),
-                else_=CarListing.thumbnail_url,
-            ),
-            "price": case(
-                (
-                    stmt.excluded.price.isnot(None)
-                    & (
-                        CarListing.price.is_(None)
-                        | (CarListing.price <= 0)
-                        | CarListing.title.is_(None)
-                        | CarListing.title.ilike("comprar%")
-                        | CarListing.title.ilike("%comparar%")
-                    ),
-                    stmt.excluded.price,
-                ),
-                else_=CarListing.price,
-            ),
-            "location": case(
-                (
-                    stmt.excluded.location.isnot(None)
-                    & (
-                        CarListing.location.is_(None)
-                        | CarListing.title.is_(None)
-                        | CarListing.title.ilike("comprar%")
-                        | CarListing.title.ilike("%comparar%")
-                    ),
-                    stmt.excluded.location,
-                ),
-                else_=CarListing.location,
-            ),
-            # url normalmente é estável; se mudar (ex: resolve redirect #rfae), preferimos o novo
-            "url": stmt.excluded.url,
-            # marca como "atualizado" quando rodamos um scrape novo (ajuda o /buscar retornar o registro enriquecido)
+    (
+        # Preenche quando não existe
+        (CarListing.thumbnail_url.is_(None) & stmt.excluded.thumbnail_url.isnot(None)),
+        stmt.excluded.thumbnail_url,
+    ),
+    (
+        # Troca quando o existente é claramente ruim (logo/placeholder/thumb pequeno)
+        (
+            CarListing.thumbnail_url.ilike('%logo_icarros_compartilhar%')
+            | CarListing.thumbnail_url.ilike('%/comum/imagens/logo%')
+            | CarListing.thumbnail_url.ilike('%thumb%')
+            | CarListing.thumbnail_url.ilike('%fit-in/320%')
+            | CarListing.thumbnail_url.ilike('%fit-in/480%')
+        )
+        & stmt.excluded.thumbnail_url.isnot(None)
+        & (~stmt.excluded.thumbnail_url.ilike('%logo_icarros_compartilhar%')),
+        stmt.excluded.thumbnail_url,
+    ),
+    else_=CarListing.thumbnail_url,
+),
+            "price": func.coalesce(CarListing.price, stmt.excluded.price),
+            "location": func.coalesce(CarListing.location, stmt.excluded.location),
+            # url normalmente é estável; se mudar, preferimos o novo
             "updated_at": func.now(),
+            "url": stmt.excluded.url,
         },
     )
-
 
     stmt = stmt.returning(CarListing.id)
     result = db.execute(stmt)

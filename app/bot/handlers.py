@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.formatting import format_price
 from app.bot.media import download_image_bytes
+from app.bot.listing_display import format_listing_message_telegram
 from app.bot.utils import normalize_args, parse_int, reply_text
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
@@ -140,7 +141,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with SessionLocal() as db:
         _user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        results = manual_search(db, query=query, limit=5, sources=sources)
+        results = manual_search(db, query=query, limit=5, sources=sources, force_scrape=bool(sources))
 
     if not results:
         await reply_text(update, "Nada encontrado agora.")
@@ -157,19 +158,19 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if open_url:
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Abrir anúncio", url=open_url)]])
 
-        # Texto curto: o link vai no botão.
-        text = (
-            f"{item.title or 'Anúncio'}\n"
-            f"Fonte: {item.source}\n"
-            f"Preço: {format_price(item.price)}"
-        )
+        # Texto: consistente com notificações (sem link no corpo; use o botão)
+        text = format_listing_message_telegram(item)
+        # garante Fonte (listing_display é agnóstico)
+        if getattr(item, "source", None):
+            text = f"{text}\nFonte: {item.source}"
 
         if item.thumbnail_url:
             img = download_image_bytes(item.thumbnail_url, referer=item.url)
             if img:
-                img_bytes, _ctype = img
+                img_bytes, ctype = img
                 bio = BytesIO(img_bytes)
-                bio.name = "thumb.jpg"
+                ext = ".jpg" if ("jpeg" in (ctype or "")) else (".png" if ("png" in (ctype or "")) else (".webp" if ("webp" in (ctype or "")) else ".img"))
+                bio.name = f"thumb{ext}"
                 await update.message.reply_photo(photo=bio, caption=text, reply_markup=keyboard)
             else:
                 await reply_text(update, text, reply_markup=keyboard, disable_web_page_preview=True)
