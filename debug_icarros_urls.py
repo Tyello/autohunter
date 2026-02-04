@@ -3,7 +3,6 @@ import re
 from playwright.async_api import async_playwright
 
 URLS = [
-    "https://www.icarros.com.br/comprar/sao-jose-do-rio-preto-sp/audi/a6/2020/d56180452",
     "https://www.icarros.com.br/comprar/rio-de-janeiro-rj/audi/a6/2020/d56149836",
 ]
 
