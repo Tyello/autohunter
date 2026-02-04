@@ -36,9 +36,7 @@ from .types import SourcePlugin, ScrapeContext
 
 
 def _scrape_chavesnamao(search_url: str, ctx: ScrapeContext) -> list[dict]:
-    # chavesnamao scraper original recebe (search_url, limit:int). O scheduler passa ctx.
-    # Mantemos compatibilidade sem alterar o scraper.
-    return scrape_chavesnamao(search_url)
+    return scrape_chavesnamao(search_url, ctx=ctx)
 
 
 # Mercado Livre: API/HTML; always enabled in the MVP.

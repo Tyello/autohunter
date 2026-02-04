@@ -10,8 +10,10 @@ from bs4 import BeautifulSoup
 
 from app.core.text_norm import normalize
 from app.scrapers.base import fetch_html
+from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
 from app.scrapers.utils import normalize_asset_url, pick_from_srcset
+from app.sources.types import ScrapeContext
 
 
 @dataclass
@@ -156,8 +158,20 @@ def _extract_location_from_anchor_text(text: str) -> Optional[str]:
 DETAIL_THUMB_MAX = 3
 
 
-def scrape_chavesnamao(search_url: str, limit: int = 50) -> list[dict]:
-    html = fetch_html(search_url)
+def scrape_chavesnamao(
+    search_url: str,
+    limit: int = 50,
+    ctx: Optional[ScrapeContext] = None,
+) -> list[dict]:
+    if ctx is not None:
+        html = fetch_html_with_browser_fallback(
+            search_url,
+            ctx=ctx,
+            referer=_CHAVES_BASE + "/",
+            wait_until="domcontentloaded",
+        )
+    else:
+        html = fetch_html(search_url)
     soup = BeautifulSoup(html, "html.parser")
 
     out: list[dict] = []
