@@ -48,16 +48,21 @@ def _sanitize_price(v: Any) -> Decimal | None:
         return d
 
 
+def _sanitize_listing(listing: dict) -> dict:
+    sanitized = dict(listing)
+    if "price" in sanitized:
+        sanitized["price"] = _sanitize_price(sanitized.get("price"))
+    return sanitized
+
+
 def _sanitize_listings(listings: list[dict]) -> list[dict]:
     out: list[dict] = []
-    for l in listings or []:
-        if not isinstance(l, dict):
+    for listing in listings or []:
+        if not isinstance(listing, dict):
             continue
-        ll = dict(l)
-        if "price" in ll:
-            ll["price"] = _sanitize_price(ll.get("price"))
-        out.append(ll)
+        out.append(_sanitize_listing(listing))
     return out
+
 
 def ingest_listings(db: Session, listings: list[dict]):
     if not listings:

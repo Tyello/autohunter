@@ -1,4 +1,4 @@
-# AutoHunter — Planos e Preços (proposta)
+# AutoHunter — Planos e preços (proposta)
 
 > Objetivo: cobrar pouco, mas entregar valor real: **encontrar o anúncio certo antes de todo mundo**.
 
@@ -12,6 +12,7 @@
 ## Tiers
 
 ### Free — R$ 0
+
 Para provar o valor.
 
 - 1 wishlist
@@ -23,6 +24,7 @@ Para provar o valor.
 Ideal para quem quer “dar uma olhada” e sentir o bot.
 
 ### Enthusiast — R$ 9,90 / mês
+
 Para quem acompanha o mercado todo dia.
 
 - 3 wishlists
@@ -35,6 +37,7 @@ Para quem acompanha o mercado todo dia.
 Ponto de equilíbrio: barato o suficiente para “pagar sem pensar”, mas já muda o jogo.
 
 ### Pro — R$ 19,90 / mês
+
 Para quem caça oportunidade de verdade.
 
 - 10 wishlists
@@ -47,6 +50,7 @@ Para quem caça oportunidade de verdade.
 Preço pensado para o “hardcore”: economiza 1–2 horas/semana e aumenta chance de pegar raridade.
 
 ### Founders (lote limitado) — R$ 149 / ano
+
 Lote de lançamento para beta fechado (ex.: primeiras 200 pessoas).
 
 - Equivale a ~R$ 12,42/mês

@@ -10,11 +10,14 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 from lxml import html as lxml_html
 
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.utils import clean_text, normalize_asset_url, pick_from_srcset
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
 
 _ICARROS_BASE = "https://www.icarros.com.br"
+
+logger = logging.getLogger(__name__)
 
 # Canonical iCarros listing pattern:
 # https://www.icarros.com.br/comprar/<city-uf>/<make>/<model>/<year>/d<id>
@@ -24,12 +27,6 @@ _LISTING_URL_RE = re.compile(r'https?://(?:www\.)?icarros\.com\.br/comprar/[^"\'
 _RE_PRICE = re.compile(r"R\$\s*[0-9\.]+(?:,[0-9]{1,2})?", re.I)
 _RE_YEAR_IN_URL = re.compile(r"/(19\d{2}|20\d{2})/d\d+(?:$|[/?#])")
 _RE_KM = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{1,7})\s*km\b", re.I)
-
-logger = logging.getLogger(__name__)
-
-
-def _clean_text(t: str) -> str:
-    return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
 
 def _canonical_url(url: str) -> str:
@@ -84,214 +81,94 @@ def _extract_location_from_url(url: str) -> Optional[str]:
     return None
 
 
-def _is_default_share_logo(url: str) -> bool:
-    u = (url or "").lower()
-    return "logo_icarros_compartilhar" in u or "/comum/imagens/logo_icarros" in u
-
-
-def _deep_collect_strings(obj, out: set[str]) -> None:
-    if obj is None:
-        return
-    if isinstance(obj, str):
-        s = obj.strip()
-        if s:
-            out.add(s)
-        return
-    if isinstance(obj, dict):
-        for v in obj.values():
-            _deep_collect_strings(v, out)
-        return
-    if isinstance(obj, (list, tuple)):
-        for v in obj:
-            _deep_collect_strings(v, out)
-        return
-
-
-def _extract_next_data(doc) -> Optional[dict]:
-    raw = doc.xpath("string(//script[@id='__NEXT_DATA__']/text())") or ""
-    raw = (raw or "").strip()
-    if not raw:
-        return None
+def _extract_make_model_city_from_url(url: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Return (make, model, city_slug) from /comprar/<city-uf>/<make>/<model>/..."""
     try:
-        data = json.loads(raw)
-    except Exception:
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _extract_jsonld_objects(doc) -> list[dict]:
-    objs: list[dict] = []
-    for raw in doc.xpath("//script[@type='application/ld+json']/text()"):
-        raw = (raw or "").strip()
-        if not raw:
-            continue
-        try:
-            data = json.loads(raw)
-        except Exception:
-            continue
-        if isinstance(data, dict):
-            objs.append(data)
-        elif isinstance(data, list):
-            for it in data:
-                if isinstance(it, dict):
-                    objs.append(it)
-    return objs
-
-
-def _extract_images_from_structured(doc, base_url: str) -> list[str]:
-    imgs: list[str] = []
-
-    # JSON-LD: image / thumbnailUrl
-    for obj in _extract_jsonld_objects(doc):
-        for k in ("image", "thumbnailUrl"):
-            v = obj.get(k)
-            if isinstance(v, str):
-                imgs.append(v)
-            elif isinstance(v, list):
-                for it in v:
-                    if isinstance(it, str):
-                        imgs.append(it)
-
-    # Next.js data: scan for URL-like strings
-    nd = _extract_next_data(doc)
-    if nd:
-        sset: set[str] = set()
-        _deep_collect_strings(nd, sset)
-        for s in sset:
-            if not isinstance(s, str):
-                continue
-            if "icarros" not in s and not s.startswith("/") and not s.startswith("http"):
-                continue
-            if re.search(r"\.(?:jpe?g|png|webp)\b", s, re.I) or "fit-in/" in s or "img" in s.lower():
-                imgs.append(s)
-
-    # Normalize + filter
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in imgs:
-        u = _normalize_asset_url(raw, base_url)
-        if not u:
-            continue
-        if _is_default_share_logo(u):
-            continue
-        if u in seen:
-            continue
-        seen.add(u)
-        out.append(u)
-    return out
-
-
-def _extract_price_from_structured(doc) -> Optional[Decimal]:
-    # JSON-LD offers.price is the best signal
-    for obj in _extract_jsonld_objects(doc):
-        offers = obj.get("offers")
-        if isinstance(offers, dict):
-            p = offers.get("price")
-            cur = offers.get("priceCurrency")
-            if p is not None and (cur in (None, "", "BRL")):
-                try:
-                    return Decimal(str(p))
-                except Exception:
-                    pass
-
-    # Next.js data: pick the largest plausible 'price' number we find
-    nd = _extract_next_data(doc)
-    if not nd:
-        return None
-
-    vals: list[Decimal] = []
-
-    def _walk(o):
-        if isinstance(o, dict):
-            for k, v in o.items():
-                lk = str(k).lower()
-                if lk in ("price", "preco", "valor", "pricevalue", "amount"):
-                    if isinstance(v, (int, float, str)):
-                        try:
-                            d = Decimal(str(v).replace(".", "").replace(",", "."))
-                            vals.append(d)
-                        except Exception:
-                            pass
-                _walk(v)
-        elif isinstance(o, list):
-            for it in o:
-                _walk(it)
-
-    _walk(nd)
-
-    plausible = [d for d in vals if d >= 2000 and d <= 5000000]
-    return max(plausible) if plausible else None
-
-
-def _extract_listing_urls_from_dom(doc, base_url: str) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-
-    for href in doc.xpath("//a[@href]/@href"):
-        u = urljoin(base_url, href)
-        u = _canonical_url(u)
-        if not _is_listing_url(u):
-            continue
-        if u in seen:
-            continue
-        seen.add(u)
-        out.append(u)
-
-    # Next.js data scan (collect strings and match URLs)
-    nd = _extract_next_data(doc)
-    if nd:
-        sset: set[str] = set()
-        _deep_collect_strings(nd, sset)
-        for s in sset:
-            if not isinstance(s, str):
-                continue
-            if "/comprar/" not in s or "/d" not in s:
-                continue
-            u = urljoin(base_url, s)
-            u = _canonical_url(u)
-            if _is_listing_url(u) and u not in seen:
-                seen.add(u)
-                out.append(u)
-
-    return out
-
-
-def _resolve_listing_url_from_fallback(doc, base_url: str, requested_url: str) -> Optional[str]:
-    req_year = _extract_year_from_url(requested_url)
-    req_city = _extract_location_from_url(requested_url)
-
-    make = model = None
-    try:
-        sp = urlsplit(requested_url)
+        sp = urlsplit(url)
         seg = sp.path.strip("/").split("/")
+        # /comprar/<city-uf>/<make>/<model>/...
         if len(seg) >= 4 and seg[0] == "comprar":
-            make = seg[2].lower()
-            model = seg[3].lower()
+            city_slug = seg[1]
+            make = seg[2]
+            model = seg[3]
+            return make, model, city_slug
     except Exception:
         pass
+    return None, None, None
 
-    cands = _extract_listing_urls_from_dom(doc, base_url)
-    if not cands:
+
+def _pretty_slug(s: Optional[str]) -> Optional[str]:
+    if not s:
+        return None
+    s = s.strip().strip("/")
+    if not s:
+        return None
+    parts = re.split(r"[-_\s]+", s)
+    out: list[str] = []
+    for p in parts:
+        if not p:
+            continue
+        if re.match(r"^[a-z]\d+$", p, re.I):
+            out.append(p.upper())
+        elif re.match(r"^\d+[a-z]+$", p, re.I):
+            out.append(p.upper())
+        else:
+            out.append(p[:1].upper() + p[1:])
+    return " ".join(out)
+
+
+def _title_from_url(url: str) -> Optional[str]:
+    make, model, _city = _extract_make_model_city_from_url(url)
+    year = _extract_year_from_url(url)
+    pm = _pretty_slug(make)
+    pmodel = _pretty_slug(model)
+    if pm and pmodel and year:
+        return f"{pm} {pmodel} {year}"
+    if pm and pmodel:
+        return f"{pm} {pmodel}"
+    return None
+
+
+def _resolve_listing_url_from_fallback_page(html_text: str, *, requested_url: str, base_url: str) -> Optional[str]:
+    """If iCarros redirects a listing URL to a catalog page (e.g. /a6#rfae),
+    try to recover the real listing URL from the HTML (often contains the correct /<year>/d<id> link).
+    """
+    if not html_text:
+        return None
+
+    req_make, req_model, req_city = _extract_make_model_city_from_url(requested_url)
+    req_year = _extract_year_from_url(requested_url)
+
+    found: list[str] = []
+    for u in _LISTING_URL_RE.findall(html_text):
+        cu = _canonical_url(urljoin(base_url, u))
+        if _is_listing_url(cu):
+            found.append(cu)
+
+    if not found:
         return None
 
     def _score(u: str) -> int:
+        make, model, city = _extract_make_model_city_from_url(u)
+        year = _extract_year_from_url(u)
         s = 0
-        ul = u.lower()
-        if req_year and f"/{req_year}/" in ul:
+        if req_city and city and req_city == city:
             s += 5
-        if req_city:
-            # partial match for slug is enough
-            slug = req_city.lower().replace(" ", "-")
-            if slug[:6] in ul:
-                s += 3
-        if make and f"/{make}/" in ul:
-            s += 2
-        if model and f"/{model}/" in ul:
-            s += 2
+        if req_make and make and req_make == make:
+            s += 3
+        if req_model and model and req_model == model:
+            s += 3
+        if req_year and year and req_year == year:
+            s += 4
         return s
 
-    cands.sort(key=_score, reverse=True)
-    return cands[0]
+    found = list(dict.fromkeys(found))
+    found.sort(key=_score, reverse=True)
+    best = found[0]
+    if _score(best) >= 6:
+        return best
+    return None
+
 
 def _extract_km(text: str) -> Optional[str]:
     """Extract odometer; ignore patterns like '| a 0 km' (distance-to-you)."""
@@ -346,64 +223,23 @@ def _best_price(text: str) -> Optional[Decimal]:
     return max(vals)
 
 
-def _pick_from_srcset(srcset: str, *, max_width: int = 2048) -> Optional[str]:
-    """Pick a good URL from a srcset string.
-
-    Prefer the largest width <= max_width; if none, pick the largest available.
-    """
-    if not srcset:
-        return None
-
-    candidates: list[tuple[int, str]] = []
-    for part in srcset.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        bits = part.split()
-        u = bits[0].strip()
-        w = 0
-        if len(bits) >= 2:
-            m = re.match(r"(\d+)w$", bits[1].strip())
-            if m:
-                try:
-                    w = int(m.group(1))
-                except Exception:
-                    w = 0
-        candidates.append((w, u))
-
-    if not candidates:
-        return None
-
-    le = [c for c in candidates if c[0] and c[0] <= max_width]
-    if le:
-        le.sort(key=lambda x: x[0], reverse=True)
-        return le[0][1]
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
-
-
-def _normalize_asset_url(raw: str, base_url: str) -> Optional[str]:
-    if not raw:
-        return None
-    u = raw.strip()
-    if not u or u.startswith("data:"):
-        return None
-    if u.startswith("//"):
-        u = "https:" + u
-    if u.startswith("/"):
-        u = urljoin(base_url, u)
-    return u
-
-
 def _upgrade_image_url(url: str) -> str:
     """Try to upgrade thumbnail URLs to higher resolution."""
     if not url:
         return url
 
+    # fit-in/320x240 -> fit-in/1600x1200
     url = re.sub(r"/fit-in/(\d{2,4})x(\d{2,4})/", "/fit-in/1600x1200/", url)
-    url = re.sub(r"(\D)(\d{2,4})x(\d{2,4})(\.(?:jpe?g|png|webp))\b", r"\g<1>1600x1200\g<4>", url, flags=re.I)
 
+    # ...-320x240.jpg -> ...-1600x1200.jpg
+    url = re.sub(
+        r"(\D)(\d{2,4})x(\d{2,4})(\.(?:jpe?g|png|webp))\b",
+        r"\g<1>1600x1200\g<4>",
+        url,
+        flags=re.I,
+    )
+
+    # query params w/h or width/height
     try:
         sp = urlsplit(url)
         qs = parse_qs(sp.query)
@@ -431,13 +267,13 @@ def _is_tiny_image(url: str) -> bool:
     m = re.search(r"[?&](?:w|width)=(\d+)", u)
     if m:
         try:
-            return int(m.group(1)) <= 420
+            return int(m.group(1)) <= 640
         except Exception:
             return False
     m2 = re.search(r"(\d{2,4})x(\d{2,4})\.(?:jpe?g|png|webp)\b", u)
     if m2:
         try:
-            return int(m2.group(1)) <= 420
+            return int(m2.group(1)) <= 640
         except Exception:
             return False
     return False
@@ -446,18 +282,18 @@ def _is_tiny_image(url: str) -> bool:
 def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
     candidates: list[str] = []
 
+    # meta tags (detail pages)
     for v in node.xpath(".//meta[@property='og:image']/@content | .//meta[@name='twitter:image']/@content"):
         candidates.append(v)
 
-    candidates.extend(_extract_images_from_structured(node, base_url))
-
+    # images
     for img in node.xpath(".//img"):
         for attr in ("data-srcset", "srcset", "data-src", "data-lazy-src", "data-original", "src"):
             v = img.get(attr)
             if not v:
                 continue
             if "srcset" in attr:
-                picked = _pick_from_srcset(v)
+                picked = pick_from_srcset(v)
                 if picked:
                     candidates.append(picked)
                 else:
@@ -465,11 +301,13 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
             else:
                 candidates.append(v)
 
+    # picture sources
     for ss in node.xpath(".//picture//source[@srcset]/@srcset"):
-        picked = _pick_from_srcset(ss)
+        picked = pick_from_srcset(ss)
         if picked:
             candidates.append(picked)
 
+    # background-image style
     for st in node.xpath(
         ".//*[@style and contains(translate(@style,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'background-image')]/@style"
     ):
@@ -478,36 +316,32 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
             candidates.append(m.group(1).strip().strip('"\''))
 
     def _score(u: str) -> int:
+        s = 0
         ul = (u or "").lower()
         if not ul or ul.startswith("data:"):
             return -50
-        if _is_default_share_logo(ul):
-            return -999
-
-        s = 0
         if "logo" in ul or "icon" in ul or "sprite" in ul:
-            s -= 20
+            s -= 10
         if ul.endswith(".svg"):
-            s -= 20
+            s -= 10
         if re.search(r"\.(jpe?g|png|webp)\b", ul):
-            s += 6
+            s += 4
         if "icarros" in ul:
             s += 2
         if "thumb" in ul:
-            s -= 4
-
+            s -= 2
         m = re.search(r"[?&](?:w|width)=(\d+)", ul)
         if m:
             try:
-                s += min(int(m.group(1)) // 200, 10)
+                s += min(int(m.group(1)) // 200, 8)
             except Exception:
                 pass
-        m2 = re.search(r"(\d{2,4})x(\d{2,4})(?:\.(?:jpe?g|png|webp)\b|/)", ul)
+        m2 = re.search(r"(\d{2,4})x(\d{2,4})\.(?:jpe?g|png|webp)\b", ul)
         if m2:
             try:
                 w = int(m2.group(1))
                 h = int(m2.group(2))
-                s += min((w * h) // (300 * 300), 12)
+                s += min((w * h) // (300 * 300), 8)
             except Exception:
                 pass
         return s
@@ -516,10 +350,8 @@ def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
     best_score = -10**9
 
     for raw in candidates:
-        u = _normalize_asset_url(raw, base_url)
+        u = normalize_asset_url(raw, base_url)
         if not u:
-            continue
-        if _is_default_share_logo(u):
             continue
         sc = _score(u)
         if sc > best_score:
@@ -545,76 +377,224 @@ def _looks_generic_title(title: Optional[str]) -> bool:
     return False
 
 
-def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int = 45000) -> dict:
-    """Fetch detail page to improve title/price/thumb/location (Playwright-first)."""
+def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int = 35000) -> dict:
+    """Fetch detail page to improve title/price/thumb/km/location.
+
+    iCarros sometimes redirects a listing URL to a catalog page (e.g. /a6#rfae) when the ad id is stale.
+    In that case, attempt to recover the real listing URL from the fallback HTML and re-fetch.
+    """
     url = listing.get("url") or ""
     if not url:
         return listing
 
     try:
-        res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
-        html_text = res.html
-        base_url = res.final_url or url
+        # Prefer networkidle on detail pages (SPA hydration), but fall back to domcontentloaded.
+        try:
+            res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="networkidle")
+        except Exception:
+            res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
 
-        logger.info("[icarros] detail nav requested_url=%s final_url=%s", url, base_url)
+        html_text = res.html
+        final_url = res.final_url or url
+        logger.info("[icarros] detail nav requested_url=%s final_url=%s", url, final_url)
+
+        base_url = final_url
+
+        # If we landed on a non-listing URL (catalog), try to recover the real listing URL from HTML.
+        if not _is_listing_url(_canonical_url(base_url)):
+            resolved = _resolve_listing_url_from_fallback_page(html_text, requested_url=url, base_url=base_url)
+            if resolved and resolved != _canonical_url(base_url):
+                logger.info("[icarros] detail resolve requested_url=%s final_url=%s resolved_url=%s", url, base_url, resolved)
+                try:
+                    res2 = fetch_html_browser(resolved, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="networkidle")
+                except Exception:
+                    res2 = fetch_html_browser(resolved, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
+                html_text = res2.html
+                base_url = res2.final_url or resolved
+                listing["url"] = _canonical_url(base_url)
+                ext2 = _external_id(base_url)
+                if ext2:
+                    listing["external_id"] = ext2
+            else:
+                # Don't trust metadata from catalog fallback pages.
+                logger.info("[icarros] detail fallback non-listing (no resolve) requested_url=%s final_url=%s", url, base_url)
+                if not listing.get("title"):
+                    listing["title"] = _title_from_url(url)
+                if not listing.get("location"):
+                    listing["location"] = _extract_location_from_url(url)
+                if not listing.get("year"):
+                    y = _extract_year_from_url(url)
+                    if y:
+                        listing["year"] = y
+                return listing
 
         doc = lxml_html.fromstring(html_text)
         doc.make_links_absolute(base_url)
 
-        # Resolve redirect/fallback pages (ex: /a6#rfae)
-        if not _is_listing_url(_canonical_url(base_url)):
-            resolved = _resolve_listing_url_from_fallback(doc, base_url, url)
-            if resolved and _is_listing_url(resolved):
-                logger.info("[icarros] detail resolve requested_url=%s final_url=%s resolved_url=%s", url, base_url, resolved)
-                res2 = fetch_html_browser(resolved, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
-                html_text = res2.html
-                base_url = res2.final_url or resolved
-                doc = lxml_html.fromstring(html_text)
-                doc.make_links_absolute(base_url)
-                listing["url"] = _canonical_url(base_url)
-                ext = _external_id(base_url)
-                if ext:
-                    listing["external_id"] = ext
-
-        # Title: prefer og:title, then h1, then headers
+        # Title: prefer og:title, then h1, then any strong header-like node
         title = None
-        ogt = _clean_text(doc.xpath("string(//meta[@property='og:title']/@content)") or "")
-        if ogt:
-            head = ogt.split(" - ")[0].strip()
-            if 6 <= len(head) <= 180:
-                title = head
+        ogt = doc.xpath("string(//meta[@property='og:title']/@content)") or ""
+        ogt = clean_text(ogt)
+        if ogt and len(ogt) <= 180:
+            title = ogt
 
         if _looks_generic_title(title):
-            h1 = _clean_text(doc.xpath("string(//h1[1])") or "")
+            h1 = clean_text(doc.xpath("string(//h1[1])") or "")
             if h1 and 6 <= len(h1) <= 180:
                 title = h1
 
         if _looks_generic_title(title):
             for xp in ("//h2", "//h3"):
                 for n in doc.xpath(xp):
-                    t = _clean_text(n.text_content())
+                    t = clean_text(n.text_content())
                     if t and "R$" not in t and 10 <= len(t) <= 180:
                         title = t
                         break
                 if not _looks_generic_title(title):
                     break
 
-        if title:
-            title = re.sub(r"^comprar\s+", "", title, flags=re.I).strip()
+        # Price: first try JSON-LD offers.price
+        price: Optional[Decimal] = None
+        for raw in doc.xpath("//script[@type='application/ld+json']/text()"):
+            raw = (raw or "").strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            objs = data if isinstance(data, list) else [data]
+            for obj in objs:
+                if not isinstance(obj, dict):
+                    continue
+                offers = obj.get("offers")
+                if isinstance(offers, dict):
+                    p = offers.get("price")
+                    cur = offers.get("priceCurrency")
+                    if p is not None and (cur in (None, "", "BRL")):
+                        try:
+                            price = Decimal(str(p))
+                            break
+                        except Exception:
+                            pass
+                if price is not None:
+                    break
+            if price is not None:
+                break
 
-        # Price: structured > text
-        price: Optional[Decimal] = _extract_price_from_structured(doc)
         if price is None:
-            price = _best_price(_clean_text(doc.text_content()))
+            price = _best_price(clean_text(doc.text_content()))
 
         # Thumbnail
         thumb = _extract_thumbnail_any(doc, base_url=base_url)
-        if thumb and _is_default_share_logo(thumb):
-            thumb = None
 
+        # KM
+        km = _extract_km(clean_text(doc.text_content()))
+
+        # Location
         # Location: from URL
         location = listing.get("location") or _extract_location_from_url(base_url)
 
+        if title and not _looks_generic_title(title):
+            title = re.sub(r"^comprar\s+", "", title, flags=re.I).strip()
+            listing["title"] = title
+
+        if not listing.get("title"):
+            listing["title"] = _title_from_url(base_url) or _title_from_url(url)
+
+        if price is not None:
+            listing["price"] = price
+
+        if thumb and (not listing.get("thumbnail_url") or _is_tiny_image(listing.get("thumbnail_url") or "")):
+            listing["thumbnail_url"] = thumb
+
+        if km and not listing.get("km"):
+            listing["km"] = km
+
+        if location and not listing.get("location"):
+            listing["location"] = location
+
+        y = listing.get("year") or _extract_year_from_url(base_url)
+        if y and not listing.get("year"):
+            listing["year"] = y
+
+    except Exception:
+        return listing
+
+    return listing
+
+    try:
+        res = fetch_html_browser(url, ctx=ctx, timeout_ms=limit_timeout_ms, wait_until="domcontentloaded")
+        html_text = res.html
+        base_url = res.final_url or url
+
+        doc = lxml_html.fromstring(html_text)
+        doc.make_links_absolute(base_url)
+
+        # Title: prefer og:title, then h1, then any strong header-like node
+        title = None
+        ogt = doc.xpath("string(//meta[@property='og:title']/@content)") or ""
+        ogt = clean_text(ogt)
+        if ogt and len(ogt) <= 180:
+            title = ogt
+
+        if _looks_generic_title(title):
+            h1 = clean_text(doc.xpath("string(//h1[1])") or "")
+            if h1 and 6 <= len(h1) <= 180:
+                title = h1
+
+        if _looks_generic_title(title):
+            for xp in ("//h2", "//h3"):
+                for n in doc.xpath(xp):
+                    t = clean_text(n.text_content())
+                    if t and "R$" not in t and 10 <= len(t) <= 180:
+                        title = t
+                        break
+                if not _looks_generic_title(title):
+                    break
+
+        # Price: first try JSON-LD offers.price
+        price: Optional[Decimal] = None
+        for raw in doc.xpath("//script[@type='application/ld+json']/text()"):
+            raw = (raw or "").strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            # data can be list or dict
+            objs = data if isinstance(data, list) else [data]
+            for obj in objs:
+                if not isinstance(obj, dict):
+                    continue
+                offers = obj.get("offers")
+                if isinstance(offers, dict):
+                    p = offers.get("price")
+                    cur = offers.get("priceCurrency")
+                    if p is not None and (cur in (None, "", "BRL")):
+                        try:
+                            price = Decimal(str(p))
+                            break
+                        except Exception:
+                            pass
+                if price is not None:
+                    break
+            if price is not None:
+                break
+
+        if price is None:
+            # fallback: best price from visible text
+            price = _best_price(clean_text(doc.text_content()))
+
+        # Thumbnail: prefer richer sources on detail
+        thumb = _extract_thumbnail_any(doc, base_url=base_url)
+
+        # KM: from detail text (more reliable)
+        km = _extract_km(clean_text(doc.text_content()))
+
+        # Location: from URL (detail has it)
+        location = listing.get("location") or _extract_location_from_url(base_url)
         # Pack year/km into title (avoid extra DB columns)
         y = _extract_year_from_url(base_url)
         km = _extract_km(_clean_text(doc.text_content()))

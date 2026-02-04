@@ -13,8 +13,12 @@ from .types import SourcePlugin
 _REGISTRY: Dict[str, SourcePlugin] = {}
 
 
+def _normalize_name(name: str) -> str:
+    return name.strip().lower()
+
+
 def register_source(plugin: SourcePlugin) -> None:
-    name = plugin.name.strip().lower()
+    name = _normalize_name(plugin.name)
     if not name:
         raise ValueError("plugin.name cannot be empty")
     if name in _REGISTRY:
@@ -23,7 +27,7 @@ def register_source(plugin: SourcePlugin) -> None:
 
 
 def get_source(name: str) -> Optional[SourcePlugin]:
-    return _REGISTRY.get(name.strip().lower())
+    return _REGISTRY.get(_normalize_name(name))
 
 
 def list_sources() -> List[SourcePlugin]:
@@ -36,18 +40,20 @@ def list_enabled_sources(db: Optional[Session] = None) -> List[SourcePlugin]:
     - If `db` is provided, DB (`source_configs`) is the source of truth.
     - If `db` is None (e.g. during very early startup), fall back to plugin defaults.
     """
-    plugins = list_sources()
     if db is None:
-        return [p for p in plugins if bool(getattr(p, "default_enabled", True))]
+        return [p for p in _REGISTRY.values() if bool(getattr(p, "default_enabled", True))]
 
     try:
         enabled: Set[str] = set(
-            s for s in db.execute(select(SourceConfig.source).where(SourceConfig.is_enabled == True)).scalars().all()
+            _normalize_name(s)
+            for s in db.execute(
+                select(SourceConfig.source).where(SourceConfig.is_enabled.is_(True))
+            ).scalars().all()
         )
-        return [p for p in plugins if p.name in enabled]
+        return [p for p in _REGISTRY.values() if p.name in enabled]
     except Exception:
         # In case migrations were not applied yet, fall back to defaults.
-        return [p for p in plugins if bool(getattr(p, "default_enabled", True))]
+        return [p for p in _REGISTRY.values() if bool(getattr(p, "default_enabled", True))]
 
 
 # Import builtins so they register themselves.
