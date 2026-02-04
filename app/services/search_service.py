@@ -150,4 +150,4 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
     for t in terms:
         q = q.filter((CarListing.title.ilike(f"%{t}%")) | (CarListing.location.ilike(f"%{t}%")))
 
-    return q.order_by(CarListing.created_at.desc()).limit(limit).all()
+    return q.order_by(CarListing.updated_at.desc(), CarListing.created_at.desc()).limit(limit).all()

@@ -3,8 +3,30 @@ import re
 from playwright.async_api import async_playwright
 
 URLS = [
+    "https://www.icarros.com.br/comprar/sao-jose-do-rio-preto-sp/audi/a6/2020/d56180452",
     "https://www.icarros.com.br/comprar/rio-de-janeiro-rj/audi/a6/2020/d56149836",
 ]
+
+async def meta_contents(page, selector: str) -> list[str]:
+    # pega todos os <meta ... content="..."> que batem no selector
+    vals = await page.locator(selector).evaluate_all(
+        "els => els.map(e => e.getAttribute('content')).filter(Boolean)"
+    )
+    return [v.strip() for v in vals if isinstance(v, str) and v.strip()]
+
+def pick_best_og_image(values: list[str]) -> str | None:
+    if not values:
+        return None
+
+    # ignora logo genérico do iCarros
+    for v in values:
+        if "logo_icarros_compartilhar" in v:
+            continue
+        return v
+
+    # se só tiver logo, devolve o primeiro mesmo
+    return values[0]
+
 
 def pick_best_srcset(srcset: str) -> str | None:
     # ex: "https://... 320w, https://... 640w, https://... 1024w"
@@ -36,13 +58,21 @@ async def main():
             print("status       :", resp.status if resp else None)
 
             # og:title / og:image
-            og_title = await page.locator("meta[property='og:title']").get_attribute("content")
-            og_image = await page.locator("meta[property='og:image']").get_attribute("content")
+            og_titles = await meta_contents(page, "meta[property='og:title']")
+            og_title = og_titles[0] if og_titles else None
+            print("og:title(all):", og_titles)
             print("og:title     :", og_title)
+
+            og_images = await meta_contents(page, "meta[property='og:image']")
+            og_image = pick_best_og_image(og_images)
+            print("og:image(all):", og_images)
             print("og:image     :", og_image)
 
             # tenta achar um srcset grande
-            srcset = await page.locator("img[srcset]").first.get_attribute("srcset")
+            srcset = None
+            loc = page.locator("img[srcset]")
+            if await loc.count() > 0:
+                srcset = await loc.first.get_attribute("srcset")
             if srcset:
                 best = pick_best_srcset(srcset)
                 print("srcset_best  :", best)
