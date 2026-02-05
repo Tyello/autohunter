@@ -30,6 +30,15 @@ def _is_bug_type(exc_type: str) -> bool:
 
 
 
+
+
+def _ctx_fetch_diag(ctx) -> dict:
+    return {
+        "hybrid_browser_used": bool(getattr(ctx, "_hybrid_browser_used", False)),
+        "hybrid_blocked": bool(getattr(ctx, "_hybrid_blocked", False)),
+        "hybrid_blocked_status": getattr(ctx, "_hybrid_blocked_status", None),
+    }
+
 def queue_notifications_for_new_listings(db: Session, component: str, new_listing_ids: list):
     listing_rows = db.query(CarListing.id).filter(CarListing.id.in_(new_listing_ids)).all()
     listing_ids = [row[0] for row in listing_rows]
@@ -79,7 +88,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -98,6 +107,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             "url": search_url,
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
+            **_ctx_fetch_diag(ctx),
         }
 
     found = len(listings or [])
@@ -134,7 +144,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued}
+    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued, **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
@@ -149,7 +159,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -168,6 +178,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             "url": search_url,
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
+            **_ctx_fetch_diag(ctx),
         }
 
     found = len(listings or [])
@@ -211,4 +222,4 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or [])}
+    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or []), **_ctx_fetch_diag(ctx)}

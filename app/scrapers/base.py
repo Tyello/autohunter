@@ -9,6 +9,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.scrapers.hybrid_cookies import inject_storage_state_cookies
+
 
 class FetchBlocked(Exception):
     def __init__(self, status_code: int, url: str, *, reason: str | None = None):
@@ -131,6 +133,14 @@ def _resolve_session_key(ctx: Optional[object]) -> Optional[str]:
         return None
     src = getattr(ctx, 'source', None)
     return str(src).strip().lower() if src else None
+
+
+def _apply_hybrid_cookies(sess: requests.Session, ctx: Optional[object]) -> None:
+    if ctx is None:
+        return
+    src = getattr(ctx, 'source', None)
+    proxy = getattr(ctx, 'proxy_server', None)
+    inject_storage_state_cookies(sess, source=src, proxy_server=proxy)
 
 def _resolve_delay(min_delay_ms: int, max_delay_ms: int, ctx: Optional[object]) -> tuple[int, int]:
     if ctx is None:
@@ -258,6 +268,7 @@ def fetch_response(
     proxy = _resolve_proxy(proxy, ctx)
     sess = _get_session(proxy, _resolve_session_key(ctx))
     _ensure_session_fingerprint(sess)
+    _apply_hybrid_cookies(sess, ctx)
 
     base_headers = {}
     if referer:

@@ -6,29 +6,17 @@ from urllib.parse import urlparse, urlunparse, parse_qs, unquote
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
+from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
 from app.core.settings import settings
-from app.services.browser_fetcher import fetch_html_browser
 
 
 def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
     proxy = getattr(ctx, "proxy_server", None)
 
-    # 0) Playwright-first when explicitly forced via DB config
-    if settings.enable_playwright and getattr(ctx, "force_browser", False):
-        res = fetch_html_browser(
-            url,
-            ctx=ctx,
-            timeout_ms=timeout * 1000,
-            wait_until="domcontentloaded",
-            min_delay_ms=250,
-            max_delay_ms=900,
-        )
-        return res.html
-
-    # 1) HTTP normal
+    # 1) HTTP normal/hardened (with auto cookies from storage_state in base.fetch_html).
     try:
         return fetch_html(
             url,
@@ -67,22 +55,30 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
         )
         if r.status_code == 200 and r.text:
             return r.text
+        if int(getattr(r, "status_code", 0) or 0) in (403, 429):
+            raise FetchBlocked(int(r.status_code), url, reason="http_status")
+    except FetchBlocked:
+        pass
     except Exception:
         pass
 
-    # 3) fallback browser (se habilitado via DB config)
+    # 3) Hybrid ideal: browser warmup -> retry HTTP once -> browser HTML as last resort.
     if settings.enable_playwright and getattr(ctx, "browser_fallback_enabled", False):
-        res = fetch_html_browser(
+        return fetch_html_with_browser_fallback(
             url,
             ctx=ctx,
-            timeout_ms=timeout * 1000,
-            wait_until="domcontentloaded",
+            timeout=timeout,
+            referer="https://lista.mercadolivre.com.br/",
+            proxy=proxy,
             min_delay_ms=250,
             max_delay_ms=900,
+            wait_until="domcontentloaded",
+            timeout_ms=timeout * 1000,
+            browser_min_delay_ms=250,
+            browser_max_delay_ms=900,
+            allow_browser_fallback=True,
         )
-        return res.html
 
-    # se chegou aqui, marca blocked
     raise FetchBlocked(403, url, reason="ml_403_all_strategies")
 
 
