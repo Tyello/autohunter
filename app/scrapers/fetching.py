@@ -8,6 +8,27 @@ from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
 
+_BLOCKED_HTTP_CODES = {403, 429}
+
+
+def _is_blocked_error(exc: Exception) -> bool:
+    if isinstance(exc, FetchBlocked):
+        if exc.status_code in _BLOCKED_HTTP_CODES:
+            return True
+        return (exc.reason or "") in {"bot_challenge", "http_status"}
+    msg = str(exc).lower()
+    return any(k in msg for k in ("captcha", "cloudflare", "challenge", "access denied"))
+
+
+
+
+def _set_ctx_diag(ctx: ScrapeContext, **values: object) -> None:
+    for k, v in values.items():
+        try:
+            setattr(ctx, k, v)
+        except Exception:
+            pass
+
 def fetch_html_with_browser_fallback(
     url: str,
     *,
@@ -23,7 +44,10 @@ def fetch_html_with_browser_fallback(
     browser_max_delay_ms: Optional[int] = None,
     allow_browser_fallback: bool = True,
 ) -> str:
-    """Fetch HTML via HTTP and fallback to Playwright when available."""
+    """Hybrid fetch: HTTP first, browser warmup only on block, then HTTP retry once.
+
+    Last resort returns browser HTML only when retry HTTP still fails.
+    """
 
     def _fetch_browser() -> str:
         res = fetch_html_browser(
@@ -36,7 +60,10 @@ def fetch_html_with_browser_fallback(
         )
         return res.html
 
+    _set_ctx_diag(ctx, _hybrid_browser_used=False, _hybrid_blocked=False, _hybrid_blocked_status=None)
+
     if settings.enable_playwright and getattr(ctx, "force_browser", False):
+        _set_ctx_diag(ctx, _hybrid_browser_used=True)
         return _fetch_browser()
 
     try:
@@ -49,11 +76,37 @@ def fetch_html_with_browser_fallback(
             min_delay_ms=min_delay_ms,
             max_delay_ms=max_delay_ms,
         )
-    except FetchBlocked:
+    except Exception as first_exc:
         if not (settings.enable_playwright and allow_browser_fallback):
             raise
-    except Exception:
-        if not (settings.enable_playwright and allow_browser_fallback):
+        if not _is_blocked_error(first_exc):
             raise
 
-    return _fetch_browser()
+        _set_ctx_diag(ctx, _hybrid_blocked=True)
+
+        # 1) Browser warmup to refresh storage_state/cookies.
+        try:
+            browser_html = _fetch_browser()
+        except FetchBlocked as warm_exc:
+            _set_ctx_diag(ctx, _hybrid_browser_used=True, _hybrid_blocked_status=warm_exc.status_code)
+            raise FetchBlocked(warm_exc.status_code, url, reason="blocked_after_browser_warmup") from warm_exc
+
+        _set_ctx_diag(ctx, _hybrid_browser_used=True)
+
+        # 2) Retry HTTP once (base.fetch_html now injects storage_state cookies automatically).
+        try:
+            return fetch_html(
+                url,
+                ctx=ctx,
+                timeout=timeout,
+                referer=referer,
+                proxy=proxy,
+                min_delay_ms=min_delay_ms,
+                max_delay_ms=max_delay_ms,
+            )
+        except Exception as second_exc:
+            if not _is_blocked_error(second_exc):
+                raise
+            # 3) Last resort: return browser HTML.
+            _set_ctx_diag(ctx, _hybrid_browser_used=True, _hybrid_blocked_status=getattr(second_exc, "status_code", None))
+            return browser_html
