@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.contract import finalize_listings
 from app.core.settings import settings
 from app.services.browser_fetcher import fetch_html_browser, fetch_json_browser
 from app.sources.types import ScrapeContext
@@ -292,7 +293,7 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
                 "location": it.location,
             }
         )
-    return out
+    return finalize_listings("olx", out)
 
 
 def _looks_like_cf_or_bot(html: str) -> bool:

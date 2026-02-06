@@ -12,6 +12,7 @@ import requests
 from app.core.settings import settings
 from app.scrapers.base import FetchBlocked, fetch_json
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.contract import finalize_listings
 from app.services.browser_fetcher import fetch_html_browser, fetch_json_browser
 from app.sources.types import ScrapeContext
 
@@ -454,4 +455,4 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
         if len(out) >= 60:
             break
 
-    return out
+    return finalize_listings("webmotors", out)

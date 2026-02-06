@@ -5,7 +5,6 @@ from io import BytesIO
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from app.bot.formatting import format_price
 from app.bot.media import download_image_bytes
 from app.bot.listing_display import format_listing_message_telegram
 from app.bot.utils import normalize_args, parse_int, reply_text

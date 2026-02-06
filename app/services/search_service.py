@@ -8,6 +8,7 @@ from app.models.car_listing import CarListing
 from app.scrapers.base import FetchBlocked
 from app.sources import list_sources
 from app.services.listings_service import ingest_listings
+from app.scrapers.diagnostics import ScrapeDiagnostics, using_diagnostics
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, get_source_config, build_scrape_context
 from app.services.source_runs_service import record_run
@@ -68,10 +69,15 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
         rate_limit_seconds = int(cfg.rate_limit_seconds or 0) if cfg else 0
 
         t0 = time.perf_counter()
+        diag = ScrapeDiagnostics(source=plugin.name, url=url, kind="manual")
         try:
             ctx = build_scrape_context(db, plugin.name)
-            items = plugin.scrape(url, ctx)
+            with using_diagnostics(diag):
+                items = plugin.scrape(url, ctx)
             inserted_ids = ingest_listings(db, items)
+
+            diag.inc("found", len(items or []))
+            diag.inc("inserted", len(inserted_ids or []))
 
             mark_success(
                 db,
@@ -89,6 +95,7 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 duration_ms=_duration_ms(t0),
                 items_found=len(items or []),
                 items_ingested=len(inserted_ids or []),
+                payload={"diag": diag.snapshot(), "forced_backoff": bool(forced_backoff)},
             )
         except FetchBlocked as e:
             err_url = getattr(e, "url", url)
@@ -100,6 +107,10 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 http_status=err_status,
                 url=err_url,
             )
+            diag.flag("blocked", True)
+            if err_status is not None:
+                diag.note("blocked_status_code", err_status)
+
             record_run(
                 db,
                 source=plugin.name,
@@ -110,6 +121,7 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 http_status=err_status,
                 duration_ms=_duration_ms(t0),
                 error=f"blocked(backoff={minutes}m)",
+                payload={"diag": diag.snapshot(), "backoff_minutes": minutes},
             )
             log(
                 db,
@@ -132,11 +144,12 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                     url=url,
                     duration_ms=_duration_ms(t0),
                     error=err,
-                    payload={"reason": "playwright_sources_restricted"},
+                    payload={"reason": "playwright_sources_restricted", "diag": diag.snapshot()},
                 )
                 continue
 
             minutes = mark_error(db, plugin.name, base_cooldown_minutes=max(cooldown, 1), error=err, url=url)
+            diag.note("error", err)
             record_run(
                 db,
                 source=plugin.name,
@@ -146,6 +159,7 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
                 url=url,
                 duration_ms=_duration_ms(t0),
                 error=f"{err} (backoff={minutes}m)",
+                payload={"diag": diag.snapshot(), "backoff_minutes": minutes},
             )
             log(
                 db,

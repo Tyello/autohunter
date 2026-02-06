@@ -13,6 +13,7 @@ from app.scrapers.base import fetch_html
 from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
 from app.scrapers.utils import normalize_asset_url, pick_from_srcset
+from app.scrapers.contract import finalize_listings
 from app.sources.types import ScrapeContext
 
 
@@ -262,4 +263,4 @@ def scrape_chavesnamao(
             except Exception:
                 continue
 
-    return uniq
+    return finalize_listings("chavesnamao", uniq)

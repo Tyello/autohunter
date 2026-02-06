@@ -12,6 +12,7 @@ from app.core.settings import settings
 from app.scrapers.base import FetchBlocked, fetch_html
 from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.contract import finalize_listings
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
@@ -411,7 +412,7 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
         if len(out) >= 60:
             break
 
-    return out
+    return finalize_listings("gogarage", out)
 
 
 def urlparse_safe(url: str) -> str:

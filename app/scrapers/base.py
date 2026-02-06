@@ -9,6 +9,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.scrapers.hybrid_cookies import apply_storage_cookies, get_cookies_for_ctx
+
 
 class FetchBlocked(Exception):
     def __init__(self, status_code: int, url: str, *, reason: str | None = None):
@@ -258,6 +260,18 @@ def fetch_response(
     proxy = _resolve_proxy(proxy, ctx)
     sess = _get_session(proxy, _resolve_session_key(ctx))
     _ensure_session_fingerprint(sess)
+
+    # Hybrid mode: reuse Playwright session cookies (storage_state) when available.
+    # This is especially useful for hostile sites that return 403 to "clean" HTTP.
+    try:
+        source = getattr(ctx, "source", None) if ctx is not None else None
+        proxy_server = getattr(ctx, "proxy_server", None) if ctx is not None else None
+        if source:
+            ck = get_cookies_for_ctx(source=str(source), proxy_server=str(proxy_server) if proxy_server else None)
+            if ck:
+                apply_storage_cookies(sess, url=url, cookies=ck)
+    except Exception:
+        pass
 
     base_headers = {}
     if referer:

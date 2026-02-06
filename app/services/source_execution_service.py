@@ -18,6 +18,7 @@ from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
+from app.scrapers.diagnostics import merge_snapshots
 
 
 def _utcnow() -> datetime:
@@ -178,6 +179,7 @@ def run_source_for_all_wishlists(
     total_inserted = 0
     total_matched = 0
     total_queued = 0
+    diag_total: dict | None = None
 
     for url, g in groups.items():
         job_name = f"scraper_{src}"
@@ -189,6 +191,9 @@ def run_source_for_all_wishlists(
             ctx=ctx,
             wishlists=g["wishlists"],
         )
+
+        # Diagnostics: aggregate per-group snapshots into one summary for the whole run.
+        diag_total = merge_snapshots(diag_total, res.get("diag"))
 
         if not res.get("ok"):
             reason = res.get("reason") or "error"
@@ -214,7 +219,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m)",
-                    payload={"backoff_minutes": minutes},
+                    payload={"backoff_minutes": minutes, "diag": diag_total},
                 )
                 emit_event(
                     db,
@@ -246,7 +251,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True},
+                    payload={"retry_minutes": minutes, "is_bug": True, "diag": diag_total},
                 )
                 emit_event(
                     db,
@@ -293,7 +298,7 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes},
+                payload={"backoff_minutes": minutes, "diag": diag_total},
             )
             emit_event(
                 db,
@@ -320,7 +325,7 @@ def run_source_for_all_wishlists(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "diag": diag_total},
     )
     run_row = record_run(
         db,
@@ -337,6 +342,7 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
+        payload={"diag": diag_total},
     )
 
     emit_event(
@@ -353,4 +359,4 @@ def run_source_for_all_wishlists(
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "diag": diag_total}

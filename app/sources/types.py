@@ -8,19 +8,45 @@ from typing import Callable, Optional, List, Dict, Any, Literal
 class ScrapeContext:
     """Runtime context passed to scrapers.
 
-    This is the *operational* configuration for a source at runtime, sourced
-    from the DB table `source_configs`.
+    Source config is stored in DB (`source_configs`) and hydrated per-run.
 
+    Core:
     - source: source name (e.g. 'olx', 'webmotors'). Used for session/browser stickiness.
     - proxy_server: full proxy URL (http://... or socks5://...). Optional.
     - browser_fallback_enabled: allow HTTP -> Playwright fallback on failures/blocks.
     - force_browser: force Playwright first (no HTTP attempt).
+
+    Tunables (all optional, DB-driven via `source_configs.extra`):
+    - http_connect_timeout_s / http_read_timeout_s / http_timeout_s
+    - http_min_delay_ms / http_max_delay_ms
+    - browser_timeout_ms / browser_wait_until
+    - browser_min_delay_ms / browser_max_delay_ms
     """
 
     source: str
+
+    # Network
     proxy_server: Optional[str] = None
+
+    # Browser/hybrid
     browser_fallback_enabled: bool = False
     force_browser: bool = False
+
+    # HTTP tuning
+    http_connect_timeout_s: Optional[float] = None
+    http_read_timeout_s: Optional[float] = None
+    http_timeout_s: Optional[float] = None
+    http_min_delay_ms: Optional[int] = None
+    http_max_delay_ms: Optional[int] = None
+
+    # Browser tuning
+    browser_timeout_ms: Optional[int] = None
+    browser_wait_until: Optional[str] = None
+    browser_min_delay_ms: Optional[int] = None
+    browser_max_delay_ms: Optional[int] = None
+
+    # Free-form extra (keep it small)
+    extra: Optional[Dict[str, Any]] = None
 
 
 ScrapeFn = Callable[[str, ScrapeContext], List[Dict[str, Any]]]

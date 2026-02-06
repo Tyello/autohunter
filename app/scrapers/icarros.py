@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 from lxml import html as lxml_html
 
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.contract import finalize_listings
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
@@ -693,4 +694,4 @@ def scrape_icarros(search_url: str, ctx: ScrapeContext) -> list[dict]:
             it = _detail_enrich(it, ctx)
         enriched.append(it)
 
-    return enriched
+    return finalize_listings("icarros", enriched)

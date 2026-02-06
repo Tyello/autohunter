@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
 from app.scrapers.base import FetchBlocked
+from app.scrapers.diagnostics import current_diagnostics
 from app.core.settings import settings
 
 
@@ -133,9 +134,19 @@ def fetch_html_browser(
     - PLAYWRIGHT_HEADLESS=true|false (default true)
     """
 
+    diag = current_diagnostics()
+    if diag is not None:
+        diag.inc("br_req")
+        diag.flag("browser_used", True)
+        if url:
+            diag.note("last_browser_url", url)
+
     # small random delay to reduce patterns
 
     if not _playwright_allowed_for(ctx.source):
+        if diag is not None:
+            diag.inc("br_err")
+            diag.note("br_last_error", "PlaywrightSourcesRestricted")
         raise RuntimeError(f"Playwright disabled for source='{ctx.source}'. Set PLAYWRIGHT_SOURCES to enable.")
 
     timeout_ms = _effective_timeout_ms(ctx.source, timeout_ms)
@@ -160,6 +171,9 @@ def fetch_html_browser(
             break
         except Exception as e:  # pragma: no cover
             last_exc = e
+            if diag is not None:
+                diag.inc("br_err")
+                diag.note("br_last_error", type(e).__name__)
             if _is_target_closed_error(e) and hasattr(backend, 'reset'):
                 try:
                     backend.reset()
@@ -177,7 +191,14 @@ def fetch_html_browser(
     final_url = r.final_url
 
     if _looks_like_bot_challenge(html):
+        if diag is not None:
+            diag.flag("blocked", True)
+            diag.inc("blocked_browser")
+            diag.note("blocked_reason", "bot_challenge")
         raise FetchBlocked(200, url, reason="bot_challenge")
+
+    if diag is not None:
+        diag.inc("br_ok")
 
     return BrowserFetchResult(html=html, final_url=final_url)
 
@@ -200,7 +221,17 @@ def fetch_json_browser(
     """
 
 
+    diag = current_diagnostics()
+    if diag is not None:
+        diag.inc("br_req")
+        diag.flag("browser_used", True)
+        if url:
+            diag.note("last_browser_url", url)
+
     if not _playwright_allowed_for(ctx.source):
+        if diag is not None:
+            diag.inc("br_err")
+            diag.note("br_last_error", "PlaywrightSourcesRestricted")
         raise RuntimeError(f"Playwright disabled for source='{ctx.source}'. Set PLAYWRIGHT_SOURCES to enable.")
 
     timeout_ms = _effective_timeout_ms(ctx.source, timeout_ms)
@@ -226,6 +257,9 @@ def fetch_json_browser(
             break
         except Exception as e:  # pragma: no cover
             last_exc = e
+            if diag is not None:
+                diag.inc("br_err")
+                diag.note("br_last_error", type(e).__name__)
             if _is_target_closed_error(e) and hasattr(backend, 'reset'):
                 try:
                     backend.reset()
@@ -248,6 +282,13 @@ def fetch_json_browser(
     except Exception:
         pass
     if as_text and _looks_like_bot_challenge(as_text):
+        if diag is not None:
+            diag.flag("blocked", True)
+            diag.inc("blocked_browser")
+            diag.note("blocked_reason", "bot_challenge")
         raise FetchBlocked(200, url, reason="bot_challenge")
+
+    if diag is not None:
+        diag.inc("br_ok")
 
     return BrowserJsonFetchResult(data=r.data, final_url=r.final_url, data_url=r.data_url)

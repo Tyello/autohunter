@@ -175,16 +175,91 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
     # If still missing, fallback to plugin defaults
     if not cfg:
         plugin = get_source(src)
+        extra = getattr(plugin, "default_extra", None) if plugin else None
+        extra = extra or {}
+
+        def _get_int(key: str):
+            v = extra.get(key)
+            if v is None:
+                return None
+            try:
+                return int(v)
+            except Exception:
+                return None
+
+        def _get_float(key: str):
+            v = extra.get(key)
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except Exception:
+                return None
+
+        def _get_str(key: str):
+            v = extra.get(key)
+            if v is None:
+                return None
+            s = str(v).strip()
+            return s or None
+
         return ScrapeContext(
             source=src,
             proxy_server=getattr(plugin, "default_proxy_server", None) if plugin else None,
             browser_fallback_enabled=bool(getattr(plugin, "default_browser_fallback_enabled", False)) if plugin else False,
             force_browser=bool(getattr(plugin, "default_force_browser", False)) if plugin else False,
+            http_connect_timeout_s=_get_float("http_connect_timeout_s"),
+            http_read_timeout_s=_get_float("http_read_timeout_s"),
+            http_timeout_s=_get_float("http_timeout_s"),
+            http_min_delay_ms=_get_int("http_min_delay_ms"),
+            http_max_delay_ms=_get_int("http_max_delay_ms"),
+            browser_timeout_ms=_get_int("browser_timeout_ms"),
+            browser_wait_until=_get_str("browser_wait_until"),
+            browser_min_delay_ms=_get_int("browser_min_delay_ms"),
+            browser_max_delay_ms=_get_int("browser_max_delay_ms"),
+            extra=extra if extra else None,
         )
+
+    extra = cfg.extra or {}
+
+    def _get_int(key: str) -> int | None:
+        v = extra.get(key)
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except Exception:
+            return None
+
+    def _get_float(key: str) -> float | None:
+        v = extra.get(key)
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    def _get_str(key: str) -> str | None:
+        v = extra.get(key)
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     return ScrapeContext(
         source=src,
         proxy_server=cfg.proxy_server,
         browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
         force_browser=bool(cfg.force_browser),
+        http_connect_timeout_s=_get_float("http_connect_timeout_s"),
+        http_read_timeout_s=_get_float("http_read_timeout_s"),
+        http_timeout_s=_get_float("http_timeout_s"),
+        http_min_delay_ms=_get_int("http_min_delay_ms"),
+        http_max_delay_ms=_get_int("http_max_delay_ms"),
+        browser_timeout_ms=_get_int("browser_timeout_ms"),
+        browser_wait_until=_get_str("browser_wait_until"),
+        browser_min_delay_ms=_get_int("browser_min_delay_ms"),
+        browser_max_delay_ms=_get_int("browser_max_delay_ms"),
+        extra=extra if extra else None,
     )

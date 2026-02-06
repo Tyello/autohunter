@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 from lxml import html as lxml_html
 
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.contract import finalize_listings
 from app.scrapers.utils import clean_text
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
@@ -222,4 +223,4 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 "location": None,
             }
 
-    return list(by_url.values())
+    return finalize_listings("kavak", list(by_url.values()))

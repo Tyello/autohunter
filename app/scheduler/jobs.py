@@ -11,6 +11,7 @@ from app.services.telemetry_events_service import emit_event
 from app.services.notifications_queue_service import queue_notifications_for_matches
 from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists
 from app.services.listings_service import ingest_listings
+from app.scrapers.diagnostics import ScrapeDiagnostics, using_diagnostics
 
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
@@ -72,14 +73,19 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
 
 
 def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None) -> dict:
+    diag = ScrapeDiagnostics(source=getattr(ctx, "source", ""), url=search_url, kind=job_name)
     try:
-        listings = scraper_fn(search_url, ctx)
+        with using_diagnostics(diag):
+            listings = scraper_fn(search_url, ctx)
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
+        if status_code is not None:
+            diag.note("blocked_status_code", status_code)
+        diag.flag("blocked", True)
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "diag": diag.snapshot()}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -91,6 +97,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             maybe_alert_programming_error(job_name, e, url=search_url)
         except Exception:
             pass
+        diag.note("error", err)
         return {
             "ok": False,
             "reason": "error",
@@ -98,6 +105,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             "url": search_url,
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
+            "diag": diag.snapshot(),
         }
 
     found = len(listings or [])
@@ -134,7 +142,13 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued}
+    # High-level counters (helpful for /admin sources verbose)
+    diag.inc("found", found)
+    diag.inc("inserted", inserted)
+    diag.inc("matched", matched)
+    diag.inc("queued", queued)
+
+    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued, "diag": diag.snapshot()}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
@@ -142,14 +156,19 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     This collapses duplicate work when multiple users share the same query/URL for a given source.
     """
+    diag = ScrapeDiagnostics(source=getattr(ctx, "source", ""), url=search_url, kind=job_name)
     try:
-        listings = scraper_fn(search_url, ctx)
+        with using_diagnostics(diag):
+            listings = scraper_fn(search_url, ctx)
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url}
+        if status_code is not None:
+            diag.note("blocked_status_code", status_code)
+        diag.flag("blocked", True)
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "diag": diag.snapshot()}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -161,6 +180,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             maybe_alert_programming_error(job_name, e, url=search_url)
         except Exception:
             pass
+        diag.note("error", err)
         return {
             "ok": False,
             "reason": "error",
@@ -168,6 +188,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             "url": search_url,
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
+            "diag": diag.snapshot(),
         }
 
     found = len(listings or [])
@@ -211,4 +232,10 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or [])}
+    diag.inc("found", found)
+    diag.inc("inserted", inserted)
+    diag.inc("matched", total_matched)
+    diag.inc("queued", total_queued)
+    diag.inc("wishlists", len(wishlists or []))
+
+    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or []), "diag": diag.snapshot()}

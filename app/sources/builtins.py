@@ -52,11 +52,16 @@ register_source(
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="http",
+        # Browser fallback is a safety net (rarely used), but prevents the source
+        # from silently dying on anti-bot waves.
+        default_browser_fallback_enabled=True,
         default_extra={
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 120,
             "http_max_delay_ms": 420,
+            "browser_timeout_ms": 45000,
+            "browser_wait_until": "domcontentloaded",
         },
     )
 )

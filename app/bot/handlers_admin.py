@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
-
+from sqlalchemy.orm import joinedload
 from sqlalchemy import func, or_, cast, Text, case
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -68,6 +68,70 @@ def _short(s: Optional[str], n: int = 140) -> str:
         return "-"
     s = " ".join(s.split())
     return s if len(s) <= n else s[: max(0, n - 3)] + "..."
+
+
+def _fmt_diag(diag: Optional[dict]) -> str:
+    """Compact diagnostics formatter for /admin sources verbose."""
+    if not diag or not isinstance(diag, dict):
+        return "-"
+
+    def _i(key: str) -> int:
+        try:
+            return int(diag.get(key) or 0)
+        except Exception:
+            return 0
+
+    def _b(key: str) -> bool:
+        return bool(diag.get(key) or False)
+
+    http_req = _i("http_req")
+    http_err = _i("http_err")
+    br_req = _i("br_req")
+    br_err = _i("br_err")
+    parsed = _i("items_parsed")
+    final = _i("items_final")
+    dedup = _i("items_deduped")
+    drops = _i("items_dropped_non_dict") + _i("items_dropped_no_url") + _i("items_dropped_no_external_id")
+    nonveh = _i("items_filtered_non_vehicle")
+    noprice = _i("items_missing_price")
+
+    fb = _b("browser_fallback")
+    forced = _b("browser_forced")
+    used = _b("browser_used")
+    blocked = _b("blocked")
+
+    parts: list[str] = []
+
+    if http_req or http_err:
+        parts.append(f"http={http_req} err={http_err}")
+
+    hs = diag.get("http_statuses")
+    if isinstance(hs, dict) and hs:
+        try:
+            top = sorted(((str(k), int(v)) for k, v in hs.items()), key=lambda x: x[1], reverse=True)[:3]
+            parts.append("http_status=" + ",".join([f"{k}x{v}" for k, v in top]))
+        except Exception:
+            pass
+
+    if br_req or br_err or used:
+        extra = []
+        if fb:
+            extra.append("fb")
+        if forced:
+            extra.append("force")
+        parts.append(f"br={br_req} err={br_err}" + (" (" + ",".join(extra) + ")" if extra else ""))
+
+    if parsed or final or dedup or drops:
+        parts.append(f"items parsed={parsed} final={final} dedup={dedup} drop={drops}")
+
+    if nonveh:
+        parts.append(f"nonveh={nonveh}")
+    if noprice:
+        parts.append(f"noprice={noprice}")
+    if blocked:
+        parts.append("BLOCKED")
+
+    return " | ".join(parts) if parts else "-"
 
 
 def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
@@ -633,6 +697,30 @@ async def _admin_runall(update: Update, raw_args: List[str]):
         await update.message.reply_text(chunk)
 
 
+def _payload_as_dict(payload: Any) -> Optional[dict]:
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str):
+        s = payload.strip()
+        if not s:
+            return None
+        try:
+            v = json.loads(s)
+            return v if isinstance(v, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+async def _reply_chunked(update: Update, text: str, max_len: int = 3600):
+    # Telegram costuma falhar acima de ~4096; 3600 é safe.
+    chunks = _chunk_lines(text, max_len=max_len)
+    for ch in chunks:
+        await update.message.reply_text(sanitize_for_telegram(ch))
+
+
 
 async def _admin_sources(update: Update, verbose: bool = False):
     """
@@ -857,6 +945,15 @@ async def _admin_sources(update: Update, verbose: bool = False):
         lines.append(f"   {last_line}")
         lines.append(f"   {snap}")
 
+        if verbose and lr_cause is not None and getattr(lr_cause, "payload", None):
+            try:
+                payload = _payload_as_dict(getattr(lr_cause, "payload", None))
+                d = payload.get("diag") if payload else None
+                if d:
+                    lines.append(f"   diag: {_fmt_diag(d)}")
+            except Exception:
+                pass
+
         backoff_active = bool(enabled and st and st.next_allowed_at and st.next_allowed_at > now)
         if kind != "OK" or backoff_active:
             lines.append(f"   causa: {why}")
@@ -867,10 +964,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
         lines.append("")
 
-    text = sanitize_for_telegram("\n".join(lines))
-    if len(text) > 3800:
-        text = text[:3797] + "..."
-    await update.message.reply_text(text)
+    text = "\n".join(lines)
+    await _reply_chunked(update, text)
 
 
 async def _admin_health(update: Update):

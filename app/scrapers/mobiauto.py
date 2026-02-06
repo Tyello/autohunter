@@ -8,6 +8,7 @@ from lxml import html as lxml_html
 
 from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
+from app.scrapers.contract import finalize_listings
 from app.sources.types import ScrapeContext
 
 
@@ -349,4 +350,4 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
         except Exception:
             continue
 
-    return list(by_url.values())
+    return finalize_listings("mobiauto", list(by_url.values()))

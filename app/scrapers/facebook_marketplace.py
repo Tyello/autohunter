@@ -4,6 +4,7 @@ import re
 from urllib.parse import urljoin
 
 from app.services.browser_fetcher import fetch_html_browser
+from app.scrapers.contract import finalize_listings
 from app.sources.types import ScrapeContext
 
 
@@ -56,4 +57,4 @@ def scrape_facebook_marketplace(search_url: str, ctx: ScrapeContext) -> list[dic
                 "location": None,
             })
 
-    return out
+    return finalize_listings("facebook_marketplace", out)
