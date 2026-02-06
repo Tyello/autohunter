@@ -934,6 +934,13 @@ async def _admin_sources(update: Update, verbose: bool = False):
             last_line = f"last {lr.status} at={_fmt_dt(lr.created_at)} dur={dur} found={found} match={match}"
             if lr.http_status is not None:
                 last_line += f" http={lr.http_status}"
+            payload = lr.payload or {}
+            if isinstance(payload, dict):
+                if payload.get("hybrid_browser_used") is True:
+                    last_line += " browser=hybrid"
+                if payload.get("hybrid_blocked") is True:
+                    hs = payload.get("hybrid_blocked_status")
+                    last_line += f" blocked=1" + (f" blocked_http={hs}" if hs is not None else "")
 
         lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind} | " + " ".join(flags))
         if st:

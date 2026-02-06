@@ -1,12 +1,12 @@
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
-from io import BytesIO
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from app.bot.media import download_image_bytes
+from app.bot.formatting import format_price
 from app.bot.listing_display import format_listing_message_telegram
+from app.bot.listing_sender import send_listing_message
 from app.bot.utils import normalize_args, parse_int, reply_text
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
@@ -163,18 +163,14 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if getattr(item, "source", None):
             text = f"{text}\nFonte: {item.source}"
 
-        if item.thumbnail_url:
-            img = download_image_bytes(item.thumbnail_url, referer=item.url)
-            if img:
-                img_bytes, ctype = img
-                bio = BytesIO(img_bytes)
-                ext = ".jpg" if ("jpeg" in (ctype or "")) else (".png" if ("png" in (ctype or "")) else (".webp" if ("webp" in (ctype or "")) else ".img"))
-                bio.name = f"thumb{ext}"
-                await update.message.reply_photo(photo=bio, caption=text, reply_markup=keyboard)
-            else:
-                await reply_text(update, text, reply_markup=keyboard, disable_web_page_preview=True)
-        else:
-            await reply_text(update, text, reply_markup=keyboard, disable_web_page_preview=True)
+        await send_listing_message(
+            update,
+            text=text,
+            thumbnail_url=getattr(item, "thumbnail_url", None),
+            referer_url=getattr(item, "url", None),
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
 
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):

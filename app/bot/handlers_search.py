@@ -10,6 +10,7 @@ from app.services.users_service import get_or_create_user_by_chat
 from app.services.search_service import manual_search
 from app.bot.formatting import format_price
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.bot.listing_sender import send_listing_message
 from app.core.enthusiast import compute_enthusiast_score, detect_signals
 from app.models.source_run import SourceRun
 
@@ -18,7 +19,6 @@ from app.models.source_run import SourceRun
 DEFAULT_MANUAL_SOURCES = ["olx", "mercadolivre", "chavesnamao", "gogarage", "mobiauto"]
 
 
-TELEGRAM_CAPTION_MAX = 1024
 TELEGRAM_TEXT_MAX = 4096
 
 
@@ -28,14 +28,6 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)] + "…"
-
-
-def _split(text: str, limit: int) -> tuple[str, str]:
-    if not text:
-        return "", ""
-    if len(text) <= limit:
-        return text, ""
-    return text[:limit], text[limit:]
 
 
 _RE_KM = re.compile(r"\b(\d{1,3}(?:\.\d{3})*|\d+)\s*km\b", re.I)
@@ -234,25 +226,12 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for item in results:
-        full_text = _build_text(item)
-        caption, remainder = _split(full_text, TELEGRAM_CAPTION_MAX)
-
-        # Foto: deixa o Telegram buscar a URL (mais simples no manual_search)
-        # Se quebrar por fetch, você ainda recebe o texto.
-        if getattr(item, "thumbnail_url", None):
-            try:
-                await update.message.reply_photo(
-                    photo=item.thumbnail_url,
-                    caption=_truncate(caption, TELEGRAM_CAPTION_MAX),
-                )
-                if remainder.strip():
-                    await update.message.reply_text(
-                        _truncate(remainder.strip(), TELEGRAM_TEXT_MAX),
-                        disable_web_page_preview=True,
-                    )
-                continue
-            except Exception:
-                # fallback pro texto
-                pass
-
-        await update.message.reply_text(full_text, disable_web_page_preview=True)
+        await send_listing_message(
+            update,
+            text=_build_text(item),
+            thumbnail_url=getattr(item, "thumbnail_url", None),
+            referer_url=getattr(item, "url", None),
+            disable_web_page_preview=True,
+            prefer_photo_url=True,
+            allow_local_image_download=False,
+        )

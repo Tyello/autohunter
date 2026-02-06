@@ -18,7 +18,6 @@ from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
-from app.scrapers.diagnostics import merge_snapshots
 
 
 def _utcnow() -> datetime:
@@ -179,7 +178,9 @@ def run_source_for_all_wishlists(
     total_inserted = 0
     total_matched = 0
     total_queued = 0
-    diag_total: dict | None = None
+    any_hybrid_browser = False
+    any_hybrid_blocked = False
+    last_hybrid_blocked_status: int | None = None
 
     for url, g in groups.items():
         job_name = f"scraper_{src}"
@@ -192,8 +193,10 @@ def run_source_for_all_wishlists(
             wishlists=g["wishlists"],
         )
 
-        # Diagnostics: aggregate per-group snapshots into one summary for the whole run.
-        diag_total = merge_snapshots(diag_total, res.get("diag"))
+        any_hybrid_browser = any_hybrid_browser or bool(res.get("hybrid_browser_used"))
+        any_hybrid_blocked = any_hybrid_blocked or bool(res.get("hybrid_blocked"))
+        if res.get("hybrid_blocked_status") is not None:
+            last_hybrid_blocked_status = int(res.get("hybrid_blocked_status"))
 
         if not res.get("ok"):
             reason = res.get("reason") or "error"
@@ -218,8 +221,8 @@ def run_source_for_all_wishlists(
                     proxy_server=ctx.proxy_server,
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
-                    error=f"blocked(backoff={minutes}m)",
-                    payload={"backoff_minutes": minutes, "diag": diag_total},
+                    error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
+                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status")},
                 )
                 emit_event(
                     db,
@@ -251,7 +254,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True, "diag": diag_total},
+                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status")},
                 )
                 emit_event(
                     db,
@@ -298,7 +301,7 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes, "diag": diag_total},
+                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status")},
             )
             emit_event(
                 db,
@@ -325,7 +328,7 @@ def run_source_for_all_wishlists(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "diag": diag_total},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
     )
     run_row = record_run(
         db,
@@ -342,7 +345,7 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
-        payload={"diag": diag_total},
+        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
     )
 
     emit_event(
@@ -359,4 +362,4 @@ def run_source_for_all_wishlists(
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "diag": diag_total}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}

@@ -9,7 +9,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from app.scrapers.hybrid_cookies import apply_storage_cookies, get_cookies_for_ctx
+from app.scrapers.hybrid_cookies import inject_storage_state_cookies
 
 
 class FetchBlocked(Exception):
@@ -133,6 +133,14 @@ def _resolve_session_key(ctx: Optional[object]) -> Optional[str]:
         return None
     src = getattr(ctx, 'source', None)
     return str(src).strip().lower() if src else None
+
+
+def _apply_hybrid_cookies(sess: requests.Session, ctx: Optional[object]) -> None:
+    if ctx is None:
+        return
+    src = getattr(ctx, 'source', None)
+    proxy = getattr(ctx, 'proxy_server', None)
+    inject_storage_state_cookies(sess, source=src, proxy_server=proxy)
 
 def _resolve_delay(min_delay_ms: int, max_delay_ms: int, ctx: Optional[object]) -> tuple[int, int]:
     if ctx is None:
@@ -260,18 +268,7 @@ def fetch_response(
     proxy = _resolve_proxy(proxy, ctx)
     sess = _get_session(proxy, _resolve_session_key(ctx))
     _ensure_session_fingerprint(sess)
-
-    # Hybrid mode: reuse Playwright session cookies (storage_state) when available.
-    # This is especially useful for hostile sites that return 403 to "clean" HTTP.
-    try:
-        source = getattr(ctx, "source", None) if ctx is not None else None
-        proxy_server = getattr(ctx, "proxy_server", None) if ctx is not None else None
-        if source:
-            ck = get_cookies_for_ctx(source=str(source), proxy_server=str(proxy_server) if proxy_server else None)
-            if ck:
-                apply_storage_cookies(sess, url=url, cookies=ck)
-    except Exception:
-        pass
+    _apply_hybrid_cookies(sess, ctx)
 
     base_headers = {}
     if referer:

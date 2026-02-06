@@ -1,134 +1,83 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Optional
 
-from app.core.settings import settings
+import requests
+from requests.cookies import create_cookie
 
+from app.services.storage_state_cookies import storage_state_path
 
-@dataclass(frozen=True)
-class StorageCookie:
-    name: str
-    value: str
-    domain: str
-    path: str
-    secure: bool
-    httpOnly: bool
-    expires: Optional[float]
-    sameSite: Optional[str]
+_cache_lock = threading.Lock()
+_cookies_cache: dict[str, tuple[float, list[dict]]] = {}
 
 
-_lock = threading.Lock()
-_cache: Dict[str, Tuple[float, List[StorageCookie]]] = {}
-
-
-def _safe(s: str) -> str:
-    return (s or "").replace(":", "_").replace("/", "_")
-
-
-def storage_state_path(*, source: str, proxy_server: Optional[str]) -> str:
-    """Compute the same storage_state path used by the Playwright pool.
-
-    Must remain compatible with app.services.playwright_pool._storage_path().
-    """
-    base = Path(getattr(settings, "playwright_storage_dir", None) or ".data/playwright")
-    base.mkdir(parents=True, exist_ok=True)
-
-    proxy_key = proxy_server or "__no_proxy__"
-    safe_proxy = _safe(proxy_key)
-    safe_source = _safe((source or "unknown").strip().lower() or "unknown")
-    return str(base / f"storage_{safe_source}__{safe_proxy}.json")
-
-
-def _load_storage_cookies(path: str) -> List[StorageCookie]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    cookies = []
-    for c in (data.get("cookies") or []):
-        try:
-            cookies.append(
-                StorageCookie(
-                    name=str(c.get("name") or ""),
-                    value=str(c.get("value") or ""),
-                    domain=str(c.get("domain") or ""),
-                    path=str(c.get("path") or "/"),
-                    secure=bool(c.get("secure")),
-                    httpOnly=bool(c.get("httpOnly")),
-                    expires=float(c["expires"]) if c.get("expires") is not None else None,
-                    sameSite=str(c.get("sameSite")) if c.get("sameSite") is not None else None,
-                )
-            )
-        except Exception:
-            continue
-    return cookies
-
-
-def get_cookies_for_ctx(*, source: str, proxy_server: Optional[str]) -> List[StorageCookie]:
-    """Load cookies from Playwright storage_state (cached by mtime)."""
+def _load_storage_state_cookies(*, source: str, proxy_server: Optional[str]) -> list[dict]:
     path = storage_state_path(source=source, proxy_server=proxy_server)
-    if not os.path.exists(path):
+    p = Path(path)
+    if not p.exists():
         return []
 
+    cache_key = str(p)
     try:
-        mtime = os.path.getmtime(path)
+        mtime = p.stat().st_mtime
     except Exception:
         return []
 
-    with _lock:
-        hit = _cache.get(path)
+    with _cache_lock:
+        hit = _cookies_cache.get(cache_key)
         if hit and hit[0] == mtime:
             return hit[1]
 
-        try:
-            cookies = _load_storage_cookies(path)
-        except Exception:
-            cookies = []
-
-        _cache[path] = (mtime, cookies)
-        return cookies
-
-
-def _domain_matches(cookie_domain: str, req_host: str) -> bool:
-    d = (cookie_domain or "").lstrip(".").lower()
-    h = (req_host or "").lower()
-    if not d or not h:
-        return False
-    return h == d or h.endswith("." + d)
-
-
-def apply_storage_cookies(session: Any, *, url: str, cookies: List[StorageCookie]) -> int:
-    """Apply cookies (loaded from storage_state) to a requests.Session.
-
-    Returns how many cookies were applied.
-    """
     try:
-        host = urlparse(url).netloc
+        data = json.loads(p.read_text(encoding="utf-8"))
+        cookies = data.get("cookies") or []
+        if not isinstance(cookies, list):
+            cookies = []
     except Exception:
-        host = ""
-    if not host:
+        cookies = []
+
+    with _cache_lock:
+        _cookies_cache[cache_key] = (mtime, cookies)
+    return cookies
+
+
+def inject_storage_state_cookies(
+    sess: requests.Session,
+    *,
+    source: Optional[str],
+    proxy_server: Optional[str],
+) -> int:
+    """Inject Playwright storage_state cookies into a requests Session.
+
+    Returns the number of cookies injected.
+    """
+    src = (source or "").strip().lower()
+    if not src:
         return 0
 
-    applied = 0
-    for c in cookies or []:
-        if not c.name:
+    injected = 0
+    for c in _load_storage_state_cookies(source=src, proxy_server=proxy_server):
+        if not isinstance(c, dict):
             continue
-        if not _domain_matches(c.domain, host):
+        name = c.get("name")
+        value = c.get("value")
+        if not name or value is None:
             continue
         try:
-            # requests will handle domain/path scoping
-            session.cookies.set(
-                name=c.name,
-                value=c.value,
-                domain=c.domain,
-                path=c.path or "/",
+            cookie = create_cookie(
+                name=str(name),
+                value=str(value),
+                domain=(c.get("domain") or ""),
+                path=(c.get("path") or "/"),
+                secure=bool(c.get("secure")),
             )
-            applied += 1
+            sess.cookies.set_cookie(cookie)
+            injected += 1
         except Exception:
             continue
-    return applied
+
+    return injected
+
