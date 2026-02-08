@@ -4,7 +4,7 @@ Testes para BaseScraper.
 
 import pytest
 from decimal import Decimal
-from app.scrapers.base.scraper import BaseScraper, ScraperResult
+from app.scrapers.scraper_base.scraper import BaseScraper, ScraperResult
 from app.sources.types import ScrapeContext
 
 
@@ -69,7 +69,7 @@ def test_base_scraper_pipeline_success(monkeypatch):
     
     # Mock unified_fetch para não fazer request real
     def mock_fetch(url, ctx, source):
-        from app.scrapers.base.fetcher import FetchResult
+        from app.scrapers.scraper_base.fetcher import FetchResult
         return FetchResult(
             content="mock_html",
             final_url=url,
@@ -77,7 +77,7 @@ def test_base_scraper_pipeline_success(monkeypatch):
             duration_ms=100
         )
     
-    monkeypatch.setattr("app.scrapers.base.scraper.unified_fetch", mock_fetch)
+    monkeypatch.setattr("app.scrapers.scraper_base.scraper.unified_fetch", mock_fetch)
     
     ctx = ScrapeContext(source="mock_source")
     result = scraper.scrape("https://mock.com/search", ctx)
@@ -99,10 +99,10 @@ def test_base_scraper_pipeline_invalid_items(monkeypatch):
     ]
     
     def mock_fetch(url, ctx, source):
-        from app.scrapers.base.fetcher import FetchResult
+        from app.scrapers.scraper_base.fetcher import FetchResult
         return FetchResult(content="", final_url=url, method="http", duration_ms=100)
     
-    monkeypatch.setattr("app.scrapers.base.scraper.unified_fetch", mock_fetch)
+    monkeypatch.setattr("app.scrapers.scraper_base.scraper.unified_fetch", mock_fetch)
     
     ctx = ScrapeContext(source="mock_source")
     result = scraper.scrape("https://mock.com/search", ctx)
@@ -120,10 +120,10 @@ def test_base_scraper_source_injection(monkeypatch):
     scraper.mock_items = [{"id": "1", "title": "Car", "url": "http://x"}]
     
     def mock_fetch(url, ctx, source):
-        from app.scrapers.base.fetcher import FetchResult
+        from app.scrapers.scraper_base.fetcher import FetchResult
         return FetchResult(content="", final_url=url, method="http", duration_ms=100)
     
-    monkeypatch.setattr("app.scrapers.base.scraper.unified_fetch", mock_fetch)
+    monkeypatch.setattr("app.scrapers.scraper_base.scraper.unified_fetch", mock_fetch)
     
     ctx = ScrapeContext(source="mock_source")
     result = scraper.scrape("https://mock.com/search", ctx)

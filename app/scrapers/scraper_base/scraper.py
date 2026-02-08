@@ -15,8 +15,9 @@ import time
 import traceback
 
 from app.sources.types import ScrapeContext
-from app.scrapers.base.fetcher import unified_fetch
-from app.scrapers.base.metrics import PipelineMetrics
+from app.scrapers.scraper_base.fetcher import unified_fetch
+from app.scrapers.scraper_base.metrics import PipelineMetrics
+from app.scrapers.base import FetchBlocked
 from app.scrapers.shared.circuit_breaker import get_circuit_breaker
 from app.scrapers.base import FetchBlocked
 

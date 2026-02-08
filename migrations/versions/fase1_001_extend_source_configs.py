@@ -13,20 +13,35 @@ Adiciona campos para configuração granular das fontes:
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import inspect, text
 
 # revision identifiers
 revision = 'fase1_001_source_configs'
-down_revision = '<PREVIOUS_REVISION>'  # SUBSTITUIR pela última migration
+down_revision = 'e695123144b5'  # SUBSTITUIR pela última migration
 branch_labels = None
 depends_on = None
 
 
+def _has_column(table: str, col: str, schema: str | None = None) -> bool:
+    bind = op.get_bind()
+    insp = inspect(bind)
+    return any(c["name"] == col for c in insp.get_columns(table, schema=schema))
+
+def _ensure_jsonb_defaults(table: str, col: str):
+    # garante default, preenche NULLs e força NOT NULL
+    op.execute(text(f"ALTER TABLE {table} ALTER COLUMN {col} SET DEFAULT '{{}}'::jsonb"))
+    op.execute(text(f"UPDATE {table} SET {col}='{{}}'::jsonb WHERE {col} IS NULL"))
+    op.execute(text(f"ALTER TABLE {table} ALTER COLUMN {col} SET NOT NULL"))
+
 def upgrade():
     # Adiciona campo extras (JSONB)
-    op.add_column('source_configs',
-        sa.Column('extra', postgresql.JSONB(astext_type=sa.Text()), 
-                  nullable=False, server_default='{}')
-    )
+    if not _has_column("source_configs", "extra"):
+        op.add_column('source_configs',
+            sa.Column('extra', postgresql.JSONB(astext_type=sa.Text()),
+                      nullable=False, server_default='{}')
+        )
+    else:
+        _ensure_jsonb_defaults("source_configs", "extra")
     
     # Índice GIN para busca em extra
     op.create_index(
@@ -66,4 +81,5 @@ def downgrade():
     op.drop_column('source_configs', 'circuit_breaker_cooldown_s')
     op.drop_column('source_configs', 'circuit_breaker_threshold')
     op.drop_index('idx_source_configs_extra', table_name='source_configs')
-    op.drop_column('source_configs', 'extra')
+    if _has_column("source_configs", "extra"):
+        op.drop_column('source_configs', 'extra')
