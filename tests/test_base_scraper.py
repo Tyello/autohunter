@@ -3,6 +3,7 @@ Testes para BaseScraper.
 """
 
 import pytest
+import time
 from decimal import Decimal
 from app.scrapers.scraper_base.scraper import BaseScraper, ScraperResult
 from app.sources.types import ScrapeContext
@@ -25,9 +26,9 @@ class MockScraper(BaseScraper):
     def parse_listing(self, raw_data: dict):
         # Parse simples
         return {
-            "external_id": raw_data.get("id", "unknown"),
+            "external_id": raw_data.get("id"),
             "title": raw_data.get("title", ""),
-            "url": raw_data.get("url", "https://mock.com/item/1"),
+            "url": raw_data.get("url"),
             "price": Decimal(str(raw_data.get("price", 0))),
         }
 
@@ -63,8 +64,8 @@ def test_base_scraper_pipeline_success(monkeypatch):
     """Teste do pipeline completo (sucesso)."""
     scraper = MockScraper()
     scraper.mock_items = [
-        {"id": "1", "title": "Car 1", "price": 10000},
-        {"id": "2", "title": "Car 2", "price": 20000},
+        {"id": "1", "title": "Car 1", "price": 10000, "url": "https://mock.com/item/1"},
+        {"id": "2", "title": "Car 2", "price": 20000, "url": "https://mock.com/item/2"},
     ]
     
     # Mock unified_fetch para não fazer request real
@@ -137,7 +138,7 @@ def test_base_scraper_circuit_breaker_open(monkeypatch):
     
     # Força circuit breaker aberto
     scraper._circuit_breaker._state.state = "open"
-    scraper._circuit_breaker._state.opened_at = 0  # sempre aberto
+    scraper._circuit_breaker._state.opened_at = time.time()
     
     ctx = ScrapeContext(source="mock_source")
     result = scraper.scrape("https://mock.com/search", ctx)
