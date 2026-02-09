@@ -15,13 +15,13 @@ class _Listing:
 
 
 def test_telegram_message_contract_basic_formatting():
-    """Contract: mensagem sempre tem título, preço e URL normalizada.
+    """Contract: mensagem sempre tem título e preço; URL fica no botão.
 
     O conteúdo pode evoluir (ex.: Ano, Score, FIPE), mas:
     - 1ª linha: título limpo
     - Deve existir linha "Preço: ..."
     - Deve existir linha "Score: N/100"
-    - A última linha deve ser uma URL sem query/fragment
+    - Não deve conter URL no corpo
     """
     from app.bot.sender import _build_text
 
@@ -40,12 +40,12 @@ def test_telegram_message_contract_basic_formatting():
     assert lines[0] == "Honda Civic Hatch 1994"
     assert "Preço: R$ 32.000,00" in lines
     assert any(l.startswith("Score: ") and l.endswith("/100") for l in lines)
-    # URL sempre sem query/fragment
-    assert lines[-1] == "https://www.exemplo.com/anuncio"
+    # URL não deve aparecer no corpo da mensagem
+    assert all("http" not in line for line in lines)
 
 
 def test_telegram_message_contract_ml_tracking_is_canonical():
-    """Contract: ML tracking URLs nunca vão pro Telegram (vira URL canônica curta)."""
+    """Contract: URLs de tracking do ML nunca vão no corpo do Telegram."""
     from app.bot.sender import _build_text
 
     listing = _Listing(
@@ -60,5 +60,6 @@ def test_telegram_message_contract_ml_tracking_is_canonical():
     )
 
     text = _build_text(listing)
-    # a última linha deve ser a URL estável, sem tracking
-    assert text.splitlines()[-1] == "https://carro.mercadolivre.com.br/MLB-6177621992-_JM"
+    # URL de tracking não deve aparecer na mensagem
+    assert "click1.mercadolivre.com.br" not in text
+    assert "http" not in text
