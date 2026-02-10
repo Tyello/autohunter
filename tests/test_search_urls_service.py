@@ -32,3 +32,26 @@ def test_icarros_url_infers_brand_and_model():
         search_urls_service.icarros_url("Subaru WRX")
         == "https://www.icarros.com.br/comprar/usados/subaru/wrx"
     )
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["", None],
+)
+def test_url_builders_handle_empty_queries(query):
+    assert (
+        search_urls_service.olx_url(query)
+        == "https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q="
+    )
+    assert (
+        search_urls_service.gogarage_url(query)
+        == "https://www.gogarage.com.br/index.php?q="
+    )
+    assert (
+        search_urls_service.icarros_url(query)
+        == "https://www.icarros.com.br/busca?anunciante=concessionaria&produto=carro&palavra-chave="
+    )
+    assert (
+        search_urls_service.facebook_marketplace_url(query)
+        == "https://www.facebook.com/marketplace/search/?query="
+    )

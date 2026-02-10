@@ -110,7 +110,7 @@ def ml_url(query: str) -> str:
 
 
 def olx_url(query: str) -> str:
-    q = quote_plus(query.strip())
+    q = quote_plus((query or "").strip())
     return f"https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q={q}"
 
 
@@ -172,7 +172,7 @@ def webmotors_url(query: str) -> str:
 def gogarage_url(query: str) -> str:
     # GoGarage é JS-heavy e historicamente alterna rotas.
     # O mais estável tem sido o host com www + index.php (evita 404 em /?q=).
-    q = quote_plus(query.strip())
+    q = quote_plus((query or "").strip())
     return f"https://www.gogarage.com.br/index.php?q={q}"
 
 
@@ -212,11 +212,11 @@ def icarros_url(query: str) -> str:
     if brand and model:
         return f"https://www.icarros.com.br/comprar/usados/{brand}/{model}"
     # Fallback: generic search landing page (browser will be needed anyway)
-    q = quote_plus(query.strip())
+    q = quote_plus((query or "").strip())
     return f"https://www.icarros.com.br/busca?anunciante=concessionaria&produto=carro&palavra-chave={q}"
 
 
 def facebook_marketplace_url(query: str) -> str:
-    q = quote_plus(query.strip())
+    q = quote_plus((query or "").strip())
     # Location will be resolved by Facebook itself; Playwright will return final_url after redirects.
     return f"https://www.facebook.com/marketplace/search/?query={q}"
