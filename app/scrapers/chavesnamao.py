@@ -73,7 +73,7 @@ def build_chavesnamao_search_url(query: str, page: int = 1) -> str:
         url = f"https://www.chavesnamao.com.br/carros/brasil/{slug}/"
     else:
         # Fallback: generic search. Can be noisier.
-        q = quote_plus(query.strip())
+        q = quote_plus((query or "").strip())
         url = f"https://www.chavesnamao.com.br/carros-usados/brasil/?q={q}"
 
     if page and page > 1:
