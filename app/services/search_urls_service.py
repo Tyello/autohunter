@@ -100,13 +100,19 @@ def _infer_brand_model(query: str) -> tuple[str | None, str | None]:
 
 
 def ml_url(query: str) -> str:
-    # Mercado Livre is very sensitive to URL patterns.
-    # Prefer the VEHICLES vertical and keep query as a clean slug in the path.
-    raw = (query or "").strip().lower()
-    raw = re.sub(r"[^\w\s-]+", " ", raw, flags=re.UNICODE)
-    slug = re.sub(r"[\s_]+", "-", raw).strip("-")
-    slug = slug or "carro"
-    return f"https://carro.mercadolivre.com.br/{slug}"
+    """Mercado Livre URL builder.
+
+    Importante: buscas de veículos (carros/caminhonetes) canonicalizam em:
+      https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/<slug>
+
+    O host `carro.mercadolivre.com.br/<slug>` costuma redirecionar/canonicalizar
+    para o host `lista.*` e isso quebrava o guardrail do scraper (found=0).
+    """
+
+    slug = _slugify(query)
+    if not slug:
+        slug = "carro"
+    return f"https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/{slug}"
 
 
 def olx_url(query: str) -> str:

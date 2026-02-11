@@ -145,15 +145,21 @@ def _strip_query_fragment(url: str) -> str:
 _ALLOWED_VEHICLE_HOSTS = {"carro.mercadolivre.com.br"}
 
 
-
 _ML_VEHICLE_HOST = "carro.mercadolivre.com.br"
+_ML_LIST_HOST = "lista.mercadolivre.com.br"
+_ML_VEHICLE_LIST_PREFIX = "/veiculos/carros-caminhonetes/"
 
 
 def _ensure_vehicle_search_url(url: str) -> str:
-    """Força a busca no vertical de veículos (carro.mercadolivre.com.br).
+    """Normaliza a busca para o vertical de veículos.
 
-    O ML pode fazer fallback de categoria quando não encontra resultados; aqui preferimos
-    retornar 0 itens a ingerir peças/acessórios no AutoHunter.
+    O ML canonicaliza buscas de veículos em:
+      https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/<slug>
+
+    Historicamente, URLs no host `carro.mercadolivre.com.br/<slug>` redirecionam/canonicalizam
+    para `lista.*`, e o guardrail antigo interpretava isso como "saiu do vertical" (found=0).
+
+    Aqui normalizamos a URL para o vertical correto e removemos query/fragment.
     """
     url = (url or "").strip()
     if not url:
@@ -168,10 +174,35 @@ def _ensure_vehicle_search_url(url: str) -> str:
     try:
         p = urlparse(url)
         host = (p.netloc or "").lower()
+        path = (p.path or "")
 
-        # Se for qualquer host do ML, "trava" no host de veículos.
-        if "mercadolivre.com.br" in host and host != _ML_VEHICLE_HOST:
-            p = p._replace(netloc=_ML_VEHICLE_HOST)
+        # Se já é uma busca canônica de veículos, só limpa query/fragment.
+        if host == _ML_LIST_HOST and (path or "").lower().startswith(_ML_VEHICLE_LIST_PREFIX):
+            p = p._replace(query="", fragment="", params="")
+            return urlunparse(p)
+
+        # Se parece uma página de anúncio (VIP) por MLB-XXXX, não converte para busca.
+        if re.search(r"/MLB-\d+", path, re.IGNORECASE) or re.search(r"\bMLB-\d+\b", path, re.IGNORECASE):
+            p = p._replace(query="", fragment="", params="")
+            return urlunparse(p)
+
+        # Para qualquer URL do ML, reescreve para o vertical de veículos em lista.*
+        if "mercadolivre.com.br" in host:
+            slug = path.strip("/")
+            if slug.lower().startswith(_ML_VEHICLE_LIST_PREFIX.strip("/")):
+                # evita duplicar prefix
+                new_path = "/" + slug
+            else:
+                new_path = _ML_VEHICLE_LIST_PREFIX + slug
+
+            p = p._replace(
+                scheme="https",
+                netloc=_ML_LIST_HOST,
+                path=new_path,
+                query="",
+                fragment="",
+                params="",
+            )
             return urlunparse(p)
     except Exception:
         pass
@@ -186,6 +217,33 @@ def _is_vehicle_host(url: str) -> bool:
         return host in _ALLOWED_VEHICLE_HOSTS
     except Exception:
         return False
+
+
+def _is_vehicle_search_vertical(url: str) -> bool:
+    """Valida se a URL (canonical/og:url) ainda está no vertical de veículos.
+
+    Aceita:
+    - lista.mercadolivre.com.br/veiculos/carros-caminhonetes/...
+    - carro.mercadolivre.com.br/<slug> (busca) — mas NÃO VIP (MLB-...)
+    """
+    if not url:
+        return False
+    try:
+        p = urlparse(url)
+        host = (p.netloc or "").lower()
+        path = (p.path or "").lower()
+
+        if host == _ML_LIST_HOST and path.startswith(_ML_VEHICLE_LIST_PREFIX):
+            return True
+
+        if host == _ML_VEHICLE_HOST:
+            # VIP: carro.mercadolivre.com.br/MLB-xxxx
+            if re.search(r"/mlb-\d+", path, re.IGNORECASE):
+                return False
+            return True
+    except Exception:
+        pass
+    return False
 
 
 
@@ -218,19 +276,9 @@ def _left_vehicle_vertical(requested_url: str, html: str) -> bool:
     """
     canonical = _extract_canonical_or_og_url(html)
 
-    # Se a canonical existe e NÃO é do host de veículos, aborta.
-    if canonical and not _is_vehicle_host(canonical):
+    # Se a canonical existe e NÃO é do vertical de veículos, aborta.
+    if canonical and not _is_vehicle_search_vertical(canonical):
         return True
-
-    # Se pedimos explicitamente o host de veículos e a canonical aponta para outro host, aborta.
-    try:
-        req_host = (urlparse(requested_url).netloc or "").lower()
-        if req_host == _ML_VEHICLE_HOST and canonical:
-            can_host = (urlparse(canonical).netloc or "").lower()
-            if can_host and can_host != _ML_VEHICLE_HOST:
-                return True
-    except Exception:
-        pass
 
     return False
 
