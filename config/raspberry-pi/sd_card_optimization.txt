@@ -1,0 +1,28 @@
+# Otimizações para SD Card (Raspberry Pi)
+
+1. Usar sistema de arquivos ext4 com options:
+   - noatime (não atualiza access time)
+   - commit=60 (flush a cada 60s, reduz escritas)
+
+2. Adicionar ao /etc/fstab:
+   /dev/mmcblk0p2 / ext4 defaults,noatime,commit=60 0 1
+
+3. Mover diretórios temporários para RAM:
+   # /etc/fstab
+   tmpfs /tmp tmpfs defaults,noatime,mode=1777,size=100M 0 0
+   tmpfs /var/log tmpfs defaults,noatime,mode=0755,size=50M 0 0
+
+4. Desabilitar swap se tiver RAM suficiente:
+   sudo dphys-swapfile swapoff
+   sudo dphys-swapfile uninstall
+   sudo systemctl disable dphys-swapfile
+
+5. Limitar writes do PostgreSQL:
+   - fsync = off (apenas para desenvolvimento!)
+   - synchronous_commit = off
+   - full_page_writes = off
+
+6. Log rotation agressivo:
+   - Rotacionar logs a cada 10MB
+   - Manter apenas 3 rotações
+   - Comprimir com gzip

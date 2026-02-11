@@ -1,0 +1,29 @@
+# /etc/systemd/system/autohunter.service
+# Service file otimizado para Raspberry Pi
+
+[Unit]
+Description=AutoHunter - Car Listing Aggregator
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=autohunter
+Group=autohunter
+WorkingDirectory=/home/autohunter/autohunter
+Environment="PATH=/home/autohunter/autohunter/venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Limites de recursos
+MemoryMax=512M                      # Máximo 512MB de RAM
+CPUQuota=75%                        # Máximo 75% de CPU
+Nice=10                             # Prioridade baixa
+
+# Restart automático
+Restart=on-failure
+RestartSec=10s
+
+# Comando
+ExecStart=/home/autohunter/autohunter/venv/bin/python -m app.scheduler
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+# requirements-rpi.txt
+# Versão mínima para Raspberry Pi (sem dependências desnecessárias)
+
+# Core
+SQLAlchemy==2.0.25
+alembic==1.13.1
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+
+# Web Scraping (mínimo)
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# Browser (Playwright - mais leve que Selenium)
+playwright==1.41.0
+
+# Utilities
+python-dateutil==2.8.2
+psutil==5.9.8                       # Monitoramento
+
+# Notificações
+python-telegram-bot==20.8           # Telegram apenas
+# boto3                             # SES desabilitado para economizar
+
+# Cache (opcional)
+# redis==5.0.1                      # Desabilitado por padrão
