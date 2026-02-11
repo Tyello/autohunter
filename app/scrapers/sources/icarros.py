@@ -345,9 +345,11 @@ class ICarrosScraper(BaseScraper):
         
         # Busca marca
         make = None
+        matched_brand = None
         for brand in brands:
-            if brand in title_lower:
+            if re.search(rf"\b{re.escape(brand)}\b", title_lower):
                 make = brand.capitalize()
+                matched_brand = brand
                 if brand == "vw":
                     make = "Volkswagen"
                 break
@@ -355,10 +357,10 @@ class ICarrosScraper(BaseScraper):
         # Extrai modelo (primeira palavra após marca)
         if make:
             # Acha posição da marca no título
-            idx = title_lower.find(make.lower())
+            idx = title_lower.find((matched_brand or make).lower())
             if idx >= 0:
                 # Pega palavras após marca
-                after = title[idx + len(make):].strip()
+                after = title[idx + len(matched_brand or make):].strip()
                 words = after.split()
                 if words:
                     # Modelo é primeira palavra
