@@ -1,0 +1,179 @@
+{
+  "div[class*='card']": {
+    "description": "Divs com 'card' na classe",
+    "count": 6,
+    "samples": [
+      {
+        "tag": "div",
+        "classes": [
+          "swiper-slide",
+          "categories-home__card"
+        ],
+        "id": null,
+        "has_link": false,
+        "link_href": null,
+        "text_preview": "CategoriaTítuloVer modelos"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "swiper-slide",
+          "categories-home__card"
+        ],
+        "id": null,
+        "has_link": false,
+        "link_href": null,
+        "text_preview": "CategoriaTítuloVer modelos"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "swiper-slide",
+          "categories-home__card"
+        ],
+        "id": null,
+        "has_link": false,
+        "link_href": null,
+        "text_preview": "CategoriaTítuloVer modelos"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "swiper-slide",
+          "categories-home__card"
+        ],
+        "id": null,
+        "has_link": false,
+        "link_href": null,
+        "text_preview": "CategoriaTítuloVer modelos"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "card-section-layout"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/financiamento/index.jsp",
+        "text_preview": "financiamento de carroitaufonts_veiculosimule o seu financiamento e veja o valor das parcelasvenda d"
+      }
+    ]
+  },
+  "li:has(a[href*='anuncio'])": {
+    "description": "Li com link de anúncio",
+    "count": 6,
+    "samples": [
+      {
+        "tag": "li",
+        "classes": [
+          "torque-list-item",
+          "torque-list-item--megamenu"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/meu-icarros/meus-anuncios",
+        "text_preview": "gerenciar meu anúnciogerenciar meu anúncioGerencie seu veículo"
+      },
+      {
+        "tag": "li",
+        "classes": [
+          "torque-list-item",
+          "torque-list-item--megamenu"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/meu-icarros/meus-anuncios",
+        "text_preview": "meus anúnciosmeus anúnciosVisualizar seus anúncios, editar e excluir"
+      },
+      {
+        "tag": "li",
+        "classes": [
+          "simple-link-list-item"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/meu-icarros/meus-anuncios",
+        "text_preview": "Meus anúncios"
+      },
+      {
+        "tag": "li",
+        "classes": [
+          "simple-link-list-item"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/meu-icarros/meus-anuncios",
+        "text_preview": "Gerenciar anúncio"
+      },
+      {
+        "tag": "li",
+        "classes": [
+          "simple-link-list-item"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/meu-icarros/meus-anuncios",
+        "text_preview": "Meus anúncios"
+      }
+    ]
+  },
+  "div:has(a[href*='anuncio'])": {
+    "description": "Div com link de anúncio",
+    "count": 20,
+    "samples": [
+      {
+        "tag": "div",
+        "classes": [
+          "torque-megamenu"
+        ],
+        "id": "torque-megamenu--vender",
+        "has_link": true,
+        "link_href": "/vender",
+        "text_preview": "RetornarVenderFecharpara vocêanunciar meu veículoAnuncie seu veículogerenciar meu anúnciogerenciar m"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "torque-megamenu__nav-container",
+          "torque-justify-center"
+        ],
+        "id": "torque-megamenu__nav-container--vender",
+        "has_link": true,
+        "link_href": "/vender",
+        "text_preview": "RetornarVenderFecharpara vocêanunciar meu veículoAnuncie seu veículogerenciar meu anúnciogerenciar m"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "torque-megamenu__box"
+        ],
+        "id": null,
+        "has_link": true,
+        "link_href": "/vender",
+        "text_preview": "para vocêanunciar meu veículoAnuncie seu veículogerenciar meu anúnciogerenciar meu anúncioGerencie s"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "torque-megamenu",
+          "torque-megamenu-hide-submenu-login"
+        ],
+        "id": "torque-megamenu--login",
+        "has_link": true,
+        "link_href": "/logout",
+        "text_preview": "RetornarLoginFecharVeja aqui as informações da sua conta, anúncios e propostas recebidasSairSairperf"
+      },
+      {
+        "tag": "div",
+        "classes": [
+          "torque-megamenu__nav-container",
+          "torque-justify-center"
+        ],
+        "id": "torque-megamenu__nav-container--login",
+        "has_link": true,
+        "link_href": "/logout",
+        "text_preview": "RetornarLoginFecharVeja aqui as informações da sua conta, anúncios e propostas recebidasSairSairperf"
+      }
+    ]
+  }
+}
