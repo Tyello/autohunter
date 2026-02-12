@@ -1,11 +1,10 @@
 # AutoHunter - runtime base (leve)
-# Raspberry Pi 3: este arquivo deve instalar sem Playwright.
 
 fastapi>=0.110
 uvicorn>=0.27
 
 SQLAlchemy>=2.0
-alembic>=1.13
+alembic>=1.13.1
 psycopg2-binary>=2.9
 
 python-dotenv>=1.0
