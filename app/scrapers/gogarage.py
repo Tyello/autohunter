@@ -237,7 +237,15 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
         )
 
     def _fetch_browser(url: str) -> str:
-        res = fetch_html_browser(url, ctx=ctx)
+        # Respeita tuning do ScrapeContext (timeouts/wait_until) para ajustar em Pi/produção.
+        res = fetch_html_browser(
+            url,
+            ctx=ctx,
+            timeout_ms=int(getattr(ctx, "browser_timeout_ms", None) or 45000),
+            wait_until=str(getattr(ctx, "browser_wait_until", None) or "domcontentloaded"),
+            min_delay_ms=int(getattr(ctx, "browser_min_delay_ms", None) or 250),
+            max_delay_ms=int(getattr(ctx, "browser_max_delay_ms", None) or 900),
+        )
         return res.html
 
     def _alt_urls(url: str) -> list[str]:

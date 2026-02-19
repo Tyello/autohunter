@@ -98,13 +98,7 @@ _PRICE_MIN_PATTERNS = [
 
 
 def _parse_human_money_to_int(raw: str) -> Optional[int]:
-    """Converte valores do tipo '200k', '1.2m', '120.000', 'R$ 80.000' em inteiro (centavos ignorados).
-
-    Regras:
-      - 'k' = mil, 'm' = milhão
-      - aceita '.' ou ',' como separadores (pt-BR)
-      - decimais são ignorados (tratamos como unidade inteira de BRL)
-    """
+    """Converte valores do tipo '200k', '1.2m', '120.000', 'R$ 80.000' em inteiro (centavos ignorados)."""
     if not raw:
         return None
 
@@ -120,14 +114,8 @@ def _parse_human_money_to_int(raw: str) -> Optional[int]:
         mult = 1_000_000
         s = s[:-1]
 
-    # normaliza: remove milhares e mantém decimal como '.' (se existir)
-    # Ex: '120.000' -> '120000'
-    # Ex: '1.2' -> '1.2'
-    # Ex: '1,2' -> '1.2'
     s = s.replace(".", "") if re.search(r"\d\.\d{3}", s) else s
     s = s.replace(",", ".")
-
-    # remove qualquer lixo restante
     s = re.sub(r"[^0-9\.]+", "", s)
     if not s:
         return None
@@ -141,25 +129,20 @@ def _parse_human_money_to_int(raw: str) -> Optional[int]:
         return None
 
     val = int(round(num * mult))
-    if val <= 0:
-        return None
-    return val
+    return val if val > 0 else None
 
 
 def _is_plausible_price(v: int) -> bool:
-    # compatível com NUMERIC(12,2): valor absoluto < 10^10 (R$ 9.999.999.999)
     return 1 <= v <= 9_999_999_999
 
 
-def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[int]]:
-    """Extrai diretivas de preço (min/max/range) e limpa a query.
+def _clean_span(q: str, start: int, end: int) -> str:
+    q = (q[:start] + " " + q[end:]).strip()
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
 
-    Exemplos:
-      - "audi a6 entre 200k e 300k"  -> price_min=200000, price_max=300000
-      - "civic até 90k"             -> price_max=90000
-      - "preço>=80k"                -> price_min=80000
-      - "R$ 80.000 a R$ 120.000"    -> price_min=80000, price_max=120000
-    """
+
+def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[int]]:
     q = (query or "").strip()
     if not q:
         return q, None, None
@@ -167,7 +150,6 @@ def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[
     pmin: Optional[int] = None
     pmax: Optional[int] = None
 
-    # Range primeiro
     for rx in _PRICE_RANGE_PATTERNS:
         m = rx.search(q)
         if not m:
@@ -184,7 +166,6 @@ def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[
         q = _clean_span(q, m.start(), m.end())
         break
 
-    # Max
     if pmax is None:
         for rx in _PRICE_MAX_PATTERNS:
             m = rx.search(q)
@@ -202,7 +183,6 @@ def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[
                 q = _clean_span(q, m.start(), m.end())
                 break
 
-    # Min
     if pmin is None:
         for rx in _PRICE_MIN_PATTERNS:
             m = rx.search(q)
@@ -218,20 +198,13 @@ def _extract_price_directives(query: str) -> Tuple[str, Optional[int], Optional[
     return q, pmin, pmax
 
 
-def _clean_span(q: str, start: int, end: int) -> str:
-    q = (q[:start] + " " + q[end:]).strip()
-    q = re.sub(r"\s+", " ", q).strip()
-    return q
-
-
 def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[int]]:
     """Extrai diretivas de ano (min/max/range) e limpa a query.
 
-    Exemplos:
-      - "audi a6 entre 2014 e 2020"  -> year_min=2014, year_max=2020
-      - "civic 1993 até 2004"       -> year_min=1993, year_max=2004
-      - "defender até 2004"         -> year_max=2004
-      - "civic a partir de 2014"    -> year_min=2014
+    **Contrato importante:**
+    - "entre 2014 e 2015" => year_min=2014, year_max=2015 (INCLUSIVO)
+    - "até 2015" => year_max=2015 (INCLUSIVO)
+    - "a partir de 2014" => year_min=2014 (INCLUSIVO)
     """
     q = (query or "").strip()
     if not q:
@@ -240,7 +213,6 @@ def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[i
     year_min: Optional[int] = None
     year_max: Optional[int] = None
 
-    # Range primeiro (mais específico)
     for rx in _YEAR_RANGE_PATTERNS:
         m = rx.search(q)
         if not m:
@@ -255,7 +227,6 @@ def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[i
             q = _clean_span(q, m.start(), m.end())
             break
 
-    # Max
     if year_max is None:
         for rx in _YEAR_MAX_PATTERNS:
             m = rx.search(q)
@@ -270,7 +241,6 @@ def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[i
                 q = _clean_span(q, m.start(), m.end())
                 break
 
-    # Min
     if year_min is None:
         for rx in _YEAR_MIN_PATTERNS:
             m = rx.search(q)
@@ -287,14 +257,55 @@ def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[i
 
     return q, year_min, year_max
 
-def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
-    """Retorna um snapshot dos limites do plano do usuário.
 
-    Padrão do seu schema (conforme users_service):
-      User.account_id -> Subscription(account_id, status) -> Plan(max_wishlists, daily_alert_limit)
+def numeric_filter_match(value: Optional[int], operator: str, target: Optional[int]) -> bool:
+    """Comparação numérica padronizada para filtros.
 
-    Fallback: FREE com max_wishlists=3.
+    Esse helper existe pra **evitar o bug clássico** do intervalo ficar exclusivo:
+    - gte/lte são INCLUSIVOS.
+    - gt/lt são EXCLUSIVOS.
+    - eq/neq são óbvios.
+
+    Se value ou target forem None, falha (retorna False).
     """
+    if value is None or target is None:
+        return False
+
+    op = (operator or "").strip().lower()
+    if op == "gte":
+        return value >= target
+    if op == "lte":
+        return value <= target
+    if op == "gt":
+        return value > target
+    if op == "lt":
+        return value < target
+    if op == "eq":
+        return value == target
+    if op == "neq":
+        return value != target
+
+    return False
+
+
+def year_in_directive_range(year: Optional[int], year_min: Optional[int], year_max: Optional[int]) -> bool:
+    """Valida um ano contra as diretivas extraídas.
+
+    **INCLUSIVO nas bordas**:
+      - year_min => year >= year_min
+      - year_max => year <= year_max
+    """
+    if year is None:
+        return False
+
+    if year_min is not None and not numeric_filter_match(year, "gte", year_min):
+        return False
+    if year_max is not None and not numeric_filter_match(year, "lte", year_max):
+        return False
+    return True
+
+
+def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
     snap: Dict[str, Any] = {
         "plan_code": "free",
         "max_wishlists": DEFAULT_MAX_WISHLISTS_PER_USER,
@@ -308,22 +319,18 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
 
         q = db.query(Subscription)
 
-        # Preferência: subscriptions por account_id
         if hasattr(Subscription, "account_id") and getattr(user, "account_id", None) is not None:
             q = q.filter(Subscription.account_id == user.account_id)
-        # Alternativa: caso exista subscriptions.user_id (alguns schemas)
         elif hasattr(Subscription, "user_id"):
             q = q.filter(Subscription.user_id == user_id)
         else:
             return snap
 
-        # Ativo
         if hasattr(Subscription, "status"):
             q = q.filter(Subscription.status == "active")
         elif hasattr(Subscription, "is_active"):
             q = q.filter(Subscription.is_active.is_(True))
 
-        # Ordenação
         if hasattr(Subscription, "created_at"):
             q = q.order_by(Subscription.created_at.desc())
         else:
@@ -348,7 +355,6 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         return snap
 
     except Exception:
-        # Se qualquer coisa der errado, mantém fallback (não explode o bot)
         try:
             db.rollback()
         except Exception:
@@ -371,11 +377,7 @@ def list_wishlists(db: Session, user_id):
 
 
 def add_wishlist(db: Session, user_id, query: str):
-    """Cria wishlist e opcionalmente cria filtros de ano (gte/lte) se diretivas existirem.
-
-    Importante: faz rollback preventivo para não herdar transação abortada.
-    """
-    # Limpa transação abortada anterior (evita InFailedSqlTransaction)
+    """Cria wishlist e opcionalmente cria filtros de ano/preço se diretivas existirem."""
     try:
         db.rollback()
     except Exception:
@@ -386,9 +388,7 @@ def add_wishlist(db: Session, user_id, query: str):
     if count >= max_wishlists:
         return False, f"Limite atingido: {max_wishlists} wishlists no seu plano."
 
-    # 1) Ano (range/min/max)
     cleaned_query, year_min, year_max = _extract_year_directives(query)
-    # 2) Preço (range/min/max) — roda em cima da query já limpa de diretivas de ano
     cleaned_query, price_min, price_max = _extract_price_directives(cleaned_query)
 
     cleaned_query = (cleaned_query or "").strip()
@@ -407,9 +407,8 @@ def add_wishlist(db: Session, user_id, query: str):
         db.rollback()
         return False, "Erro ao salvar wishlist. Tente novamente."
 
-    
-    # auto-filtros (quando houver diretivas)
     filters = []
+    # IMPORTANTE: year range é INCLUSIVO => gte/lte
     if year_min:
         filters.append(WishlistFilter(wishlist_id=w.id, field="year", operator="gte", value=str(year_min)))
     if year_max:
@@ -430,7 +429,6 @@ def add_wishlist(db: Session, user_id, query: str):
     return True, "Wishlist criada."
 
 
-
 def remove_wishlist(db: Session, user_id, index: int):
     wishlists = list_wishlists(db, user_id)
     if index < 1 or index > len(wishlists):
@@ -445,18 +443,8 @@ def remove_wishlist(db: Session, user_id, index: int):
         return False, "Erro ao remover wishlist."
     return True, "Wishlist removida."
 
+
 def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
-    """Filtros por wishlist.
-
-    Campos suportados:
-      - price  (comparadores numéricos)
-      - year   (comparadores numéricos)
-      - source (eq/neq)
-
-    Operadores:
-      - price/year: lt|lte|gt|gte|eq|neq
-      - source: eq|neq
-    """
     field = (field or "").strip().lower()
     operator = (operator or "").strip().lower()
     value = (value or "").strip()
@@ -485,7 +473,6 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
             return False, "Ano fora do intervalo (1900-2100)."
         value = str(y)
 
-    # price: aceita int/decimal/pt-BR (validação real acontece no matching)
     row = WishlistFilter(wishlist_id=wishlist_id, field=field, operator=operator, value=value)
     db.add(row)
     try:

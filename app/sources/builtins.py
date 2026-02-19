@@ -104,11 +104,17 @@ register_source(
         rate_limit_seconds_setting="rate_limit_chavesnamao_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
+        # Prioriza Playwright para estabilidade (evita SSR/anti-bot variar por região).
+        fetch_mode="browser",
+        default_force_browser=True,
+        default_browser_fallback_enabled=True,
         default_extra={
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 180,
             "http_max_delay_ms": 650,
+            "browser_timeout_ms": 35000,
+            "browser_wait_until": "domcontentloaded",
         },
     )
 )
@@ -147,7 +153,14 @@ register_source(
         rate_limit_seconds_setting="rate_limit_gogarage_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="http",
+        # GoGarage é JS-heavy; browser-first elimina HTML placeholder que quebra parsing/matching.
+        fetch_mode="browser",
+        default_force_browser=True,
+        default_browser_fallback_enabled=True,
+        default_extra={
+            "browser_timeout_ms": 45000,
+            "browser_wait_until": "domcontentloaded",
+        },
     )
 )
 
@@ -164,6 +177,11 @@ register_source(
         supports_wishlist_monitoring=True,
         fetch_mode="browser",
         default_force_browser=True,
+        default_browser_fallback_enabled=True,
+        default_extra={
+            "browser_timeout_ms": 45000,
+            "browser_wait_until": "domcontentloaded",
+        },
     )
 )
 
@@ -178,8 +196,14 @@ register_source(
         rate_limit_seconds_setting="rate_limit_mobiauto_seconds",
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
-        fetch_mode="http",
+        # JS-heavy + bloqueios: browser-first.
+        fetch_mode="browser",
+        default_force_browser=True,
         default_browser_fallback_enabled=True,
+        default_extra={
+            "browser_timeout_ms": 45000,
+            "browser_wait_until": "domcontentloaded",
+        },
     )
 )
 

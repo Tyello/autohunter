@@ -73,9 +73,7 @@ def ensure_source_configs(db: Session) -> int:
 
     Returns number of rows created (not committed).
     """
-    existing_sources = set(
-        db.execute(select(SourceConfig.source)).scalars().all()
-    )
+    existing_sources = set(db.execute(select(SourceConfig.source)).scalars().all())
     created = 0
     for plugin in list_sources():
         src = plugin.name.strip().lower()
@@ -98,7 +96,60 @@ def ensure_source_configs(db: Session) -> int:
         db.add(row)
         created += 1
 
+    # Policy: fontes JS-heavy / com anti-bot agressivo devem priorizar Playwright.
+    # Esse ajuste é intencionalmente opinativo: o usuário pode desligar via /admin sources.
+    _enforce_playwright_first_policy(db)
+
     return created
+
+
+def _enforce_playwright_first_policy(db: Session) -> int:
+    """Best-effort migration that flips core sources to browser-first.
+
+    Why:
+    - alguns sites retornam HTML incompleto/placeholder via HTTP ou variam por região
+    - isso quebra parsing e, principalmente, o matching/notify
+    - browser-first dá previsibilidade (custo maior, mas controlado via pool/limits)
+
+    This only updates a small allowlist of sources.
+    """
+
+    desired = {
+        "webmotors": {"browser_timeout_ms": 60000, "browser_wait_until": "domcontentloaded"},
+        "gogarage": {"browser_timeout_ms": 45000, "browser_wait_until": "domcontentloaded"},
+        "chavesnamao": {"browser_timeout_ms": 35000, "browser_wait_until": "domcontentloaded"},
+        "icarros": {"browser_timeout_ms": 45000, "browser_wait_until": "domcontentloaded"},
+        "mobiauto": {"browser_timeout_ms": 45000, "browser_wait_until": "domcontentloaded"},
+    }
+
+    updated = 0
+    for src, extra_defaults in desired.items():
+        row = get_source_config(db, src)
+        if not row:
+            continue
+
+        changed = False
+        if not bool(row.force_browser):
+            row.force_browser = True
+            changed = True
+
+        if not bool(row.browser_fallback_enabled):
+            row.browser_fallback_enabled = True
+            changed = True
+
+        # Merge extra defaults without overwriting user tuning.
+        if extra_defaults:
+            extra = dict(row.extra or {})
+            for k, v in extra_defaults.items():
+                if k not in extra:
+                    extra[k] = v
+                    changed = True
+            row.extra = extra if extra else None
+
+        if changed:
+            updated += 1
+
+    return updated
 
 
 def set_source_field(db: Session, source: str, field: str, value: str) -> SourceConfig:
