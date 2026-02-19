@@ -90,6 +90,49 @@ def _strip_title_noise(t: str) -> str:
     return _clean_text(t)
 
 
+def _extract_title_from_card(card) -> Optional[str]:
+    """Best-effort title extraction from a Mobiauto listing card.
+
+    Mobiauto sometimes returns generic aria-label/title attributes.
+    Try semantic DOM nodes (h1/h2/h3/strong), then image alt, then a cleaned
+    version of the card text.
+    """
+
+    try:
+        for xp in (
+            ".//h1//text()",
+            ".//h2//text()",
+            ".//h3//text()",
+            ".//strong//text()",
+            ".//p[contains(@class,'title') or contains(@class,'titulo')]//text()",
+            ".//span[contains(@class,'title') or contains(@class,'titulo')]//text()",
+        ):
+            parts = [p.strip() for p in (card.xpath(xp) or []) if isinstance(p, str) and p.strip()]
+            if not parts:
+                continue
+            t = _strip_title_noise(" ".join(parts))
+            if t and 6 <= len(t) <= 160:
+                return t
+
+        alts = [a.strip() for a in (card.xpath(".//img/@alt") or []) if isinstance(a, str) and a.strip()]
+        for alt in alts:
+            t = _strip_title_noise(alt)
+            if t and 6 <= len(t) <= 160:
+                return t
+
+        raw = (card.text_content() or "").strip()
+        if raw:
+            raw = re.sub(r"R\$\s*[-\d\.,]+", " ", raw, flags=re.I)
+            raw = re.sub(r"\s+", " ", raw).strip()
+            t = _strip_title_noise(raw)
+            if t and 6 <= len(t) <= 160:
+                return t
+    except Exception:
+        return None
+
+    return None
+
+
 def _extract_price_from_text(t: str):
     # pega um pedaço pequeno ao redor do "R$" pra reduzir falso positivo
     if not t or "R$" not in t:
@@ -290,6 +333,12 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
         text = _strip_title_noise(raw_card)
         if not text or text.lower() in ("enviar mensagem", "ver detalhes", "detalhes"):
             text = ""
+
+        # Se o texto do <a> vier genérico/vazio, tenta extrair do DOM do card.
+        if not text:
+            t2 = _extract_title_from_card(card)
+            if t2:
+                text = t2
 
         card_text = (card.text_content() or "")
         price = _extract_price_from_text(card_text) or _extract_price_from_text(raw_card)
