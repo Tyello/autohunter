@@ -14,6 +14,7 @@ from .subscription import Subscription
 from .account import Account
 from .account_member import AccountMember
 from .app_kv import AppKV
+from .scrape_job import ScrapeJob
 
 __all__ = [
     "User",
@@ -32,4 +33,5 @@ __all__ = [
     "Account",
     "AccountMember",
     "AppKV",
+    "ScrapeJob",
 ]

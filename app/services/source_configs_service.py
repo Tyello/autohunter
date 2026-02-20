@@ -11,6 +11,25 @@ from app.sources.registry import list_sources, get_source
 from app.sources.types import ScrapeContext
 
 
+def _normalize_proxy_server(v: Any) -> Optional[str]:
+    """Normalize proxy strings coming from DB/user input.
+
+    Guarantees that "no proxy" values don't leak into scrapers (e.g. "NULL").
+    Also auto-prefixes scheme for common inputs like "host:port".
+    """
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    if s.lower() in {"null", "none", "nil"}:
+        return None
+    # requests/playwright proxy expects a scheme; accept explicit schemes as-is.
+    if "://" not in s:
+        s = "http://" + s
+    return s
+
+
 @dataclass
 class UpdateResult:
     ok: bool
@@ -73,7 +92,9 @@ def ensure_source_configs(db: Session) -> int:
 
     Returns number of rows created (not committed).
     """
-    existing_sources = set(db.execute(select(SourceConfig.source)).scalars().all())
+    existing_sources = set(
+        db.execute(select(SourceConfig.source)).scalars().all()
+    )
     created = 0
     for plugin in list_sources():
         src = plugin.name.strip().lower()
@@ -96,60 +117,7 @@ def ensure_source_configs(db: Session) -> int:
         db.add(row)
         created += 1
 
-    # Policy: fontes JS-heavy / com anti-bot agressivo devem priorizar Playwright.
-    # Esse ajuste é intencionalmente opinativo: o usuário pode desligar via /admin sources.
-    _enforce_playwright_first_policy(db)
-
     return created
-
-
-def _enforce_playwright_first_policy(db: Session) -> int:
-    """Best-effort migration that flips core sources to browser-first.
-
-    Why:
-    - alguns sites retornam HTML incompleto/placeholder via HTTP ou variam por região
-    - isso quebra parsing e, principalmente, o matching/notify
-    - browser-first dá previsibilidade (custo maior, mas controlado via pool/limits)
-
-    This only updates a small allowlist of sources.
-    """
-
-    desired = {
-        "webmotors": {"browser_timeout_ms": 60000, "browser_wait_until": "domcontentloaded"},
-        "gogarage": {"browser_timeout_ms": 45000, "browser_wait_until": "domcontentloaded"},
-        "chavesnamao": {"browser_timeout_ms": 35000, "browser_wait_until": "domcontentloaded"},
-        "icarros": {"browser_timeout_ms": 45000, "browser_wait_until": "domcontentloaded"},
-        "mobiauto": {"browser_timeout_ms": 45000, "browser_wait_until": "domcontentloaded"},
-    }
-
-    updated = 0
-    for src, extra_defaults in desired.items():
-        row = get_source_config(db, src)
-        if not row:
-            continue
-
-        changed = False
-        if not bool(row.force_browser):
-            row.force_browser = True
-            changed = True
-
-        if not bool(row.browser_fallback_enabled):
-            row.browser_fallback_enabled = True
-            changed = True
-
-        # Merge extra defaults without overwriting user tuning.
-        if extra_defaults:
-            extra = dict(row.extra or {})
-            for k, v in extra_defaults.items():
-                if k not in extra:
-                    extra[k] = v
-                    changed = True
-            row.extra = extra if extra else None
-
-        if changed:
-            updated += 1
-
-    return updated
 
 
 def set_source_field(db: Session, source: str, field: str, value: str) -> SourceConfig:
@@ -256,7 +224,7 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
 
         return ScrapeContext(
             source=src,
-            proxy_server=getattr(plugin, "default_proxy_server", None) if plugin else None,
+            proxy_server=_normalize_proxy_server(getattr(plugin, "default_proxy_server", None) if plugin else None),
             browser_fallback_enabled=bool(getattr(plugin, "default_browser_fallback_enabled", False)) if plugin else False,
             force_browser=bool(getattr(plugin, "default_force_browser", False)) if plugin else False,
             http_connect_timeout_s=_get_float("http_connect_timeout_s"),
@@ -300,7 +268,7 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
 
     return ScrapeContext(
         source=src,
-        proxy_server=cfg.proxy_server,
+        proxy_server=_normalize_proxy_server(cfg.proxy_server),
         browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
         force_browser=bool(cfg.force_browser),
         http_connect_timeout_s=_get_float("http_connect_timeout_s"),

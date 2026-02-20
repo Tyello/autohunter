@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # Keep this small (<=60s) to react quickly, but not too small to avoid DB churn.
     scheduler_tick_seconds: int = 60
 
+    # Worker que consome a fila Playwright (scrape_jobs.queue='browser').
+    # Mantém ordem e previsibilidade para fontes browser-first.
+    scheduler_browser_worker_seconds: int = 5
+
     # Backoff automatico (protects product and helps avoid bans)
     source_backoff_max_minutes: int = 720
     source_backoff_jitter_seconds: int = 20

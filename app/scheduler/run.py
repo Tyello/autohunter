@@ -2,6 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
 import threading
+from datetime import datetime, timezone, timedelta
 
 from app.core.settings import settings
 from app.db.session import SessionLocal
@@ -11,7 +12,15 @@ from app.scheduler.heartbeat import heartbeat
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import mark_skipped
 from app.services.source_runs_service import record_run
+from sqlalchemy import select
+
+from app.models.source_config import SourceConfig
+from app.models.source_state import SourceState
 from app.services.source_execution_service import run_source_for_all_wishlists as _exec_source_for_all_wishlists
+from app.services.source_backoff_service import is_source_allowed
+from app.services.source_configs_service import ensure_source_configs
+from app.services.scrape_jobs_service import enqueue_job, count_active_jobs
+from app.sources.registry import get_source
 
 
 # Hard cap parallel scraping jobs (protects Raspberry Pi CPU/RAM and reduces ban risk)
@@ -19,39 +28,100 @@ _MAX_PAR = int(getattr(settings, "scheduler_max_parallel_sources", 1) or 1)
 _SOURCE_JOBS_SEM = threading.BoundedSemaphore(_MAX_PAR if _MAX_PAR > 0 else 1)
 
 
-def job_run_source_for_all_wishlists(source_name: str):
-    """Scheduler tick for one source (DB-driven).
+def _utcnow():
+    return datetime.now(timezone.utc)
 
-    Cadence and operational config come from DB:
-    - source_configs: enable/schedule/cooldown/rate-limit/proxy/browser flags
-    - source_states: backoff and last_effective_run_at (due checks)
+
+def _get_cfg(db, source: str):
+    return db.execute(select(SourceConfig).where(SourceConfig.source == source)).scalar_one_or_none()
+
+
+def _get_state(db, source: str):
+    return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
+
+
+def job_run_source_for_all_wishlists(source_name: str):
+    """Scheduler tick for one source.
+
+    **Mudança chave**: fontes browser/Playwright agora entram em uma *fila* persistente
+    (scrape_jobs) para execução em ordem (FIFO). Isso elimina "skipped:parallel_limit"
+    e garante previsibilidade.
+
+    Fontes HTTP continuam podendo rodar direto (com semaphore) para não atrasar tudo.
     """
-    # Non-blocking: if another source is running, skip this tick.
-    if not _SOURCE_JOBS_SEM.acquire(blocking=False):
-        with SessionLocal() as db:
-            src = (source_name or "").lower().strip()
-            mark_skipped(db, src, "parallel_limit")
-            record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "parallel_limit"})
-            db.commit()
+    src = (source_name or "").lower().strip()
+    plugin = get_source(src)
+    if not plugin:
         return
 
-    try:
-        with SessionLocal() as db:
+    with SessionLocal() as db:
+        try:
+            ensure_source_configs(db)
+            cfg = _get_cfg(db, src)
+            if not cfg or not bool(cfg.is_enabled) or plugin.scrape is None:
+                db.commit()
+                return
+
+            is_browser = (plugin.fetch_mode == "browser") or bool(cfg.force_browser)
+
+            # Browser-first: enqueue FIFO
+            if is_browser:
+                if not bool(getattr(settings, "enable_playwright", False)):
+                    mark_skipped(db, src, "playwright_off")
+                    record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "playwright_off"})
+                    db.commit()
+                    return
+
+                minutes = int(cfg.sched_minutes or 0)
+                if minutes <= 0:
+                    db.commit()
+                    return
+
+                st = _get_state(db, src)
+                last_eff = st.last_effective_run_at if st else None
+                next_due = (last_eff + timedelta(minutes=minutes)) if last_eff else _utcnow()
+                if _utcnow() < next_due:
+                    db.commit()
+                    return
+
+                avail = is_source_allowed(db, src)
+                if not avail.is_allowed:
+                    # não marca skip aqui para não poluir; o backoff já está no state
+                    db.commit()
+                    return
+
+                inserted = enqueue_job(db, source=src, queue="browser", run_at=next_due, priority=0, max_attempts=3)
+                if not inserted:
+                    # fila cheia (cap) ou job já ativo. Se estiver cheia, registra evidência.
+                    cap = int(getattr(settings, "playwright_queue_max_jobs", 25) or 25)
+                    if cap > 0 and count_active_jobs(db, queue="browser") >= cap:
+                        mark_skipped(db, src, "queue_full", {"cap": cap})
+                        record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "queue_full", "cap": cap})
+                db.commit()
+                return
+
+            # HTTP: mantém execução direta com cap paralelo
+            if not _SOURCE_JOBS_SEM.acquire(blocking=False):
+                mark_skipped(db, src, "parallel_limit")
+                record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "parallel_limit"})
+                db.commit()
+                return
+
             try:
                 _exec_source_for_all_wishlists(db, source_name, kind="scheduler", force=False, ignore_backoff=False)
                 db.commit()
-            except Exception as e:
-                # last-resort guard: don't let the scheduler thread die
+            finally:
                 try:
-                    log(db, "error", f"scheduler_{source_name}", "tick_failed", {"err": str(e)[:300]})
-                    db.commit()
+                    _SOURCE_JOBS_SEM.release()
                 except Exception:
                     pass
-    finally:
-        try:
-            _SOURCE_JOBS_SEM.release()
-        except Exception:
-            pass
+
+        except Exception as e:
+            try:
+                log(db, "error", f"scheduler_{source_name}", "tick_failed", {"err": str(e)[:300]})
+                db.commit()
+            except Exception:
+                pass
 
 
 def start_scheduler() -> BackgroundScheduler:
@@ -112,13 +182,33 @@ def start_scheduler() -> BackgroundScheduler:
 
     sched.add_job(_job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
 
+    # Browser queue worker: executa jobs Playwright em ordem (FIFO)
+    try:
+        from app.scheduler.browser_queue_job import job_browser_queue_worker
+
+        worker_s = int(getattr(settings, "scheduler_browser_worker_seconds", 5) or 5)
+        worker_s = max(2, min(worker_s, 60))
+        sched.add_job(
+            job_browser_queue_worker,
+            "interval",
+            seconds=worker_s,
+            id="browser_queue_worker",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            executor="browser",
+        )
+    except Exception:
+        pass
+
     from app.scheduler.sender_job import job_send_notifications
     sched.add_job(
         job_send_notifications,
         "interval",
         seconds=settings.sched_sender_seconds,
         id="sender_job",
-        replace_existing=True
+        replace_existing=True,
+        executor="sender",
     )
 
     # Admin monitor (erro/bloqueio -> alerta no Telegram)
