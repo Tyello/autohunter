@@ -19,6 +19,7 @@ from app.services.search_urls_service import (
     mobiauto_url,
     kavak_url,
     facebook_marketplace_url,
+    turboclass_url,
 )
 
 from app.scrapers.mercadolivre import scrape_mercadolivre
@@ -30,6 +31,7 @@ from app.scrapers.facebook_marketplace import scrape_facebook_marketplace
 from app.scrapers.icarros import scrape_icarros
 from app.scrapers.kavak import scrape_kavak
 from app.scrapers.mobiauto import scrape_mobiauto
+from app.scrapers.turboclass import scrape_turboclass
 
 from .registry import register_source
 from .types import SourcePlugin, ScrapeContext
@@ -237,5 +239,33 @@ register_source(
         fetch_mode="browser",
         default_force_browser=True,
         default_cooldown_minutes=180,
+    )
+)
+
+
+# TurboClass: SSR estável e barato. Começa desabilitado por default.
+register_source(
+    SourcePlugin(
+        name="turboclass",
+        build_url=turboclass_url,
+        scrape=scrape_turboclass,
+        enabled_setting=None,
+        sched_minutes_setting=None,
+        cooldown_minutes_setting=None,
+        rate_limit_seconds_setting=None,
+        supports_manual_search=True,
+        supports_wishlist_monitoring=True,
+        fetch_mode="http",
+        default_enabled=False,
+        default_sched_minutes=90,
+        default_browser_fallback_enabled=True,
+        default_extra={
+            "http_connect_timeout_s": 5,
+            "http_read_timeout_s": 20,
+            "http_min_delay_ms": 220,
+            "http_max_delay_ms": 650,
+            "browser_timeout_ms": 35000,
+            "browser_wait_until": "domcontentloaded",
+        },
     )
 )

@@ -117,6 +117,16 @@ def ensure_source_configs(db: Session) -> int:
         db.add(row)
         created += 1
 
+    # SessionLocal in this project uses autoflush=False. We must flush here so
+    # that subsequent SELECTs in the same transaction can "see" freshly added
+    # rows (e.g. /admin sources enable <source>). Commit is handled by callers.
+    if created:
+        try:
+            db.flush()
+        except Exception:
+            # If migrations haven't run yet, flush may fail; callers will handle.
+            pass
+
     return created
 
 
@@ -132,6 +142,10 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Source
         raise ValueError(f"campo inválido: {field}")
 
     row = get_source_config(db, src)
+    if not row:
+        # If the DB is missing the row (new plugin, fresh DB), seed + retry.
+        ensure_source_configs(db)
+        row = get_source_config(db, src)
     if not row:
         raise ValueError(f"source não encontrada: {src}")
 

@@ -55,3 +55,15 @@ def test_url_builders_handle_empty_queries(query):
         search_urls_service.facebook_marketplace_url(query)
         == "https://www.facebook.com/marketplace/search/?query="
     )
+
+    assert (
+        search_urls_service.turboclass_url(query)
+        == "https://turboclass.com.br/anuncio-lista.php?o=&pg=1&q="
+    )
+
+
+def test_turboclass_url_encodes_query():
+    assert (
+        search_urls_service.turboclass_url("civic si")
+        == "https://turboclass.com.br/anuncio-lista.php?o=&pg=1&q=civic+si"
+    )

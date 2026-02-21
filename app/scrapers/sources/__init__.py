@@ -83,6 +83,12 @@ def _auto_register():
     except ImportError:
         pass
 
+    try:
+        from app.scrapers.sources.turboclass import TurboClassScraper
+        register_scraper(TurboClassScraper())
+    except ImportError:
+        pass
+
 
 # Auto-register ao importar
 _auto_register()

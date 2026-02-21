@@ -258,3 +258,19 @@ def facebook_marketplace_url(query: str) -> str:
     q = quote_plus((query or "").strip())
     # Location will be resolved by Facebook itself; Playwright will return final_url after redirects.
     return f"https://www.facebook.com/marketplace/search/?query={q}"
+
+
+def turboclass_url(query: str) -> str:
+    """TurboClass URL builder.
+
+    TurboClass expõe uma listagem SSR em `anuncio-lista.php`.
+    A navegação do site usa os parâmetros:
+      - `q`: busca livre
+      - `pg`: paginação
+      - `o`: ordenação
+
+    Mesmo se o `q` variar em efetividade entre releases do site, o AutoHunter
+    ainda filtra/ranqueia por título no pós-processamento.
+    """
+    q = quote_plus((query or "").strip())
+    return f"https://turboclass.com.br/anuncio-lista.php?o=&pg=1&q={q}"
