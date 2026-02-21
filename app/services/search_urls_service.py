@@ -272,5 +272,7 @@ def turboclass_url(query: str) -> str:
     Mesmo se o `q` variar em efetividade entre releases do site, o AutoHunter
     ainda filtra/ranqueia por título no pós-processamento.
     """
+    # O TurboClass aceita `q` diretamente (forma curta e que o próprio site divulga
+    # no schema.org SearchAction). Mantemos sem `o/pg` para reduzir variações de HTML.
     q = quote_plus((query or "").strip())
-    return f"https://turboclass.com.br/anuncio-lista.php?o=&pg=1&q={q}"
+    return f"https://turboclass.com.br/anuncio-lista.php?q={q}"

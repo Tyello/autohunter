@@ -24,7 +24,8 @@ from app.scrapers.utils import normalize_asset_url, pick_from_srcset
 class TurboClassScraper(BaseScraper):
     BASE_URL = "https://turboclass.com.br"
 
-    _RE_DETAIL = re.compile(r"(?:^|/)anuncio/(?:detalhe|vendido)/([^/?#]+)", re.I)
+    # Hrefs podem vir sem barra inicial ("anuncio/detalhe/..."), então aceitamos ambos.
+    _RE_DETAIL = re.compile(r"(?:^|/)(?:anuncio/detalhe)/([^/?#]+)", re.I)
     _RE_TC_ID = re.compile(r"\b(tc-[a-z0-9]+)\b", re.I)
     _RE_YEARS = re.compile(r"\bANO\s*/\s*MODELO\s*(19\d{2}|20\d{2})\s*/\s*(19\d{2}|20\d{2})\b", re.I)
     _RE_LOCATION = re.compile(r"\bLOCALIDADE\s+(.+?)\s+detalhes\b", re.I)
@@ -34,17 +35,15 @@ class TurboClassScraper(BaseScraper):
 
     def build_search_url(self, query: str, **kwargs) -> str:
         q = quote_plus((query or "").strip())
-        return f"{self.BASE_URL}/anuncio-lista.php?o=&pg=1&q={q}"
+        return f"{self.BASE_URL}/anuncio-lista.php?q={q}"
 
     def extract_raw_data(self, raw_content: str, ctx) -> List[Dict]:
         soup = BeautifulSoup(raw_content, "lxml")
         items: list[dict] = []
 
-        for a in soup.find_all("a", href=True):
-            href = (a.get("href") or "").strip()
+        for a in soup.select('a[href*="anuncio/detalhe/"]'):
+            href = a.get("href")
             if not href:
-                continue
-            if not self._RE_DETAIL.search(href):
                 continue
 
             text = (a.get_text(" ", strip=True) or "").strip()
@@ -54,7 +53,7 @@ class TurboClassScraper(BaseScraper):
             if "R$" not in text and "VALOR" not in text.upper():
                 continue
 
-            url = href
+            url = href.strip()
             if not url.startswith("http"):
                 url = urljoin(self.BASE_URL + "/", url)
 
