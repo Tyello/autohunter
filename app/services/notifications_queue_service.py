@@ -65,19 +65,45 @@ def queue_notifications_for_matches_diag(
 
     Útil para admin/telemetria quando temos match>0 mas queued=0.
 
-    Retorna:
+    Retorna (contadores):
+      - matched: total de listings recebidos (inclui inválidos)
       - queued: quantas notifications foram criadas
       - already_notified: quantas combinações (wishlist_id, car_listing_id) já existiam
       - cap_skipped: quantos matches seriam novos, mas não entraram por limite (max_queue)
-      - matched: total de listings avaliados
+      - invalid_listing: quantos listings vieram sem `id`
+      - buckets: dict com motivos (para exibir em /admin)
     """
     if not matched_listings:
-        return {"queued": 0, "already_notified": 0, "cap_skipped": 0, "matched": 0}
+        return {
+            "matched": 0,
+            "queued": 0,
+            "already_notified": 0,
+            "cap_skipped": 0,
+            "invalid_listing": 0,
+            "buckets": {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0},
+        }
 
-    listing_ids = [getattr(l, "id", None) for l in matched_listings]
-    listing_ids = [i for i in listing_ids if i]
+    matched_total = len(matched_listings)
+    invalid_listing = 0
+    valid = []
+    listing_ids = []
+    for l in matched_listings:
+        lid = getattr(l, "id", None)
+        if not lid:
+            invalid_listing += 1
+            continue
+        valid.append(l)
+        listing_ids.append(lid)
+
     if not listing_ids:
-        return {"queued": 0, "already_notified": 0, "cap_skipped": 0, "matched": 0}
+        return {
+            "matched": matched_total,
+            "queued": 0,
+            "already_notified": 0,
+            "cap_skipped": 0,
+            "invalid_listing": invalid_listing,
+            "buckets": {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": invalid_listing},
+        }
 
     existing = (
         db.query(Notification.car_listing_id)
@@ -87,8 +113,8 @@ def queue_notifications_for_matches_diag(
     )
     existing_ids = {row[0] for row in (existing or [])}
 
-    # candidatos realmente novos
-    new_listings = [l for l in matched_listings if getattr(l, "id", None) and l.id not in existing_ids]
+    # candidatos realmente novos (dedupe por existing notification)
+    new_listings = [l for l in valid if l.id not in existing_ids]
 
     cap = int(max_queue) if max_queue is not None else None
     if cap is not None and cap < 0:
@@ -109,14 +135,23 @@ def queue_notifications_for_matches_diag(
         )
         queued += 1
 
-    already_notified = len([l for l in matched_listings if getattr(l, "id", None) in existing_ids])
+    already_notified = len(valid) - len(new_listings)
     cap_skipped = 0
     if cap is not None:
         cap_skipped = max(0, len(new_listings) - len(to_queue))
 
-    return {
+    buckets = {
         "queued": queued,
         "already_notified": already_notified,
         "cap_skipped": cap_skipped,
-        "matched": len(listing_ids),
+        "invalid_listing": invalid_listing,
+    }
+
+    return {
+        "matched": matched_total,
+        "queued": queued,
+        "already_notified": already_notified,
+        "cap_skipped": cap_skipped,
+        "invalid_listing": invalid_listing,
+        "buckets": buckets,
     }

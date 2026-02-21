@@ -170,6 +170,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     queued = 0
     already_notified = 0
     cap_skipped = 0
+    invalid_listing = 0
+    queue_buckets: dict[str, int] = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlist is not None:
@@ -193,6 +195,14 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                 queued = int(diag.get("queued") or 0)
                 already_notified = int(diag.get("already_notified") or 0)
                 cap_skipped = int(diag.get("cap_skipped") or 0)
+                invalid_listing = int(diag.get("invalid_listing") or 0)
+                b = diag.get("buckets")
+                if isinstance(b, dict):
+                    for k in queue_buckets.keys():
+                        try:
+                            queue_buckets[k] = int(b.get(k) or 0)
+                        except Exception:
+                            queue_buckets[k] = 0
 
     emit_event(db, level="info", event_type="pipeline_summary", source=ctx.source, message="pipeline_summary", evidence={
         "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
@@ -203,6 +213,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "queued": queued,
         "already_notified": already_notified,
         "cap_skipped": cap_skipped,
+        "invalid_listing": invalid_listing,
+        "queue_buckets": queue_buckets,
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary", {
@@ -214,11 +226,13 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "queued": queued,
         "already_notified": already_notified,
         "cap_skipped": cap_skipped,
+        "invalid_listing": invalid_listing,
+        "queue_buckets": queue_buckets,
     }, source=ctx.source, event_type="pipeline_summary", tags=["ok"])
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued, "already_notified": already_notified, "cap_skipped": cap_skipped, **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued, "already_notified": already_notified, "cap_skipped": cap_skipped, "invalid_listing": invalid_listing, "queue_buckets": queue_buckets, **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
@@ -264,6 +278,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     total_queued = 0
     total_already_notified = 0
     total_cap_skipped = 0
+    total_invalid_listing = 0
+    total_queue_buckets: dict[str, int] = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlists:
@@ -291,6 +307,14 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                 total_queued += int(diag.get("queued") or 0)
                 total_already_notified += int(diag.get("already_notified") or 0)
                 total_cap_skipped += int(diag.get("cap_skipped") or 0)
+                total_invalid_listing += int(diag.get("invalid_listing") or 0)
+                b = diag.get("buckets")
+                if isinstance(b, dict):
+                    for k in total_queue_buckets.keys():
+                        try:
+                            total_queue_buckets[k] += int(b.get(k) or 0)
+                        except Exception:
+                            pass
 
     emit_event(db, level="info", event_type="pipeline_summary_many", source=ctx.source, message="pipeline_summary_many", evidence={
         "url": search_url,
@@ -301,6 +325,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "queued": total_queued,
         "already_notified": total_already_notified,
         "cap_skipped": total_cap_skipped,
+        "invalid_listing": total_invalid_listing,
+        "queue_buckets": total_queue_buckets,
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary_many", {
@@ -312,8 +338,10 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "queued": total_queued,
         "already_notified": total_already_notified,
         "cap_skipped": total_cap_skipped,
+        "invalid_listing": total_invalid_listing,
+        "queue_buckets": total_queue_buckets,
     }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"])
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "wishlists": len(wishlists or []), **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "invalid_listing": total_invalid_listing, "queue_buckets": total_queue_buckets, "wishlists": len(wishlists or []), **_ctx_fetch_diag(ctx)}
