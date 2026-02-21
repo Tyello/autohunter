@@ -14,19 +14,37 @@ from app.bot.sender import send_daily_limit_notice_http
 
 
 def send_queued_notifications(db: Session, component: str, sender_fn):
-    queued = (
+    q = (
         db.query(Notification)
         .filter(Notification.status == "queued")
         .order_by(Notification.created_at.asc())
-        .limit(10)
-        .all()
     )
+
+    # Concurrency-safe claim: if multiple sender loops exist (scheduler + bot),
+    # avoid double-send by locking rows on Postgres.
+    try:
+        q = q.with_for_update(skip_locked=True)
+    except Exception:
+        # SQLite / unsupported dialect
+        pass
+
+    queued = q.limit(10).all()
 
     sent = 0
     blocked = 0
     failed = 0
 
     for n in queued:
+        user = n.user
+        if not user or not getattr(user, "telegram_chat_id", None):
+            # Can't deliver (no destination). Mark as failed to avoid infinite queue.
+            n.status = "failed"
+            n.reason = "missing_chat_id"
+            n.error_message = "User telegram_chat_id is missing"
+            db.commit()
+            failed += 1
+            continue
+
         if not can_send_more_today(db, n.user_id):
             # política (não é erro)
             mark_suppressed_reason(db, n.id, "daily_limit_reached")
@@ -42,8 +60,6 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
 
             blocked += 1
             continue
-
-        user = n.user
         listing = n.car_listing
 
         try:

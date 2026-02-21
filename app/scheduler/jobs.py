@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy.orm import Session
 
 from app.scrapers.base import FetchBlocked
@@ -29,6 +31,55 @@ def _is_bug_type(exc_type: str) -> bool:
     }
 
 
+# ---- Matching/Queue strategy -------------------------------------------------
+#
+# Historically we only notified on *newly inserted* listings (inserted_ids).
+# That creates a blind spot: if a source initially ingests listings with a
+# degraded title (e.g. UI/noise), once the scraper is fixed the listing is not
+# "new" anymore, so it would never notify.
+#
+# New behavior: match against the *current scrape result-set* (resolved in DB)
+# and enqueue notifications only when no Notification exists yet.
+#
+# This does NOT "re-alert" because queue_notifications_for_matches dedupes by
+# (wishlist_id, car_listing_id) regardless of status.
+#
+# Safety caps avoid huge backfills on first run.
+
+MAX_CANDIDATE_LISTINGS_PER_RUN = int(os.getenv("MATCH_CANDIDATES_PER_RUN", "250"))
+MAX_QUEUE_PER_WISHLIST_PER_RUN = int(os.getenv("MATCH_MAX_QUEUE_PER_WISHLIST", "10"))
+
+
+def _candidate_listings_for_run(db: Session, *, source: str, raw_listings: list[dict], limit: int) -> list[CarListing]:
+    """Resolve scraper results to DB rows (existing + newly inserted).
+
+    We use (source, external_id) to map scrape results to car_listings.
+    """
+    ext_ids: list[str] = []
+    seen: set[str] = set()
+    for it in (raw_listings or []):
+        eid = (it or {}).get("external_id")
+        if not eid:
+            continue
+        eid = str(eid)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        ext_ids.append(eid)
+
+    if not ext_ids:
+        return []
+
+    q = (
+        db.query(CarListing)
+        .filter(CarListing.source == source)
+        .filter(CarListing.external_id.in_(ext_ids))
+        .order_by(CarListing.created_at.desc())
+        .limit(int(limit or 0) if int(limit or 0) > 0 else 250)
+    )
+    return q.all()
+
+
 
 
 
@@ -38,65 +89,6 @@ def _ctx_fetch_diag(ctx) -> dict:
         "hybrid_blocked": bool(getattr(ctx, "_hybrid_blocked", False)),
         "hybrid_blocked_status": getattr(ctx, "_hybrid_blocked_status", None),
     }
-
-
-def _resolve_candidate_listings(
-    db: Session,
-    *,
-    source: str,
-    scraped: list,
-    inserted_ids: list | None = None,
-    limit: int = 250,
-) -> list[CarListing]:
-    """Resolve scraped dicts -> persisted CarListing rows.
-
-    We intentionally match/notify based on what the scraper *returned now*, even
-    if the listing was already in DB (e.g., user created wishlist after it was
-    first ingested). Dedupe is handled downstream by notifications table.
-    """
-
-    src = (source or "").strip().lower()
-    ext_ids: list[str] = []
-
-    for it in (scraped or []):
-        if not isinstance(it, dict):
-            continue
-        it_src = (it.get("source") or src).strip().lower()
-        if it_src != src:
-            continue
-        eid = it.get("external_id")
-        if eid is None:
-            continue
-        s = str(eid).strip()
-        if s:
-            ext_ids.append(s)
-
-    # dedupe preserving order
-    ext_ids = list(dict.fromkeys(ext_ids))[: max(int(limit), 1)]
-
-    rows: list[CarListing] = []
-    if ext_ids:
-        rows.extend(
-            db.query(CarListing)
-            .filter(CarListing.source == src)
-            .filter(CarListing.external_id.in_(ext_ids))
-            .all()
-        )
-
-    if inserted_ids:
-        rows.extend(db.query(CarListing).filter(CarListing.id.in_(list(inserted_ids))).all())
-
-    # final dedupe by id preserving order
-    seen = set()
-    out: list[CarListing] = []
-    for r in rows:
-        if not getattr(r, "id", None):
-            continue
-        if r.id in seen:
-            continue
-        seen.add(r.id)
-        out.append(r)
-    return out
 
 def queue_notifications_for_new_listings(db: Session, component: str, new_listing_ids: list):
     listing_rows = db.query(CarListing.id).filter(CarListing.id.in_(new_listing_ids)).all()
@@ -177,13 +169,24 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     matched = 0
     queued = 0
 
+    # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlist is not None:
-        candidates = _resolve_candidate_listings(db, source=ctx.source, scraped=listings, inserted_ids=list(inserted_ids or []))
-        matches_by_wishlist = match_listings_for_wishlists([wishlist], candidates)
-        matched_listings = matches_by_wishlist.get(wishlist.id) or []
-        matched = len(matched_listings)
-        if matched:
-            queued = int(queue_notifications_for_matches(db, wishlist, matched_listings) or 0)
+        candidates = _candidate_listings_for_run(
+            db,
+            source=ctx.source,
+            raw_listings=listings,
+            limit=MAX_CANDIDATE_LISTINGS_PER_RUN,
+        )
+        if candidates:
+            matches_by = match_listings_for_wishlists([wishlist], candidates)
+            matched_listings = matches_by.get(wishlist.id) or []
+            matched = len(matched_listings)
+            if matched:
+                queued = queue_notifications_for_matches(
+                    db,
+                    wishlist,
+                    matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
+                )
 
     emit_event(db, level="info", event_type="pipeline_summary", source=ctx.source, message="pipeline_summary", evidence={
         "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
@@ -250,20 +253,31 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     total_matched = 0
     total_queued = 0
 
-    # Notify based on the scraped result-set, even if listings already existed in DB.
-    # This avoids the common "found but didn't notify" issue when a wishlist is created
-    # after a listing was first ingested.
-    if wishlists and listings:
-        candidates = _resolve_candidate_listings(db, source=ctx.source, scraped=listings, inserted_ids=list(inserted_ids or []))
+    # Match against the current scrape set (existing + new), then queue only if not notified yet.
+    if wishlists:
+        candidates = _candidate_listings_for_run(
+            db,
+            source=ctx.source,
+            raw_listings=listings,
+            limit=MAX_CANDIDATE_LISTINGS_PER_RUN,
+        )
         if candidates:
             matches_by_wishlist = match_listings_for_wishlists(wishlists, candidates)
+
             for w in wishlists:
                 matched_listings = matches_by_wishlist.get(w.id) or []
                 m = len(matched_listings)
                 if not m:
                     continue
                 total_matched += m
-                total_queued += int(queue_notifications_for_matches(db, w, matched_listings) or 0)
+                total_queued += int(
+                    queue_notifications_for_matches(
+                        db,
+                        w,
+                        matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
+                    )
+                    or 0
+                )
 
     emit_event(db, level="info", event_type="pipeline_summary_many", source=ctx.source, message="pipeline_summary_many", evidence={
         "url": search_url,

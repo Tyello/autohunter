@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from telegram import Update
 from telegram.ext import ContextTypes, Application, CommandHandler, CallbackQueryHandler
@@ -26,6 +27,26 @@ logger = logging.getLogger(__name__)
 
 async def _post_init(application: Application):
     await setup_bot_commands(application.bot)
+
+    # Ensure queued notifications are delivered even when APScheduler isn't running
+    # (common in Windows/local runs where only the bot is started).
+    if bool(getattr(settings, "enable_sender_in_bot", True)):
+        from app.scheduler.sender_job import job_send_notifications
+
+        async def _sender_tick(_ctx):
+            try:
+                await asyncio.to_thread(job_send_notifications)
+            except Exception:
+                logger.exception("sender_in_bot tick failed")
+
+        interval = int(getattr(settings, "sched_sender_seconds", 60) or 60)
+        interval = max(10, interval)
+        application.job_queue.run_repeating(
+            _sender_tick,
+            interval=interval,
+            first=5,
+            name="sender_in_bot",
+        )
 
 
 async def on_error(update: Update, context: ContextTypes.DEFAULT_TYPE):

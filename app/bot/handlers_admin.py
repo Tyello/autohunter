@@ -466,6 +466,19 @@ async def _admin_matchdebug(update: Update, raw_args: List[str]):
             lines.append(f"Amostra de anúncios (DB): {len(listings)}")
             lines.append("")
 
+            # Mostra alguns anúncios para validar se a extração está OK (título/ano/preço acabam impactando matching).
+            empty_title = sum(1 for l in listings if not (l.title or '').strip())
+            lines.append(f"Empty title na amostra: {empty_title}/{len(listings)}")
+            lines.append("Anúncios (amostra):")
+            for l in listings[: min(5, len(listings))]:
+                t = (l.title or '').strip().replace("\n", " ")
+                if len(t) > 110:
+                    t = t[:110] + '…'
+                loc = (l.location or '-').strip()
+                lines.append(f"- {str(l.id)[:8]}: '{t}' | loc={loc}")
+            lines.append("")
+
+
             if not eligible:
                 lines.append("⚠️ Nenhuma wishlist ativa aceita essa source.")
                 lines.append("Dica: se você tem filtros 'source eq', inclua também essa source.")

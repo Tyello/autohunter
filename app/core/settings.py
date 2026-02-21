@@ -76,6 +76,10 @@ class Settings(BaseSettings):
 
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
+
+    # Run a lightweight sender loop inside the Telegram bot process.
+    # Useful for DEV/Windows runs where APScheduler (run_scheduler) isn't running.
+    enable_sender_in_bot: bool = True
     # APScheduler thread pool. For Raspberry Pi 3, 2 is usually safer (override via env).
     scheduler_workers: int = 2
 
@@ -86,10 +90,6 @@ class Settings(BaseSettings):
     # Scheduler tick frequency for source jobs. Sources are DB-driven (source_configs.sched_minutes).
     # Keep this small (<=60s) to react quickly, but not too small to avoid DB churn.
     scheduler_tick_seconds: int = 60
-
-    # Worker que consome a fila Playwright (scrape_jobs.queue='browser').
-    # Mantém ordem e previsibilidade para fontes browser-first.
-    scheduler_browser_worker_seconds: int = 5
 
     # Backoff automatico (protects product and helps avoid bans)
     source_backoff_max_minutes: int = 720

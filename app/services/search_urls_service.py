@@ -19,6 +19,27 @@ def _slugify(text: str) -> str:
     return s.strip("-")
 
 
+# Remove termos de ano/range do texto para construir URLs canônicas por marca/modelo.
+# Ex.: 'audi a6 entre 2014 e 2020' -> 'audi a6'
+# Isso NÃO afeta matching (só URL builder).
+_RE_YEAR = re.compile(r"\b(19\d{2}|20\d{2})\b")
+
+def _strip_year_phrases(text: str) -> str:
+    t = (text or '').strip()
+    if not t:
+        return ''
+    low = t.lower()
+    # padrões comuns em pt-BR
+    low = re.sub(r"\bentre\s+(19\d{2}|20\d{2})\s+e\s+(19\d{2}|20\d{2})\b", ' ', low)
+    low = re.sub(r"\bde\s+(19\d{2}|20\d{2})\s+a\s+(19\d{2}|20\d{2})\b", ' ', low)
+    low = re.sub(r"\b(19\d{2}|20\d{2})\s*[-/]\s*(19\d{2}|20\d{2})\b", ' ', low)
+    low = re.sub(r"\bat[eé]\s+(19\d{2}|20\d{2})\b", ' ', low)
+    # remove anos soltos
+    low = _RE_YEAR.sub(' ', low)
+    low = re.sub(r"\s+", ' ', low).strip()
+    return low
+
+
 # Minimal brand/model inference to build friendlier URLs when user doesn't type a brand.
 # You can extend this list freely.
 _MODEL_TO_BRAND = {
@@ -131,7 +152,8 @@ def webmotors_url(query: str) -> str:
     raw = (query or "").strip()
     q = quote_plus(raw)
 
-    brand, model = _infer_brand_model(raw)
+    raw2 = _strip_year_phrases(raw)
+    brand, model = _infer_brand_model(raw2 or raw)
     if brand and model:
         def _brand_display(b: str) -> str:
             b = (b or "").strip().lower()
@@ -160,7 +182,7 @@ def webmotors_url(query: str) -> str:
 
         # tenta preservar “resto” do prompt como search (ex.: "virtus gts")
         rest = ""
-        slug = _slugify(raw)
+        slug = _slugify(raw2 or raw)
         parts = [p for p in slug.split("-") if p]
         if parts:
             # se o usuário não começou pela marca, a inferência normalmente pega o primeiro token como modelo
@@ -178,7 +200,15 @@ def webmotors_url(query: str) -> str:
 def gogarage_url(query: str) -> str:
     # GoGarage é JS-heavy e historicamente alterna rotas.
     # O mais estável tem sido o host com www + index.php (evita 404 em /?q=).
-    q = quote_plus((query or "").strip())
+    raw = (query or "").strip()
+    # GoGarage search é bem literal: se colocarmos "entre 2014 e 2020" ou anos,
+    # o site frequentemente devolve resultados errados/irrelevantes.
+    raw2 = _strip_year_phrases(raw)
+    # remove anos soltos (ex: "x3 2012")
+    raw2 = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", raw2 or "")
+    raw2 = re.sub(r"\s+", " ", raw2).strip()
+
+    q = quote_plus(raw2 or raw)
     return f"https://www.gogarage.com.br/index.php?q={q}"
 
 
@@ -203,8 +233,10 @@ def mobiauto_url(query: str) -> str:
 
     raw = (query or '').strip()
 
+    raw2 = _strip_year_phrases(raw)
+
     # Inferência padrão (quando usuário informa marca/modelo)
-    brand, model = _infer_brand_model(raw)
+    brand, model = _infer_brand_model(raw2 or raw)
     if brand and model:
         return f"https://www.mobiauto.com.br/comprar/carros/brasil/{brand}/{model}"
 

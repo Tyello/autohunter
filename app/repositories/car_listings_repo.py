@@ -101,10 +101,19 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
             # mantém valores já existentes quando não-null; caso contrário, preenche do novo scrape
             "title": case(
     (
+        # GoGarage: external_id = slug, então é seguro sempre atualizar para o título mais recente.
+        (CarListing.source == "gogarage") & stmt.excluded.title.isnot(None),
+        stmt.excluded.title,
+    ),
+    (
         # atualiza título quando o existente é claramente "ruim" (ruído de UI / concat quebrada)
         (
             CarListing.title.is_(None)
             | (func.length(CarListing.title) < 6)
+            | CarListing.title.ilike('link para%')
+            | CarListing.title.ilike('% visto%')
+            | CarListing.title.ilike('% pts%')
+            | CarListing.title.ilike('% pontos%')
             | CarListing.title.ilike('%comparar%')
             | CarListing.title.ilike('reservado%')
             | CarListing.title.ilike('%| a%')

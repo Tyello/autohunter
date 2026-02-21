@@ -66,6 +66,9 @@ def _strip_title_noise(t: str) -> str:
 
     t = _deconcat(t)
 
+    # Acessibilidade/ARIA: muitos links vêm como 'Link para <carro>'
+    t = re.sub(r'^\s*link\s+para\s+', '', t, flags=re.IGNORECASE)
+
     # Remove/zera pedaços de UI
     t = _NOISE_RE.sub(" ", t)
 
@@ -90,49 +93,6 @@ def _strip_title_noise(t: str) -> str:
     return _clean_text(t)
 
 
-def _extract_title_from_card(card) -> Optional[str]:
-    """Best-effort title extraction from a Mobiauto listing card.
-
-    Mobiauto sometimes returns generic aria-label/title attributes.
-    Try semantic DOM nodes (h1/h2/h3/strong), then image alt, then a cleaned
-    version of the card text.
-    """
-
-    try:
-        for xp in (
-            ".//h1//text()",
-            ".//h2//text()",
-            ".//h3//text()",
-            ".//strong//text()",
-            ".//p[contains(@class,'title') or contains(@class,'titulo')]//text()",
-            ".//span[contains(@class,'title') or contains(@class,'titulo')]//text()",
-        ):
-            parts = [p.strip() for p in (card.xpath(xp) or []) if isinstance(p, str) and p.strip()]
-            if not parts:
-                continue
-            t = _strip_title_noise(" ".join(parts))
-            if t and 6 <= len(t) <= 160:
-                return t
-
-        alts = [a.strip() for a in (card.xpath(".//img/@alt") or []) if isinstance(a, str) and a.strip()]
-        for alt in alts:
-            t = _strip_title_noise(alt)
-            if t and 6 <= len(t) <= 160:
-                return t
-
-        raw = (card.text_content() or "").strip()
-        if raw:
-            raw = re.sub(r"R\$\s*[-\d\.,]+", " ", raw, flags=re.I)
-            raw = re.sub(r"\s+", " ", raw).strip()
-            t = _strip_title_noise(raw)
-            if t and 6 <= len(t) <= 160:
-                return t
-    except Exception:
-        return None
-
-    return None
-
-
 def _extract_price_from_text(t: str):
     # pega um pedaço pequeno ao redor do "R$" pra reduzir falso positivo
     if not t or "R$" not in t:
@@ -141,6 +101,22 @@ def _extract_price_from_text(t: str):
     snippet = t[i:i+40]
     return parse_brl_price(snippet)
 
+
+
+def _extract_best_year(text: str) -> Optional[int]:
+    """Extract a plausible model year from arbitrary card text.
+
+    Many cards show '2019/2020' or multiple years; we pick the max.
+    """
+    ys: list[int] = []
+    for m in re.finditer(r"\b(19\d{2}|20\d{2})\b", text or ""):
+        try:
+            y = int(m.group(1))
+            if 1900 <= y <= 2100:
+                ys.append(y)
+        except Exception:
+            continue
+    return max(ys) if ys else None
 
 def _pick_thumb_from_element(el, base_url: str) -> Optional[str]:
     candidates: list[str] = []
@@ -292,8 +268,10 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
         ctx=ctx,
         timeout=25,
         proxy=ctx.proxy_server,
-        wait_until="domcontentloaded",
-        timeout_ms=60000,
+        wait_until=str(getattr(ctx, 'browser_wait_until', None) or 'domcontentloaded'),
+        timeout_ms=int(getattr(ctx, 'browser_timeout_ms', 60000) or 60000),
+        min_delay_ms=int(getattr(ctx, 'browser_min_delay_ms', 120) or 120),
+        max_delay_ms=int(getattr(ctx, 'browser_max_delay_ms', 520) or 520),
     )
 
     doc = lxml_html.fromstring(html_text)
@@ -329,18 +307,45 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
             except Exception:
                 break
 
-        loc = _extract_location(raw_card)
-        text = _strip_title_noise(raw_card)
-        if not text or text.lower() in ("enviar mensagem", "ver detalhes", "detalhes"):
-            text = ""
-
-        # Se o texto do <a> vier genérico/vazio, tenta extrair do DOM do card.
-        if not text:
-            t2 = _extract_title_from_card(card)
-            if t2:
-                text = t2
-
         card_text = (card.text_content() or "")
+
+        # tenta extrair título de headings dentro do card (quando disponível)
+        heading_text = ''
+        try:
+            hs = card.xpath('.//*[self::h2 or self::h3 or self::h4 or self::strong]//text()')
+            heading_text = ' '.join([x.strip() for x in hs if x and x.strip()])
+        except Exception:
+            heading_text = ''
+
+        # Title + location may be missing on the <a> itself (often it's just 'Ver detalhes').
+        # So we fall back to the card container text, which usually contains make/model/year.
+        loc = _extract_location(raw_card) or _extract_location(card_text)
+
+        t1 = _strip_title_noise(raw_card)
+        t2 = _strip_title_noise(heading_text or card_text)
+
+        def _good_title(t: str) -> bool:
+            t = (t or '').strip()
+            if not t or len(t) < 6 or len(t) > 160:
+                return False
+            tl = t.lower()
+            if tl in ("enviar mensagem", "ver detalhes", "detalhes"):
+                return False
+            if tl.startswith('link para '):
+                return False
+            # avoid titles that are just a location
+            if loc and tl == (loc or '').lower():
+                return False
+            # require at least 2 tokens
+            return len(t.split()) >= 2
+
+        text = t2 if _good_title(t2) else (t1 if _good_title(t1) else '')
+
+        # If wishlists rely on year filters, ensure year is discoverable.
+        y = _extract_best_year(card_text)
+        if y and str(y) not in text:
+            text = (text + f" {y}").strip() if text else str(y)
+
         price = _extract_price_from_text(card_text) or _extract_price_from_text(raw_card)
 
         # thumbnail (best-effort): tenta no card e depois no <a>

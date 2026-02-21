@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from app.core.settings import settings
+from app.scrapers.base import FetchBlocked
 
 
 @dataclass
@@ -475,16 +476,17 @@ class _PlaywrightCore:
                 return _default_pred
             if m in ("next_data", "nextjs", "_next_data"):
                 def _p(u: str, h: dict, s: int) -> bool:
-                    ct = (h.get("content-type") or "").lower()
-                    return s == 200 and ("application/json" in ct or u.endswith(".json")) and "/_next/data/" in u
+                    # capture even when blocked (403/429) to fail fast with a clear reason
+                    if s not in (200, 403, 429):
+                        return False
+                    return "/_next/data/" in (u or "")
                 return _p
             if m.startswith("url_contains:"):
-                needle = m.split(":", 1)[1]
+                needle = m.split(":", 1)[1].lower()
                 def _p(u: str, h: dict, s: int) -> bool:
-                    if s != 200:
+                    if s not in (200, 403, 429):
                         return False
-                    ct = (h.get("content-type") or "").lower()
-                    return needle in (u or "").lower() and ("application/json" in ct or u.endswith(".json"))
+                    return needle in (u or "").lower()
                 return _p
             if m.startswith("url_regex:"):
                 rx = m.split(":", 1)[1]
@@ -493,10 +495,9 @@ class _PlaywrightCore:
                 except Exception:
                     cre = re.compile(re.escape(rx))
                 def _p(u: str, h: dict, s: int) -> bool:
-                    if s != 200:
+                    if s not in (200, 403, 429):
                         return False
-                    ct = (h.get("content-type") or "").lower()
-                    return bool(cre.search(u or "")) and ("application/json" in ct or u.endswith(".json"))
+                    return bool(cre.search(u or ""))
                 return _p
             # Unknown mode: fallback to any_json
             return _default_pred
@@ -508,13 +509,42 @@ class _PlaywrightCore:
 
         final_url = url
         try:
-            with page.expect_response(lambda r: pred(r.url, r.headers, r.status), timeout=timeout_ms) as resp_info:
-                page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            captured_resp: dict[str, object] = {"resp": None}
 
-            resp = resp_info.value
+            def _on_response(resp: Any) -> None:
+                try:
+                    if captured_resp["resp"] is None and pred(resp.url, resp.headers, resp.status):
+                        captured_resp["resp"] = resp
+                except Exception:
+                    pass
+
+            try:
+                page.on("response", _on_response)
+            except Exception:
+                pass
+
+            page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+
+            deadline = time.time() + (timeout_ms / 1000.0)
+            while time.time() < deadline and captured_resp["resp"] is None:
+                page.wait_for_timeout(150)
+
+            resp = captured_resp["resp"]
+            if resp is None:
+                raise TimeoutError(f"No JSON response matched (capture_mode={capture_mode})")
+
             captured_url = resp.url
-            captured_data = resp.json()
             final_url = page.url
+
+            status = int(getattr(resp, "status", 0) or 0)
+            if status in (403, 429):
+                raise FetchBlocked(status, captured_url, reason="http_status")
+
+            try:
+                captured_data = resp.json()
+            except Exception:
+                # Some sources return HTML challenges behind a 200; treat as blocked.
+                raise FetchBlocked(status or 200, captured_url, reason="non_json")
         finally:
             try:
                 page.close()

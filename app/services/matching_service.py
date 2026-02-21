@@ -39,6 +39,29 @@ def _effective_terms(query: str) -> list[str]:
     ts = tokens(query or "")
     return [t for t in ts if t and t not in _STOPWORDS]
 
+
+
+def _expand_alphanum_pairs(ts: list[str]) -> set[str]:
+    """Expande tokens adjacentes para cobrir casos como 'A 6' vs 'A6'.
+
+    Exemplos:
+      - ['a', '6'] -> {'a6'}
+      - ['320', 'i'] -> {'320i'}
+
+    Isso aumenta recall sem NLP pesado.
+    """
+    out: set[str] = set()
+    for i in range(len(ts) - 1):
+        a = ts[i]
+        b = ts[i + 1]
+        if not a or not b:
+            continue
+        if a.isalpha() and len(a) <= 3 and b.isdigit() and len(b) <= 4:
+            out.add(a + b)
+        if a.isdigit() and len(a) <= 4 and b.isalpha() and len(b) <= 3:
+            out.add(a + b)
+    return out
+
 def _extract_year_from_url(url: str) -> int | None:
     if not url:
         return None
@@ -118,7 +141,9 @@ def text_match(query: str, listing: CarListing) -> bool:
     if not (listing.title or "").strip():
         base = (base + " " + (listing.url or "")).strip()
 
-    hay_tokens = set(tokens(base))
+    ht_list = tokens(base)
+    hay_tokens = set(ht_list)
+    hay_tokens |= _expand_alphanum_pairs(ht_list)
     year = _extract_year(listing)
 
     # Se houver outros termos além de anos, não deixe um "1993" isolado matar o match.
@@ -148,7 +173,7 @@ def _build_listing_ctx(listings: Sequence[CarListing]) -> dict:
     for l in listings:
         base = _hay_for_listing(l)
         ctx[l.id] = {
-            "hay_tokens": set(tokens(base)),
+            "hay_tokens": (lambda _ts: (set(_ts) | _expand_alphanum_pairs(_ts)))(tokens(base)),
             "year": _extract_year(l),
             "hay_norm": None,  # calculado sob demanda para semantic rules
         }
@@ -498,7 +523,9 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
         terms = [t for t in terms if not _is_year_token(t)]
 
     if terms:
-        hay_tokens = set(tokens(_hay_for_listing(listing)))
+        ht_list = tokens(_hay_for_listing(listing))
+        hay_tokens = set(ht_list)
+        hay_tokens |= _expand_alphanum_pairs(ht_list)
         if not all(_term_satisfied(t, hay_tokens, year) for t in terms):
             return "text_terms"
 
