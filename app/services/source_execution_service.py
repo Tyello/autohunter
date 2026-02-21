@@ -178,6 +178,8 @@ def run_source_for_all_wishlists(
     total_inserted = 0
     total_matched = 0
     total_queued = 0
+    total_already_notified = 0
+    total_cap_skipped = 0
     any_hybrid_browser = False
     any_hybrid_blocked = False
     last_hybrid_blocked_status: int | None = None
@@ -321,6 +323,8 @@ def run_source_for_all_wishlists(
         total_inserted += int(res.get("inserted") or 0)
         total_matched += int(res.get("matched") or 0)
         total_queued += int(res.get("queued") or 0)
+        total_already_notified += int(res.get("already_notified") or 0)
+        total_cap_skipped += int(res.get("cap_skipped") or 0)
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
 
@@ -328,7 +332,7 @@ def run_source_for_all_wishlists(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
     )
     run_row = record_run(
         db,
@@ -345,7 +349,7 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
-        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
+        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "queue_diag": {"already_notified": total_already_notified, "cap_skipped": total_cap_skipped}},
     )
 
     emit_event(
@@ -355,11 +359,11 @@ def run_source_for_all_wishlists(
         source=src,
         run_id=run_row.id,
         message="run_ok",
-        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "duration_ms": duration_ms, "kind": kind},
+        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "duration_ms": duration_ms, "kind": kind},
         tags=[kind, "ok"],
     )
 
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped}

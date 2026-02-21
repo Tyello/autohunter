@@ -674,9 +674,22 @@ async def _admin_runall(update: Update, raw_args: List[str]):
                 st = res.get("status")
 
                 if st == "success":
+                    m = int(res.get("matched") or 0)
+                    q = int(res.get("queued") or 0)
+                    extra = []
+                    if m > 0 and q == 0:
+                        an = int(res.get("already_notified") or 0)
+                        cs = int(res.get("cap_skipped") or 0)
+                        if an:
+                            extra.append(f"already_notified={an}")
+                        if cs:
+                            extra.append(f"cap_skipped={cs}")
+                        if not extra:
+                            extra.append("queue_reason=unknown")
+                    extra_s = (" " + " ".join(extra)) if extra else ""
                     lines.append(
                         f"- {src}: ✅ success found={res.get('found')} ins={res.get('inserted')} "
-                        f"match={res.get('matched')} queued={res.get('queued')} dur={res.get('duration_ms')}ms"
+                        f"match={res.get('matched')} queued={res.get('queued')}{extra_s} dur={res.get('duration_ms')}ms"
                     )
                 elif st == "blocked":
                     lines.append(
@@ -944,7 +957,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
             dur = f"{lr.duration_ms}ms" if lr.duration_ms is not None else "-"
             found = f"{lr.items_found}" if lr.items_found is not None else "-"
             match = f"{lr.items_matched}" if lr.items_matched is not None else "-"
-            last_line = f"last {lr.status} at={_fmt_dt(lr.created_at)} dur={dur} found={found} match={match}"
+            queued = f"{lr.notifications_queued}" if lr.notifications_queued is not None else "-"
+            last_line = f"last {lr.status} at={_fmt_dt(lr.created_at)} dur={dur} found={found} match={match} queued={queued}"
             if lr.http_status is not None:
                 last_line += f" http={lr.http_status}"
             payload = lr.payload or {}
@@ -954,6 +968,25 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 if payload.get("hybrid_blocked") is True:
                     hs = payload.get("hybrid_blocked_status")
                     last_line += f" blocked=1" + (f" blocked_http={hs}" if hs is not None else "")
+
+                # queue diagnostics (match>0 but queued==0)
+                qd = payload.get("queue_diag") if payload else None
+                try:
+                    mi = int(lr.items_matched or 0)
+                    qi = int(lr.notifications_queued or 0)
+                except Exception:
+                    mi = 0
+                    qi = 0
+                if mi > 0 and qi == 0 and isinstance(qd, dict):
+                    bits = []
+                    an = qd.get("already_notified")
+                    cs = qd.get("cap_skipped")
+                    if an:
+                        bits.append(f"already_notified={int(an)}")
+                    if cs:
+                        bits.append(f"cap_skipped={int(cs)}")
+                    if bits:
+                        last_line += " " + " ".join(bits)
 
         lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind} | " + " ".join(flags))
         if st:
