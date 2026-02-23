@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -10,6 +11,19 @@ from app.repositories.car_listings_repo import insert_ignore_duplicates_return_i
 
 # car_listings.price is NUMERIC(12,2): absolute value must be < 10^10.
 _MAX_DB_PRICE = Decimal("9999999999.99")
+
+
+@dataclass(frozen=True)
+class IngestStats:
+    """Estatísticas de ingest.
+
+    inserted_new / updated dependem de o repo suportar `with_stats=True`.
+    Em versões antigas, caímos para uma estimativa compatível.
+    """
+    ids: list
+    inserted_new: int
+    updated: int
+    upserted: int
 
 
 def _sanitize_price(v: Any) -> Decimal | None:
@@ -27,11 +41,9 @@ def _sanitize_price(v: Any) -> Decimal | None:
         elif isinstance(v, (int, float)):
             d = Decimal(str(v))
         elif isinstance(v, str):
-            # strings should already be parsed upstream, but be defensive.
             vv = v.strip()
             if not vv:
                 return None
-            # keep only digits and separators
             vv = "".join(ch for ch in vv if ch.isdigit() or ch in ".,")
             vv = vv.replace(".", "").replace(",", ".")
             d = Decimal(vv)
@@ -65,9 +77,41 @@ def _sanitize_listings(listings: list[dict]) -> list[dict]:
 
 
 def ingest_listings(db: Session, listings: list[dict]):
+    """Compat: retorna lista de IDs upsertados."""
     if not listings:
         return []
 
     listings = _sanitize_listings(listings)
     inserted_ids = insert_ignore_duplicates_return_ids(db, listings)
     return list(inserted_ids or [])
+
+
+def ingest_listings_stats(db: Session, listings: list[dict]) -> IngestStats:
+    """Ingest com contagem separada: novos vs updates.
+
+    - Se `insert_ignore_duplicates_return_ids(..., with_stats=True)` existir,
+      usamos os contadores reais.
+    - Caso contrário (repo antigo), mantemos compatibilidade sem quebrar o scheduler.
+    """
+    if not listings:
+        return IngestStats(ids=[], inserted_new=0, updated=0, upserted=0)
+
+    listings = _sanitize_listings(listings)
+
+    try:
+        res = insert_ignore_duplicates_return_ids(db, listings, with_stats=True)
+        if isinstance(res, dict):
+            ids = list(res.get("ids") or [])
+            inserted_new = int(res.get("inserted_new") or 0)
+            updated = int(res.get("updated") or 0)
+            upserted = int(res.get("upserted") or 0)
+            return IngestStats(ids=ids, inserted_new=inserted_new, updated=updated, upserted=upserted)
+
+        # fallback defensive: if a future repo returns a list even with with_stats
+        ids = list(res or [])
+        return IngestStats(ids=ids, inserted_new=len(ids), updated=0, upserted=len(ids))
+
+    except TypeError:
+        # Repo não suporta with_stats -> comportamento antigo
+        ids = list(insert_ignore_duplicates_return_ids(db, listings) or [])
+        return IngestStats(ids=ids, inserted_new=len(ids), updated=0, upserted=len(ids))
