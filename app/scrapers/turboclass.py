@@ -1,244 +1,242 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html
-from app.scrapers.fetching import fetch_html_with_browser_fallback
-from app.scrapers.parsing import parse_brl_price
-from app.scrapers.utils import normalize_asset_url, pick_from_srcset
 from app.scrapers.contract import finalize_listings
+from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
 
-_BASE = "https://turboclass.com.br"
+_BASE = "https://turboclass.com.br/"
+
+_RE_BG_URL = re.compile(r"url\((?:'|\")?(.*?)(?:'|\")?\)", re.I)
 
 
-# O TurboClass usa hrefs relativos SEM barra inicial (ex.: "anuncio/detalhe/..."),
-# então aceitamos com ou sem "/" para não perder anúncios.
-_RE_DETAIL = re.compile(r"(?:^|/)(?:anuncio/detalhe)/([^/?#]+)", re.I)
-_RE_TC_ID = re.compile(r"\b(tc-[a-z0-9]+)\b", re.I)
-_RE_YEARS = re.compile(r"\bANO\s*/\s*MODELO\s*(19\d{2}|20\d{2})\s*/\s*(19\d{2}|20\d{2})\b", re.I)
-_RE_LOCATION = re.compile(r"\bLOCALIDADE\s+(.+?)\s+detalhes\b", re.I)
+def _clean_text(t: str) -> str:
+    return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
 
-def _extract_external_id(url: str) -> str:
-    """TurboClass usa um slug estável: tc-xxxxxx-..."""
-    u = (url or "").strip()
-    if not u:
+def _canonical_url(url: str) -> str:
+    """Drop query/fragment to reduce duplicates."""
+    try:
+        sp = urlsplit(url)
+        return urlunsplit((sp.scheme, sp.netloc, sp.path, "", ""))
+    except Exception:
+        return url
+
+
+def _abs_url(href: str) -> str:
+    href = (href or "").strip()
+    if not href:
         return ""
-
-    m = _RE_DETAIL.search(u)
-    slug = m.group(1) if m else ""
-    if slug:
-        m2 = _RE_TC_ID.search(slug)
-        return (m2.group(1).lower() if m2 else slug)
-
-    # fallback: o contract.finalize_listings tem fallback por URL, mas preferimos estabilidade
-    return u
+    # TurboClass uses relative hrefs like "anuncio/detalhe/..." (without leading slash)
+    return urljoin(_BASE, href)
 
 
-def _extract_thumb_from_anchor(a) -> Optional[str]:
-    img = a.select_one("img")
-    if img:
-        cand = (
-            img.get("data-src")
-            or img.get("data-original")
-            or img.get("data-lazy-src")
-            or img.get("src")
-        )
-        if not cand:
-            cand = pick_from_srcset(img.get("data-srcset") or img.get("srcset") or "", prefer_last=True)
-        if cand:
-            return normalize_asset_url(cand, _BASE)
+def _extract_external_id(href: str) -> Optional[str]:
+    href = (href or "").strip().lstrip("/")
+    m = re.search(r"\banuncio/detalhe/(tc-[a-z0-9]+)", href, re.I)
+    return m.group(1) if m else None
 
-    src = a.select_one("source[srcset]")
-    if src:
-        cand = pick_from_srcset(src.get("srcset") or "", prefer_last=True)
-        if cand:
-            return normalize_asset_url(cand, _BASE)
 
-    # background-image inline
-    el = a.select_one("[style*='background-image']")
-    if el:
-        style = el.get("style") or ""
-        m = re.search(r"background-image\s*:\s*url\((['\"]?)([^'\")]+)\1\)", style, re.I)
-        if m:
-            return normalize_asset_url(m.group(2), _BASE)
+def _extract_bg_image(style: str) -> Optional[str]:
+    if not style:
+        return None
+    m = _RE_BG_URL.search(style)
+    if not m:
+        return None
+    raw = (m.group(1) or "").strip()
+    if not raw or raw.startswith("data:"):
+        return None
+    return urljoin(_BASE, raw)
 
+
+def _find_row_value(card: BeautifulSoup, key: str) -> str:
+    """Find table row where first cell contains `key` and return the value cell text."""
+    key = (key or "").strip().lower()
+    if not key:
+        return ""
+    for tr in card.select("table tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 2:
+            continue
+        k = _clean_text(tds[0].get_text(" ", strip=True)).lower()
+        if k == key:
+            return _clean_text(tds[1].get_text(" ", strip=True))
+    return ""
+
+
+def _parse_year(year_model_text: str) -> Optional[int]:
+    """Parse '2009/2010' -> 2010 (prefer model year)."""
+    t = (year_model_text or "").strip()
+    if not t:
+        return None
+    years = re.findall(r"\b(19\d{2}|20\d{2})\b", t)
+    if not years:
+        return None
+    try:
+        y = int(years[-1])  # prefer model year when present
+        if 1900 <= y <= 2100:
+            return y
+    except Exception:
+        return None
     return None
 
 
-def _parse_year(text: str) -> Optional[int]:
-    if not text:
-        return None
+def _build_title(make: str, model: str, anchor_title: str, spec: str, year: Optional[int]) -> str:
+    make = _clean_text(make)
+    model = _clean_text(model)
+    at = _clean_text(anchor_title)
+    spec = _clean_text(spec)
 
-    m = _RE_YEARS.search(text)
-    if m:
-        try:
-            y = int(m.group(1))
-            return y if 1960 <= y <= 2035 else None
-        except Exception:
-            return None
+    base = " ".join([make, model]).strip()
 
-    m2 = re.search(r"\b(19\d{2}|20\d{2})\b", text)
-    if m2:
-        try:
-            y = int(m2.group(1))
-            return y if 1960 <= y <= 2035 else None
-        except Exception:
-            return None
-    return None
+    # Prefer anchor title because it contains tokens like "SI", "K24", etc.
+    if at:
+        low = at.lower()
+        if make and low.startswith(make.lower()):
+            title = at
+        elif base and low.startswith(base.lower()):
+            title = at
+        elif make:
+            title = f"{make} {at}".strip()
+        else:
+            title = at
+    else:
+        title = base
 
+    # Add spec (Original/Turbo/etc) only if it isn't already there.
+    if spec and spec.lower() not in title.lower():
+        title = f"{title} {spec}".strip()
 
-def _parse_location(text: str) -> Optional[str]:
-    if not text:
-        return None
+    # Put year in title to keep year filters working even in legacy schema.
+    if year and str(year) not in title:
+        title = f"{title} {year}".strip()
 
-    m = _RE_LOCATION.search(text)
-    if m:
-        loc = " ".join((m.group(1) or "").replace("\xa0", " ").split())
-        return loc.strip() or None
-
-    # fallback: último padrão Cidade/UF no texto
-    matches = list(re.finditer(r"([A-Za-zÀ-ÿ0-9\s\-\.]+\/[A-Z]{2})\b", text))
-    if matches:
-        loc = " ".join(matches[-1].group(1).split())
-        return loc.strip() or None
-
-    return None
+    return title
 
 
-def _parse_title(text: str) -> Optional[str]:
-    if not text:
-        return None
+def scrape_turboclass(search_url: str, ctx: ScrapeContext | None = None, limit: int = 80) -> list[dict]:
+    """HTTP-first TurboClass scraper.
 
-    # Ex.: "Volkswagen Gol Turbo Motorização VALOR R$ ..."
-    head = text
-    if "VALOR" in head.upper():
-        head = re.split(r"\bVALOR\b", head, maxsplit=1, flags=re.I)[0]
-
-    # TurboClass às vezes usa unicode com combining marks (ex.: "Motorização"),
-    # então cortamos pelo prefixo "Motoriz" ao invés de tentar casar o token inteiro.
-    head = re.split(r"\bMotoriz", head, maxsplit=1, flags=re.I)[0].strip()
-    head = " ".join(head.replace("\xa0", " ").split())
-    return head or None
-
-
-DETAIL_THUMB_MAX = 3
-
-
-def scrape_turboclass(
-    search_url: str,
-    limit: int = 50,
-    ctx: Optional[ScrapeContext] = None,
-) -> list[dict]:
-    """Scrape TurboClass (SSR) list page.
-
-    Mantém scraping leve (1 página) e, opcionalmente, enriquece thumbs via OG:image
-    em até `DETAIL_THUMB_MAX` anúncios (budget) para reduzir casos sem foto no Telegram.
+    Gotchas:
+    - card hrefs are relative like "anuncio/detalhe/..." (no leading slash)
+    - images are in inline styles (background-image)
     """
 
-    if ctx is not None:
-        html = fetch_html_with_browser_fallback(
-            search_url,
-            ctx=ctx,
-            referer=_BASE + "/",
-            wait_until="domcontentloaded",
-        )
-    else:
-        html = fetch_html(search_url)
-
-    soup = BeautifulSoup(html, "html.parser")
+    html = fetch_html(search_url, ctx=ctx)
+    soup = BeautifulSoup(html or "", "html.parser")
 
     out: list[dict] = []
-    for a in soup.select('a[href*="anuncio/detalhe/"]'):
-        href = a.get("href")
+
+    anchors = soup.select('a.car-link[href*="anuncio/detalhe/"]')
+    if not anchors:
+        anchors = soup.select('a[href*="anuncio/detalhe/"]')
+
+    is_sold_mode = ("/vendidos" in (search_url or "")) or ("vendidos" in (search_url or "").lower()) or (
+        bool(ctx) and (getattr(ctx, "source", "").strip().lower() in {"turboclass_vendidos", "turboclass_sold"})
+    )
+
+    for a in anchors:
+        href = (a.get("href") or "").strip()
         if not href:
             continue
 
-        text = (a.get_text(" ", strip=True) or "").strip()
-        if not text:
+        ext = _extract_external_id(href)
+        if not ext:
             continue
 
-        # Guardrail: a listagem de anúncios sempre traz VALOR/ANO/MODELO/LOCALIDADE no texto.
-        if "R$" not in text and "VALOR" not in text.upper():
+        url = _canonical_url(_abs_url(href))
+        if not url:
             continue
 
-        # href pode vir como "anuncio/detalhe/..." (sem /) ou "/anuncio/detalhe/...".
-        url = href.strip()
-        if not url.startswith("http"):
-            url = urljoin(_BASE + "/", url)
+        # Card container
+        try:
+            card = a.find_parent(class_=re.compile(r"car-col|car-card", re.I)) or a
+        except Exception:
+            card = a
 
-        external_id = _extract_external_id(url)
-        if not external_id:
-            continue
+        # make/model from title-wrap
+        make = ""
+        model = ""
+        tw = None
+        if hasattr(card, "select_one"):
+            tw = card.select_one(".title-wrap")
+        if tw is None:
+            tw = a.select_one(".title-wrap")
+        if tw is not None:
+            h6 = tw.find("h6")
+            h5 = tw.find("h5")
+            if h6:
+                make = _clean_text(h6.get_text(" ", strip=True))
+            if h5:
+                model = _clean_text(h5.get_text(" ", strip=True))
 
-        price: Optional[Decimal] = parse_brl_price(text)
-        title = _parse_title(text)
-        year = _parse_year(text)
-        location = _parse_location(text)
-        thumb = _extract_thumb_from_anchor(a)
+        # spec from grid-specs
+        spec = ""
+        gs = None
+        if hasattr(card, "select_one"):
+            gs = card.select_one(".grid-specs")
+        if gs is None:
+            gs = a.select_one(".grid-specs")
+        if gs is not None:
+            h = gs.find("h5")
+            if h:
+                spec = _clean_text(h.get_text(" ", strip=True))
 
-        out.append(
-            {
+        price = None
+        year = None
+        location = ""
+        if hasattr(card, "select"):
+            price = parse_brl_price(_find_row_value(card, "valor"))
+            year = _parse_year(_find_row_value(card, "ano/modelo"))
+            location = _find_row_value(card, "localidade")
+
+        thumb = None
+        img_div = None
+        if hasattr(card, "select_one"):
+            img_div = card.select_one("div[style*='background-image']")
+        if img_div is None:
+            img_div = a.select_one("div[style*='background-image']")
+        if img_div is not None:
+            thumb = _extract_bg_image(img_div.get("style") or "")
+
+        anchor_title = a.get("title") or ""
+        title = _build_title(make, model, anchor_title, spec, year)
+
+        payload = {
+                # IMPORTANT: sold-mode still updates the *same* source listings.
                 "source": "turboclass",
-                "external_id": str(external_id),
-                "title": title,
+                "external_id": ext,
+                "title": title or None,
                 "url": url,
                 "thumbnail_url": thumb,
                 "price": price,
                 "currency": "BRL",
-                "location": location,
-                # persistência indireta (decorated title) no repo
+                "location": location or None,
+                # optional structured fields (inserted only if schema supports)
                 "year": year,
-            }
-        )
+                "make": make or None,
+                "model": model or None,
+        }
 
-        if len(out) >= int(limit or 0):
+        if is_sold_mode:
+            payload["is_sold"] = True
+            payload["sold_at"] = datetime.now(timezone.utc)
+            payload["listing_type"] = "marketplace"
+            payload.setdefault("extras", {})
+            payload["extras"] = dict(payload["extras"] or {})
+            payload["extras"]["sold_source"] = "turboclass_vendidos"
+
+        out.append(payload)
+
+        if limit and len(out) >= int(limit):
             break
 
-    # dedupe interno (antes do enrichment)
-    seen: set[tuple[str, str]] = set()
-    uniq: list[dict] = []
-    for it in out:
-        key = ((it.get("source") or ""), (it.get("external_id") or ""))
-        if not key[0] or not key[1] or key in seen:
-            continue
-        seen.add(key)
-        uniq.append(it)
-
-    # Enriquecimento barato: OG:image na página do anúncio (budget fixo)
-    missing = [it for it in uniq if not it.get("thumbnail_url") and it.get("url")]
-    if missing:
-        budget = DETAIL_THUMB_MAX
-        for it in missing:
-            if budget <= 0:
-                break
-            try:
-                html_d = fetch_html(
-                    it["url"],
-                    ctx=ctx,
-                    referer=_BASE + "/",
-                    timeout=25,
-                    min_delay_ms=120,
-                    max_delay_ms=420,
-                )
-                s2 = BeautifulSoup(html_d, "html.parser")
-                meta = s2.select_one('meta[property="og:image"]') or s2.select_one('meta[name="twitter:image"]')
-                if meta and meta.get("content"):
-                    it["thumbnail_url"] = normalize_asset_url(meta.get("content"), _BASE)
-                    budget -= 1
-                    continue
-                img = s2.select_one("img[src]")
-                if img and img.get("src"):
-                    it["thumbnail_url"] = normalize_asset_url(img.get("src"), _BASE)
-                    budget -= 1
-            except Exception:
-                continue
-
-    return finalize_listings("turboclass", uniq)
+    return finalize_listings("turboclass", out)

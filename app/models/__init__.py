@@ -9,6 +9,7 @@ from .telemetry_event import TelemetryEvent
 from .source_state import SourceState
 from .source_run import SourceRun
 from .source_config import SourceConfig
+from .source_url_cursor import SourceUrlCursor
 from .plan import Plan
 from .subscription import Subscription
 from .account import Account
@@ -28,6 +29,7 @@ __all__ = [
     "SourceState",
     "SourceRun",
     "SourceConfig",
+    "SourceUrlCursor",
     "Plan",
     "Subscription",
     "Account",

@@ -96,11 +96,30 @@ def ensure_source_configs(db: Session) -> int:
         db.execute(select(SourceConfig.source)).scalars().all()
     )
     created = 0
+    updated = 0
     for plugin in list_sources():
         src = plugin.name.strip().lower()
         if not src:
             continue
         if src in existing_sources:
+            # Backfill missing keys in `extra` using plugin defaults (DB remains source of truth).
+            # This is intentionally non-destructive: it only fills keys that are absent.
+            try:
+                defaults = getattr(plugin, "default_extra", None) or {}
+                if defaults:
+                    cfg = get_source_config(db, src)
+                    if cfg is not None:
+                        cur = cfg.extra or {}
+                        changed = False
+                        for k, v in defaults.items():
+                            if k not in cur:
+                                cur[k] = v
+                                changed = True
+                        if changed:
+                            cfg.extra = cur
+                            updated += 1
+            except Exception:
+                pass
             continue
 
         row = SourceConfig(
@@ -120,7 +139,7 @@ def ensure_source_configs(db: Session) -> int:
     # SessionLocal in this project uses autoflush=False. We must flush here so
     # that subsequent SELECTs in the same transaction can "see" freshly added
     # rows (e.g. /admin sources enable <source>). Commit is handled by callers.
-    if created:
+    if created or updated:
         try:
             db.flush()
         except Exception:

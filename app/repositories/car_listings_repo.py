@@ -77,14 +77,39 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
 
     # Drop/encode extra fields (ex: year/km) to avoid SQLAlchemy CompileError
     # "Unconsumed column names" on bulk insert.
+    #
+    # IMPORTANT:
+    # - If the schema already has `year`/`km` columns, keep them.
+    # - If it doesn't, encode them into title (legacy behavior).
     allowed_cols = set(CarListing.__table__.columns.keys())
+    has_year_col = "year" in allowed_cols
+    # legacy scrapers might send "km"; schema uses mileage_km
+    has_km_col = ("km" in allowed_cols) or ("mileage_km" in allowed_cols)
     prepared: list[dict] = []
     for l in listings:
         if not isinstance(l, dict):
             continue
-        year = l.pop("year", None)
-        km = l.pop("km", None)
-        if l.get("title"):
+
+        year = None
+        km = None
+        if not has_year_col:
+            year = l.pop("year", None)
+        # mileage: accept both keys
+        km_in = None
+        if "mileage_km" in l and l.get("mileage_km") is not None:
+            km_in = l.pop("mileage_km", None)
+        if "km" in l and l.get("km") is not None:
+            km_in = l.pop("km", None)
+
+        if "mileage_km" in allowed_cols and km_in is not None:
+            l["mileage_km"] = km_in
+        elif "km" in allowed_cols and km_in is not None:
+            l["km"] = km_in
+        else:
+            km = km_in
+
+        # Only decorate when we had to pop (legacy schema without columns).
+        if l.get("title") and (year is not None or km is not None):
             l["title"] = _decorate_title_with_year_km(l.get("title"), year, km)
         # keep only columns that actually exist in the table
         prepared.append({k: v for k, v in l.items() if k in allowed_cols})
@@ -103,6 +128,17 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
     (
         # GoGarage: external_id = slug, então é seguro sempre atualizar para o título mais recente.
         (CarListing.source == "gogarage") & stmt.excluded.title.isnot(None),
+        stmt.excluded.title,
+    ),
+    (
+        # TurboClass: o primeiro ingest pode vir "capado" (sem 'SI', sem ano/modelo etc).
+        # Se o novo título for claramente mais informativo, atualiza.
+        (CarListing.source == "turboclass")
+        & stmt.excluded.title.isnot(None)
+        & (
+            CarListing.title.is_(None)
+            | (func.length(stmt.excluded.title) > (func.length(CarListing.title) + 3))
+        ),
         stmt.excluded.title,
     ),
     (
@@ -147,6 +183,24 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
 ),
             "price": func.coalesce(CarListing.price, stmt.excluded.price),
             "location": func.coalesce(CarListing.location, stmt.excluded.location),
+            # Promoted common fields: fill when missing.
+            "year": func.coalesce(CarListing.year, stmt.excluded.year),
+            "make": func.coalesce(CarListing.make, stmt.excluded.make),
+            "model": func.coalesce(CarListing.model, stmt.excluded.model),
+            "mileage_km": func.coalesce(CarListing.mileage_km, stmt.excluded.mileage_km),
+            # Sold state: once sold, never revert (OR semantics).
+            "is_sold": (
+                func.coalesce(CarListing.is_sold, False)
+                | func.coalesce(stmt.excluded.is_sold, False)
+            ),
+            # When marking sold, keep the first sold_at we saw (or set it from excluded).
+            "sold_at": case(
+                (
+                    (CarListing.sold_at.is_(None) & stmt.excluded.sold_at.isnot(None)),
+                    stmt.excluded.sold_at,
+                ),
+                else_=CarListing.sold_at,
+            ),
             # url normalmente é estável; se mudar, preferimos o novo
             "updated_at": func.now(),
             "url": stmt.excluded.url,

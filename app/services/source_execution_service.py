@@ -139,34 +139,40 @@ def run_source_for_all_wishlists(
         if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
             return {"ok": True, "status": "skipped", "reason": "not_due"}
 
-    wishlists = (
-        db.query(Wishlist)
-        .options(joinedload(Wishlist.filters))
-        .filter(Wishlist.is_active == True)
-        .all()
-    )
-    if not wishlists:
-        log(db, "info", component, "no_active_wishlists")
-        db.commit()
-        return {"ok": True, "status": "skipped", "reason": "no_active_wishlists"}
+    # Feed sources (maintenance/inventory) can run without wishlists.
+    if not bool(getattr(plugin, "supports_wishlist_monitoring", True)):
+        url = plugin.build_url("")
+        groups: dict[str, dict] = {url: {"query": None, "wishlists": []}}
+        wishlists = []
+    else:
+        wishlists = (
+            db.query(Wishlist)
+            .options(joinedload(Wishlist.filters))
+            .filter(Wishlist.is_active == True)
+            .all()
+        )
+        if not wishlists:
+            log(db, "info", component, "no_active_wishlists")
+            db.commit()
+            return {"ok": True, "status": "skipped", "reason": "no_active_wishlists"}
 
-    groups: dict[str, dict] = {}
-    allowed_map = allowed_sources_for_wishlists(db, wishlists)
-    for w in wishlists:
-        sources = allowed_map.get(w.id) or set()
-        if src not in sources:
-            continue
-        url = plugin.build_url(w.query)
-        g = groups.get(url)
-        if g is None:
-            groups[url] = {"query": w.query, "wishlists": [w]}
-        else:
-            g["wishlists"].append(w)
+        groups = {}
+        allowed_map = allowed_sources_for_wishlists(db, wishlists)
+        for w in wishlists:
+            sources = allowed_map.get(w.id) or set()
+            if src not in sources:
+                continue
+            url = plugin.build_url(w.query)
+            g = groups.get(url)
+            if g is None:
+                groups[url] = {"query": w.query, "wishlists": [w]}
+            else:
+                g["wishlists"].append(w)
 
-    if not groups:
-        log(db, "info", component, "no_matching_wishlists")
-        db.commit()
-        return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists"}
+        if not groups:
+            log(db, "info", component, "no_matching_wishlists")
+            db.commit()
+            return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists"}
 
     ctx = build_scrape_context(db, src)
 
@@ -178,10 +184,7 @@ def run_source_for_all_wishlists(
     total_inserted = 0
     total_matched = 0
     total_queued = 0
-    total_already_notified = 0
-    total_cap_skipped = 0
-    total_invalid_listing = 0
-    total_queue_buckets: dict[str, int] = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
+    total_thumb_present = 0
     any_hybrid_browser = False
     any_hybrid_blocked = False
     last_hybrid_blocked_status: int | None = None
@@ -325,16 +328,7 @@ def run_source_for_all_wishlists(
         total_inserted += int(res.get("inserted") or 0)
         total_matched += int(res.get("matched") or 0)
         total_queued += int(res.get("queued") or 0)
-        total_already_notified += int(res.get("already_notified") or 0)
-        total_cap_skipped += int(res.get("cap_skipped") or 0)
-        total_invalid_listing += int(res.get("invalid_listing") or 0)
-        b = res.get("queue_buckets")
-        if isinstance(b, dict):
-            for k in total_queue_buckets.keys():
-                try:
-                    total_queue_buckets[k] += int(b.get(k) or 0)
-                except Exception:
-                    pass
+        total_thumb_present += int(res.get("thumb_present") or 0)
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
 
@@ -342,7 +336,7 @@ def run_source_for_all_wishlists(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "invalid_listing": total_invalid_listing, "queue_buckets": total_queue_buckets, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
     )
     run_row = record_run(
         db,
@@ -359,7 +353,7 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
-        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "queue_diag": {"already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "invalid_listing": total_invalid_listing, "buckets": total_queue_buckets}},
+        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0},
     )
 
     emit_event(
@@ -369,11 +363,11 @@ def run_source_for_all_wishlists(
         source=src,
         run_id=run_row.id,
         message="run_ok",
-        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "invalid_listing": total_invalid_listing, "queue_buckets": total_queue_buckets, "duration_ms": duration_ms, "kind": kind},
+        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind},
         tags=[kind, "ok"],
     )
 
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "invalid_listing": total_invalid_listing, "queue_buckets": total_queue_buckets}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}

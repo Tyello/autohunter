@@ -134,78 +134,6 @@ def _fmt_diag(diag: Optional[dict]) -> str:
     return " | ".join(parts) if parts else "-"
 
 
-def _fmt_queue_buckets(*, matched: int, queued: int, qd: Optional[dict] = None) -> str:
-    """Formata motivos de queue em buckets para /admin.
-
-    Esperado em qd:
-      - already_notified
-      - cap_skipped
-      - invalid_listing
-      - buckets (dict)
-    """
-    if matched <= 0:
-        return ""
-
-    an = 0
-    cs = 0
-    inv = 0
-    other = 0
-
-    if isinstance(qd, dict):
-        b = qd.get("buckets")
-        if isinstance(b, dict):
-            try:
-                an = int(b.get("already_notified") or 0)
-            except Exception:
-                an = 0
-            try:
-                cs = int(b.get("cap_skipped") or 0)
-            except Exception:
-                cs = 0
-            try:
-                inv = int(b.get("invalid_listing") or 0)
-            except Exception:
-                inv = 0
-        else:
-            try:
-                an = int(qd.get("already_notified") or 0)
-            except Exception:
-                an = 0
-            try:
-                cs = int(qd.get("cap_skipped") or 0)
-            except Exception:
-                cs = 0
-            try:
-                inv = int(qd.get("invalid_listing") or 0)
-            except Exception:
-                inv = 0
-
-    # "other" = matches que não viraram queued nem caíram nos buckets explícitos
-    try:
-        other = max(0, int(matched) - int(queued) - int(an) - int(cs) - int(inv))
-    except Exception:
-        other = 0
-
-    bits: list[str] = []
-    if an:
-        bits.append(f"already_notified={an}")
-    if cs:
-        bits.append(f"cap_skipped={cs}")
-    if inv:
-        bits.append(f"invalid_listing={inv}")
-    if other:
-        bits.append(f"other={other}")
-
-    # só mostra quando tem algo útil
-    if not bits:
-        # se matched>0 e queued==0 e não temos bucket, deixa explícito
-        if matched > 0 and queued == 0:
-            return "queue_reason=unknown"
-        return ""
-
-    return " ".join(bits)
-
-
 def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
     if not dt:
         return None
@@ -746,19 +674,9 @@ async def _admin_runall(update: Update, raw_args: List[str]):
                 st = res.get("status")
 
                 if st == "success":
-                    m = int(res.get("matched") or 0)
-                    q = int(res.get("queued") or 0)
-                    qd = {
-                        "already_notified": res.get("already_notified"),
-                        "cap_skipped": res.get("cap_skipped"),
-                        "invalid_listing": res.get("invalid_listing"),
-                        "buckets": res.get("queue_buckets"),
-                    }
-                    extra_s = _fmt_queue_buckets(matched=m, queued=q, qd=qd)
-                    extra_s = (" " + extra_s) if extra_s else ""
                     lines.append(
                         f"- {src}: ✅ success found={res.get('found')} ins={res.get('inserted')} "
-                        f"match={res.get('matched')} queued={res.get('queued')}{extra_s} dur={res.get('duration_ms')}ms"
+                        f"match={res.get('matched')} queued={res.get('queued')} dur={res.get('duration_ms')}ms"
                     )
                 elif st == "blocked":
                     lines.append(
@@ -1026,8 +944,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
             dur = f"{lr.duration_ms}ms" if lr.duration_ms is not None else "-"
             found = f"{lr.items_found}" if lr.items_found is not None else "-"
             match = f"{lr.items_matched}" if lr.items_matched is not None else "-"
-            queued = f"{lr.notifications_queued}" if lr.notifications_queued is not None else "-"
-            last_line = f"last {lr.status} at={_fmt_dt(lr.created_at)} dur={dur} found={found} match={match} queued={queued}"
+            last_line = f"last {lr.status} at={_fmt_dt(lr.created_at)} dur={dur} found={found} match={match}"
             if lr.http_status is not None:
                 last_line += f" http={lr.http_status}"
             payload = lr.payload or {}
@@ -1037,20 +954,14 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 if payload.get("hybrid_blocked") is True:
                     hs = payload.get("hybrid_blocked_status")
                     last_line += f" blocked=1" + (f" blocked_http={hs}" if hs is not None else "")
-
-                # queue diagnostics (buckets)
-                qd = payload.get("queue_diag") if payload else None
-                try:
-                    mi = int(lr.items_matched or 0)
-                    qi = int(lr.notifications_queued or 0)
-                except Exception:
-                    mi = 0
-                    qi = 0
-
-                if mi > 0:
-                    extra = _fmt_queue_buckets(matched=mi, queued=qi, qd=qd if isinstance(qd, dict) else None)
-                    if extra:
-                        last_line += " " + extra
+                # Thumb telemetry (helps detect regressions in photo sending)
+                tr = payload.get("thumb_rate")
+                if tr is not None:
+                    try:
+                        pct = int(round(float(tr) * 100))
+                        last_line += f" thumb={pct}%"
+                    except Exception:
+                        pass
 
         lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind} | " + " ".join(flags))
         if st:

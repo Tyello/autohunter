@@ -105,6 +105,16 @@ def _parse_decimal(value: str) -> Decimal | None:
 
 
 def _extract_year(listing: CarListing) -> int | None:
+    # 0) se o schema já possui coluna year, use-a (mais confiável do que parsing de texto)
+    try:
+        y0 = getattr(listing, "year", None)
+        if y0 is not None and str(y0).strip():
+            y0i = int(y0)
+            if 1900 <= y0i <= 2100:
+                return y0i
+    except Exception:
+        pass
+
     # 1) tenta no título
     t = (listing.title or "")
     m = re.search(r"\b(19\d{2}|20\d{2})\b", t)
@@ -238,6 +248,9 @@ def match_listings_for_wishlists(
 
     for (w, terms, filters, sem) in prepared:
         for l in listings:
+            # Never notify sold items (vendidos feed can backfill sold state).
+            if bool(getattr(l, "is_sold", False)):
+                continue
             lctx = listing_ctx.get(l.id) or {}
 
             # filtros
@@ -437,6 +450,8 @@ def match_listings_for_wishlist(
 
     matched: list[CarListing] = []
     for l in listings:
+        if bool(getattr(l, "is_sold", False)):
+            continue
         if not _apply_filters(l, filters):
             continue
 
@@ -462,6 +477,9 @@ def match_listing_to_wishlist(db: Session, wishlist: Wishlist, listing: CarListi
     necessário para a lógica (os filtros vêm da própria wishlist).
     """
 
+    if bool(getattr(listing, "is_sold", False)):
+        return False
+
     filters = _get_filters(wishlist)
     if not _apply_filters(listing, filters):
         return False
@@ -479,6 +497,9 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
 
     Útil para debug via /admin matchdebug.
     """
+    if bool(getattr(listing, "is_sold", False)):
+        return "filter_sold"
+
     filters = _get_filters(wishlist)
     year = _extract_year(listing)
 

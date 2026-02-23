@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -10,9 +11,10 @@ from app.services.admin_programming_alerts import maybe_alert_programming_error
 
 from app.services.system_logs_service import log
 from app.services.telemetry_events_service import emit_event
-from app.services.notifications_queue_service import queue_notifications_for_matches, queue_notifications_for_matches_diag
+from app.services.notifications_queue_service import queue_notifications_for_matches
 from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists
-from app.services.listings_service import ingest_listings
+from app.services.listings_service import ingest_listings, ingest_listings_stats
+from app.services.source_url_cursors_service import get_cursor, touch_cursor
 
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
@@ -133,7 +135,15 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
 
 def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None) -> dict:
     try:
-        listings = scraper_fn(search_url, ctx)
+        # Prefer keyword-arg calling. Some scrapers are defined as:
+        #   scrape(url, limit=50, ctx=None)
+        # and the orchestration layer always passes ctx.
+        # Calling positionally would bind ctx into `limit` and crash later.
+        try:
+            listings = scraper_fn(search_url, ctx=ctx)
+        except TypeError:
+            # Back-compat for older scrapers that only accept positional ctx.
+            listings = scraper_fn(search_url, ctx)
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
@@ -161,24 +171,91 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             **_ctx_fetch_diag(ctx),
         }
 
-    found = len(listings or [])
+    listings_all = list(listings or [])
+    found = len(listings_all)
 
-    inserted_ids = ingest_listings(db, listings)
-    inserted = len(inserted_ids or [])
+    thumb_present = sum(1 for it in listings_all if (it or {}).get("thumbnail_url"))
+    thumb_rate = (thumb_present / found) if found else 0.0
+
+    # Incremental mode (per source+url) - default OFF unless enabled via source_configs.extra
+    inc_enabled = bool((getattr(ctx, "extra", None) or {}).get("incremental_enabled", False))
+    inc_max_new = (getattr(ctx, "extra", None) or {}).get("incremental_max_new")
+    try:
+        inc_max_new_i = int(inc_max_new) if inc_max_new is not None else None
+        if inc_max_new_i is not None and inc_max_new_i <= 0:
+            inc_max_new_i = None
+    except Exception:
+        inc_max_new_i = None
+
+    listings_to_ingest = listings_all
+    inc_mode = None
+    inc_cursor = None
+    if inc_enabled and found:
+        try:
+            cur = get_cursor(db, source=ctx.source, url=search_url)
+            inc_cursor = getattr(cur, "last_external_id", None) if cur else None
+            top = (listings_all[0] or {}).get("external_id")
+            if cur and top and top == inc_cursor:
+                # nothing changed (top listing unchanged) -> skip DB work
+                touch_cursor(db, source=ctx.source, url=search_url, last_external_id=top)
+                emit_event(db, level="info", event_type="pipeline_summary", source=ctx.source, message="pipeline_summary", evidence={
+                    "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
+                    "url": search_url,
+                    "found": found,
+                    "inserted": 0,
+                    "updated": 0,
+                    "upserted": 0,
+                    "matched": 0,
+                    "queued": 0,
+                    "thumb_present": thumb_present,
+                    "thumb_rate": thumb_rate,
+                    "incremental": {"mode": "skip", "cursor": top},
+                }, tags=["ok", "incremental"])
+                log(db, "info", job_name, "pipeline_summary", {
+                    "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
+                    "url": search_url,
+                    "found": found,
+                    "inserted": 0,
+                    "updated": 0,
+                    "upserted": 0,
+                    "matched": 0,
+                    "queued": 0,
+                    "thumb_present": thumb_present,
+                    "thumb_rate": thumb_rate,
+                    "incremental": {"mode": "skip", "cursor": top},
+                }, source=ctx.source, event_type="pipeline_summary", tags=["ok", "incremental"])
+                db.commit()
+                return {"ok": True, "found": found, "inserted": 0, "updated": 0, "upserted": 0, "matched": 0, "queued": 0, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", **_ctx_fetch_diag(ctx)}
+
+            # ingest only listings before the cursor (still match on full set)
+            if cur and inc_cursor:
+                inc_mode = "cut"
+                cut: list[dict] = []
+                for it in listings_all:
+                    if (it or {}).get("external_id") == inc_cursor:
+                        break
+                    cut.append(it)
+                listings_to_ingest = cut
+                if inc_max_new_i is not None:
+                    listings_to_ingest = listings_to_ingest[:inc_max_new_i]
+        except Exception:
+            # never let cursor logic break the pipeline
+            listings_to_ingest = listings_all
+
+    ing = ingest_listings_stats(db, listings_to_ingest)
+    inserted_new = int(getattr(ing, "inserted_new", 0) or 0)
+    updated = int(getattr(ing, "updated", 0) or 0)
+    upserted = int(getattr(ing, "upserted", 0) or 0)
 
     matched = 0
     queued = 0
-    already_notified = 0
-    cap_skipped = 0
-    invalid_listing = 0
-    queue_buckets: dict[str, int] = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlist is not None:
         candidates = _candidate_listings_for_run(
             db,
             source=ctx.source,
-            raw_listings=listings,
+            raw_listings=listings_all,
             limit=MAX_CANDIDATE_LISTINGS_PER_RUN,
         )
         if candidates:
@@ -186,53 +263,52 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             matched_listings = matches_by.get(wishlist.id) or []
             matched = len(matched_listings)
             if matched:
-                diag = queue_notifications_for_matches_diag(
+                queued = queue_notifications_for_matches(
                     db,
                     wishlist,
-                    matched_listings,
-                    max_queue=MAX_QUEUE_PER_WISHLIST_PER_RUN,
+                    matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
                 )
-                queued = int(diag.get("queued") or 0)
-                already_notified = int(diag.get("already_notified") or 0)
-                cap_skipped = int(diag.get("cap_skipped") or 0)
-                invalid_listing = int(diag.get("invalid_listing") or 0)
-                b = diag.get("buckets")
-                if isinstance(b, dict):
-                    for k in queue_buckets.keys():
-                        try:
-                            queue_buckets[k] = int(b.get(k) or 0)
-                        except Exception:
-                            queue_buckets[k] = 0
+
+    # Update cursor on success (top item)
+    if inc_enabled and found:
+        try:
+            top = (listings_all[0] or {}).get("external_id")
+            if top:
+                touch_cursor(db, source=ctx.source, url=search_url, last_external_id=top)
+        except Exception:
+            pass
 
     emit_event(db, level="info", event_type="pipeline_summary", source=ctx.source, message="pipeline_summary", evidence={
         "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
         "url": search_url,
         "found": found,
-        "inserted": inserted,
+        "inserted": inserted_new,
+        "updated": updated,
+        "upserted": upserted,
         "matched": matched,
         "queued": queued,
-        "already_notified": already_notified,
-        "cap_skipped": cap_skipped,
-        "invalid_listing": invalid_listing,
-        "queue_buckets": queue_buckets,
+        "thumb_present": thumb_present,
+        "thumb_rate": thumb_rate,
+        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary", {
         "wishlist_id": str(getattr(wishlist, "id", "")) if wishlist else None,
         "url": search_url,
         "found": found,
-        "inserted": inserted,
+        "inserted": inserted_new,
+        "updated": updated,
+        "upserted": upserted,
         "matched": matched,
         "queued": queued,
-        "already_notified": already_notified,
-        "cap_skipped": cap_skipped,
-        "invalid_listing": invalid_listing,
-        "queue_buckets": queue_buckets,
+        "thumb_present": thumb_present,
+        "thumb_rate": thumb_rate,
+        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
     }, source=ctx.source, event_type="pipeline_summary", tags=["ok"])
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": matched, "queued": queued, "already_notified": already_notified, "cap_skipped": cap_skipped, "invalid_listing": invalid_listing, "queue_buckets": queue_buckets, **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": matched, "queued": queued, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
@@ -241,7 +317,10 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     This collapses duplicate work when multiple users share the same query/URL for a given source.
     """
     try:
-        listings = scraper_fn(search_url, ctx)
+        try:
+            listings = scraper_fn(search_url, ctx=ctx)
+        except TypeError:
+            listings = scraper_fn(search_url, ctx)
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
@@ -269,24 +348,88 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             **_ctx_fetch_diag(ctx),
         }
 
-    found = len(listings or [])
+    listings_all = list(listings or [])
+    found = len(listings_all)
 
-    inserted_ids = ingest_listings(db, listings)
-    inserted = len(inserted_ids or [])
+    thumb_present = sum(1 for it in listings_all if (it or {}).get("thumbnail_url"))
+    thumb_rate = (thumb_present / found) if found else 0.0
+
+    inc_enabled = bool((getattr(ctx, "extra", None) or {}).get("incremental_enabled", False))
+    inc_max_new = (getattr(ctx, "extra", None) or {}).get("incremental_max_new")
+    try:
+        inc_max_new_i = int(inc_max_new) if inc_max_new is not None else None
+        if inc_max_new_i is not None and inc_max_new_i <= 0:
+            inc_max_new_i = None
+    except Exception:
+        inc_max_new_i = None
+
+    listings_to_ingest = listings_all
+    inc_mode = None
+    inc_cursor = None
+    if inc_enabled and found:
+        try:
+            cur = get_cursor(db, source=ctx.source, url=search_url)
+            inc_cursor = getattr(cur, "last_external_id", None) if cur else None
+            top = (listings_all[0] or {}).get("external_id")
+
+            if cur and top and top == inc_cursor:
+                touch_cursor(db, source=ctx.source, url=search_url, last_external_id=top)
+                emit_event(db, level="info", event_type="pipeline_summary_many", source=ctx.source, message="pipeline_summary_many", evidence={
+                    "url": search_url,
+                    "wishlists": len(wishlists or []),
+                    "found": found,
+                    "inserted": 0,
+                    "updated": 0,
+                    "upserted": 0,
+                    "matched": 0,
+                    "queued": 0,
+                    "thumb_present": thumb_present,
+                    "thumb_rate": thumb_rate,
+                    "incremental": {"mode": "skip", "cursor": top},
+                }, tags=["ok", "incremental"])
+                log(db, "info", job_name, "pipeline_summary_many", {
+                    "url": search_url,
+                    "wishlists": len(wishlists or []),
+                    "found": found,
+                    "inserted": 0,
+                    "updated": 0,
+                    "upserted": 0,
+                    "matched": 0,
+                    "queued": 0,
+                    "thumb_present": thumb_present,
+                    "thumb_rate": thumb_rate,
+                    "incremental": {"mode": "skip", "cursor": top},
+                }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok", "incremental"])
+                db.commit()
+                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", **_ctx_fetch_diag(ctx)}
+
+            if cur and inc_cursor:
+                inc_mode = "cut"
+                cut: list[dict] = []
+                for it in listings_all:
+                    if (it or {}).get("external_id") == inc_cursor:
+                        break
+                    cut.append(it)
+                listings_to_ingest = cut
+                if inc_max_new_i is not None:
+                    listings_to_ingest = listings_to_ingest[:inc_max_new_i]
+        except Exception:
+            listings_to_ingest = listings_all
+
+    ing = ingest_listings_stats(db, listings_to_ingest)
+    inserted_new = int(getattr(ing, "inserted_new", 0) or 0)
+    updated = int(getattr(ing, "updated", 0) or 0)
+    upserted = int(getattr(ing, "upserted", 0) or 0)
 
     total_matched = 0
     total_queued = 0
-    total_already_notified = 0
-    total_cap_skipped = 0
-    total_invalid_listing = 0
-    total_queue_buckets: dict[str, int] = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlists:
         candidates = _candidate_listings_for_run(
             db,
             source=ctx.source,
-            raw_listings=listings,
+            raw_listings=listings_all,
             limit=MAX_CANDIDATE_LISTINGS_PER_RUN,
         )
         if candidates:
@@ -298,50 +441,51 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                 if not m:
                     continue
                 total_matched += m
-                diag = queue_notifications_for_matches_diag(
-                    db,
-                    w,
-                    matched_listings,
-                    max_queue=MAX_QUEUE_PER_WISHLIST_PER_RUN,
+                total_queued += int(
+                    queue_notifications_for_matches(
+                        db,
+                        w,
+                        matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
+                    )
+                    or 0
                 )
-                total_queued += int(diag.get("queued") or 0)
-                total_already_notified += int(diag.get("already_notified") or 0)
-                total_cap_skipped += int(diag.get("cap_skipped") or 0)
-                total_invalid_listing += int(diag.get("invalid_listing") or 0)
-                b = diag.get("buckets")
-                if isinstance(b, dict):
-                    for k in total_queue_buckets.keys():
-                        try:
-                            total_queue_buckets[k] += int(b.get(k) or 0)
-                        except Exception:
-                            pass
+
+    if inc_enabled and found:
+        try:
+            top = (listings_all[0] or {}).get("external_id")
+            if top:
+                touch_cursor(db, source=ctx.source, url=search_url, last_external_id=top)
+        except Exception:
+            pass
 
     emit_event(db, level="info", event_type="pipeline_summary_many", source=ctx.source, message="pipeline_summary_many", evidence={
         "url": search_url,
         "wishlists": len(wishlists or []),
         "found": found,
-        "inserted": inserted,
+        "inserted": inserted_new,
+        "updated": updated,
+        "upserted": upserted,
         "matched": total_matched,
         "queued": total_queued,
-        "already_notified": total_already_notified,
-        "cap_skipped": total_cap_skipped,
-        "invalid_listing": total_invalid_listing,
-        "queue_buckets": total_queue_buckets,
+        "thumb_present": thumb_present,
+        "thumb_rate": thumb_rate,
+        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary_many", {
         "url": search_url,
         "wishlists": len(wishlists or []),
         "found": found,
-        "inserted": inserted,
+        "inserted": inserted_new,
+        "updated": updated,
+        "upserted": upserted,
         "matched": total_matched,
         "queued": total_queued,
-        "already_notified": total_already_notified,
-        "cap_skipped": total_cap_skipped,
-        "invalid_listing": total_invalid_listing,
-        "queue_buckets": total_queue_buckets,
+        "thumb_present": thumb_present,
+        "thumb_rate": thumb_rate,
+        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
     }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"])
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "cap_skipped": total_cap_skipped, "invalid_listing": total_invalid_listing, "queue_buckets": total_queue_buckets, "wishlists": len(wishlists or []), **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
