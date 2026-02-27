@@ -127,7 +127,11 @@ def job_run_source_for_all_wishlists(source_name: str):
 def start_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(
         timezone="UTC",
-        executors={"default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 4) or 4))},
+        executors={
+            "default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 4) or 4)),
+            "browser": ThreadPoolExecutor(int(getattr(settings, "scheduler_browser_workers", 1) or 1)),
+            "sender": ThreadPoolExecutor(int(getattr(settings, "scheduler_sender_workers", 1) or 1)),
+        },
         job_defaults={
             "coalesce": True,
             "misfire_grace_time": 60,
@@ -198,8 +202,14 @@ def start_scheduler() -> BackgroundScheduler:
             coalesce=True,
             executor="browser",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            with SessionLocal() as db:
+                log(db, "error", "scheduler", "browser_worker_register_failed", {"err": str(e)[:300]})
+                db.commit()
+        except Exception:
+            # last resort: avoid crashing scheduler boot
+            pass
 
     from app.scheduler.sender_job import job_send_notifications
     sched.add_job(
