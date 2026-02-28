@@ -16,6 +16,7 @@ from .account import Account
 from .account_member import AccountMember
 from .app_kv import AppKV
 from .scrape_job import ScrapeJob
+from .market_stats import MarketStatsCohort
 
 __all__ = [
     "User",
@@ -36,4 +37,5 @@ __all__ = [
     "AccountMember",
     "AppKV",
     "ScrapeJob",
+    "MarketStatsCohort",
 ]

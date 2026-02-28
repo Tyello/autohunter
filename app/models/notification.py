@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Text, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Text, DateTime, ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base, TimestampMixin
 
@@ -44,6 +44,10 @@ class Notification(TimestampMixin, Base):
 
     # Mensagem detalhada (stacktrace/erro do provider etc.)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Score vNext (v2) persistido por notificação (wishlist_id + car_listing_id)
+    score_v2: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    score_breakdown: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     user = relationship("User")
     wishlist = relationship("Wishlist")

@@ -74,9 +74,9 @@ class Settings(BaseSettings):
 
     default_alert_limit: int = 30
 
-    # Notification gating (off by default; enable when you decide it's a rule)
-    notify_require_price: bool = False
-    notify_require_thumb: bool = False
+    # Score v2 market stats (cohort mediana/p25/p75)
+    market_stats_daily_hour_utc: int = 4
+    market_stats_window_days: int = 180
 
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60

@@ -4,16 +4,30 @@ import re
 from typing import Tuple
 
 from app.core.settings import settings
-from app.bot.formatting import format_price
 from app.bot.media import download_image_bytes
-from app.bot.open_ad import normalize_listing_url, open_ad_reply_markup_json
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.notifications.telegram_formatter import format_ad_message
 from app.services.http_session import get_shared_session
 
 
 # Telegram limits
 TELEGRAM_CAPTION_MAX = 1024
 TELEGRAM_TEXT_MAX = 4096
+
+
+class _AdView:
+    """Adapter: expose listing fields + notification score fields to the formatter."""
+
+    def __init__(self, listing, notification=None):
+        self._listing = listing
+        self._notification = notification
+
+        # Score fields are persisted on Notification (wishlist-specific)
+        self.score_v2 = getattr(notification, 'score_v2', None) if notification is not None else None
+        self.score_breakdown = getattr(notification, 'score_breakdown', None) if notification is not None else None
+
+    def __getattr__(self, item):
+        return getattr(self._listing, item)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -144,53 +158,10 @@ def _score_from_text(text: str) -> int:
 
 
 def _build_text(listing, notification=None) -> str:
-    raw_title = _clean_spaces(getattr(listing, "title", None) or "Novo anúncio")
-    title, km = _clean_title_and_extract_km(raw_title)
-    loc = _clean_location(getattr(listing, "location", None) or "")
-    url = normalize_listing_url(
-        getattr(listing, "url", None) or "",
-        getattr(listing, "source", None) or "",
-        getattr(listing, "external_id", None) or "",
-    )
-    price_text = format_price(getattr(listing, "price", None))
+    """Build vNext message text (no URL in body; URL is in the button)."""
 
-    year = _extract_year(raw_title)
-    score = _score_from_text(" ".join([raw_title, loc]))
-
-    # Se no futuro você salvar FIPE/score no banco, aqui já “aparece” automaticamente:
-    fipe = getattr(listing, "fipe_price", None)
-    if fipe is None and notification is not None:
-        fipe = getattr(notification, "fipe_price", None)
-
-    deal_score = getattr(listing, "deal_score", None)
-    if deal_score is None and notification is not None:
-        deal_score = getattr(notification, "deal_score", None)
-
-    lines = [title]
-    if year:
-        lines.append(f"Ano: {year}")
-    if km:
-        lines.append(f"KM: {km}")
-    lines.append(f"Preço: {price_text}")
-    if loc:
-        lines.append(f"Local: {loc}")
-
-    # diferencial: score (offline)
-    lines.append(f"Score: {score}/100")
-
-    # se você passar FIPE / deal_score, aparece
-    if fipe is not None:
-        try:
-            lines.append(f"FIPE: {format_price(fipe)}")
-        except Exception:
-            lines.append(f"FIPE: {fipe}")
-    if deal_score is not None:
-        lines.append(f"Deal: {deal_score}")
-
-    # URL não vai no corpo para economizar espaço; use o botão "Abrir anúncio".
-
-    text = "\n".join(lines)
-    text = sanitize_for_telegram(text)
+    payload = format_ad_message(_AdView(listing, notification))
+    text = sanitize_for_telegram(payload.text)
     return _truncate(text, TELEGRAM_TEXT_MAX)
 
 
@@ -213,18 +184,13 @@ def telegram_sender(notification, listing, user):
 
     chat_id = user.telegram_chat_id
 
-    full_text = _build_text(listing, notification=notification)
+    payload = format_ad_message(_AdView(listing, notification))
+    full_text = _truncate(sanitize_for_telegram(payload.text), TELEGRAM_TEXT_MAX)
     caption, remainder = _split(full_text, TELEGRAM_CAPTION_MAX)
     caption = _truncate(caption, TELEGRAM_CAPTION_MAX)
 
     sent_photo = False
-
-    open_url = normalize_listing_url(
-        getattr(listing, "url", None) or "",
-        getattr(listing, "source", None) or None,
-        getattr(listing, "external_id", None) or "",
-    )
-    reply_markup = open_ad_reply_markup_json(open_url) if open_url else None
+    reply_markup = payload.reply_markup_json() or None
 
     session = get_shared_session("telegram")
 

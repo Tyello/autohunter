@@ -72,6 +72,24 @@ def job_run_source_for_all_wishlists(source_name: str):
                     db.commit()
                     return
 
+                minutes = int(cfg.sched_minutes or 0)
+                if minutes <= 0:
+                    db.commit()
+                    return
+
+                st = _get_state(db, src)
+                last_eff = st.last_effective_run_at if st else None
+                next_due = (last_eff + timedelta(minutes=minutes)) if last_eff else _utcnow()
+                if _utcnow() < next_due:
+                    db.commit()
+                    return
+
+                avail = is_source_allowed(db, src)
+                if not avail.is_allowed:
+                    # não marca skip aqui para não poluir; o backoff já está no state
+                    db.commit()
+                    return
+
                 inserted = enqueue_job(db, source=src, queue="browser", run_at=next_due, priority=0, max_attempts=3)
                 if not inserted:
                     # fila cheia (cap) ou job já ativo. Se estiver cheia, registra evidência.
@@ -109,14 +127,10 @@ def job_run_source_for_all_wishlists(source_name: str):
 def start_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(
         timezone="UTC",
-        executors={
-            "default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 4) or 4)),
-            "browser": ThreadPoolExecutor(int(getattr(settings, "scheduler_browser_workers", 1) or 1)),
-            "sender": ThreadPoolExecutor(int(getattr(settings, "scheduler_sender_workers", 1) or 1)),
-        },
+        executors={"default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 4) or 4))},
         job_defaults={
             "coalesce": True,
-            "misfire_grace_time": 3600,
+            "misfire_grace_time": 60,
             "max_instances": 1,
         },
     )
@@ -232,7 +246,24 @@ def start_scheduler() -> BackgroundScheduler:
                 replace_existing=True,
             )
 
-    # Limpeza leve: mantém notifications enxutas (evita crescimento infinito) (evita crescimento infinito)
+        # Market stats diário (cohorts) para Score vNext (v2)
+    try:
+        from app.scheduler.market_stats_job import job_compute_market_stats_daily
+
+        h = int(getattr(settings, 'market_stats_daily_hour_utc', 4) or 4)
+        h = max(0, min(h, 23))
+        sched.add_job(
+            job_compute_market_stats_daily,
+            'cron',
+            hour=h,
+            minute=10,
+            id='market_stats_daily',
+            replace_existing=True,
+        )
+    except Exception:
+        pass
+
+# Limpeza leve: mantém notifications enxutas (evita crescimento infinito) (evita crescimento infinito)
     from app.scheduler.cleanup_job import job_cleanup_notifications
     sched.add_job(
         job_cleanup_notifications,

@@ -4,9 +4,10 @@ from functools import lru_cache
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from app.bot.formatting import format_price
-from app.bot.listing_display import format_listing_message_telegram
 from app.bot.listing_sender import send_listing_message
+from app.notifications.telegram_formatter import format_ad_message
+from app.scoring.score_v2 import score_ad
+from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 from app.bot.utils import normalize_args, parse_int, reply_text
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
@@ -23,6 +24,19 @@ from app.models.subscription import Subscription
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
+
+from types import SimpleNamespace
+
+class _AdView:
+    """Adapter: expose listing fields + computed score fields to the vNext formatter."""
+
+    def __init__(self, listing, *, score_v2=None, score_breakdown=None):
+        self._listing = listing
+        self.score_v2 = score_v2
+        self.score_breakdown = score_breakdown
+
+    def __getattr__(self, item):
+        return getattr(self._listing, item)
 
 
 def _get_active_subscription_and_plan(db, user: User):
@@ -142,35 +156,46 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         results = manual_search(db, query=query, limit=5, sources=sources, force_scrape=bool(sources))
 
-    if not results:
-        await reply_text(update, "Nada encontrado agora.")
-        return
+        if not results:
+            await reply_text(update, "Nada encontrado agora.")
+            return
 
-    for item in results:
-        open_url = normalize_listing_url(
-            getattr(item, "url", None) or "",
-            source=getattr(item, "source", None) or None,
-            external_id=getattr(item, "external_id", None) or None,
-        )
+        # vNext scoring+formatting (treat manual query as a temporary wishlist)
+        pseudo_wishlist = SimpleNamespace(query=query, filters=[])
 
-        keyboard = None
-        if open_url:
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Abrir anúncio", url=open_url)]])
+        stats_map = {}
+        try:
+            stats_map = batch_get_market_stats(db, results)
+        except Exception:
+            stats_map = {}
 
-        # Texto: consistente com notificações (sem link no corpo; use o botão)
-        text = format_listing_message_telegram(item)
-        # garante Fonte (listing_display é agnóstico)
-        if getattr(item, "source", None):
-            text = f"{text}\nFonte: {item.source}"
+        for item in results:
+            ms = None
+            try:
+                k = cohort_key_for_listing(item)
+                if k:
+                    ms = stats_map.get(k)
+            except Exception:
+                ms = None
 
-        await send_listing_message(
-            update,
-            text=text,
-            thumbnail_url=getattr(item, "thumbnail_url", None),
-            referer_url=getattr(item, "url", None),
-            reply_markup=keyboard,
-            disable_web_page_preview=True,
-        )
+            sres = score_ad(item, pseudo_wishlist, ms)
+            payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
+
+            keyboard = None
+            if payload.inline_keyboard:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(btn.get("text", "Abrir anúncio"), url=btn.get("url")) for btn in row]
+                    for row in payload.inline_keyboard
+                ])
+
+            await send_listing_message(
+                update,
+                text=payload.text,
+                thumbnail_url=getattr(item, "thumbnail_url", None),
+                referer_url=getattr(item, "url", None),
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
 
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -3,7 +3,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.notification import Notification
-from app.core.settings import settings
+from app.scoring.score_v2 import score_ad
+from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 
 
 def queue_notifications_for_matches(
@@ -36,10 +37,34 @@ def queue_notifications_for_matches(
     )
     existing_ids = {row[0] for row in (existing or [])}
 
+    # Score v2: batch fetch cohort market stats (cheap)
+    stats_map = {}
+    try:
+        stats_map = batch_get_market_stats(db, [l for l in matched_listings if getattr(l, "id", None) and l.id not in existing_ids])
+    except Exception:
+        # Never let stats retrieval break queuing (table may not exist yet in some envs).
+        stats_map = {}
+
     queued = 0
     for listing in matched_listings:
         if listing.id in existing_ids:
             continue
+
+        ms = None
+        try:
+            k = cohort_key_for_listing(listing)
+            if k:
+                ms = stats_map.get(k)
+        except Exception:
+            ms = None
+
+        # Compute score breakdown (wishlist-specific)
+        try:
+            sres = score_ad(listing, wishlist, ms)
+        except Exception:
+            # Never block queueing due to scoring errors; fall back to minimal breakdown
+            sres = None
+
         db.add(
             Notification(
                 user_id=wishlist.user_id,
@@ -47,6 +72,8 @@ def queue_notifications_for_matches(
                 car_listing_id=listing.id,
                 status="queued",
                 error_message=None,
+                score_v2=(sres.total if sres else None),
+                score_breakdown=(sres.to_dict() if sres else None),
             )
         )
         queued += 1
@@ -73,13 +100,6 @@ def queue_notifications_for_matches_diag(
       - cap_skipped: quantos matches seriam novos, mas não entraram por limite (max_queue)
       - invalid_listing: quantos listings vieram sem `id`
       - buckets: dict com motivos (para exibir em /admin)
-
-    Buckets adicionais (quando aplicável):
-      - user_unreachable: usuário inativo (não deve receber)
-      - wishlist_disabled: wishlist desativada
-      - price_missing: regra opcional (NOTIFY_REQUIRE_PRICE)
-      - thumb_missing: regra opcional (NOTIFY_REQUIRE_THUMB)
-      - filtered_by_rules: total de regras de supressão (soma de price_missing/thumb_missing/...)
     """
     if not matched_listings:
         return {
@@ -88,17 +108,7 @@ def queue_notifications_for_matches_diag(
             "already_notified": 0,
             "cap_skipped": 0,
             "invalid_listing": 0,
-            "buckets": {
-                "queued": 0,
-                "already_notified": 0,
-                "cap_skipped": 0,
-                "invalid_listing": 0,
-                "user_unreachable": 0,
-                "wishlist_disabled": 0,
-                "price_missing": 0,
-                "thumb_missing": 0,
-                "filtered_by_rules": 0,
-            },
+            "buckets": {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0},
         }
 
     matched_total = len(matched_listings)
@@ -120,17 +130,7 @@ def queue_notifications_for_matches_diag(
             "already_notified": 0,
             "cap_skipped": 0,
             "invalid_listing": invalid_listing,
-            "buckets": {
-                "queued": 0,
-                "already_notified": 0,
-                "cap_skipped": 0,
-                "invalid_listing": invalid_listing,
-                "user_unreachable": 0,
-                "wishlist_disabled": 0,
-                "price_missing": 0,
-                "thumb_missing": 0,
-                "filtered_by_rules": 0,
-            },
+            "buckets": {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": invalid_listing},
         }
 
     existing = (
@@ -141,63 +141,8 @@ def queue_notifications_for_matches_diag(
     )
     existing_ids = {row[0] for row in (existing or [])}
 
-    # wishlist/user gates (cheap and consistent)
-    user_unreachable = 0
-    wishlist_disabled = 0
-    try:
-        if getattr(wishlist, "is_active", True) is not True:
-            wishlist_disabled = len(valid)
-    except Exception:
-        wishlist_disabled = 0
-
-    try:
-        u = getattr(wishlist, "user", None)
-        if u is not None and getattr(u, "is_active", True) is not True:
-            user_unreachable = len(valid)
-    except Exception:
-        user_unreachable = 0
-
-    if wishlist_disabled or user_unreachable:
-        # nothing should be queued if wishlist/user is not eligible
-        buckets = {
-            "queued": 0,
-            "already_notified": 0,
-            "cap_skipped": 0,
-            "invalid_listing": invalid_listing,
-            "user_unreachable": user_unreachable,
-            "wishlist_disabled": wishlist_disabled,
-            "price_missing": 0,
-            "thumb_missing": 0,
-            "filtered_by_rules": int(bool(user_unreachable or wishlist_disabled)) * len(valid),
-        }
-        return {
-            "matched": matched_total,
-            "queued": 0,
-            "already_notified": 0,
-            "cap_skipped": 0,
-            "invalid_listing": invalid_listing,
-            "buckets": buckets,
-        }
-
     # candidatos realmente novos (dedupe por existing notification)
     new_listings = [l for l in valid if l.id not in existing_ids]
-
-    # Optional notification rules (feature flags)
-    require_price = bool(getattr(settings, "notify_require_price", False))
-    require_thumb = bool(getattr(settings, "notify_require_thumb", False))
-    price_missing = 0
-    thumb_missing = 0
-    ruled: list = []
-    for l in new_listings:
-        if require_price and getattr(l, "price", None) in (None, ""):
-            price_missing += 1
-            continue
-        if require_thumb and not (getattr(l, "thumbnail_url", None) or "").strip():
-            thumb_missing += 1
-            continue
-        ruled.append(l)
-
-    new_listings = ruled
 
     cap = int(max_queue) if max_queue is not None else None
     if cap is not None and cap < 0:
@@ -223,17 +168,11 @@ def queue_notifications_for_matches_diag(
     if cap is not None:
         cap_skipped = max(0, len(new_listings) - len(to_queue))
 
-    filtered_by_rules = int(price_missing) + int(thumb_missing)
     buckets = {
         "queued": queued,
         "already_notified": already_notified,
         "cap_skipped": cap_skipped,
         "invalid_listing": invalid_listing,
-        "user_unreachable": 0,
-        "wishlist_disabled": 0,
-        "price_missing": price_missing,
-        "thumb_missing": thumb_missing,
-        "filtered_by_rules": filtered_by_rules,
     }
 
     return {
