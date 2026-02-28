@@ -4,13 +4,14 @@ import json
 import random
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional, Dict
 
 from app.scrapers.base import FetchBlocked
 from app.scrapers.diagnostics import current_diagnostics
 from app.core.settings import settings
 
 
+from app.services.challenge_fingerprint import fingerprint_from_html
 def _allowed_playwright_sources() -> set[str]:
     raw = (getattr(settings, "playwright_sources", "") or "").strip().lower()
     # Empty means "no restriction" (DB/runtime flags decide whether to use the browser).

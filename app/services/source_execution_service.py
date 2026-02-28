@@ -211,7 +211,7 @@ def run_source_for_all_wishlists(
                 minutes = mark_blocked(
                     db,
                     src,
-                    base_cooldown_minutes=max(int(cfg.cooldown_minutes or 0), 1),
+                    base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
                     http_status=res.get("status_code"),
                     url=res.get("url") or url,
                 )
@@ -291,7 +291,7 @@ def run_source_for_all_wishlists(
             minutes = mark_error(
                 db,
                 src,
-                base_cooldown_minutes=max(int(cfg.cooldown_minutes or 0), 1),
+                base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
                 error=err,
                 url=res.get("url") or url,
             )

@@ -72,24 +72,6 @@ def job_run_source_for_all_wishlists(source_name: str):
                     db.commit()
                     return
 
-                minutes = int(cfg.sched_minutes or 0)
-                if minutes <= 0:
-                    db.commit()
-                    return
-
-                st = _get_state(db, src)
-                last_eff = st.last_effective_run_at if st else None
-                next_due = (last_eff + timedelta(minutes=minutes)) if last_eff else _utcnow()
-                if _utcnow() < next_due:
-                    db.commit()
-                    return
-
-                avail = is_source_allowed(db, src)
-                if not avail.is_allowed:
-                    # não marca skip aqui para não poluir; o backoff já está no state
-                    db.commit()
-                    return
-
                 inserted = enqueue_job(db, source=src, queue="browser", run_at=next_due, priority=0, max_attempts=3)
                 if not inserted:
                     # fila cheia (cap) ou job já ativo. Se estiver cheia, registra evidência.
@@ -134,7 +116,7 @@ def start_scheduler() -> BackgroundScheduler:
         },
         job_defaults={
             "coalesce": True,
-            "misfire_grace_time": 60,
+            "misfire_grace_time": 3600,
             "max_instances": 1,
         },
     )
@@ -202,14 +184,8 @@ def start_scheduler() -> BackgroundScheduler:
             coalesce=True,
             executor="browser",
         )
-    except Exception as e:
-        try:
-            with SessionLocal() as db:
-                log(db, "error", "scheduler", "browser_worker_register_failed", {"err": str(e)[:300]})
-                db.commit()
-        except Exception:
-            # last resort: avoid crashing scheduler boot
-            pass
+    except Exception:
+        pass
 
     from app.scheduler.sender_job import job_send_notifications
     sched.add_job(

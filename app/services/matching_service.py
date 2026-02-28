@@ -12,6 +12,7 @@ from app.core.text_norm import tokens, normalize
 from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
 from app.services.wishlist_semantic_rules import semantic_match
+from app.services.wishlist_query_parser import parse_wishlist_query
 
 
 @dataclass(frozen=True)
@@ -225,8 +226,10 @@ def match_listings_for_wishlists(
     # prepara termos e filtros por wishlist
     prepared = []
     for w in wishlists:
-        terms = _effective_terms(getattr(w, "query", "") or "")
-        filters = _get_filters(w)
+        parsed = parse_wishlist_query(getattr(w, "query", "") or "")
+        q_clean = (parsed.cleaned_query or "").strip() or (getattr(w, "query", "") or "")
+        terms = _effective_terms(q_clean)
+        filters = _get_filters_merged(w, parsed)
 
         if any(not _is_year_token(t) for t in terms):
             terms = [t for t in terms if not _is_year_token(t)]
@@ -425,9 +428,57 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
 
 
 def _get_filters(wishlist: Wishlist) -> list[FilterRule]:
-    # usa relationship se já carregou
+    """Backward compatible shim."""
+    parsed = parse_wishlist_query(getattr(wishlist, "query", "") or "")
+    return _get_filters_merged(wishlist, parsed)
+
+
+def _get_filters_merged(wishlist: Wishlist, parsed) -> list[FilterRule]:
+    """Return structured filters for this wishlist.
+
+    Sources should never implement their own filter rules.
+    We merge:
+      1) persisted filters (wishlist_filters table)
+      2) derived filters parsed from the *query string* (legacy compatibility)
+
+    Dedup is done by (field, operator, value).
+    """
     raw = list(getattr(wishlist, "filters", None) or [])
-    return [FilterRule(f.field, f.operator, f.value) for f in raw]
+    out = [FilterRule(f.field, f.operator, f.value) for f in raw]
+
+    seen = {(f.field.lower(), f.operator.lower(), str(f.value)) for f in out}
+
+    try:
+        y_min = getattr(parsed, "year_min", None)
+        y_max = getattr(parsed, "year_max", None)
+        p_min = getattr(parsed, "price_min", None)
+        p_max = getattr(parsed, "price_max", None)
+    except Exception:
+        y_min = y_max = p_min = p_max = None
+
+    if y_min is not None:
+        key = ("year", "gte", str(int(y_min)))
+        if key not in seen:
+            out.append(FilterRule("year", "gte", str(int(y_min))))
+            seen.add(key)
+    if y_max is not None:
+        key = ("year", "lte", str(int(y_max)))
+        if key not in seen:
+            out.append(FilterRule("year", "lte", str(int(y_max))))
+            seen.add(key)
+
+    if p_min is not None:
+        key = ("price", "gte", str(int(p_min)))
+        if key not in seen:
+            out.append(FilterRule("price", "gte", str(int(p_min))))
+            seen.add(key)
+    if p_max is not None:
+        key = ("price", "lte", str(int(p_max)))
+        if key not in seen:
+            out.append(FilterRule("price", "lte", str(int(p_max))))
+            seen.add(key)
+
+    return out
 
 
 def match_listings_for_wishlist(
@@ -446,7 +497,9 @@ def match_listings_for_wishlist(
         return []
 
     listings = db.query(CarListing).filter(CarListing.id.in_(ids)).all()
-    filters = _get_filters(wishlist)
+    parsed = parse_wishlist_query(getattr(wishlist, "query", "") or "")
+    q_clean = (parsed.cleaned_query or "").strip() or (wishlist.query or "")
+    filters = _get_filters_merged(wishlist, parsed)
 
     matched: list[CarListing] = []
     for l in listings:
@@ -455,7 +508,7 @@ def match_listings_for_wishlist(
         if not _apply_filters(l, filters):
             continue
 
-        if not text_match(wishlist.query, l):
+        if not text_match(q_clean, l):
             continue
 
         if not semantic_match(wishlist, l):
@@ -480,11 +533,13 @@ def match_listing_to_wishlist(db: Session, wishlist: Wishlist, listing: CarListi
     if bool(getattr(listing, "is_sold", False)):
         return False
 
-    filters = _get_filters(wishlist)
+    parsed = parse_wishlist_query(getattr(wishlist, "query", "") or "")
+    q_clean = (parsed.cleaned_query or "").strip() or (wishlist.query or "")
+    filters = _get_filters_merged(wishlist, parsed)
     if not _apply_filters(listing, filters):
         return False
 
-    if not text_match(wishlist.query, listing):
+    if not text_match(q_clean, listing):
         return False
 
     if not semantic_match(wishlist, listing):
@@ -500,7 +555,9 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
     if bool(getattr(listing, "is_sold", False)):
         return "filter_sold"
 
-    filters = _get_filters(wishlist)
+    parsed = parse_wishlist_query(getattr(wishlist, "query", "") or "")
+    q_clean = (parsed.cleaned_query or "").strip() or (wishlist.query or "")
+    filters = _get_filters_merged(wishlist, parsed)
     year = _extract_year(listing)
 
     for f in filters:
@@ -539,7 +596,7 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
                 return "filter_year_cmp"
             continue
 
-    terms = _effective_terms(getattr(wishlist, "query", "") or "")
+    terms = _effective_terms(q_clean)
     if any(not _is_year_token(t) for t in terms):
         terms = [t for t in terms if not _is_year_token(t)]
 

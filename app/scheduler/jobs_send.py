@@ -72,7 +72,13 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
             sent += 1
         except Exception as e:
             n.status = "failed"
-            n.reason = "send_error"
+            msg = str(e)
+            m = msg.lower()
+            # Best-effort classification (Telegram)
+            if "forbidden" in m or "blocked" in m or "bot was blocked" in m or "chat not found" in m:
+                n.reason = "user_unreachable"
+            else:
+                n.reason = "send_error"
             n.error_message = str(e)[:5000]
             db.commit()
             failed += 1

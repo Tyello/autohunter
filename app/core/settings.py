@@ -74,6 +74,10 @@ class Settings(BaseSettings):
 
     default_alert_limit: int = 30
 
+    # Notification gating (off by default; enable when you decide it's a rule)
+    notify_require_price: bool = False
+    notify_require_thumb: bool = False
+
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
 

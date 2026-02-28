@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+
+from app.bot.sources_health import compute_due_info, fmt_dt, utcnow
 import asyncio
 import json
 from dataclasses import dataclass
@@ -352,10 +354,29 @@ async def _admin_sources_set_simple(update: Update, source: str, field: str, val
 
             db.commit()
 
+        # --- due diagnostics (next_due / late_by) ---
+        now_utc = utcnow()
+        last_eff = None
+        try:
+            last_eff = getattr(state, "last_effective_run_at", None)
+        except Exception:
+            last_eff = None
+        if last_eff is None:
+            last_eff = last_success_at
+        due = compute_due_info(
+            sched_minutes=int(getattr(cfg, "sched_minutes", 0) or 0),
+            last_effective_at=last_eff,
+            now=now_utc,
+        )
+        due_s = ""
+        if due.next_due_at is not None:
+            late = due.late_by_minutes or 0
+            due_s = f" next_due={fmt_dt(due.next_due_at)} late_by={late}m"
+
         await update.message.reply_text(
             sanitize_for_telegram(
                 f"✅ Atualizado {snap['source']}: {field}={value}\n"
-                f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
+                f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m {due_s}"
                 f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
             )
         )

@@ -268,6 +268,115 @@ class _PlaywrightCore:
         self._browsers[key] = b
         return b
 
+    def warmup(
+        self,
+        *,
+        source: str,
+        proxy_server: Optional[str],
+        url: Optional[str] = None,
+        timeout_ms: int = 120000,
+        wait_until: str = "domcontentloaded",
+    ) -> Dict[str, Any]:
+        """Warm up cookies/storage_state for a given source/domain.
+
+        This is mainly used for sources that present anti-bot challenges with HTTP 200.
+        We intentionally avoid wait_until='networkidle' which can hang forever on ad-heavy pages.
+        """
+        src = (source or "unknown").lower().strip() or "unknown"
+        proxy_key = proxy_server or "__no_proxy__"
+        storage_path = self._storage_path(proxy_key, src)
+
+        browser = self._get_or_create_browser(proxy_server)
+
+        # Use the same fingerprint logic as _get_or_create_context
+        if src == "webmotors":
+            ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            viewport = {"width": 1366, "height": 768}
+        else:
+            ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            viewport = {"width": 1366, "height": 768}
+
+        ctx = browser.new_context(
+            user_agent=ua,
+            locale="pt-BR",
+            timezone_id="America/Sao_Paulo",
+            viewport=viewport,
+        )
+
+        def _is_challenge(html: str) -> bool:
+            h = (html or "").lower()
+            return (
+                "captcha" in h
+                or "verify you are" in h
+                or "cloudflare" in h
+                or "incapsula" in h
+                or "datadome" in h
+                or "perimeterx" in h
+                or "access denied" in h
+                or "just a moment" in h
+                or "px-captcha" in h
+            )
+
+        try:
+            page = ctx.new_page()
+            # do not block heavy resources for warmup; challenges often rely on them
+            target_url = (url or "").strip()
+            if not target_url and src == "webmotors":
+                target_url = "https://www.webmotors.com.br/"
+            if target_url:
+                # Step 1: home
+                page.goto(target_url, wait_until=wait_until, timeout=timeout_ms)
+                page.wait_for_timeout(1500)
+                # Step 2: a lighter path to complete scripts/cookies
+                if src == "webmotors" and "webmotors.com.br" in target_url:
+                    page.goto(
+                        "https://www.webmotors.com.br/carros",
+                        wait_until=wait_until,
+                        timeout=timeout_ms,
+                    )
+                    page.wait_for_timeout(2000)
+
+            html = ""
+            try:
+                html = page.content()
+            except Exception:
+                html = ""
+            title = ""
+            try:
+                title = page.title()
+            except Exception:
+                title = ""
+
+            # Save state even if the page is not perfect; but report if it still looks like a challenge
+            Path(storage_path).parent.mkdir(parents=True, exist_ok=True)
+            ctx.storage_state(path=storage_path)
+
+            # Invalidate cached context for this (proxy,source) so next fetch reloads storage_state
+            key = (proxy_key, src)
+            try:
+                old = self._contexts.pop(key, None)
+                self._ctx_last_used.pop(key, None)
+                if old is not None:
+                    try:
+                        old.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            return {
+                "ok": True,
+                "storage_path": storage_path,
+                "still_challenge": _is_challenge(html),
+                "final_url": getattr(page, "url", "") or "",
+                "title": title,
+            }
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+
     def _get_or_create_context(self, *, proxy_server: Optional[str], source: str) -> Any:
         # keep memory stable
         self._cleanup_contexts()
@@ -286,7 +395,14 @@ class _PlaywrightCore:
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         ]
-        ua = random.choice(user_agents)
+        # Use a stable fingerprint for sensitive sources (e.g., webmotors) to avoid
+        # cookie/UA mismatch across runs.
+        if src == "webmotors":
+            ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            viewport = {"width": 1366, "height": 768}
+        else:
+            ua = random.choice(user_agents)
+            viewport = {"width": random.choice([1280, 1366, 1440]), "height": random.choice([720, 800, 900])}
 
         storage_path = self._storage_path(proxy_key, src)
         storage_state = storage_path if os.path.exists(storage_path) else None
@@ -295,7 +411,7 @@ class _PlaywrightCore:
             user_agent=ua,
             locale="pt-BR",
             timezone_id="America/Sao_Paulo",
-            viewport={"width": random.choice([1280, 1366, 1440]), "height": random.choice([720, 800, 900])},
+            viewport=viewport,
             storage_state=storage_state,
         )
 
@@ -608,6 +724,8 @@ class _PlaywrightWorker(threading.Thread):
                     job.result = self._core.fetch(**job.kwargs)
                 elif job.name == "fetch_json":
                     job.result = self._core.fetch_json(**job.kwargs)
+                elif job.name == "warmup":
+                    job.result = self._core.warmup(**job.kwargs)
                 else:
                     raise RuntimeError(f"Unknown Playwright job: {job.name}")
                 job.exc = None
@@ -739,6 +857,30 @@ class PlaywrightPool:
             min_delay_ms=min_delay_ms,
             max_delay_ms=max_delay_ms,
         )
+
+    def warmup(
+        self,
+        url: Optional[str] = None,
+        *,
+        source: str,
+        proxy_server: Optional[str] = None,
+        timeout_ms: int = 120000,
+        wait_until: str = "domcontentloaded",
+    ) -> Dict[str, Any]:
+        """Warm up cookies/storage_state for a given source (best-effort)."""
+        self.start()
+        assert self._worker is not None
+        hard_timeout_s = max(15.0, (timeout_ms / 1000.0) + 30.0)
+        return self._call(
+            "warmup",
+            hard_timeout_s=hard_timeout_s,
+            url=url,
+            source=source,
+            proxy_server=proxy_server,
+            timeout_ms=timeout_ms,
+            wait_until=wait_until,
+        )
+
 
 
 _POOL: Optional[PlaywrightPool] = None
