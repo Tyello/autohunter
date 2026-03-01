@@ -11,13 +11,6 @@ from app.db.base import Base
 
 
 class WishlistToken(Base):
-    """Token index for scalable matching.
-
-    Table is intentionally minimal:
-      - PK is (wishlist_id, token)
-      - Only created_at is stored (no updated_at, no surrogate id)
-    """
-
     __tablename__ = "wishlist_tokens"
 
     wishlist_id: Mapped[uuid.UUID] = mapped_column(

@@ -408,14 +408,6 @@ def add_wishlist(db: Session, user_id, query: str):
         db.rollback()
         return False, "Erro ao salvar wishlist. Tente novamente."
 
-
-    # build token index for scalability (wishlist is source-agnostic)
-    try:
-        rebuild_tokens_for_wishlist(db, w)
-        db.commit()
-    except Exception:
-        db.rollback()
-
     filters = []
     # IMPORTANTE: year range é INCLUSIVO => gte/lte
     if year_min:
@@ -434,6 +426,13 @@ def add_wishlist(db: Session, user_id, query: str):
             db.commit()
         except Exception:
             db.rollback()
+
+    # build token index for scalable matching
+    try:
+        rebuild_tokens_for_wishlist(db, w)
+        db.commit()
+    except Exception:
+        db.rollback()
 
     return True, "Wishlist criada."
 
