@@ -28,6 +28,7 @@ from app.sources.registry import list_sources
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
+from app.services.wishlist_tokens_service import extract_tokens
 
 
 @dataclass
@@ -197,7 +198,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin health | /admin users | /admin errors")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
         return
 
     action = args[0].lower()
@@ -229,7 +230,11 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _admin_reindex_wishlists(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin health | /admin users | /admin errors")
+    if action == "tokens":
+        await _admin_tokens(update, args[1:])
+        return
+
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     """Subcomandos para operar SourceConfig (DB)."""
@@ -1316,26 +1321,3 @@ async def _admin_errors(update: Update, raw_args: List[str]):
     if len(msg3) > 3800:
         msg3 = msg3[:3797] + "..."
     await update.effective_message.reply_text(msg3)
-
-
-async def _admin_reindex_wishlists(update: Update, args: List[str]):
-    """Rebuild wishlist token index for scalable matching.
-
-    Usage:
-      /admin reindex_wishlists
-    """
-    await update.effective_message.reply_text("🧩 reindex iniciado… (wishlists ativas)")
-    with SessionLocal() as db:
-        res = reindex_active_wishlists(db)
-    await update.effective_message.reply_text(
-        sanitize_for_telegram(
-            "\n".join(
-                [
-                    "🧩 AutoHunter — reindex_wishlists (admin)",
-                    f"UTC: {_fmt_dt(datetime.now(timezone.utc))}",
-                    f"wishlists_processadas={res.wishlists_processed}",
-                    f"tokens_inseridos={res.tokens_inserted}",
-                ]
-            )
-        )
-    )

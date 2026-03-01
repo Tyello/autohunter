@@ -4,14 +4,14 @@ import json
 import random
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional, Dict
+from typing import TYPE_CHECKING, Callable, Optional
 
 from app.scrapers.base import FetchBlocked
 from app.scrapers.diagnostics import current_diagnostics
 from app.core.settings import settings
-
-
 from app.services.challenge_fingerprint import fingerprint_from_html
+
+
 def _allowed_playwright_sources() -> set[str]:
     raw = (getattr(settings, "playwright_sources", "") or "").strip().lower()
     # Empty means "no restriction" (DB/runtime flags decide whether to use the browser).
@@ -196,6 +196,9 @@ def fetch_html_browser(
             diag.flag("blocked", True)
             diag.inc("blocked_browser")
             diag.note("blocked_reason", "bot_challenge")
+        fp = fingerprint_from_html(html, final_url=url)
+        if fp:
+            raise FetchBlocked(f"blocked(provider={fp.provider}; title={fp.title}; url={fp.final_url}; snippet={fp.snippet[:160]})")
         raise FetchBlocked(200, url, reason="bot_challenge")
 
     if diag is not None:
