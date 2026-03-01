@@ -23,10 +23,6 @@ from app.services.scrape_jobs_service import enqueue_job, count_active_jobs
 from app.sources.registry import get_source
 
 
-# Hard cap parallel scraping jobs (protects Raspberry Pi CPU/RAM and reduces ban risk)
-_MAX_PAR = int(getattr(settings, "scheduler_max_parallel_sources", 1) or 1)
-_SOURCE_JOBS_SEM = threading.BoundedSemaphore(_MAX_PAR if _MAX_PAR > 0 else 1)
-
 
 def _utcnow():
     return datetime.now(timezone.utc)
@@ -43,11 +39,11 @@ def _get_state(db, source: str):
 def job_run_source_for_all_wishlists(source_name: str):
     """Scheduler tick for one source.
 
-    **Mudança chave**: fontes browser/Playwright agora entram em uma *fila* persistente
-    (scrape_jobs) para execução em ordem (FIFO). Isso elimina "skipped:parallel_limit"
+    **Mudanca chave**: fontes browser/Playwright agora entram em uma *fila* persistente
+    (scrape_jobs) para execucao em ordem (FIFO). Isso elimina "skipped:parallel_limit"
     e garante previsibilidade.
 
-    Fontes HTTP continuam podendo rodar direto (com semaphore) para não atrasar tudo.
+    Fontes HTTP tambem entram em fila persistente ('http'). Execucao pesada sai do tick e vai para workers, garantindo fairness e paralelismo controlado.
     """
     src = (source_name or "").lower().strip()
     plugin = get_source(src)
@@ -86,13 +82,13 @@ def job_run_source_for_all_wishlists(source_name: str):
 
                 avail = is_source_allowed(db, src)
                 if not avail.is_allowed:
-                    # não marca skip aqui para não poluir; o backoff já está no state
+                    # nao marca skip aqui para nao poluir; o backoff ja esta no state
                     db.commit()
                     return
 
                 inserted = enqueue_job(db, source=src, queue="browser", run_at=next_due, priority=0, max_attempts=3)
                 if not inserted:
-                    # fila cheia (cap) ou job já ativo. Se estiver cheia, registra evidência.
+                    # fila cheia (cap) ou job ja ativo. Se estiver cheia, registra evidencia.
                     cap = int(getattr(settings, "playwright_queue_max_jobs", 25) or 25)
                     if cap > 0 and count_active_jobs(db, queue="browser") >= cap:
                         mark_skipped(db, src, "queue_full", {"cap": cap})
@@ -100,21 +96,35 @@ def job_run_source_for_all_wishlists(source_name: str):
                 db.commit()
                 return
 
-            # HTTP: mantém execução direta com cap paralelo
-            if not _SOURCE_JOBS_SEM.acquire(blocking=False):
-                mark_skipped(db, src, "parallel_limit")
-                record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "parallel_limit"})
+            # HTTP: enqueue FIFO (mesma filosofia do browser)
+            minutes = int(cfg.sched_minutes or 0)
+            if minutes <= 0:
                 db.commit()
                 return
 
-            try:
-                _exec_source_for_all_wishlists(db, source_name, kind="scheduler", force=False, ignore_backoff=False)
+            st = _get_state(db, src)
+            last_eff = st.last_effective_run_at if st else None
+            next_due = (last_eff + timedelta(minutes=minutes)) if last_eff else _utcnow()
+            if _utcnow() < next_due:
                 db.commit()
-            finally:
-                try:
-                    _SOURCE_JOBS_SEM.release()
-                except Exception:
-                    pass
+                return
+
+            avail = is_source_allowed(db, src)
+            if not avail.is_allowed:
+                # evidencia para admin (evita "sumir" sem motivo)
+                mark_skipped(db, src, "backoff", {"until": getattr(avail, "until", None), "reason": getattr(avail, "reason", None)})
+                record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "backoff", "until": getattr(avail, "until", None), "detail": getattr(avail, "reason", None)})
+                db.commit()
+                return
+
+            inserted = enqueue_job(db, source=src, queue="http", run_at=next_due, priority=0, max_attempts=3)
+            if not inserted:
+                cap = int(getattr(settings, "http_queue_max_jobs", 200) or 200)
+                if cap > 0 and count_active_jobs(db, queue="http") >= cap:
+                    mark_skipped(db, src, "queue_full", {"cap": cap, "queue": "http"})
+                    record_run(db, source=src, kind="scheduler", status="skipped", payload={"reason": "queue_full", "cap": cap, "queue": "http"})
+            db.commit()
+            return
 
         except Exception as e:
             try:
@@ -127,15 +137,20 @@ def job_run_source_for_all_wishlists(source_name: str):
 def start_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(
         timezone="UTC",
-        executors={"default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 4) or 4))},
+        executors={
+            "default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 2) or 2)),
+            "http": ThreadPoolExecutor(int(getattr(settings, "scheduler_http_workers", 3) or 3)),
+            "browser": ThreadPoolExecutor(int(getattr(settings, "scheduler_browser_workers", 1) or 1)),
+            "sender": ThreadPoolExecutor(int(getattr(settings, "scheduler_sender_workers", 1) or 1)),
+        },
         job_defaults={
             "coalesce": True,
-            "misfire_grace_time": 60,
+            "misfire_grace_time": 3600,
             "max_instances": 1,
         },
     )
 
-    # Smoke test Playwright no boot (falha cedo em caso de bug/config/permissões)
+    # Smoke test Playwright no boot (falha cedo em caso de bug/config/permissoes)
     if bool(getattr(settings, "playwright_smoke_on_boot", True)):
         try:
             from app.services.playwright_smoke import assert_playwright_ready
@@ -201,6 +216,30 @@ def start_scheduler() -> BackgroundScheduler:
     except Exception:
         pass
 
+    # HTTP queue workers: executa jobs HTTP em paralelo controlado
+    try:
+        from app.scheduler.http_queue_job import job_http_queue_worker
+
+        worker_s = int(getattr(settings, "scheduler_http_worker_seconds", 2) or 2)
+        worker_s = max(1, min(worker_s, 60))
+        workers = int(getattr(settings, "scheduler_http_worker_count", 2) or 2)
+        workers = max(1, min(workers, 8))
+
+        for i in range(workers):
+            wid = f"http_queue_worker_{i+1}"
+            sched.add_job(
+                lambda w=wid: job_http_queue_worker(w),
+                "interval",
+                seconds=worker_s,
+                id=wid,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+                executor="http",
+            )
+    except Exception:
+        pass
+
     from app.scheduler.sender_job import job_send_notifications
     sched.add_job(
         job_send_notifications,
@@ -222,7 +261,7 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
         )
 
-    # Autopilot (detecta regressões/bloqueios e manda alertas compactos)
+    # Autopilot (detecta regress�es/bloqueios e manda alertas compactos)
     if getattr(settings, "autopilot_enabled", True):
         from app.scheduler.autopilot_job import job_autopilot_scan, job_autopilot_daily_digest
         sched.add_job(
@@ -233,7 +272,7 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
         )
 
-        # Digest diário (hora UTC configurável)
+        # Digest di�rio (hora UTC configur�vel)
         if getattr(settings, "autopilot_daily_digest_enabled", True):
             h = int(getattr(settings, "autopilot_daily_digest_hour_utc", 12) or 12)
             h = max(0, min(h, 23))
@@ -246,24 +285,7 @@ def start_scheduler() -> BackgroundScheduler:
                 replace_existing=True,
             )
 
-        # Market stats diário (cohorts) para Score vNext (v2)
-    try:
-        from app.scheduler.market_stats_job import job_compute_market_stats_daily
-
-        h = int(getattr(settings, 'market_stats_daily_hour_utc', 4) or 4)
-        h = max(0, min(h, 23))
-        sched.add_job(
-            job_compute_market_stats_daily,
-            'cron',
-            hour=h,
-            minute=10,
-            id='market_stats_daily',
-            replace_existing=True,
-        )
-    except Exception:
-        pass
-
-# Limpeza leve: mantém notifications enxutas (evita crescimento infinito) (evita crescimento infinito)
+    # Limpeza leve: mantem notifications enxutas (evita crescimento infinito) (evita crescimento infinito)
     from app.scheduler.cleanup_job import job_cleanup_notifications
     sched.add_job(
         job_cleanup_notifications,

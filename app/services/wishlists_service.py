@@ -13,9 +13,7 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
-
-# Central parser (shared across all sources & matching paths)
-from app.services.wishlist_query_parser import parse_wishlist_query
+from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 
 # Fallback (quando não existir plano/assinatura no banco ainda)
 DEFAULT_MAX_WISHLISTS_PER_USER = 3
@@ -38,14 +36,14 @@ KNOWN_SOURCES = {
 #  - "a partir de 2014" / "ano>=2014"
 #  - "entre 2014 e 2020" / "2014 até 2020" / "2014-2020"
 _YEAR_MAX_PATTERNS = [
-    re.compile(r"(?:\bate\b|\ba\b|\baté\b)\s+(\d{4})", re.IGNORECASE),
-    re.compile(r"(?:\bate\b|\ba\b|\baté\b)\s+ano\s+(\d{4})", re.IGNORECASE),
+    re.compile(r"(?:\bate\b|\baté\b)\s+(\d{4})", re.IGNORECASE),
+    re.compile(r"(?:\bate\b|\baté\b)\s+ano\s+(\d{4})", re.IGNORECASE),
     re.compile(r"\bano\s*(?:<=|=<|≤)\s*(\d{4})", re.IGNORECASE),
     re.compile(r"\byear\s*(?:<=|=<|≤)\s*(\d{4})", re.IGNORECASE),
 ]
 
 _YEAR_MIN_PATTERNS = [
-    re.compile(r"\b(?:a\s+partir\s+de|de|apartir\s+de|desde)\s+(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\b(?:a\s+partir\s+de|apartir\s+de|desde)\s+(\d{4})\b", re.IGNORECASE),
     re.compile(r"\bano\s*(?:>=|=>|≥)\s*(\d{4})\b", re.IGNORECASE),
     re.compile(r"\byear\s*(?:>=|=>|≥)\s*(\d{4})\b", re.IGNORECASE),
 ]
@@ -391,10 +389,10 @@ def add_wishlist(db: Session, user_id, query: str):
     if count >= max_wishlists:
         return False, f"Limite atingido: {max_wishlists} wishlists no seu plano."
 
-    parsed = parse_wishlist_query(query)
-    cleaned_query = (parsed.cleaned_query or "").strip()
-    year_min, year_max = parsed.year_min, parsed.year_max
-    price_min, price_max = parsed.price_min, parsed.price_max
+    cleaned_query, year_min, year_max = _extract_year_directives(query)
+    cleaned_query, price_min, price_max = _extract_price_directives(cleaned_query)
+
+    cleaned_query = (cleaned_query or "").strip()
     if not cleaned_query:
         return False, "Query inválida. Ex: /wishlist_add audi a6 entre 2014 e 2020"
 
@@ -409,6 +407,14 @@ def add_wishlist(db: Session, user_id, query: str):
     except SQLAlchemyError:
         db.rollback()
         return False, "Erro ao salvar wishlist. Tente novamente."
+
+
+    # build token index for scalability (wishlist is source-agnostic)
+    try:
+        rebuild_tokens_for_wishlist(db, w)
+        db.commit()
+    except Exception:
+        db.rollback()
 
     filters = []
     # IMPORTANTE: year range é INCLUSIVO => gte/lte

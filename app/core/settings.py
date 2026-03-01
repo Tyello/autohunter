@@ -74,10 +74,6 @@ class Settings(BaseSettings):
 
     default_alert_limit: int = 30
 
-    # Score v2 market stats (cohort mediana/p25/p75)
-    market_stats_daily_hour_utc: int = 4
-    market_stats_window_days: int = 180
-
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
 
@@ -86,6 +82,14 @@ class Settings(BaseSettings):
     enable_sender_in_bot: bool = True
     # APScheduler thread pool. For Raspberry Pi 3, 2 is usually safer (override via env).
     scheduler_workers: int = 2
+
+    # HTTP queue workers (scheduler)
+    scheduler_http_workers: int = 3
+    scheduler_http_worker_seconds: int = 2
+    scheduler_http_worker_count: int = 2
+
+    # HTTP queue cap (protects DB/RAM)
+    http_queue_max_jobs: int = 200
 
     # Max parallel *scraping* jobs running at once (sender/heartbeat are not gated).
     # 1 is the safest default for Raspberry Pi 3.

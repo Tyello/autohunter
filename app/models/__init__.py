@@ -1,6 +1,7 @@
 from .user import User
 from .wishlist import Wishlist
 from .wishlist_filter import WishlistFilter
+from .wishlist_token import WishlistToken
 from .car_listing import CarListing
 from .fipe_price import FipePrice
 from .notification import Notification
@@ -16,12 +17,12 @@ from .account import Account
 from .account_member import AccountMember
 from .app_kv import AppKV
 from .scrape_job import ScrapeJob
-from .market_stats import MarketStatsCohort
 
 __all__ = [
     "User",
     "Wishlist",
     "WishlistFilter",
+    "WishlistToken",
     "CarListing",
     "FipePrice",
     "Notification",
@@ -37,5 +38,4 @@ __all__ = [
     "AccountMember",
     "AppKV",
     "ScrapeJob",
-    "MarketStatsCohort",
 ]

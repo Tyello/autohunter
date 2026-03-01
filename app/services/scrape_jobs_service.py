@@ -52,6 +52,12 @@ def enqueue_job(
         if cap > 0 and count_active_jobs(db, queue=queue) >= cap:
             return False
 
+
+    if queue == "http":
+        cap = int(getattr(settings, "http_queue_max_jobs", 200) or 200)
+        if cap > 0 and count_active_jobs(db, queue=queue) >= cap:
+            return False
+
     stmt = (
         insert(ScrapeJob)
         .values(

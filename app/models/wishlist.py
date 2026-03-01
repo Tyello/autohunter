@@ -5,6 +5,7 @@ import uuid
 
 from app.db.base import Base, TimestampMixin
 
+
 class Wishlist(TimestampMixin, Base):
     __tablename__ = "wishlists"
 
@@ -19,4 +20,13 @@ class Wishlist(TimestampMixin, Base):
         "WishlistFilter",
         back_populates="wishlist",
         cascade="all, delete-orphan",
+    )
+
+    # Scalable matching: inverted index tokens (token -> wishlist)
+    # PK is (wishlist_id, token) in wishlist_tokens table.
+    tokens = relationship(
+        "WishlistToken",
+        back_populates="wishlist",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
