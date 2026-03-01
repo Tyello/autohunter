@@ -315,3 +315,21 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
         browser_max_delay_ms=_get_int("browser_max_delay_ms"),
         extra=extra if extra else None,
     )
+
+
+def get_source_impl_flags(extra: Dict[str, Any] | None) -> tuple[str, str]:
+    """Read source implementation flags from source_configs.extra.
+
+    Keys:
+    - impl: v1|v2|dual
+    - dual_mode: v1_primary|v2_primary
+    """
+    payload = extra or {}
+    impl = str(payload.get("impl") or "v1").strip().lower()
+    if impl not in {"v1", "v2", "dual"}:
+        impl = "v1"
+
+    dual_mode = str(payload.get("dual_mode") or "v1_primary").strip().lower()
+    if dual_mode not in {"v1_primary", "v2_primary", "prefer_v2", "prefer_v1"}:
+        dual_mode = "v1_primary"
+    return impl, dual_mode
