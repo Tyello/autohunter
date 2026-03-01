@@ -14,6 +14,7 @@ from app.schemas.car_listing import CarListingOut
 from app.scrapers.olx import get_olx_health_snapshot
 
 from app.db.deps import get_db
+from app.web.routes_auth_facebook import router as facebook_auth_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AutoHunter", version="0.1.0", lifespan=lifespan)
+app.include_router(facebook_auth_router)
 
 @app.get("/health")
 def health():
