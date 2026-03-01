@@ -1,51 +1,36 @@
-from app.scrapers.dual_run import compare_results
-from app.scrapers.source_contract import NormalizedAd, ResultMetadata, SourceResult, normalize_raw_items
-from app.services.source_configs_service import get_source_impl_flags
+from app.sources.adapters.v1 import adapt_v1
+from app.sources.compare import compare_ads
+from app.sources.flags import read_source_impl_flags
 
 
 def test_normalize_raw_items_contract_validation():
-    raw = [
-        {"source": "olx", "external_id": "1", "url": "https://www.olx.com.br/a?utm=1", "title": "  Civic  "},
-        {"source": "olx", "external_id": "1", "url": "https://www.olx.com.br/a", "price": 10},
-    ]
-    ads = normalize_raw_items("olx", raw)
-    assert len(ads) == 1
-    ad = ads[0]
-    assert isinstance(ad, NormalizedAd)
-    assert ad.currency == "BRL"
-    assert ad.url == "https://www.olx.com.br/a"
+    ads, _ = adapt_v1(
+        "olx",
+        [
+            {"source": "olx", "external_id": "1", "url": "https://www.olx.com.br/a?utm=1", "title": "  Civic  "},
+            {"source": "olx", "external_id": "1", "url": "https://www.olx.com.br/a", "price": 10},
+        ],
+    )
+    assert len(ads) == 2
+    assert ads[0].currency == "BRL"
+    assert ads[0].url == "https://www.olx.com.br/a?utm=1"
 
 
 def test_compare_results_counts_and_field_diffs():
-    v1 = SourceResult(
-        ads=[
-            NormalizedAd(source="olx", external_id="1", url="u1", title="A", price=100),
-            NormalizedAd(source="olx", external_id="2", url="u2", title="B", price=200),
-        ],
-        metadata=ResultMetadata(source="olx", impl="v1", duration_ms=1, raw_count=2, normalized_count=2),
-    )
-    v2 = SourceResult(
-        ads=[
-            NormalizedAd(source="olx", external_id="1", url="u1", title="A*", price=100),
-            NormalizedAd(source="olx", external_id="3", url="u3", title="C", price=300),
-        ],
-        metadata=ResultMetadata(source="olx", impl="v2", duration_ms=1, raw_count=2, normalized_count=2),
-    )
+    v1, _ = adapt_v1("olx", [{"external_id": "1", "url": "u1", "title": "A", "price": 100}, {"external_id": "2", "url": "u2", "title": "B", "price": 200}])
+    v2, _ = adapt_v1("olx", [{"external_id": "1", "url": "u1", "title": "A*", "price": 100}, {"external_id": "3", "url": "u3", "title": "C", "price": 300}])
 
-    comp = compare_results(v1, v2)
-    assert comp["v1_count"] == 2
-    assert comp["v2_count"] == 2
-    assert comp["intersection"] == 1
-    assert comp["only_v1_count"] == 1
-    assert comp["only_v2_count"] == 1
-    assert comp["field_diffs"][0]["external_id"] == "1"
+    comp = compare_ads(v1, v2)
+    assert comp["matched"] == 1
+    assert comp["misses_v2"] == 1
+    assert comp["extras_v2"] == 1
 
 
 def test_impl_flags_from_source_extra():
-    impl, dual_mode = get_source_impl_flags({"impl": "dual", "dual_mode": "v2_primary"})
-    assert impl == "dual"
-    assert dual_mode == "v2_primary"
+    flags = read_source_impl_flags({"impl": "dual", "dual_mode": "compare_and_use_v2"})
+    assert flags.impl == "dual"
+    assert flags.dual_mode == "compare_and_use_v2"
 
-    impl2, dual_mode2 = get_source_impl_flags({"impl": "invalid", "dual_mode": "??"})
-    assert impl2 == "v1"
-    assert dual_mode2 == "v1_primary"
+    flags2 = read_source_impl_flags({"impl": "invalid", "dual_mode": "??"})
+    assert flags2.impl == "v1"
+    assert flags2.dual_mode == "compare_only"

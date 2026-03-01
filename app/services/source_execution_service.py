@@ -13,13 +13,14 @@ from app.models.wishlist import Wishlist
 from app.scheduler.jobs import scrape_ingest_match_many
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
-from app.services.source_configs_service import ensure_source_configs, build_scrape_context, get_source_impl_flags
+from app.services.source_configs_service import ensure_source_configs, build_scrape_context
 from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
-from app.scrapers.dual_run import run_with_dual_mode
-from app.scrapers.source_adapters import run_v2_adapter
+from app.sources.adapters.v2 import adapt_v2
+from app.sources.dual_run import execute_dual_run
+from app.sources.flags import read_source_impl_flags
 from app.scrapers.sources import get_scraper
 
 
@@ -178,22 +179,39 @@ def run_source_for_all_wishlists(
             return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists"}
 
     ctx = build_scrape_context(db, src)
-    impl, dual_mode = get_source_impl_flags(cfg.extra)
+    flags = read_source_impl_flags(cfg.extra)
     v2_scraper = get_scraper(src)
 
     def _scrape_dispatch(search_url: str, ctx):
-        if impl == "v2" and v2_scraper is not None:
-            res = run_v2_adapter(src, v2_scraper, search_url, ctx)
-            return [ad.to_listing() for ad in res.ads]
-        if impl == "dual" and v2_scraper is not None:
-            return run_with_dual_mode(
+        if flags.impl == "v2" and v2_scraper is not None:
+            result = v2_scraper.scrape(search_url, ctx)
+            ads, _meta = adapt_v2(src, result)
+            return [
+                {
+                    "source": ad.source,
+                    "external_id": ad.source_listing_id,
+                    "url": ad.url,
+                    "title": ad.title,
+                    "price": ad.price,
+                    "currency": ad.currency,
+                    "location": ", ".join([x for x in [ad.city, ad.uf] if x]) or None,
+                    "year": ad.year,
+                    "mileage_km": ad.km,
+                    "images_count": ad.images_count,
+                }
+                for ad in ads
+            ]
+        if flags.impl == "dual" and v2_scraper is not None:
+            chosen, report = execute_dual_run(
                 source=src,
                 search_url=search_url,
                 ctx=ctx,
                 v1_scrape_fn=plugin.scrape,
                 v2_scraper=v2_scraper,
-                dual_mode=dual_mode,
+                flags=flags,
             )
+            object.__setattr__(ctx, "_dual_run_summary", report.get("comparison") or {})
+            return chosen
         return plugin.scrape(search_url, ctx=ctx)
 
     groups_count = len(groups)
@@ -204,6 +222,8 @@ def run_source_for_all_wishlists(
     total_inserted = 0
     total_matched = 0
     total_queued = 0
+    total_already_notified = 0
+    total_reason_buckets: dict[str, int] = {}
     total_thumb_present = 0
     any_hybrid_browser = False
     any_hybrid_blocked = False
@@ -348,6 +368,9 @@ def run_source_for_all_wishlists(
         total_inserted += int(res.get("inserted") or 0)
         total_matched += int(res.get("matched") or 0)
         total_queued += int(res.get("queued") or 0)
+        total_already_notified += int(res.get("already_notified") or 0)
+        for k, v in (res.get("reason_buckets") or {}).items():
+            total_reason_buckets[k] = int(total_reason_buckets.get(k, 0)) + int(v or 0)
         total_thumb_present += int(res.get("thumb_present") or 0)
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
@@ -356,7 +379,7 @@ def run_source_for_all_wishlists(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
     )
     run_row = record_run(
         db,
@@ -383,11 +406,11 @@ def run_source_for_all_wishlists(
         source=src,
         run_id=run_row.id,
         message="run_ok",
-        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind},
+        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind},
         tags=[kind, "ok"],
     )
 
-    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
+    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets}

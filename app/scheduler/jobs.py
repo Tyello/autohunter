@@ -249,6 +249,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     matched = 0
     queued = 0
+    already_notified = 0
+    reason_buckets = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlist is not None:
@@ -263,11 +265,16 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             matched_listings = matches_by.get(wishlist.id) or []
             matched = len(matched_listings)
             if matched:
-                queued = queue_notifications_for_matches(
+                diag = queue_notifications_for_matches_diag(
                     db,
                     wishlist,
                     matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
+                    max_queue=MAX_QUEUE_PER_WISHLIST_PER_RUN,
                 )
+                queued = int(diag.get("queued") or 0)
+                already_notified = int(diag.get("already_notified") or 0)
+                for k, v in (diag.get("buckets") or {}).items():
+                    reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
 
     else:
         # Scheduler/source runs (wishlist agnóstica): matching escalável via token index.
@@ -293,6 +300,9 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                 )
                 matched += int(diag.get("matched") or 0)
                 queued += int(diag.get("queued") or 0)
+                already_notified += int(diag.get("already_notified") or 0)
+                for k, v in (diag.get("buckets") or {}).items():
+                    reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
             # expose matching scalability stats for admin/telemetry
             ctx._matching_stats = mstats
 
@@ -315,6 +325,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "matched": matched,
         "matching": getattr(ctx, "_matching_stats", None),
         "queued": queued,
+        "already_notified": already_notified,
+        "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
@@ -330,6 +342,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "matched": matched,
         "matching": getattr(ctx, "_matching_stats", None),
         "queued": queued,
+        "already_notified": already_notified,
+        "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
@@ -338,7 +352,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     db.commit()
 
     return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": matched,
-        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
+        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
@@ -453,6 +467,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     total_matched = 0
     total_queued = 0
+    total_already_notified = 0
+    reason_buckets = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlists:
@@ -471,14 +487,16 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                 if not m:
                     continue
                 total_matched += m
-                total_queued += int(
-                    queue_notifications_for_matches(
-                        db,
-                        w,
-                        matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
-                    )
-                    or 0
+                diag = queue_notifications_for_matches_diag(
+                    db,
+                    w,
+                    matched_listings[:MAX_QUEUE_PER_WISHLIST_PER_RUN],
+                    max_queue=MAX_QUEUE_PER_WISHLIST_PER_RUN,
                 )
+                total_queued += int(diag.get("queued") or 0)
+                total_already_notified += int(diag.get("already_notified") or 0)
+                for k, v in (diag.get("buckets") or {}).items():
+                    reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
 
     if inc_enabled and found:
         try:
@@ -497,6 +515,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "upserted": upserted,
         "matched": total_matched,
         "queued": total_queued,
+        "already_notified": total_already_notified,
+        "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
@@ -511,6 +531,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "upserted": upserted,
         "matched": total_matched,
         "queued": total_queued,
+        "already_notified": total_already_notified,
+        "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
@@ -518,4 +540,4 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
