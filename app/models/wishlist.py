@@ -26,4 +26,3 @@ tokens = relationship(
     cascade="all, delete-orphan",
     passive_deletes=True,
 )
-

@@ -1321,3 +1321,24 @@ async def _admin_errors(update: Update, raw_args: List[str]):
     if len(msg3) > 3800:
         msg3 = msg3[:3797] + "..."
     await update.effective_message.reply_text(msg3)
+
+async def _admin_reindex_wishlists(update: Update, args: List[str]):
+    """Rebuild wishlist token index for scalable matching.
+    Usage:
+      /admin reindex_wishlists
+    """
+    await update.effective_message.reply_text("🧩 reindex iniciado… (wishlists ativas)")
+    with SessionLocal() as db:
+        res = reindex_active_wishlists(db)
+    await update.effective_message.reply_text(
+        sanitize_for_telegram(
+            "\n".join(
+                [
+                    "🧩 AutoHunter — reindex_wishlists (admin)",
+                    f"UTC: {_fmt_dt(datetime.now(timezone.utc))}",
+                    f"wishlists_processadas={res.wishlists_processed}",
+                    f"tokens_inseridos={res.tokens_inserted}",
+                ]
+            )
+        )
+    )
