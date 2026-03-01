@@ -231,7 +231,8 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "tokens":
-        await _admin_tokens(update, args[1:])
+        from app.bot.admin_tokens import admin_tokens_dispatch
+        await admin_tokens_dispatch(update, args[1:])
         return
 
     await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
