@@ -12,6 +12,7 @@ from app.core.text_norm import tokens, normalize
 from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
 from app.services.wishlist_semantic_rules import semantic_match
+from app.services.wishlist_query_parser import parse_wishlist_query
 
 
 @dataclass(frozen=True)
@@ -427,7 +428,21 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
 def _get_filters(wishlist: Wishlist) -> list[FilterRule]:
     # usa relationship se já carregou
     raw = list(getattr(wishlist, "filters", None) or [])
-    return [FilterRule(f.field, f.operator, f.value) for f in raw]
+    if raw:
+        return [FilterRule(f.field, f.operator, f.value) for f in raw]
+
+    # fallback para wishlists legadas que guardam diretivas no texto
+    parsed = parse_wishlist_query(getattr(wishlist, "query", "") or "")
+    legacy: list[FilterRule] = []
+    if parsed.year_min is not None:
+        legacy.append(FilterRule("year", "gte", str(parsed.year_min)))
+    if parsed.year_max is not None:
+        legacy.append(FilterRule("year", "lte", str(parsed.year_max)))
+    if parsed.price_min is not None:
+        legacy.append(FilterRule("price", "gte", str(parsed.price_min)))
+    if parsed.price_max is not None:
+        legacy.append(FilterRule("price", "lte", str(parsed.price_max)))
+    return legacy
 
 
 def match_listings_for_wishlist(

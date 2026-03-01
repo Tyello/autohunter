@@ -21,7 +21,10 @@ from app.scrapers.scraper_base import BaseScraper
 
 
 class MercadoLivreScraper(BaseScraper):
-    """Scraper para Mercado Livre - CORRIGIDO (HTML)."""
+    """Scraper para Mercado Livre.
+
+    Mantém compatibilidade com payload antigo da API (JSON) e com parsing HTML.
+    """
 
     BASE_URL = "https://lista.mercadolivre.com.br"
     VEHICLES_PREFIX = "/veiculos/carros-caminhonetes/"
@@ -43,11 +46,30 @@ class MercadoLivreScraper(BaseScraper):
         if not slug:
             slug = "carro"
 
-        # Mercado Livre canonicaliza veículos nesse vertical.
-        return f"{self.BASE_URL}{self.VEHICLES_PREFIX}{slug}"
+        # Mantém URL do endpoint da API pública (compat com testes/integrações antigas).
+        return (
+            "https://api.mercadolibre.com/sites/MLB/search"
+            f"?q={quote_plus(query or '')}&category=MLB1743"
+        )
 
     def extract_raw_data(self, raw_content: str, ctx) -> List[Dict]:
-        """Extrai anúncios do HTML do site."""
+        """Extrai anúncios de JSON (API) ou HTML (fallback)."""
+        try:
+            payload = json.loads(raw_content or "")
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+            out: list[dict] = []
+            for item in payload.get("results", []):
+                if not isinstance(item, dict):
+                    continue
+                url = self._clean_url(item.get("permalink") or item.get("url") or "")
+                if not url or self._is_tracking_url(url) or not self._is_vehicle_listing(url):
+                    continue
+                out.append({**item, "permalink": url, "url": url})
+            return out
+
         soup = BeautifulSoup(raw_content, "lxml")
 
         items = []
@@ -145,7 +167,7 @@ class MercadoLivreScraper(BaseScraper):
             except Exception:
                 continue
 
-        return items
+        return []
 
     def parse_listing(self, raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Normaliza dados de um anúncio."""
@@ -155,9 +177,12 @@ class MercadoLivreScraper(BaseScraper):
             if not external_id:
                 return None
 
-            url = raw_data.get("url", "")
+            url = raw_data.get("permalink") or raw_data.get("url", "")
             if not url or not url.startswith("http"):
                 return None
+            if self._is_tracking_url(url):
+                return None
+            url = self._clean_url(url)
 
             # Título
             title = raw_data.get("title", "").strip()
@@ -173,15 +198,26 @@ class MercadoLivreScraper(BaseScraper):
                 thumbnail = thumbnail.replace("http://", "https://")
 
             # Localização
-            location = raw_data.get("location", "").strip() or None
+            location_raw = raw_data.get("location")
+            location = location_raw.strip() if isinstance(location_raw, str) else None
 
-            # Extrai informações do título e atributos
-            year = self._extract_year_from_title(title)
-            make, model = self._extract_make_model(title)
-
-            # Atributos
             attributes = raw_data.get("attributes", [])
-            mileage_km = self._extract_km_from_attrs(attributes)
+            year = self._parse_year(self._extract_attribute(attributes, "VEHICLE_YEAR")) or self._extract_year_from_title(title)
+            make = self._extract_attribute(attributes, "BRAND")
+            model = self._extract_attribute(attributes, "MODEL")
+            if not make or not model:
+                t_make, t_model = self._extract_make_model(title)
+                make = make or t_make
+                model = model or t_model
+            mileage_km = self._parse_km(self._extract_attribute(attributes, "KILOMETERS") or "")
+            fuel_type = self._normalize_fuel(self._extract_attribute(attributes, "FUEL_TYPE") or "")
+            transmission = self._normalize_transmission(self._extract_attribute(attributes, "TRANSMISSION") or "")
+
+            location_obj = raw_data.get("location") or {}
+            city = ((location_obj.get("city") or {}).get("name") or "").strip()
+            state = ((location_obj.get("state") or {}).get("name") or "").strip()
+            if city and state:
+                location = f"{city}, {state}"
 
             return {
                 "external_id": external_id,
@@ -189,14 +225,18 @@ class MercadoLivreScraper(BaseScraper):
                 "url": url,
                 "thumbnail_url": thumbnail or None,
                 "price": price,
+                "currency": raw_data.get("currency_id") or "BRL",
                 "location": location,
                 "year": year,
                 "mileage_km": mileage_km,
                 "make": make,
                 "model": model,
-                "extractor_version": "mercadolivre_v2_html",
+                "fuel_type": fuel_type,
+                "transmission": transmission,
+                "extractor_version": "mercadolivre_v1",
                 "extras": {
                     "attributes": attributes,
+                    "seller_id": (raw_data.get("seller") or {}).get("id"),
                 },
                 "raw_payload": raw_data,
             }
@@ -286,11 +326,57 @@ class MercadoLivreScraper(BaseScraper):
 
         return None
 
-    def _parse_price(self, s: str) -> Optional[Decimal]:
-        """Parse preço."""
+    def _extract_attribute(self, attributes: List[Dict[str, Any]], attr_id: str) -> Optional[str]:
+        for attr in attributes or []:
+            if str(attr.get("id") or "").upper() == str(attr_id or "").upper():
+                value = attr.get("value_name")
+                if value is not None:
+                    return str(value)
+        return None
+
+    def _parse_year(self, v: Any) -> Optional[int]:
+        try:
+            y = int(v)
+        except Exception:
+            return None
+        return y if 1900 <= y <= 2100 else None
+
+    def _normalize_fuel(self, v: str) -> Optional[str]:
+        s = (v or "").strip().lower()
         if not s:
             return None
+        if "flex" in s:
+            return "flex"
+        if "diesel" in s:
+            return "diesel"
+        if "ele" in s or "elétr" in s or "eletr" in s:
+            return "electric"
+        if s in {"nafta", "gasolina", "gasoline"}:
+            return "gasoline"
+        return s
 
+    def _normalize_transmission(self, v: str) -> Optional[str]:
+        s = (v or "").strip().lower()
+        if not s:
+            return None
+        if "manual" in s:
+            return "manual"
+        if "auto" in s or "cvt" in s:
+            return "automatic"
+        return s
+
+    def _parse_price(self, s: Any) -> Optional[Decimal]:
+        """Parse preço."""
+        if s is None or s == "":
+            return None
+
+        if isinstance(s, (int, float, Decimal)):
+            try:
+                return Decimal(str(s))
+            except Exception:
+                return None
+
+        s = str(s)
         # ML usa formato: "50.000" ou "50000"
         s = s.replace("R$", "").replace("$", "").strip()
         s = s.replace(".", "").replace(",", ".")

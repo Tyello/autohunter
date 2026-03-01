@@ -18,6 +18,11 @@ _BASE = "https://turboclass.com.br/"
 _RE_BG_URL = re.compile(r"url\((?:'|\")?(.*?)(?:'|\")?\)", re.I)
 
 
+def fetch_html_with_browser_fallback(url: str, ctx: ScrapeContext | None = None) -> str:
+    """Compat shim para testes antigos: hoje usa fetch_html (HTTP-first)."""
+    return fetch_html(url, ctx=ctx)
+
+
 def _clean_text(t: str) -> str:
     return re.sub(r"\s+", " ", (t or "").replace("\xa0", " ")).strip()
 
@@ -89,6 +94,46 @@ def _parse_year(year_model_text: str) -> Optional[int]:
     return None
 
 
+def _parse_card_text(text: str) -> tuple[str, Optional[object], Optional[int], str]:
+    """Fallback parser para cards simplificados sem estrutura HTML."""
+    t = _clean_text(text)
+    if not t:
+        return "", None, ""
+
+    title = ""
+    m_title = re.search(r"^(.*?)\s+motorização\b", t, re.I)
+    if m_title:
+        title = _clean_text(m_title.group(1))
+
+    price = parse_brl_price(_find_between(t, "VALOR", "ANO/MODELO"))
+    year = _parse_year(_find_between(t, "ANO/MODELO", "NEGÓCIO"))
+    location = _clean_text(_find_after(t, "LOCALIDADE"))
+    location = re.sub(r"\s+detalhes$", "", location, flags=re.I)
+    return title, price, year, location
+
+
+def _find_between(text: str, start_key: str, end_key: str) -> str:
+    low = text.lower()
+    s_key = start_key.lower()
+    e_key = end_key.lower()
+    i = low.find(s_key)
+    if i < 0:
+        return ""
+    j = low.find(e_key, i + len(s_key))
+    if j < 0:
+        j = len(text)
+    return text[i + len(start_key):j].strip()
+
+
+def _find_after(text: str, key: str) -> str:
+    low = text.lower()
+    k = key.lower()
+    i = low.find(k)
+    if i < 0:
+        return ""
+    return text[i + len(key):].strip()
+
+
 def _build_title(make: str, model: str, anchor_title: str, spec: str, year: Optional[int]) -> str:
     make = _clean_text(make)
     model = _clean_text(model)
@@ -130,7 +175,7 @@ def scrape_turboclass(search_url: str, ctx: ScrapeContext | None = None, limit: 
     - images are in inline styles (background-image)
     """
 
-    html = fetch_html(search_url, ctx=ctx)
+    html = fetch_html_with_browser_fallback(search_url, ctx=ctx)
     soup = BeautifulSoup(html or "", "html.parser")
 
     out: list[dict] = []
@@ -206,9 +251,21 @@ def scrape_turboclass(search_url: str, ctx: ScrapeContext | None = None, limit: 
             img_div = a.select_one("div[style*='background-image']")
         if img_div is not None:
             thumb = _extract_bg_image(img_div.get("style") or "")
+        if not thumb:
+            img = a.select_one("img[src]")
+            if img is not None:
+                thumb = urljoin(_BASE, (img.get("src") or "").strip())
 
         anchor_title = a.get("title") or ""
         title = _build_title(make, model, anchor_title, spec, year)
+
+        if not title:
+            parsed_title, parsed_price, parsed_year, parsed_location = _parse_card_text(a.get_text(" ", strip=True))
+            title = parsed_title or None
+            price = price if price is not None else parsed_price
+            year = year or parsed_year
+            if not location:
+                location = parsed_location
 
         payload = {
                 # IMPORTANT: sold-mode still updates the *same* source listings.
