@@ -261,7 +261,23 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
         )
 
-    # Autopilot (detecta regressıes/bloqueios e manda alertas compactos)
+    # Facebook session healthcheck
+    try:
+        from app.scheduler.jobs_fb_sessions import job_fb_sessions_healthcheck
+        fb_hours = int(getattr(settings, "fb_healthcheck_hours", 6) or 6)
+        fb_hours = max(1, min(fb_hours, 24))
+        sched.add_job(
+            job_fb_sessions_healthcheck,
+            "interval",
+            hours=fb_hours,
+            id="fb_sessions_healthcheck",
+            replace_existing=True,
+            max_instances=1,
+        )
+    except Exception:
+        pass
+
+    # Autopilot (detecta regress√µes/bloqueios e manda alertas compactos)
     if getattr(settings, "autopilot_enabled", True):
         from app.scheduler.autopilot_job import job_autopilot_scan, job_autopilot_daily_digest
         sched.add_job(
@@ -272,7 +288,7 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
         )
 
-        # Digest di·rio (hora UTC configur·vel)
+        # Digest di√°rio (hora UTC configur√°vel)
         if getattr(settings, "autopilot_daily_digest_enabled", True):
             h = int(getattr(settings, "autopilot_daily_digest_hour_utc", 12) or 12)
             h = max(0, min(h, 23))

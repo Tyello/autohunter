@@ -12,6 +12,7 @@ from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cm
 from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_admin import cmd_admin
 from app.bot.handlers_misc import cmd_me
+from app.bot.handlers_fb import cmd_fb
 from app.bot.handlers_wishlist_ui import (
     wishlist_add_conversation,
     cb_wishlist_add_confirm,
@@ -109,6 +110,7 @@ def main():
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))
     app.add_handler(CommandHandler("me", cmd_me))
+    app.add_handler(CommandHandler("fb", cmd_fb))
 
     # misc
     app.add_handler(CommandHandler("plan", cmd_plan))

@@ -24,6 +24,7 @@ from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
+from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_execution_service import run_source_for_all_wishlists
@@ -214,6 +215,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "errors":
         await _admin_errors(update, args[1:])
         return
+    if action == "fb_sessions":
+        await _admin_fb_sessions(update)
+        return
     if action == "runall":
         await _admin_runall(update, args[1:])
         return
@@ -235,7 +239,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_sessions")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     """Subcomandos para operar SourceConfig (DB)."""
@@ -1343,3 +1347,28 @@ async def _admin_reindex_wishlists(update: Update, args: List[str]):
             )
         )
     )
+
+async def _admin_fb_sessions(update: Update):
+    db = SessionLocal()
+    try:
+        by_status = db.query(FBSession.status, func.count(FBSession.id)).group_by(FBSession.status).all()
+        by_error = (
+            db.query(FBSession.last_error_kind, func.count(FBSession.id))
+            .filter(FBSession.last_error_kind.is_not(None))
+            .group_by(FBSession.last_error_kind)
+            .order_by(func.count(FBSession.id).desc())
+            .limit(5)
+            .all()
+        )
+
+        status_text = ", ".join([f"{s}:{c}" for s, c in by_status]) if by_status else "-"
+        error_text = ", ".join([f"{(e or 'NONE')}:{c}" for e, c in by_error]) if by_error else "-"
+
+        await update.message.reply_text(
+            "FB sessions\n"
+            f"by_status: {status_text}\n"
+            f"top_errors: {error_text}\n"
+            "Ação recomendada: pedir /fb connect para EXPIRED/CHALLENGE/BLOCKED."
+        )
+    finally:
+        db.close()

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     database_url: str
     telegram_bot_token: str | None = None
     autohunter_admins: str | None = None
+    public_base_url: str | None = None
 
     # Chat IDs que devem receber alertas automáticos (erros/backoff/monitoramento).
     # Separe por vírgula. Se vazio, usa autohunter_admins (compatibilidade).
@@ -64,6 +65,12 @@ class Settings(BaseSettings):
 
     # Smoke test no boot (scheduler/bot)
     playwright_smoke_on_boot: bool = True
+
+    # Facebook Marketplace auth/session
+    fb_profile_base_dir: str = "/opt/autohunter/profiles/fb"
+    fb_debug_base_dir: str = "/opt/autohunter/debug/fb"
+    fb_max_parallel_browsers: int = 1
+    fb_healthcheck_hours: int = 6
 
     # Bug retry (sem backoff exponencial)
     source_bug_retry_minutes: int = 2
