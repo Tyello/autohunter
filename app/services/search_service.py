@@ -10,8 +10,11 @@ from app.sources import list_sources
 from app.services.listings_service import ingest_listings
 from app.scrapers.diagnostics import ScrapeDiagnostics, using_diagnostics
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_success, mark_skipped
-from app.services.source_configs_service import ensure_source_configs, get_source_config, build_scrape_context
+from app.services.source_configs_service import ensure_source_configs, get_source_config, build_scrape_context, get_source_impl_flags
 from app.services.source_runs_service import record_run
+from app.scrapers.dual_run import run_with_dual_mode
+from app.scrapers.source_adapters import run_v2_adapter
+from app.scrapers.sources import get_scraper
 from app.services.system_logs_service import log
 
 
@@ -72,8 +75,23 @@ def manual_search(db: Session, query: str, limit: int = 5, sources: Optional[Lis
         diag = ScrapeDiagnostics(source=plugin.name, url=url, kind="manual")
         try:
             ctx = build_scrape_context(db, plugin.name)
+            impl, dual_mode = get_source_impl_flags((cfg.extra if cfg else None))
+            v2_scraper = get_scraper(plugin.name)
             with using_diagnostics(diag):
-                items = plugin.scrape(url, ctx)
+                if impl == "v2" and v2_scraper is not None:
+                    v2_res = run_v2_adapter(plugin.name, v2_scraper, url, ctx)
+                    items = [ad.to_listing() for ad in v2_res.ads]
+                elif impl == "dual" and v2_scraper is not None:
+                    items = run_with_dual_mode(
+                        source=plugin.name,
+                        search_url=url,
+                        ctx=ctx,
+                        v1_scrape_fn=plugin.scrape,
+                        v2_scraper=v2_scraper,
+                        dual_mode=dual_mode,
+                    )
+                else:
+                    items = plugin.scrape(url, ctx)
             inserted_ids = ingest_listings(db, items)
 
             diag.inc("found", len(items or []))

@@ -13,11 +13,14 @@ from app.models.wishlist import Wishlist
 from app.scheduler.jobs import scrape_ingest_match_many
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
-from app.services.source_configs_service import ensure_source_configs, build_scrape_context
+from app.services.source_configs_service import ensure_source_configs, build_scrape_context, get_source_impl_flags
 from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
+from app.scrapers.dual_run import run_with_dual_mode
+from app.scrapers.source_adapters import run_v2_adapter
+from app.scrapers.sources import get_scraper
 
 
 def _utcnow() -> datetime:
@@ -175,6 +178,23 @@ def run_source_for_all_wishlists(
             return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists"}
 
     ctx = build_scrape_context(db, src)
+    impl, dual_mode = get_source_impl_flags(cfg.extra)
+    v2_scraper = get_scraper(src)
+
+    def _scrape_dispatch(search_url: str, ctx):
+        if impl == "v2" and v2_scraper is not None:
+            res = run_v2_adapter(src, v2_scraper, search_url, ctx)
+            return [ad.to_listing() for ad in res.ads]
+        if impl == "dual" and v2_scraper is not None:
+            return run_with_dual_mode(
+                source=src,
+                search_url=search_url,
+                ctx=ctx,
+                v1_scrape_fn=plugin.scrape,
+                v2_scraper=v2_scraper,
+                dual_mode=dual_mode,
+            )
+        return plugin.scrape(search_url, ctx=ctx)
 
     groups_count = len(groups)
     total_wishlists = sum(len(g.get("wishlists") or []) for g in groups.values())
@@ -194,7 +214,7 @@ def run_source_for_all_wishlists(
         res = scrape_ingest_match_many(
             db,
             job_name,
-            plugin.scrape,
+            _scrape_dispatch,
             url,
             ctx=ctx,
             wishlists=g["wishlists"],
@@ -229,7 +249,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status")},
+                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None)},
                 )
                 emit_event(
                     db,
@@ -261,7 +281,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status")},
+                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None)},
                 )
                 emit_event(
                     db,
@@ -308,7 +328,7 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status")},
+                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None)},
             )
             emit_event(
                 db,
