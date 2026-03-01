@@ -324,7 +324,7 @@ def score_ad(
 
     # price attractiveness
     if delta_pct is not None:
-        if delta_pct <= -0.10:
+        if delta_pct < 0:
             reasons_cand.append((1, f"Preço {_fmt_pct(delta_pct)} abaixo da mediana"))
         elif delta_pct >= 0.10:
             reasons_cand.append((5, f"Preço {_fmt_pct(delta_pct)} acima da mediana"))
