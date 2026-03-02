@@ -94,7 +94,9 @@ def is_expired(expires_at: datetime | None, now: datetime | None = None) -> bool
 def action_hint_for_status(status: str) -> str:
     if status == STATUS_ACTIVE:
         return "OK"
-    if status in {STATUS_PENDING_AUTH, STATUS_PENDING_AGENT}:
+    if status == STATUS_PENDING_AUTH:
+        return "Finalize no link"
+    if status == STATUS_PENDING_AGENT:
         return "Rodar /fb connect e iniciar agent local"
     if status == STATUS_AGENT_ONLINE:
         return "Agent online; validação em andamento"

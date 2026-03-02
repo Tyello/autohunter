@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 
 from app.core.settings import settings
@@ -20,3 +22,11 @@ def test_delete_profile_dir_only_under_base(tmp_path, monkeypatch):
 
     assert delete_profile_dir("../outside/u-bad") is False
     assert target.exists()
+
+
+def test_profile_dir_private_permissions(tmp_path, monkeypatch):
+    base = tmp_path / "profiles-perm"
+    monkeypatch.setattr(settings, "fb_profile_base_dir", str(base))
+    user_dir = ensure_profile_dir("u-perm")
+    mode = stat.S_IMODE(os.stat(user_dir).st_mode)
+    assert mode == 0o700

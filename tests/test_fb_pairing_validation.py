@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from app.integrations.facebook.constants import STATUS_ACTIVE, STATUS_DISABLED, STATUS_PENDING_AUTH
-from app.integrations.facebook.guards import can_transition_status, normalize_pairing_code, validate_pairing_code_format
+from app.integrations.facebook.guards import action_hint_for_status, can_transition_status, normalize_pairing_code, validate_pairing_code_format
 from app.integrations.facebook.service import issue_pairing_code, validate_pairing_code
 from app.models.fb_session import FBSession
 
@@ -48,3 +48,9 @@ def test_invalid_status_transitions_are_rejected():
     assert can_transition_status(STATUS_PENDING_AUTH, STATUS_ACTIVE) is True
     assert can_transition_status(STATUS_ACTIVE, STATUS_PENDING_AUTH) is False
     assert can_transition_status(STATUS_DISABLED, STATUS_ACTIVE) is False
+
+
+def test_action_hint_matrix():
+    assert action_hint_for_status("ACTIVE") == "OK"
+    assert action_hint_for_status("PENDING_AUTH") == "Finalize no link"
+    assert action_hint_for_status("DISABLED") == "Sessão desabilitada; use /fb connect"

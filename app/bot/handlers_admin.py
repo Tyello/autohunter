@@ -25,6 +25,7 @@ from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.fb_agent_session import FBAgentSession
+from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_execution_service import run_source_for_all_wishlists
@@ -1351,7 +1352,7 @@ async def _admin_reindex_wishlists(update: Update, args: List[str]):
 async def _admin_fb_sessions(update: Update):
     db = SessionLocal()
     try:
-        stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         by_status = db.query(FBAgentSession.status, func.count(FBAgentSession.id)).group_by(FBAgentSession.status).all()
         by_error = (
             db.query(FBAgentSession.last_error_kind, func.count(FBAgentSession.id))
@@ -1362,9 +1363,10 @@ async def _admin_fb_sessions(update: Update):
             .all()
         )
         stale_active = (
-            db.query(func.count(FBAgentSession.id))
-            .filter(FBAgentSession.last_seen_at.is_not(None))
-            .filter(FBAgentSession.last_seen_at < stale_cutoff)
+            db.query(func.count(FBSession.id))
+                        .filter(FBSession.status == "ACTIVE")
+            .filter(FBSession.last_ok_at.is_not(None))
+            .filter(FBSession.last_ok_at < stale_cutoff)
             .scalar()
             or 0
         )
@@ -1385,7 +1387,7 @@ async def _admin_fb_sessions(update: Update):
             "FB agent sessions\n"
             f"by_status: {status_text}\n"
             f"top_errors: {error_text}\n"
-            f"offline_24h: {stale_active}\n"
+            f"stale_active_7d: {stale_active}\n"
             f"top_recurring_error_users: {recurring_text}\n"
             "Ação recomendada: usar /fb connect ou abrir agent novamente."
         )

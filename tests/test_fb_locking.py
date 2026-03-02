@@ -1,7 +1,8 @@
 import asyncio
 
 from app.integrations.facebook.guards import UserOperationBusyError
-from app.integrations.facebook.service import start_onboarding
+from app.integrations.facebook.constants import STATUS_ACTIVE
+from app.integrations.facebook.service import complete_onboarding, issue_pairing_code, start_onboarding
 
 
 class _DummyPage:
@@ -47,5 +48,37 @@ def test_concurrent_start_returns_busy(monkeypatch):
         r1, r2 = await asyncio.gather(_call(), _call())
         assert sorted([r1, r2]) == ["busy", "ok"]
         assert counter["opened"] == 1
+
+    asyncio.run(_run())
+
+
+
+def test_concurrent_complete_returns_busy(monkeypatch, db):
+    async def _run():
+        sess = issue_pairing_code(db, "u-complete-lock")
+
+        class _Res:
+            status = STATUS_ACTIVE
+            error_kind = None
+            error_message = None
+            checked_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+
+        async def _fake_validate(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return _Res()
+
+        from app.integrations.facebook import service as svc
+
+        monkeypatch.setattr(svc, "fb_validate_session", _fake_validate)
+
+        async def _call():
+            try:
+                out = await complete_onboarding(db, sess.pairing_code)
+                return "ok" if out else "none"
+            except UserOperationBusyError:
+                return "busy"
+
+        r1, r2 = await asyncio.gather(_call(), _call())
+        assert sorted([r1, r2]) == ["busy", "ok"]
 
     asyncio.run(_run())

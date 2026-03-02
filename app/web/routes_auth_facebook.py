@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.integrations.facebook.guards import UserOperationBusyError, normalize_pairing_code
+from app.integrations.facebook.guards import UserOperationBusyError, action_hint_for_status, normalize_pairing_code
 from app.integrations.facebook.ratelimit import TTLRateLimiter
 from app.integrations.facebook.service import complete_onboarding, start_onboarding, validate_pairing_code
 
@@ -104,6 +104,9 @@ async def auth_facebook_start(payload: FBCodePayload, request: Request, db: Sess
 async def auth_facebook_complete(payload: FBCodePayload, request: Request, db: Session = Depends(get_db)):
     code = normalize_pairing_code(payload.code)
     await _apply_rate_limit(request, code, "/auth/facebook/complete")
+    check, checked_sess = validate_pairing_code(db, code, consume=False)
+    if not check.ok:
+        raise HTTPException(status_code=400, detail=check.reason or "invalid_or_expired_code")
     try:
         sess = await complete_onboarding(db, code)
     except UserOperationBusyError:
@@ -116,6 +119,7 @@ async def auth_facebook_complete(payload: FBCodePayload, request: Request, db: S
         "last_check_at": sess.last_check_at.isoformat() if sess.last_check_at else None,
         "last_error_kind": sess.last_error_kind,
         "last_error_message": sess.last_error_message,
+        "action_hint": action_hint_for_status(sess.status),
     }
 
 
@@ -133,4 +137,5 @@ async def auth_facebook_status(code: str, request: Request, db: Session = Depend
         "session_validated_at": sess.session_validated_at.isoformat() if sess.session_validated_at else None,
         "last_error_kind": sess.last_error_kind,
         "last_error_message": sess.last_error_message,
+        "action_hint": action_hint_for_status(sess.status),
     }

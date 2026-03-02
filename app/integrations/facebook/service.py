@@ -63,6 +63,8 @@ def issue_pairing_code(db: Session, user_id: str) -> FBSession:
     sess.pairing_expires_at = _now() + timedelta(minutes=PAIRING_TTL_MINUTES)
     sess.pairing_used_at = None
     sess.status = STATUS_PENDING_AUTH
+    sess.last_error_kind = None
+    sess.last_error_message = None
     db.commit()
     db.refresh(sess)
     logger.info("fb_pairing_issued", extra={"correlation_id": sess.pairing_code, "user_id": user_id})
@@ -120,20 +122,22 @@ async def complete_onboarding(db: Session, code: str) -> FBSession | None:
         return None
 
     async with fb_user_operation_lock(sess.user_id):
-        result = await fb_validate_session(sess.user_id, sess.profile_dir, correlation_id=code)
-        sess.last_check_at = result.checked_at
-        sess.session_validated_at = result.checked_at
-        is_error = result.status != STATUS_ACTIVE
-        sess.last_error_kind = (result.error_kind or (ERROR_UNKNOWN if is_error else None))
-        sess.last_error_message = (result.error_message or ("validation_failed" if is_error else ""))[:256] or None
-        if can_transition_status(sess.status, result.status):
-            sess.status = result.status
-        if result.status == STATUS_ACTIVE:
-            sess.last_ok_at = result.checked_at
-        db.commit()
-        db.refresh(sess)
-        logger.info("fb_onboarding_complete", extra={"correlation_id": code, "user_id": sess.user_id, "status": sess.status})
-        return sess
+        result = await fb_validate_session(sess.user_id, sess.profile_dir, correlation_id=code, acquire_lock=False)
+    sess.last_check_at = result.checked_at
+    sess.session_validated_at = result.checked_at
+    is_error = result.status != STATUS_ACTIVE
+    sess.last_error_kind = (result.error_kind or (ERROR_UNKNOWN if is_error else None) or ERROR_UNKNOWN)
+    sess.last_error_message = (result.error_message or ("validation_failed" if is_error else "ok"))[:256]
+    if can_transition_status(sess.status, result.status):
+        sess.status = result.status
+    if result.status == STATUS_ACTIVE:
+        sess.last_ok_at = result.checked_at
+        sess.last_error_kind = None
+        sess.last_error_message = "ok"
+    db.commit()
+    db.refresh(sess)
+    logger.info("fb_onboarding_complete", extra={"correlation_id": code, "user_id": sess.user_id, "status": sess.status})
+    return sess
 
 
 def disconnect_session(db: Session, user_id: str) -> FBSession | None:
