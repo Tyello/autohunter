@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import settings
 from app.integrations.facebook.constants import (
+    ERROR_UNKNOWN,
     LOGIN_URL,
     MARKETPLACE_URL,
     PAIRING_CODE_PREFIX,
@@ -18,6 +19,13 @@ from app.integrations.facebook.constants import (
     STATUS_ACTIVE,
     STATUS_DISABLED,
     STATUS_PENDING_AUTH,
+)
+from app.integrations.facebook.guards import (
+    can_transition_status,
+    fb_user_operation_lock,
+    is_expired,
+    normalize_pairing_code,
+    validate_pairing_code_format,
 )
 from app.integrations.facebook.playwright_manager import fb_playwright_manager
 from app.integrations.facebook.storage import ensure_profile_dir
@@ -69,19 +77,27 @@ def pairing_link(pairing_code: str) -> str:
 
 
 def validate_pairing_code(db: Session, code: str, consume: bool = False) -> tuple[PairingValidation, FBSession | None]:
+    normalized = normalize_pairing_code(code)
+    if not validate_pairing_code_format(normalized):
+        return PairingValidation(ok=False, reason="code_invalid_format"), None
+
     now = _now()
-    sess = db.query(FBSession).filter(func.lower(FBSession.pairing_code) == code.lower()).one_or_none()
+    sess = db.query(FBSession).filter(func.lower(FBSession.pairing_code) == normalized.lower()).one_or_none()
     if not sess:
         return PairingValidation(ok=False, reason="code_not_found"), None
-    exp = sess.pairing_expires_at
-    if exp is not None and exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    if not exp or exp < now:
-        sess.status = "EXPIRED"
+
+    if sess.status == STATUS_DISABLED:
+        return PairingValidation(ok=False, reason="disabled"), sess
+
+    if is_expired(sess.pairing_expires_at, now=now):
+        if can_transition_status(sess.status, "EXPIRED"):
+            sess.status = "EXPIRED"
         db.commit()
         return PairingValidation(ok=False, reason="code_expired"), sess
+
     if sess.pairing_used_at is not None:
         return PairingValidation(ok=False, reason="code_already_used"), sess
+
     if consume:
         sess.pairing_used_at = now
         db.commit()
@@ -91,28 +107,33 @@ def validate_pairing_code(db: Session, code: str, consume: bool = False) -> tupl
 
 async def start_onboarding(user_id: str, profile_dir: str, correlation_id: str) -> None:
     logger.info("fb_onboarding_start", extra={"correlation_id": correlation_id, "user_id": user_id})
-    async with fb_playwright_manager.open_context(user_id=user_id, profile_dir=ensure_profile_dir(user_id), headless=False, correlation_id=correlation_id) as context:
-        page = context.pages[0] if context.pages else await context.new_page()
-        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=45000)
-        await page.goto(MARKETPLACE_URL, wait_until="domcontentloaded", timeout=45000)
+    async with fb_user_operation_lock(user_id):
+        async with fb_playwright_manager.open_context(user_id=user_id, profile_dir=ensure_profile_dir(user_id), headless=False, correlation_id=correlation_id) as context:
+            page = context.pages[0] if context.pages else await context.new_page()
+            await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=45000)
+            await page.goto(MARKETPLACE_URL, wait_until="domcontentloaded", timeout=45000)
 
 
 async def complete_onboarding(db: Session, code: str) -> FBSession | None:
     check, sess = validate_pairing_code(db, code, consume=False)
     if not check.ok or not sess:
         return None
-    result = await fb_validate_session(sess.user_id, sess.profile_dir, correlation_id=code)
-    sess.last_check_at = result.checked_at
-    sess.session_validated_at = result.checked_at
-    sess.last_error_kind = result.error_kind
-    sess.last_error_message = (result.error_message or "")[:256] or None
-    sess.status = result.status
-    if result.status == STATUS_ACTIVE:
-        sess.last_ok_at = result.checked_at
-    db.commit()
-    db.refresh(sess)
-    logger.info("fb_onboarding_complete", extra={"correlation_id": code, "user_id": sess.user_id, "status": sess.status})
-    return sess
+
+    async with fb_user_operation_lock(sess.user_id):
+        result = await fb_validate_session(sess.user_id, sess.profile_dir, correlation_id=code)
+        sess.last_check_at = result.checked_at
+        sess.session_validated_at = result.checked_at
+        is_error = result.status != STATUS_ACTIVE
+        sess.last_error_kind = (result.error_kind or (ERROR_UNKNOWN if is_error else None))
+        sess.last_error_message = (result.error_message or ("validation_failed" if is_error else ""))[:256] or None
+        if can_transition_status(sess.status, result.status):
+            sess.status = result.status
+        if result.status == STATUS_ACTIVE:
+            sess.last_ok_at = result.checked_at
+        db.commit()
+        db.refresh(sess)
+        logger.info("fb_onboarding_complete", extra={"correlation_id": code, "user_id": sess.user_id, "status": sess.status})
+        return sess
 
 
 def disconnect_session(db: Session, user_id: str) -> FBSession | None:

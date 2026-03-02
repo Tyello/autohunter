@@ -1,12 +1,13 @@
 import asyncio
 
-from app.web.routes_auth_facebook import _RateLimiter
+from app.integrations.facebook.ratelimit import TTLRateLimiter
 
 
-def test_ratelimiter_ttl():
+def test_ratelimiter_429_condition():
     async def _run():
-        r = _RateLimiter(max_hits=2, ttl_seconds=60)
-        assert await r.hit("k") is True
-        assert await r.hit("k") is True
-        assert await r.hit("k") is False
+        limiter = TTLRateLimiter(max_hits=2, ttl_seconds=60)
+        assert await limiter.hit("ip:1") is True
+        assert await limiter.hit("ip:1") is True
+        assert await limiter.hit("ip:1") is False
+
     asyncio.run(_run())

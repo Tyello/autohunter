@@ -1351,6 +1351,7 @@ async def _admin_reindex_wishlists(update: Update, args: List[str]):
 async def _admin_fb_sessions(update: Update):
     db = SessionLocal()
     try:
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         by_status = db.query(FBSession.status, func.count(FBSession.id)).group_by(FBSession.status).all()
         by_error = (
             db.query(FBSession.last_error_kind, func.count(FBSession.id))
@@ -1360,14 +1361,38 @@ async def _admin_fb_sessions(update: Update):
             .limit(5)
             .all()
         )
+        stale_active = (
+            db.query(func.count(FBSession.id))
+            .filter(FBSession.status == "ACTIVE")
+            .filter(FBSession.last_ok_at.is_not(None))
+            .filter(FBSession.last_ok_at < stale_cutoff)
+            .scalar()
+            or 0
+        )
+        recurring_errors = (
+            db.query(FBSession.user_id, func.count(FBSession.id))
+            .filter(FBSession.last_error_kind.is_not(None))
+            .group_by(FBSession.user_id)
+            .order_by(func.count(FBSession.id).desc())
+            .limit(5)
+            .all()
+        )
 
         status_text = ", ".join([f"{s}:{c}" for s, c in by_status]) if by_status else "-"
         error_text = ", ".join([f"{(e or 'NONE')}:{c}" for e, c in by_error]) if by_error else "-"
+        recurring_text = ", ".join([f"{u}:{c}" for u, c in recurring_errors]) if recurring_errors else "-"
 
         await update.message.reply_text(
-            "FB sessions\n"
-            f"by_status: {status_text}\n"
-            f"top_errors: {error_text}\n"
+            "FB sessions
+"
+            f"by_status: {status_text}
+"
+            f"top_errors: {error_text}
+"
+            f"stale_active(>7d): {stale_active}
+"
+            f"top_recurring_error_users: {recurring_text}
+"
             "Ação recomendada: pedir /fb connect para EXPIRED/CHALLENGE/BLOCKED."
         )
     finally:
