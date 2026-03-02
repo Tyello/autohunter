@@ -23,4 +23,4 @@ else
   PYTHON_BIN="python3"
 fi
 
-exec "$PYTHON_BIN" -m uvicorn app.browser_service.main:app --host 0.0.0.0 --port 7001 --workers 1
+exec "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
