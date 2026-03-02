@@ -1,5 +1,5 @@
 [Unit]
-Description=AutoHunter Browser Service (Playwright)
+Description=AutoHunter API (FastAPI)
 After=network-online.target
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=autohunter
 WorkingDirectory=/opt/autohunter
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/opt/autohunter/.env
-ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_browser_service.sh
+ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_api.sh
 Restart=always
 RestartSec=3
 
