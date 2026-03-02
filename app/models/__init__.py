@@ -18,6 +18,7 @@ from .account_member import AccountMember
 from .app_kv import AppKV
 from .scrape_job import ScrapeJob
 from .fb_session import FBSession
+from .fb_agent_session import FBAgentSession
 
 __all__ = [
     "User",
@@ -40,4 +41,5 @@ __all__ = [
     "AppKV",
     "ScrapeJob",
     "FBSession",
+    "FBAgentSession",
 ]

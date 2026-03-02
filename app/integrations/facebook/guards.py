@@ -13,12 +13,16 @@ from app.integrations.facebook.constants import (
     STATUS_DISABLED,
     STATUS_EXPIRED,
     STATUS_PENDING_AUTH,
+    STATUS_PENDING_AGENT,
+    STATUS_AGENT_ONLINE,
 )
 
 PAIRING_CODE_RE = re.compile(r"^FB-[A-Z0-9]{4}$")
 
 _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     STATUS_PENDING_AUTH: {STATUS_ACTIVE, STATUS_CHALLENGE_REQUIRED, STATUS_EXPIRED, STATUS_BLOCKED},
+    STATUS_PENDING_AGENT: {STATUS_AGENT_ONLINE, STATUS_ACTIVE, STATUS_CHALLENGE_REQUIRED, STATUS_EXPIRED, STATUS_BLOCKED, STATUS_DISABLED},
+    STATUS_AGENT_ONLINE: {STATUS_AGENT_ONLINE, STATUS_ACTIVE, STATUS_CHALLENGE_REQUIRED, STATUS_EXPIRED, STATUS_BLOCKED, STATUS_DISABLED},
     STATUS_ACTIVE: {STATUS_ACTIVE, STATUS_CHALLENGE_REQUIRED, STATUS_EXPIRED, STATUS_BLOCKED, STATUS_DISABLED},
     STATUS_DISABLED: set(),
     STATUS_CHALLENGE_REQUIRED: {STATUS_ACTIVE, STATUS_CHALLENGE_REQUIRED, STATUS_EXPIRED, STATUS_BLOCKED, STATUS_DISABLED},
@@ -90,8 +94,10 @@ def is_expired(expires_at: datetime | None, now: datetime | None = None) -> bool
 def action_hint_for_status(status: str) -> str:
     if status == STATUS_ACTIVE:
         return "OK"
-    if status == STATUS_PENDING_AUTH:
-        return "Finalize no link"
+    if status in {STATUS_PENDING_AUTH, STATUS_PENDING_AGENT}:
+        return "Rodar /fb connect e iniciar agent local"
+    if status == STATUS_AGENT_ONLINE:
+        return "Agent online; validação em andamento"
     if status in {STATUS_EXPIRED, STATUS_CHALLENGE_REQUIRED, STATUS_BLOCKED}:
         return "Reautenticar via /fb connect"
     if status == STATUS_DISABLED:

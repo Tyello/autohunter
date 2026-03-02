@@ -1,13 +1,26 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
-APP_DIR="${APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+APP_DIR="${APP_DIR:-/opt/autohunter}"
 cd "$APP_DIR"
 
-if [ -d ".venv" ]; then
-  source .venv/bin/activate
+if [ -f ".env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
 fi
 
-export PYTHONUNBUFFERED=1
+if [ -d "venv" ]; then
+  # shellcheck disable=SC1091
+  source venv/bin/activate
+  PYTHON_BIN="venv/bin/python"
+elif [ -d ".venv" ]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
 
-python -m app.cli.run_browser_service
+exec "$PYTHON_BIN" -m uvicorn app.browser_service.main:app --host 0.0.0.0 --port 7001 --workers 1

@@ -24,7 +24,7 @@ class FBCodePayload(BaseModel):
     code: str
 
 
-@router.get("/auth/facebook", response_class=HTMLResponse)
+@router.get("/auth/facebook/legacy", response_class=HTMLResponse)
 async def auth_facebook_page(code: str):
     html = f"""
     <html><head><meta charset='utf-8'><title>AutoHunter Facebook</title></head>
