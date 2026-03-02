@@ -24,7 +24,7 @@ from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
-from app.models.fb_session import FBSession
+from app.models.fb_agent_session import FBAgentSession
 from app.sources.registry import list_sources
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_execution_service import run_source_for_all_wishlists
@@ -199,7 +199,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_agents")
         return
 
     action = args[0].lower()
@@ -215,7 +215,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "errors":
         await _admin_errors(update, args[1:])
         return
-    if action == "fb_sessions":
+    if action in {"fb_sessions", "fb_agents"}:
         await _admin_fb_sessions(update)
         return
     if action == "runall":
@@ -239,7 +239,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_sessions")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_sessions | /admin fb_agents")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     """Subcomandos para operar SourceConfig (DB)."""
@@ -1351,29 +1351,28 @@ async def _admin_reindex_wishlists(update: Update, args: List[str]):
 async def _admin_fb_sessions(update: Update):
     db = SessionLocal()
     try:
-        stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        by_status = db.query(FBSession.status, func.count(FBSession.id)).group_by(FBSession.status).all()
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        by_status = db.query(FBAgentSession.status, func.count(FBAgentSession.id)).group_by(FBAgentSession.status).all()
         by_error = (
-            db.query(FBSession.last_error_kind, func.count(FBSession.id))
-            .filter(FBSession.last_error_kind.is_not(None))
-            .group_by(FBSession.last_error_kind)
-            .order_by(func.count(FBSession.id).desc())
+            db.query(FBAgentSession.last_error_kind, func.count(FBAgentSession.id))
+            .filter(FBAgentSession.last_error_kind.is_not(None))
+            .group_by(FBAgentSession.last_error_kind)
+            .order_by(func.count(FBAgentSession.id).desc())
             .limit(5)
             .all()
         )
         stale_active = (
-            db.query(func.count(FBSession.id))
-            .filter(FBSession.status == "ACTIVE")
-            .filter(FBSession.last_ok_at.is_not(None))
-            .filter(FBSession.last_ok_at < stale_cutoff)
+            db.query(func.count(FBAgentSession.id))
+            .filter(FBAgentSession.last_seen_at.is_not(None))
+            .filter(FBAgentSession.last_seen_at < stale_cutoff)
             .scalar()
             or 0
         )
         recurring_errors = (
-            db.query(FBSession.user_id, func.count(FBSession.id))
-            .filter(FBSession.last_error_kind.is_not(None))
-            .group_by(FBSession.user_id)
-            .order_by(func.count(FBSession.id).desc())
+            db.query(FBAgentSession.user_id, func.count(FBAgentSession.id))
+            .filter(FBAgentSession.last_error_kind.is_not(None))
+            .group_by(FBAgentSession.user_id)
+            .order_by(func.count(FBAgentSession.id).desc())
             .limit(5)
             .all()
         )
@@ -1383,17 +1382,12 @@ async def _admin_fb_sessions(update: Update):
         recurring_text = ", ".join([f"{u}:{c}" for u, c in recurring_errors]) if recurring_errors else "-"
 
         await update.message.reply_text(
-            "FB sessions
-"
-            f"by_status: {status_text}
-"
-            f"top_errors: {error_text}
-"
-            f"stale_active(>7d): {stale_active}
-"
-            f"top_recurring_error_users: {recurring_text}
-"
-            "Ação recomendada: pedir /fb connect para EXPIRED/CHALLENGE/BLOCKED."
+            "FB agent sessions\n"
+            f"by_status: {status_text}\n"
+            f"top_errors: {error_text}\n"
+            f"offline_24h: {stale_active}\n"
+            f"top_recurring_error_users: {recurring_text}\n"
+            "Ação recomendada: usar /fb connect ou abrir agent novamente."
         )
     finally:
         db.close()
