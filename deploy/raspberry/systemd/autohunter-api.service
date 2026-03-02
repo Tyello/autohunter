@@ -8,10 +8,12 @@ Type=simple
 User=autohunter
 WorkingDirectory=/opt/autohunter
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=/opt/autohunter/.env
+EnvironmentFile=-/opt/autohunter/.env
 ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_api.sh
 Restart=always
 RestartSec=3
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
