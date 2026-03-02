@@ -200,7 +200,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_agents")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
         return
 
     action = args[0].lower()
@@ -216,7 +216,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "errors":
         await _admin_errors(update, args[1:])
         return
-    if action in {"fb_sessions", "fb_agents"}:
+    if action == "fb_sessions":
         await _admin_fb_sessions(update)
         return
     if action == "runall":
@@ -240,7 +240,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_sessions | /admin fb_agents")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_sessions")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     """Subcomandos para operar SourceConfig (DB)."""
@@ -1355,10 +1355,10 @@ async def _admin_fb_sessions(update: Update):
         stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         by_status = db.query(FBAgentSession.status, func.count(FBAgentSession.id)).group_by(FBAgentSession.status).all()
         by_error = (
-            db.query(FBAgentSession.last_error_kind, func.count(FBAgentSession.id))
-            .filter(FBAgentSession.last_error_kind.is_not(None))
-            .group_by(FBAgentSession.last_error_kind)
-            .order_by(func.count(FBAgentSession.id).desc())
+            db.query(FBSession.last_error_kind, func.count(FBSession.id))
+            .filter(FBSession.last_error_kind.is_not(None))
+            .group_by(FBSession.last_error_kind)
+            .order_by(func.count(FBSession.id).desc())
             .limit(5)
             .all()
         )
@@ -1371,10 +1371,10 @@ async def _admin_fb_sessions(update: Update):
             or 0
         )
         recurring_errors = (
-            db.query(FBAgentSession.user_id, func.count(FBAgentSession.id))
-            .filter(FBAgentSession.last_error_kind.is_not(None))
-            .group_by(FBAgentSession.user_id)
-            .order_by(func.count(FBAgentSession.id).desc())
+            db.query(FBSession.user_id, func.count(FBSession.id))
+            .filter(FBSession.last_error_kind.is_not(None))
+            .group_by(FBSession.user_id)
+            .order_by(func.count(FBSession.id).desc())
             .limit(5)
             .all()
         )
@@ -1383,13 +1383,15 @@ async def _admin_fb_sessions(update: Update):
         error_text = ", ".join([f"{(e or 'NONE')}:{c}" for e, c in by_error]) if by_error else "-"
         recurring_text = ", ".join([f"{u}:{c}" for u, c in recurring_errors]) if recurring_errors else "-"
 
-        await update.message.reply_text(
-            "FB agent sessions\n"
+        message = (
+            "FB sessions\n"
             f"by_status: {status_text}\n"
             f"top_errors: {error_text}\n"
             f"stale_active_7d: {stale_active}\n"
             f"top_recurring_error_users: {recurring_text}\n"
-            "Ação recomendada: usar /fb connect ou abrir agent novamente."
+            "Acao recomendada: pedir /fb connect para EXPIRED/CHALLENGE/BLOCKED."
         )
+        await update.message.reply_text(message)
     finally:
         db.close()
+
