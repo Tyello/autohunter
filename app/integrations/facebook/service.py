@@ -120,7 +120,7 @@ def validate_pairing_code(db: Session, code: str, consume: bool = False) -> tupl
     if exp is not None and exp.tzinfo is None:
         exp = exp.replace(tzinfo=timezone.utc)
     if not exp or exp < now:
-        sess.status = "EXPIRED"
+        sess.status = STATUS_EXPIRED
         db.commit()
         return PairingValidation(ok=False, reason="code_expired"), sess
     if sess.pairing_used_at is not None:
@@ -141,10 +141,11 @@ async def start_onboarding(user_id: str, profile_dir: str, correlation_id: str) 
 
 
 async def complete_onboarding(db: Session, code: str) -> FBSession | None:
-    check, sess = validate_pairing_code(db, code, consume=True)
+    normalized = normalize_pairing_code(code)
+    check, sess = validate_pairing_code(db, normalized, consume=True)
     if not check.ok or not sess:
         return None
-    result = await fb_validate_session(sess.user_id, sess.profile_dir, correlation_id=code)
+    result = await fb_validate_session(sess.user_id, sess.profile_dir, correlation_id=normalized)
     if not can_transition_status(sess.status, result.status):
         sess.last_error_kind = "INVALID_TRANSITION"
         sess.last_error_message = f"{sess.status}->{result.status}"[:256]
@@ -159,7 +160,7 @@ async def complete_onboarding(db: Session, code: str) -> FBSession | None:
         sess.last_ok_at = result.checked_at
     db.commit()
     db.refresh(sess)
-    logger.info("fb_onboarding_complete", extra={"correlation_id": code, "user_id": sess.user_id, "status": sess.status})
+    logger.info("fb_onboarding_complete", extra={"correlation_id": normalized, "user_id": sess.user_id, "status": sess.status})
     return sess
 
 

@@ -39,3 +39,14 @@ def test_invalid_status_transitions_rejected():
     assert can_transition_status("PENDING_AUTH", "ACTIVE") is True
     assert can_transition_status("DISABLED", "ACTIVE") is False
     assert can_transition_status("ACTIVE", "PENDING_AUTH") is False
+
+
+def test_disabled_session_rejects_pairing_flows(db):
+    sess = issue_pairing_code(db, "u3")
+    row = db.query(FBSession).filter(FBSession.user_id == "u3").one()
+    row.status = "DISABLED"
+    db.commit()
+
+    check, _ = validate_pairing_code(db, sess.pairing_code, consume=False)
+    assert check.ok is False
+    assert check.reason == "disabled"

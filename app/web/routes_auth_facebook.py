@@ -75,28 +75,30 @@ async def _apply_rate_limit(request: Request, endpoint: str, code: str) -> None:
 
 @router.post("/auth/facebook/start")
 async def auth_facebook_start(payload: FBCodePayload, request: Request, db: Session = Depends(get_db)):
-    await _apply_rate_limit(request, "start", payload.code)
-    check, sess = validate_pairing_code(db, payload.code, consume=False)
+    normalized = normalize_pairing_code(payload.code)
+    await _apply_rate_limit(request, "start", normalized)
+    check, sess = validate_pairing_code(db, normalized, consume=False)
     if not check.ok or not sess:
         raise HTTPException(status_code=400, detail=check.reason or "invalid_code")
     async with fb_user_lock.acquire(sess.user_id) as acquired:
         if not acquired:
             return {"ok": False, "error": "busy_try_again"}
-        logger.info("fb_web_start", extra={"correlation_id": payload.code, "user_id": sess.user_id})
-        await start_onboarding(sess.user_id, sess.profile_dir, correlation_id=payload.code)
-    return {"ok": True, "status": sess.status, "correlation_id": normalize_pairing_code(payload.code)}
+        logger.info("fb_web_start", extra={"correlation_id": normalized, "user_id": sess.user_id})
+        await start_onboarding(sess.user_id, sess.profile_dir, correlation_id=normalized)
+    return {"ok": True, "status": sess.status, "correlation_id": normalized}
 
 
 @router.post("/auth/facebook/complete")
 async def auth_facebook_complete(payload: FBCodePayload, request: Request, db: Session = Depends(get_db)):
-    await _apply_rate_limit(request, "complete", payload.code)
-    check, sess = validate_pairing_code(db, payload.code, consume=False)
+    normalized = normalize_pairing_code(payload.code)
+    await _apply_rate_limit(request, "complete", normalized)
+    check, sess = validate_pairing_code(db, normalized, consume=False)
     if not check.ok or not sess:
         raise HTTPException(status_code=400, detail=check.reason or "invalid_or_expired_code")
     async with fb_user_lock.acquire(sess.user_id) as acquired:
         if not acquired:
             return {"ok": False, "error": "busy_try_again"}
-        sess = await complete_onboarding(db, payload.code)
+        sess = await complete_onboarding(db, normalized)
     if not sess:
         raise HTTPException(status_code=400, detail="invalid_or_expired_code")
     return {
