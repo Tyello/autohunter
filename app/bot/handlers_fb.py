@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 
 from app.db.session import SessionLocal
 from app.integrations.facebook.constants import STATUS_DISABLED
-from app.integrations.facebook.service import disconnect_session, issue_pairing_code, pairing_link
+from app.integrations.facebook.service import action_hint_for_status, disconnect_session, issue_pairing_code, pairing_link
 from app.models.fb_session import FBSession
 
 
@@ -48,7 +48,7 @@ async def cmd_fb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not sess:
             await update.message.reply_text("Sem sessão Facebook. Use /fb connect.")
             return
-        hint = "Reautenticar via /fb connect" if sess.status in ("EXPIRED", "CHALLENGE_REQUIRED", "BLOCKED") else "Sessão ok"
+        hint = action_hint_for_status(sess.status)
         await update.message.reply_text(
             "Facebook Marketplace\n"
             f"status={sess.status}\n"

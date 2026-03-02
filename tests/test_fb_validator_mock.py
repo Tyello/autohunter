@@ -18,5 +18,5 @@ def test_validator_checkpoint():
 
 
 def test_validator_blocked():
-    res = classify_marketplace_state(final_url="https://www.facebook.com/marketplace/", html="suspicious activity")
+    res = classify_marketplace_state(final_url="https://www.facebook.com/marketplace/", html="unusual activity")
     assert res.status == "BLOCKED"

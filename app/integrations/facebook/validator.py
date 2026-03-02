@@ -60,4 +60,9 @@ async def fb_validate_session(user_id: str, profile_dir: str, correlation_id: st
     except Exception as exc:
         msg = str(exc)[:256]
         kind = ERROR_NET if any(k in msg.lower() for k in ["timeout", "net", "connection", "dns"]) else ERROR_UNKNOWN
+        debug = ensure_debug_dir(user_id)
+        stem = now.strftime("%Y%m%d_%H%M%S")
+        (debug / f"{stem}.html").write_text(f"<html><body><pre>{msg}</pre></body></html>", encoding="utf-8")
+        (debug / f"{stem}.png").write_bytes(b"")
+        rotate_debug_files(user_id, max_files=20)
         return FBValidationResult(status=STATUS_EXPIRED, error_kind=kind, error_message=msg, checked_at=now)

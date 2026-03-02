@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
-from collections import defaultdict, deque
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -11,33 +8,17 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.integrations.facebook.service import complete_onboarding, start_onboarding, validate_pairing_code
+from app.integrations.facebook.guards import fb_user_lock
+from app.integrations.facebook.ratelimit import TTLRateLimiter
+from app.integrations.facebook.service import complete_onboarding, normalize_pairing_code, start_onboarding, validate_pairing_code
 
 logger = logging.getLogger(__name__)
 
 
-class _RateLimiter:
-    def __init__(self, max_hits: int = 10, ttl_seconds: int = 60) -> None:
-        self.max_hits = max_hits
-        self.ttl_seconds = ttl_seconds
-        self._events: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = asyncio.Lock()
-
-    async def hit(self, key: str) -> bool:
-        now = time.time()
-        async with self._lock:
-            q = self._events[key]
-            while q and (now - q[0]) > self.ttl_seconds:
-                q.popleft()
-            if len(q) >= self.max_hits:
-                return False
-            q.append(now)
-            return True
-
-
 router = APIRouter(tags=["facebook-auth"])
-_rate_ip = _RateLimiter(max_hits=20, ttl_seconds=60)
-_rate_code = _RateLimiter(max_hits=8, ttl_seconds=60)
+_rate_ip = TTLRateLimiter(max_hits=10, ttl_seconds=60)
+_rate_start_code = TTLRateLimiter(max_hits=3, ttl_seconds=300)
+_rate_complete_code = TTLRateLimiter(max_hits=5, ttl_seconds=300)
 
 
 class FBCodePayload(BaseModel):
@@ -75,29 +56,47 @@ def _client_ip(request: Request) -> str:
     return c.host if c else "unknown"
 
 
-async def _apply_rate_limit(request: Request, code: str) -> None:
+async def _apply_rate_limit(request: Request, endpoint: str, code: str) -> None:
     ip = _client_ip(request)
-    if not await _rate_ip.hit(f"ip:{ip}"):
-        raise HTTPException(status_code=429, detail="rate_limited_ip")
-    if not await _rate_code.hit(f"code:{code.lower()}"):
-        raise HTTPException(status_code=429, detail="rate_limited_code")
+    normalized = normalize_pairing_code(code)
+    if not await _rate_ip.hit(f"ip:{ip}:{endpoint}"):
+        logger.warning("fb_onboarding_rate_limited", extra={"correlation_id": normalized, "ip": ip, "code": normalized, "endpoint": endpoint, "limited": True})
+        raise HTTPException(status_code=429, detail={"error": "rate_limited_ip", "endpoint": endpoint})
+    if endpoint == "start":
+        ok = await _rate_start_code.hit(f"code:{normalized}")
+    elif endpoint == "complete":
+        ok = await _rate_complete_code.hit(f"code:{normalized}")
+    else:
+        ok = True
+    if not ok:
+        logger.warning("fb_onboarding_rate_limited", extra={"correlation_id": normalized, "ip": ip, "code": normalized, "endpoint": endpoint, "limited": True})
+        raise HTTPException(status_code=429, detail={"error": "rate_limited_code", "endpoint": endpoint})
 
 
 @router.post("/auth/facebook/start")
 async def auth_facebook_start(payload: FBCodePayload, request: Request, db: Session = Depends(get_db)):
-    await _apply_rate_limit(request, payload.code)
-    check, sess = validate_pairing_code(db, payload.code, consume=True)
+    await _apply_rate_limit(request, "start", payload.code)
+    check, sess = validate_pairing_code(db, payload.code, consume=False)
     if not check.ok or not sess:
         raise HTTPException(status_code=400, detail=check.reason or "invalid_code")
-    logger.info("fb_web_start", extra={"correlation_id": payload.code, "user_id": sess.user_id})
-    await start_onboarding(sess.user_id, sess.profile_dir, correlation_id=payload.code)
-    return {"ok": True, "status": sess.status, "correlation_id": payload.code}
+    async with fb_user_lock.acquire(sess.user_id) as acquired:
+        if not acquired:
+            return {"ok": False, "error": "busy_try_again"}
+        logger.info("fb_web_start", extra={"correlation_id": payload.code, "user_id": sess.user_id})
+        await start_onboarding(sess.user_id, sess.profile_dir, correlation_id=payload.code)
+    return {"ok": True, "status": sess.status, "correlation_id": normalize_pairing_code(payload.code)}
 
 
 @router.post("/auth/facebook/complete")
 async def auth_facebook_complete(payload: FBCodePayload, request: Request, db: Session = Depends(get_db)):
-    await _apply_rate_limit(request, payload.code)
-    sess = await complete_onboarding(db, payload.code)
+    await _apply_rate_limit(request, "complete", payload.code)
+    check, sess = validate_pairing_code(db, payload.code, consume=False)
+    if not check.ok or not sess:
+        raise HTTPException(status_code=400, detail=check.reason or "invalid_or_expired_code")
+    async with fb_user_lock.acquire(sess.user_id) as acquired:
+        if not acquired:
+            return {"ok": False, "error": "busy_try_again"}
+        sess = await complete_onboarding(db, payload.code)
     if not sess:
         raise HTTPException(status_code=400, detail="invalid_or_expired_code")
     return {
@@ -111,7 +110,7 @@ async def auth_facebook_complete(payload: FBCodePayload, request: Request, db: S
 
 @router.get("/auth/facebook/status")
 async def auth_facebook_status(code: str, request: Request, db: Session = Depends(get_db)):
-    await _apply_rate_limit(request, code)
+    await _apply_rate_limit(request, "status", code)
     check, sess = validate_pairing_code(db, code, consume=False)
     if not sess:
         raise HTTPException(status_code=404, detail=check.reason or "not_found")
