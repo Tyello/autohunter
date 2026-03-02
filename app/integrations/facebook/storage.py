@@ -8,9 +8,21 @@ from app.core.settings import settings
 
 
 def _ensure_private_owner(path: Path) -> None:
-    path.chmod(0o700)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        # On some platforms/filesystems chmod may be limited or unsupported.
+        pass
+
+    if os.name != "posix":
+        return
+
+    uid_fn = getattr(os, "getuid", None)
+    if not callable(uid_fn):
+        return
+
     st = path.stat()
-    if st.st_uid != os.getuid():
+    if st.st_uid != uid_fn():
         raise PermissionError("invalid owner")
 
 

@@ -1382,18 +1382,15 @@ async def _admin_fb_sessions(update: Update):
         error_text = ", ".join([f"{(e or 'NONE')}:{c}" for e, c in by_error]) if by_error else "-"
         recurring_text = ", ".join([f"{u}:{c}" for u, c in recurring_errors]) if recurring_errors else "-"
 
-        await update.message.reply_text(
-            "FB sessions
-"
-            f"by_status: {status_text}
-"
-            f"top_errors: {error_text}
-"
-            f"stale_active(>7d): {stale_active}
-"
-            f"top_recurring_error_users: {recurring_text}
-"
-            "Ação recomendada: pedir /fb connect para EXPIRED/CHALLENGE/BLOCKED."
+        message = (
+            "FB sessions\n"
+            f"by_status: {status_text}\n"
+            f"top_errors: {error_text}\n"
+            f"stale_active(>7d): {stale_active}\n"
+            f"top_recurring_error_users: {recurring_text}\n"
+            "Acao recomendada: pedir /fb connect para EXPIRED/CHALLENGE/BLOCKED."
         )
+        await update.message.reply_text(message)
     finally:
         db.close()
+
