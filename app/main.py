@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, WebSocket
 from sqlalchemy import text
 from typing import List
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from app.scrapers.olx import get_olx_health_snapshot
 from app.db.deps import get_db
 from app.web.routes_auth_facebook import router as facebook_auth_router
 from app.web.routes_fb_agent import router as facebook_agent_router
+from app.integrations.facebook.agent_ws import handle_fb_agent_ws
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +36,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AutoHunter", version="0.1.0", lifespan=lifespan)
 app.include_router(facebook_auth_router)
 app.include_router(facebook_agent_router)
+
+
+@app.websocket("/ws/fb/agent")
+async def fb_agent_ws(websocket: WebSocket):
+    await handle_fb_agent_ws(websocket)
 
 @app.get("/health")
 def health():

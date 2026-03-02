@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import timedelta, timezone, datetime
 
+from starlette.websockets import WebSocketDisconnect
+
 from app.integrations.facebook.agent_service import issue_agent_pairing_code, issue_bootstrap_token, validate_agent_pairing_code
 from app.models.fb_agent_session import FBAgentSession
 
@@ -88,3 +90,23 @@ def test_state_transitions_on_ws_result(client, db):
     row = db.query(FBAgentSession).filter(FBAgentSession.user_id == "u-agent-state").one()
     assert row.status == "ACTIVE"
     assert row.last_ok_at is not None
+
+
+def test_websocket_route_invalid_token_reaches_handler(client):
+    with client.websocket_connect("/ws/fb/agent") as ws:
+        ws.send_json({"token": "invalid-token", "agent_id": "a1", "agent_version": "0.1"})
+        try:
+            ws.receive_json()
+            assert False, "websocket should be closed for invalid token"
+        except WebSocketDisconnect as exc:
+            assert exc.code == 4401
+
+
+def test_bootstrap_returns_absolute_ws_url(client, db):
+    sess = issue_agent_pairing_code(db, "u-agent-abs-url")
+    resp = client.get("/auth/facebook/agent/bootstrap", params={"code": sess.pairing_code})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ws_url"].startswith("ws://testserver/")
+    assert payload["ws_url"].endswith("ws/fb/agent")
+    assert payload["ws_path"] == "/ws/fb/agent"
