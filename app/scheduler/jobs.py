@@ -11,7 +11,10 @@ from app.services.admin_programming_alerts import maybe_alert_programming_error
 
 from app.services.system_logs_service import log
 from app.services.telemetry_events_service import emit_event
-from app.services.notifications_queue_service import queue_notifications_for_matches
+from app.services.notifications_queue_service import (
+    queue_notifications_for_matches,
+    queue_notifications_for_matches_diag,
+)
 from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists, match_listings_for_active_wishlists
 from app.services.listings_service import ingest_listings, ingest_listings_stats
 from app.services.source_url_cursors_service import get_cursor, touch_cursor
