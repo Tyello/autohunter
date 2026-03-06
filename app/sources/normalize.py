@@ -85,38 +85,19 @@ def _split_city_uf(city: Any, uf: Any, location: Any) -> tuple[str | None, str |
 
 def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
     data = raw or {}
-    flags: list[str] = []
-
     source_name = (_norm_str(data.get("source")) or source or "").lower()
     source_listing_id = _norm_str(data.get("source_listing_id") or data.get("external_id") or data.get("id"))
     url = canonicalize_url(_norm_str(data.get("url")) or "")
-    if not source_listing_id:
-        flags.append("missing_source_listing_id")
-    if not url:
-        flags.append("missing_url")
-
     price = _norm_price(data.get("price"))
-    if price is None:
-        flags.append("missing_price")
-
     km = _norm_int(data.get("km") or data.get("mileage_km") or data.get("mileage"))
-    if km is None:
-        flags.append("missing_km")
-
     year = _norm_year(data.get("year") or data.get("year_model") or data.get("ano"))
-    if year is None:
-        flags.append("missing_year")
-
     city, uf = _split_city_uf(data.get("city"), data.get("uf"), data.get("location"))
-    if city is None:
-        flags.append("missing_city")
-    if uf is None:
-        flags.append("missing_uf")
-
     images = data.get("images") or data.get("photos")
+    image_urls: list[str] | None = None
     images_count = None
     if isinstance(images, list):
-        images_count = len([x for x in images if x])
+        image_urls = [str(x).strip() for x in images if str(x).strip()]
+        images_count = len(image_urls)
     elif data.get("images_count") is not None:
         images_count = _norm_int(data.get("images_count"))
 
@@ -126,6 +107,8 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
         "make", "brand", "model", "images", "photos", "images_count",
     }
     extras = {k: v for k, v in data.items() if k not in known and v is not None}
+    if image_urls is not None:
+        extras["image_urls"] = image_urls
 
     return NormalizedAd(
         source=source_name,
@@ -141,7 +124,7 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
         make=_norm_str(data.get("make") or data.get("brand")),
         model=_norm_str(data.get("model")),
         images_count=images_count,
-        quality_flags=tuple(flags),
+        quality_flags=tuple(),
         extras=extras,
     )
 

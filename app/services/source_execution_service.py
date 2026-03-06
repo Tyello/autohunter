@@ -19,6 +19,7 @@ from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.sources.registry import get_source
+from app.sources.adapters.v1 import adapt_v1
 from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
 from app.sources.flags import read_source_impl_flags
@@ -30,6 +31,29 @@ from app.health.models import RunStatus
 
 
 logger = logging.getLogger(__name__)
+
+
+def _ad_to_listing(ad) -> dict[str, Any]:
+    location = ", ".join([x for x in [ad.city, ad.uf] if x]) or None
+    extras = dict(ad.extras or {})
+    extras.setdefault("quality_flags", list(ad.quality_flags or ()))
+    extras.setdefault("quality_has_critical", any(f in {"invalid_url", "missing_url", "empty_title", "missing_source"} for f in ad.quality_flags))
+    return {
+        "source": ad.source,
+        "external_id": ad.source_listing_id,
+        "url": ad.url,
+        "title": ad.title,
+        "price": ad.price,
+        "currency": ad.currency,
+        "location": location,
+        "year": ad.year,
+        "mileage_km": ad.km,
+        "images_count": ad.images_count,
+        "make": ad.make,
+        "model": ad.model,
+        "thumbnail_url": (extras.get("image_urls") or [None])[0] if isinstance(extras.get("image_urls"), list) else None,
+        "extras": extras,
+    }
 
 
 def _utcnow() -> datetime:
@@ -194,21 +218,7 @@ def run_source_for_all_wishlists(
         if flags.impl == "v2" and v2_scraper is not None:
             result = v2_scraper.scrape(search_url, ctx)
             ads, _meta = adapt_v2(src, result)
-            return [
-                {
-                    "source": ad.source,
-                    "external_id": ad.source_listing_id,
-                    "url": ad.url,
-                    "title": ad.title,
-                    "price": ad.price,
-                    "currency": ad.currency,
-                    "location": ", ".join([x for x in [ad.city, ad.uf] if x]) or None,
-                    "year": ad.year,
-                    "mileage_km": ad.km,
-                    "images_count": ad.images_count,
-                }
-                for ad in ads
-            ]
+            return [_ad_to_listing(ad) for ad in ads if ad.source_listing_id]
         if flags.impl == "dual" and v2_scraper is not None:
             chosen, report = execute_dual_run(
                 source=src,
@@ -219,8 +229,11 @@ def run_source_for_all_wishlists(
                 flags=flags,
             )
             object.__setattr__(ctx, "_dual_run_summary", report.get("comparison") or {})
-            return chosen
-        return plugin.scrape(search_url, ctx=ctx)
+            ads, _meta = adapt_v1(src, chosen)
+            return [_ad_to_listing(ad) for ad in ads if ad.source_listing_id]
+        raw = plugin.scrape(search_url, ctx=ctx)
+        ads, _meta = adapt_v1(src, raw)
+        return [_ad_to_listing(ad) for ad in ads if ad.source_listing_id]
 
     groups_count = len(groups)
     total_wishlists = sum(len(g.get("wishlists") or []) for g in groups.values())
