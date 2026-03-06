@@ -365,14 +365,6 @@ def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
             return clean[:3]
 
     fallback: list[str] = []
-    if getattr(ad, "price", None) is None:
-        fallback.append("Preço ausente reduz a confiança")
-    if getattr(ad, "mileage_km", None) is None:
-        fallback.append("Quilometragem não informada")
-    if not getattr(ad, "thumbnail_url", None):
-        fallback.append("Sem foto principal")
-    if not fallback:
-        fallback.append("Anúncio relevante para sua busca")
     return fallback[:3]
 
 
