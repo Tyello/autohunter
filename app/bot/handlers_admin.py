@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
@@ -30,6 +31,7 @@ from app.services.source_configs_service import ensure_source_configs, get_sourc
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
 from app.services.wishlist_tokens_service import extract_tokens
+from app.health.explain import explain_queued_zero, top_buckets
 
 
 @dataclass
@@ -693,6 +695,8 @@ async def _admin_runall(update: Update, raw_args: List[str]):
                         f"- {src}: ✅ success found={res.get('found')} ins={res.get('inserted')} "
                         f"match={res.get('matched')} queued={res.get('queued')} dur={res.get('duration_ms')}ms"
                     )
+                    for extra in _render_run_summary_lines(res.get("run_summary")):
+                        lines.append(f"  {extra}")
                 elif st == "blocked":
                     lines.append(
                         f"- {src}: 🟠 blocked http={res.get('http_status')} backoff={res.get('backoff_minutes')}m dur={res.get('duration_ms')}ms"
@@ -740,6 +744,38 @@ def _payload_as_dict(payload: Any) -> Optional[dict]:
         except Exception:
             return None
     return None
+
+
+def _render_run_summary_lines(run_summary: Optional[dict]) -> list[str]:
+    if not isinstance(run_summary, dict):
+        return []
+
+    lines: list[str] = []
+    status = run_summary.get("status")
+    found = int(run_summary.get("found") or 0)
+    inserted = int(run_summary.get("inserted") or 0)
+    matched = int(run_summary.get("matched") or 0)
+    queued = int(run_summary.get("queued") or 0)
+    lines.append(f"health status={status} found={found} inserted={inserted} matched={matched} queued={queued}")
+
+    buckets = run_summary.get("reason_buckets") or {}
+    top = top_buckets(buckets, k=3)
+    if top:
+        lines.append("top: " + " ".join(f"{k}={v}" for k, v in top))
+
+    if matched > 0 and queued == 0:
+        lines.append(f"↳ {explain_queued_zero(SimpleNamespace(reason_buckets=buckets))}")
+
+    last_error = run_summary.get("last_error") if isinstance(run_summary.get("last_error"), dict) else None
+    if last_error:
+        lines.append(
+            "last_error: "
+            f"category={last_error.get('category')} "
+            f"http={last_error.get('http_status')} "
+            f"retryable={last_error.get('retryable')}"
+        )
+
+    return lines
 
 
 async def _reply_chunked(update: Update, text: str, max_len: int = 3600):
@@ -977,6 +1013,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
                         last_line += f" thumb={pct}%"
                     except Exception:
                         pass
+                for extra in _render_run_summary_lines(payload.get("run_summary")):
+                    lines.append(f"   {extra}")
 
         lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind} | " + " ".join(flags))
         if st:
@@ -1393,4 +1431,3 @@ async def _admin_fb_sessions(update: Update):
         await update.message.reply_text(message)
     finally:
         db.close()
-

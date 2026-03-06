@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -22,6 +23,13 @@ from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
 from app.sources.flags import read_source_impl_flags
 from app.scrapers.sources import get_scraper
+from app.health.collector import HealthCollector
+from app.health.classify import classify_error
+from app.health.explain import add_anomaly_notes
+from app.health.models import RunStatus
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -218,6 +226,7 @@ def run_source_for_all_wishlists(
     total_wishlists = sum(len(g.get("wishlists") or []) for g in groups.values())
 
     t0 = datetime.now(timezone.utc)
+    health = HealthCollector(source_name=src)
     total_found = 0
     total_inserted = 0
     total_matched = 0
@@ -238,6 +247,7 @@ def run_source_for_all_wishlists(
             url,
             ctx=ctx,
             wishlists=g["wishlists"],
+            health=health,
         )
 
         any_hybrid_browser = any_hybrid_browser or bool(res.get("hybrid_browser_used"))
@@ -247,6 +257,25 @@ def run_source_for_all_wishlists(
 
         if not res.get("ok"):
             reason = res.get("reason") or "error"
+            category = "unknown_error"
+            retryable = None
+            http_status = None
+            status_cls = RunStatus.ERR
+            bucket = "unknown_error"
+            if reason == "blocked":
+                status_cls = RunStatus.BLOCKED
+                hs = int(res.get("status_code") or 0)
+                category = f"http_{hs}" if hs else "blocked"
+                http_status = hs or None
+                retryable = True
+                bucket = "blocked_403" if hs == 403 else "blocked_429" if hs == 429 else "blocked_captcha"
+                health.inc("blocked", 1)
+            else:
+                category, status_cls, retryable, http_status, bucket = classify_error(Exception(str(res.get("error") or reason)))
+            health.inc("errors", 1)
+            health.count(bucket, 1)
+            health.set_error(category, str(res.get("error") or reason), http_status=http_status, retryable=retryable)
+            run_summary_err = add_anomaly_notes(health.finalize(status_cls)).model_dump(mode="json")
             if reason == "blocked":
                 minutes = mark_blocked(
                     db,
@@ -269,8 +298,9 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None)},
+                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err},
                 )
+                logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
                     db,
                     level="warn",
@@ -301,8 +331,9 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None)},
+                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err},
                 )
+                logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
                     db,
                     level="error",
@@ -348,8 +379,9 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None)},
+                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err},
             )
+            logger.info("source_run_summary", extra=run_summary_err)
             emit_event(
                 db,
                 level="error",
@@ -374,6 +406,7 @@ def run_source_for_all_wishlists(
         total_thumb_present += int(res.get("thumb_present") or 0)
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+    run_summary_ok = add_anomaly_notes(health.finalize(RunStatus.OK)).model_dump(mode="json")
 
     mark_success(
         db,
@@ -396,8 +429,9 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
-        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0},
+        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "run_summary": run_summary_ok},
     )
+    logger.info("source_run_summary", extra=run_summary_ok)
 
     emit_event(
         db,
@@ -413,4 +447,4 @@ def run_source_for_all_wishlists(
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok}
