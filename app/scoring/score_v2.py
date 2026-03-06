@@ -326,9 +326,6 @@ def score_ad(
         elif km_per_year <= 12000:
             reasons_cand.append((7, f"KM/ano baixo (~{km_per_year:,}/ano)".replace(",", ".")))
 
-    if not has_images:
-        reasons_cand.append((2, "Sem foto no anúncio"))
-
     # Ensure stable ordering: (priority, reason)
     reasons_sorted = sorted(reasons_cand, key=lambda x: (x[0], x[1]))
 
