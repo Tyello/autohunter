@@ -22,6 +22,7 @@ from app.services.source_url_cursors_service import get_cursor, touch_cursor
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
+from app.health.collector import HealthCollector
 
 
 def _is_bug_type(exc_type: str) -> bool:
@@ -136,7 +137,7 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
     db.commit()
 
 
-def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None) -> dict:
+def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None, health: HealthCollector | None = None) -> dict:
     try:
         # Prefer keyword-arg calling. Some scrapers are defined as:
         #   scrape(url, limit=50, ctx=None)
@@ -176,6 +177,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    if health is not None:
+        health.inc("found", found)
 
     thumb_present = sum(1 for it in listings_all if (it or {}).get("thumbnail_url"))
     thumb_rate = (thumb_present / found) if found else 0.0
@@ -247,6 +250,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     ing = ingest_listings_stats(db, listings_to_ingest)
     inserted_new = int(getattr(ing, "inserted_new", 0) or 0)
+    if health is not None:
+        health.inc("inserted", inserted_new)
     updated = int(getattr(ing, "updated", 0) or 0)
     upserted = int(getattr(ing, "upserted", 0) or 0)
 
@@ -267,6 +272,8 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             matches_by = match_listings_for_wishlists([wishlist], candidates)
             matched_listings = matches_by.get(wishlist.id) or []
             matched = len(matched_listings)
+            if health is not None:
+                health.inc("matched", matched)
             if matched:
                 diag = queue_notifications_for_matches_diag(
                     db,
@@ -276,6 +283,18 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                 )
                 queued = int(diag.get("queued") or 0)
                 already_notified = int(diag.get("already_notified") or 0)
+                if health is not None:
+                    health.inc("queued", queued)
+                    health.count("queued", queued)
+                    health.inc("already_notified", already_notified)
+                    health.count("already_notified", already_notified)
+                    cap_skipped = int(diag.get("cap_skipped") or 0)
+                    invalid_listing = int(diag.get("invalid_listing") or 0)
+                    if cap_skipped:
+                        health.inc("filtered_out", cap_skipped)
+                    if invalid_listing:
+                        health.inc("skipped", invalid_listing)
+                        health.count("missing_fields_other", invalid_listing)
                 for k, v in (diag.get("buckets") or {}).items():
                     reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
 
@@ -304,6 +323,19 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                 matched += int(diag.get("matched") or 0)
                 queued += int(diag.get("queued") or 0)
                 already_notified += int(diag.get("already_notified") or 0)
+                if health is not None:
+                    health.inc("matched", int(diag.get("matched") or 0))
+                    health.inc("queued", int(diag.get("queued") or 0))
+                    health.count("queued", int(diag.get("queued") or 0))
+                    health.inc("already_notified", int(diag.get("already_notified") or 0))
+                    health.count("already_notified", int(diag.get("already_notified") or 0))
+                    cap_skipped = int(diag.get("cap_skipped") or 0)
+                    invalid_listing = int(diag.get("invalid_listing") or 0)
+                    if cap_skipped:
+                        health.inc("filtered_out", cap_skipped)
+                    if invalid_listing:
+                        health.inc("skipped", invalid_listing)
+                        health.count("missing_fields_other", invalid_listing)
                 for k, v in (diag.get("buckets") or {}).items():
                     reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
             # expose matching scalability stats for admin/telemetry
@@ -358,7 +390,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
 
 
-def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist]) -> dict:
+def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist], health: HealthCollector | None = None) -> dict:
     """Scrape once, ingest once, then match+queue for many wishlists.
 
     This collapses duplicate work when multiple users share the same query/URL for a given source.
@@ -397,6 +429,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    if health is not None:
+        health.inc("found", found)
 
     thumb_present = sum(1 for it in listings_all if (it or {}).get("thumbnail_url"))
     thumb_rate = (thumb_present / found) if found else 0.0
@@ -465,6 +499,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     ing = ingest_listings_stats(db, listings_to_ingest)
     inserted_new = int(getattr(ing, "inserted_new", 0) or 0)
+    if health is not None:
+        health.inc("inserted", inserted_new)
     updated = int(getattr(ing, "updated", 0) or 0)
     upserted = int(getattr(ing, "upserted", 0) or 0)
 
@@ -490,6 +526,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                 if not m:
                     continue
                 total_matched += m
+                if health is not None:
+                    health.inc("matched", m)
                 diag = queue_notifications_for_matches_diag(
                     db,
                     w,
@@ -498,6 +536,18 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                 )
                 total_queued += int(diag.get("queued") or 0)
                 total_already_notified += int(diag.get("already_notified") or 0)
+                if health is not None:
+                    health.inc("queued", int(diag.get("queued") or 0))
+                    health.count("queued", int(diag.get("queued") or 0))
+                    health.inc("already_notified", int(diag.get("already_notified") or 0))
+                    health.count("already_notified", int(diag.get("already_notified") or 0))
+                    cap_skipped = int(diag.get("cap_skipped") or 0)
+                    invalid_listing = int(diag.get("invalid_listing") or 0)
+                    if cap_skipped:
+                        health.inc("filtered_out", cap_skipped)
+                    if invalid_listing:
+                        health.inc("skipped", invalid_listing)
+                        health.count("missing_fields_other", invalid_listing)
                 for k, v in (diag.get("buckets") or {}).items():
                     reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
 
