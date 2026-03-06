@@ -3,19 +3,16 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 from app.bot.open_ad import normalize_listing_url
 
 
 @dataclass(frozen=True)
 class TelegramMessagePayload:
-    """Portable payload for Telegram sendMessage/sendPhoto.
-
-    - text: the message body (no URL; use inline keyboard)
-    - inline_keyboard: Telegram API inline keyboard structure
-    """
+    """Portable payload for Telegram sendMessage/sendPhoto."""
 
     text: str
     inline_keyboard: list[list[dict[str, str]]]
@@ -26,11 +23,33 @@ class TelegramMessagePayload:
         return json.dumps({"inline_keyboard": self.inline_keyboard}, ensure_ascii=False)
 
 
+@dataclass(frozen=True)
+class ListingFlags:
+    leilao: bool = False
+    pequena_monta: bool = False
+    media_monta: bool = False
+    grande_monta: bool = False
+    sinistro: bool = False
+    recuperado: bool = False
+    blindado: bool = False
+
+
 _RE_WS = re.compile(r"\s+")
 
 
-def _clean(s: str) -> str:
+def _clean(s: str | None) -> str:
     return _RE_WS.sub(" ", (s or "").strip())
+
+
+def _norm_text(s: str | None) -> str:
+    t = _clean(s).lower()
+    t = t.replace("á", "a").replace("à", "a").replace("â", "a").replace("ã", "a")
+    t = t.replace("é", "e").replace("ê", "e")
+    t = t.replace("í", "i")
+    t = t.replace("ó", "o").replace("ô", "o").replace("õ", "o")
+    t = t.replace("ú", "u")
+    t = t.replace("ç", "c")
+    return t
 
 
 def _format_price_brl(value: Any | None) -> str:
@@ -38,7 +57,6 @@ def _format_price_brl(value: Any | None) -> str:
         return "—"
     v = value
     if isinstance(v, Decimal):
-        # ok
         pass
     elif isinstance(v, (int, float)):
         v = Decimal(str(v))
@@ -55,7 +73,7 @@ def _format_price_brl(value: Any | None) -> str:
         return "—"
 
 
-def _format_km(km: Any | None) -> str | None:
+def format_km(km: Any | None) -> str | None:
     if km is None:
         return None
     try:
@@ -64,14 +82,11 @@ def _format_km(km: Any | None) -> str | None:
             return None
     except Exception:
         return None
-
-    # 75352 -> 75.352
-    s = f"{k:,}".replace(",", ".")
-    return s
+    return f"{k:,}".replace(",", ".")
 
 
 def _short_gearbox(raw: str | None) -> str | None:
-    s = _clean(raw or "")
+    s = _clean(raw)
     if not s:
         return None
     low = s.lower()
@@ -80,17 +95,15 @@ def _short_gearbox(raw: str | None) -> str | None:
     if "manual" in low or "mec" in low:
         return "Manual"
     if "auto" in low or "s-tronic" in low or "stronic" in low or "tiptronic" in low:
-        return "Auto"
-    # keep compact
-    return s[:18]
+        return "Automático"
+    return s[:20]
 
 
 def _format_location_badge(location: str | None) -> str | None:
-    s = _clean(location or "")
+    s = _clean(location)
     if not s:
         return None
 
-    # Try "Cidade-UF" or "Cidade, UF" at end.
     m = re.search(r"([A-Za-zÀ-ÿ\s'.]+?)[,\-]\s*([A-Z]{2})\b", s)
     if m:
         city = _clean(m.group(1))
@@ -99,8 +112,7 @@ def _format_location_badge(location: str | None) -> str | None:
             return f"{city}-{uf}"
         if uf:
             return uf
-
-    return s[:24]
+    return s[:30]
 
 
 def _delta_badge_text(delta_pct: float | None) -> str | None:
@@ -110,48 +122,157 @@ def _delta_badge_text(delta_pct: float | None) -> str | None:
         p = float(delta_pct)
     except Exception:
         return None
-
-    # short, directional
     pct_i = int(round(abs(p) * 100.0))
-    arrow = "↓" if p < 0 else "↑" if p > 0 else "≈"
-    if arrow == "≈":
-        return "≈med"
-    return f"{arrow}{pct_i}% vs med"
+    if p < 0:
+        return f"-{pct_i}% vs mediana"
+    if p > 0:
+        return f"+{pct_i}% vs mediana"
+    return "0% vs mediana"
 
 
-def _get_breakdown(ad: Any) -> dict | None:
+def _get_breakdown(ad: Any, score_result: Any | None) -> dict | None:
+    if isinstance(score_result, dict):
+        return score_result
+    if score_result is not None and hasattr(score_result, "to_dict"):
+        try:
+            d = score_result.to_dict()
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+
     b = getattr(ad, "score_breakdown", None)
-    if b is None:
-        return None
     if isinstance(b, dict):
         return b
     if isinstance(b, str):
         try:
-            return json.loads(b)
+            d = json.loads(b)
+            return d if isinstance(d, dict) else None
         except Exception:
             return None
     return None
 
 
-def format_ad_message(ad: Any) -> TelegramMessagePayload:
-    """Format a normalized ad/listing into a 3-second Telegram message."""
+def _parse_datetime(value: Any | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+    return None
 
-    breakdown = _get_breakdown(ad) or {}
 
-    # score
-    score = (
-        getattr(ad, "score_v2", None)
-        or getattr(ad, "score", None)
-        or breakdown.get("total")
-        or 0
+def build_recency_badge(ad: Any) -> str | None:
+    extras = getattr(ad, "extras", None) or {}
+    reliable = False
+    if isinstance(extras, dict):
+        reliable = bool(extras.get("published_at_reliable") or extras.get("is_fresh_reliable"))
+
+    candidates = [
+        getattr(ad, "published_at", None),
+        getattr(ad, "created_at", None),
+        extras.get("published_at") if isinstance(extras, dict) else None,
+    ]
+    dt = None
+    for c in candidates:
+        dt = _parse_datetime(c)
+        if dt:
+            break
+    if not dt or not reliable:
+        return None
+
+    now = datetime.now(timezone.utc)
+    if dt > now:
+        return None
+    diff = now - dt
+    hours = int(diff.total_seconds() // 3600)
+    days = diff.days
+
+    if hours < 1:
+        return "⏱️ Agora"
+    if hours < 24:
+        return f"⏱️ Há {hours}h"
+    if days == 1:
+        return "⏱️ Ontem"
+    if days <= 14:
+        return f"⏱️ Há {days} dias"
+    return None
+
+
+def build_seller_type_badge(ad: Any) -> str | None:
+    extras = getattr(ad, "extras", None) or {}
+    raw = getattr(ad, "seller_type", None)
+    if not raw and isinstance(extras, dict):
+        raw = extras.get("seller_type") or extras.get("advertiser_type")
+    text = _norm_text(str(raw or ""))
+    if not text:
+        return None
+    if any(x in text for x in ("loj", "concessionaria", "revenda", "dealer")):
+        return "🏪 Loja"
+    if any(x in text for x in ("particular", "pessoa fisica", "owner")):
+        return "👤 Particular"
+    return None
+
+
+def _join_text_sources(ad: Any) -> str:
+    parts = [
+        getattr(ad, "title", None),
+        getattr(ad, "description", None),
+    ]
+    extras = getattr(ad, "extras", None) or {}
+    if isinstance(extras, dict):
+        for k in ("description", "observations", "notes", "details"):
+            parts.append(extras.get(k))
+        for v in extras.values():
+            if isinstance(v, str) and len(v) > 10:
+                parts.append(v)
+    return " \n ".join(_clean(p) for p in parts if _clean(p))
+
+
+def _has_positive_token(blob: str, token_patterns: list[str], neg_patterns: list[str]) -> bool:
+    for neg in neg_patterns:
+        if re.search(neg, blob):
+            return False
+    return any(re.search(p, blob) for p in token_patterns)
+
+
+def extract_listing_flags(ad: Any) -> ListingFlags:
+    blob = _norm_text(_join_text_sources(ad))
+
+    leilao = _has_positive_token(
+        blob,
+        [r"\bleil[aã]o\b"],
+        [r"nao\s+e\s+de\s+leil[aã]o", r"sem\s+leil[aã]o", r"nao\s+tem\s+passagem\s+de\s+leil[aã]o"],
     )
-    try:
-        score_i = int(score)
-    except Exception:
-        score_i = 0
+    pequena = _has_positive_token(blob, [r"pequena\s+monta"], [])
+    media = _has_positive_token(blob, [r"m[eé]dia\s+monta", r"media\s+monta"], [])
+    grande = _has_positive_token(blob, [r"grande\s+monta"], [])
+    sinistro = _has_positive_token(blob, [r"sinistr"], [r"sem\s+sinistr", r"nao\s+(?:e|tem)\s+sinistr"])
+    recuperado = _has_positive_token(blob, [r"recuperad"], [r"nao\s+recuperad", r"sem\s+recupera"])
+    blindado = _has_positive_token(blob, [r"blindad", r"blindagem"], [r"nao\s+e\s+blindad", r"sem\s+blindagem"])
 
-    make = _clean(getattr(ad, "make", None) or "")
-    model = _clean(getattr(ad, "model", None) or "")
+    return ListingFlags(
+        leilao=leilao,
+        pequena_monta=pequena,
+        media_monta=media,
+        grande_monta=grande,
+        sinistro=sinistro,
+        recuperado=recuperado,
+        blindado=blindado,
+    )
+
+
+def build_title(ad: Any, *, max_len: int = 90) -> str:
+    make = _clean(getattr(ad, "make", None))
+    model = _clean(getattr(ad, "model", None))
     year = getattr(ad, "year", None)
     try:
         year_i = int(year) if year is not None else None
@@ -164,87 +285,134 @@ def format_ad_message(ad: Any) -> TelegramMessagePayload:
         trim = extras.get("trim") or extras.get("version") or extras.get("variant")
     trim = _clean(str(trim)) if trim else ""
 
-    title_fallback = _clean(getattr(ad, "title", None) or "Novo anúncio")
-
     if make and model:
-        head = f"{make} {model}"
+        title = f"{make} {model}"
         if year_i:
-            head += f" {year_i}"
+            title += f" {year_i}"
         if trim:
-            head += f" {trim}"
+            title += f" {trim}"
     else:
-        head = title_fallback
+        title = _clean(getattr(ad, "title", None) or "Novo anúncio")
 
-    line1 = f"🔥 {score_i}/100 — {head}".strip()
+    if len(title) <= max_len:
+        return title
+    cut = title[:max_len].rstrip()
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return f"{cut}…"
 
-    # badges (line2)
+
+def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags) -> list[str]:
     badges: list[str] = []
 
-    # distance (if present) OR city/uf
-    dist_km = None
-    if isinstance(extras, dict):
-        dist_km = extras.get("distance_km") or extras.get("distance")
-    if dist_km is not None:
-        try:
-            d = int(float(dist_km))
-            if d >= 0:
-                badges.append(f"📍 {d}km")
-        except Exception:
-            pass
-    else:
-        loc_badge = _format_location_badge(getattr(ad, "location", None))
-        if loc_badge:
-            badges.append(f"📍 {loc_badge}")
+    loc_badge = _format_location_badge(getattr(ad, "location", None))
+    if loc_badge:
+        badges.append(f"📍 {loc_badge}")
 
-    km_badge = _format_km(getattr(ad, "mileage_km", None))
+    recency = build_recency_badge(ad)
+    if recency:
+        badges.append(recency)
+
+    km_badge = format_km(getattr(ad, "mileage_km", None))
     if km_badge:
-        badges.append(f"🛞 {km_badge}km")
+        badges.append(f"🛞 {km_badge} km")
 
     gb = _short_gearbox(getattr(ad, "transmission", None))
     if gb:
         badges.append(f"⚙️ {gb}")
 
-    # delta vs median
-    # Prefer breakdown.market_context.delta_pct
+    breakdown = _get_breakdown(ad, score_result) or {}
     delta_pct = breakdown.get("delta_vs_median_pct")
     if delta_pct is None:
-        try:
-            mc = (breakdown.get("market_context") or {})
-            if isinstance(mc, dict):
-                delta_pct = mc.get("delta_pct")
-        except Exception:
-            delta_pct = None
+        mc = breakdown.get("market_context") if isinstance(breakdown, dict) else None
+        if isinstance(mc, dict):
+            delta_pct = mc.get("delta_pct")
+    dtxt = _delta_badge_text(delta_pct)
+    if dtxt:
+        badges.append(f"💰 {dtxt}")
 
-    # If no images, omit delta badge (per spec)
-    has_images = bool(getattr(ad, "thumbnail_url", None))
-    if not has_images and isinstance(extras, dict):
-        imgs = extras.get("images") or extras.get("image_urls")
-        has_images = isinstance(imgs, (list, tuple)) and len(imgs) > 0
+    seller = build_seller_type_badge(ad)
+    if seller:
+        badges.append(seller)
 
-    if has_images:
-        dtxt = _delta_badge_text(delta_pct)
-        if dtxt:
-            badges.append(f"💰 {dtxt}")
+    if listing_flags.leilao:
+        badges.append("⚠️ Leilão")
+    if listing_flags.pequena_monta:
+        badges.append("⚠️ Pequena monta")
+    if listing_flags.media_monta:
+        badges.append("⚠️ Média monta")
+    if listing_flags.grande_monta:
+        badges.append("⚠️ Grande monta")
+    if listing_flags.sinistro:
+        badges.append("⚠️ Sinistro")
+    if listing_flags.recuperado:
+        badges.append("⚠️ Recuperado")
+    if listing_flags.blindado:
+        badges.append("🛡️ Blindado")
 
-    line2 = " | ".join(badges)
+    return badges
 
-    # line3
-    price_txt = _format_price_brl(getattr(ad, "price", None))
-    source = _clean(getattr(ad, "source", None) or "")
-    if getattr(ad, "price", None) is None:
-        line3 = f"Preço: {price_txt}"
-    else:
-        line3 = f"{price_txt}"
-    if source:
-        line3 = f"{line3} • Fonte: {source}"
 
-    # reasons (max 3)
+def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
+    if score_i <= 0:
+        return []
+
+    breakdown = _get_breakdown(ad, score_result) or {}
     reasons = breakdown.get("reasons") or getattr(ad, "reasons", None) or []
-    if not isinstance(reasons, list):
-        reasons = []
+    if isinstance(reasons, list):
+        clean = [str(r).strip() for r in reasons if str(r).strip()]
+        if clean:
+            return clean[:3]
 
-    reasons = [str(r) for r in reasons if str(r).strip()]
-    reasons = reasons[:3]
+    fallback: list[str] = []
+    if getattr(ad, "price", None) is None:
+        fallback.append("Preço ausente reduz a confiança")
+    if getattr(ad, "mileage_km", None) is None:
+        fallback.append("Quilometragem não informada")
+    if not getattr(ad, "thumbnail_url", None):
+        fallback.append("Sem foto principal")
+    if not fallback:
+        fallback.append("Anúncio relevante para sua busca")
+    return fallback[:3]
+
+
+def build_open_button(ad: Any) -> list[list[dict[str, str]]]:
+    url = normalize_listing_url(
+        getattr(ad, "url", None) or "",
+        source=getattr(ad, "source", None) or None,
+        external_id=getattr(ad, "external_id", None) or None,
+    )
+    if not url:
+        return []
+    return [[{"text": "Abrir anúncio", "url": url}]]
+
+
+def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessagePayload:
+    """Central Telegram formatter used by all sources/pipelines."""
+
+    breakdown = _get_breakdown(ad, score_result) or {}
+    score = getattr(ad, "score_v2", None)
+    if score is None:
+        score = getattr(ad, "score", None)
+    if score is None:
+        score = breakdown.get("total")
+    try:
+        score_i = int(score) if score is not None else 0
+    except Exception:
+        score_i = 0
+
+    title = build_title(ad)
+    line1 = f"🔥 {score_i}/100 — {title}" if score_i > 0 else title
+
+    flags = extract_listing_flags(ad)
+    badges = build_badges(ad, score_result, flags)
+    line2 = " | ".join(badges) if badges else ""
+
+    price_txt = _format_price_brl(getattr(ad, "price", None))
+    source = _clean(getattr(ad, "source", None))
+    line3 = f"{price_txt} • Fonte: {source}" if source else price_txt
+
+    reasons = build_reasons(ad, score_result, score_i)
 
     lines = [line1]
     if line2:
@@ -253,14 +421,4 @@ def format_ad_message(ad: Any) -> TelegramMessagePayload:
     for r in reasons:
         lines.append(f"• {r}")
 
-    # keyboard (single button)
-    url = normalize_listing_url(
-        getattr(ad, "url", None) or "",
-        source=getattr(ad, "source", None) or None,
-        external_id=getattr(ad, "external_id", None) or None,
-    )
-    inline_keyboard: list[list[dict[str, str]]] = []
-    if url:
-        inline_keyboard = [[{"text": "Abrir anúncio", "url": url}]]
-
-    return TelegramMessagePayload(text="\n".join(lines).strip(), inline_keyboard=inline_keyboard)
+    return TelegramMessagePayload(text="\n".join(lines).strip(), inline_keyboard=build_open_button(ad))
