@@ -308,20 +308,6 @@ def score_ad(
     # Lower priority number => more important.
     reasons_cand: list[tuple[int, str]] = []
 
-    # penalties first
-    if price_dec is None:
-        reasons_cand.append((0, "Preço ausente reduz confiança"))
-    if not has_images:
-        reasons_cand.append((0, "Sem foto no anúncio (baixa confiança)"))
-    if km is None:
-        reasons_cand.append((2, "KM ausente reduz confiança"))
-
-    # match
-    if terms and match_ratio >= 0.9:
-        reasons_cand.append((3, "Match forte com sua wishlist"))
-    elif terms and match_ratio >= 0.6:
-        reasons_cand.append((6, "Match bom com sua wishlist"))
-
     # price attractiveness
     if delta_pct is not None:
         if delta_pct < 0:
@@ -337,10 +323,6 @@ def score_ad(
             reasons_cand.append((2, f"KM alto para o ano (~{km_per_year:,}/ano)".replace(",", ".")))
         elif km_per_year <= 12000:
             reasons_cand.append((7, f"KM/ano baixo (~{km_per_year:,}/ano)".replace(",", ".")))
-
-    # quality signal (positive)
-    if quality >= 9 and price_dec is not None and has_images:
-        reasons_cand.append((9, "Anúncio completo (boa confiabilidade)"))
 
     # Ensure stable ordering: (priority, reason)
     reasons_sorted = sorted(reasons_cand, key=lambda x: (x[0], x[1]))
