@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.common.price_parser import parse_price_int_reais
 from app.scrapers.framework import canonicalize_url
 from app.sources.contract import NormalizedAd
 
@@ -19,30 +20,12 @@ def _norm_str(value: Any) -> str | None:
 
 
 def _norm_price(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        v = int(value)
-        return v if v > 0 else None
-
-    s = str(value)
-    m = _PRICE_RE.search(s.replace(" ", ""))
-    if not m:
-        return None
-    token = m.group(0)
-    if "," in token and "." in token:
-        token = token.replace(".", "").replace(",", ".")
-    elif "," in token:
-        token = token.replace(",", ".")
-    else:
-        token = token.replace(".", "")
-    try:
-        out = int(float(token))
-    except Exception:
-        return None
-    return out if out > 0 else None
+    if isinstance(value, str):
+        m = _PRICE_RE.search(value.replace(" ", ""))
+        if not m:
+            return None
+        return parse_price_int_reais(m.group(0))
+    return parse_price_int_reais(value)
 
 
 def _norm_int(value: Any) -> int | None:
