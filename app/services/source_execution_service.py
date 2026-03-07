@@ -23,6 +23,7 @@ from app.sources.adapters.v1 import adapt_v1
 from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
 from app.sources.flags import read_source_impl_flags
+from app.sources.media import derive_thumbnail_url
 from app.scrapers.sources import get_scraper
 from app.health.collector import HealthCollector
 from app.health.classify import classify_error
@@ -38,6 +39,7 @@ def _ad_to_listing(ad) -> dict[str, Any]:
     extras = dict(ad.extras or {})
     extras.setdefault("quality_flags", list(ad.quality_flags or ()))
     extras.setdefault("quality_has_critical", any(f in {"invalid_url", "missing_url", "empty_title", "missing_source"} for f in ad.quality_flags))
+    thumbnail_url = derive_thumbnail_url(extras.get("thumbnail_url"), extras.get("image_urls"))
     return {
         "source": ad.source,
         "external_id": ad.source_listing_id,
@@ -51,7 +53,7 @@ def _ad_to_listing(ad) -> dict[str, Any]:
         "images_count": ad.images_count,
         "make": ad.make,
         "model": ad.model,
-        "thumbnail_url": (extras.get("image_urls") or [None])[0] if isinstance(extras.get("image_urls"), list) else None,
+        "thumbnail_url": thumbnail_url,
         "extras": extras,
     }
 

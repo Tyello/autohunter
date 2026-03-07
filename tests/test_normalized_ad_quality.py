@@ -102,3 +102,58 @@ def test_integration_adapter_v2_applies_contract_enforcement():
     assert "empty_title" in ads[0].quality_flags
     assert "duplicate_images" in ads[0].quality_flags
     assert meta.reason_buckets["quality_critical"] >= 1
+
+
+def test_thumbnail_explicit_is_preserved():
+    thumb = "https://img.example/explicit.webp"
+    res = _mk_ad(thumbnail_url=thumb, images=["https://img.example/1.jpg", "https://img.example/2.jpg"])
+    assert res.ad.extras["thumbnail_url"] == thumb
+
+
+def test_thumbnail_is_derived_from_first_valid_image_when_missing():
+    res = _mk_ad(thumbnail_url=None, images=["https://img.example/first.jpg", "https://img.example/second.jpg"])
+    assert res.ad.extras["thumbnail_url"] == "https://img.example/first.jpg"
+
+
+def test_thumbnail_stays_empty_when_images_missing():
+    res = _mk_ad(thumbnail_url=None, images=[])
+    assert res.ad.extras.get("thumbnail_url") is None
+
+
+def test_invalid_thumbnail_url_is_dropped():
+    res = _mk_ad(thumbnail_url="javascript:alert(1)", images=[])
+    assert res.ad.extras.get("thumbnail_url") is None
+
+
+def test_olx_thumbnail_url_expected_pattern_survives_normalization():
+    olx_thumb = "https://img.olx.com.br/images/83/839668503507168.webp"
+    ad = normalize_ad(
+        "olx",
+        {
+            "external_id": "olx-1",
+            "url": "https://www.olx.com.br/autos-e-pecas/cars/abc",
+            "title": "OLX car",
+            "price": 50000,
+            "location": "São Paulo - SP",
+            "thumbnail_url": olx_thumb,
+        },
+    )
+    res = enforce_ad_contract(ad)
+    assert res.ad.extras.get("thumbnail_url") == olx_thumb
+
+
+def test_mercadolivre_thumbnail_url_expected_pattern_survives_normalization():
+    ml_thumb = "https://http2.mlstatic.com/D_Q_NP_2X_908418-MLB107500557320_032026-E.webp"
+    ad = normalize_ad(
+        "mercadolivre",
+        {
+            "external_id": "MLB123",
+            "url": "https://carro.mercadolivre.com.br/MLB-123-_JM",
+            "title": "ML car",
+            "price": 70000,
+            "location": "São Paulo - SP",
+            "thumbnail_url": ml_thumb,
+        },
+    )
+    res = enforce_ad_contract(ad)
+    assert res.ad.extras.get("thumbnail_url") == ml_thumb
