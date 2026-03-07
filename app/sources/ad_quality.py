@@ -130,7 +130,9 @@ def enforce_ad_contract(ad: NormalizedAd) -> ValidationResult:
         elif "thumbnail_url" in extras:
             extras.pop("thumbnail_url", None)
 
-    if images_count is None or images_count <= 0:
+    has_valid_thumb = bool(derive_thumbnail_url(extras.get("thumbnail_url"), []))
+
+    if (images_count is None or images_count <= 0) and not has_valid_thumb:
         _add_flag(flags, "missing_images")
         images_count = 0 if images_count is None else images_count
 

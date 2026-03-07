@@ -31,3 +31,28 @@ def test_finalize_listings_dedupes_by_source_and_external_id():
     assert out[0]["url"] == "https://www.olx.com.br/a"
     assert out[0]["title"] == "A"
     assert out[0]["price"] == 10
+
+
+def test_finalize_listings_mobiauto_querystring_does_not_create_new_identity():
+    raw = [
+        {
+            "source": "mobiauto",
+            "external_id": "1234567",
+            "url": "https://www.mobiauto.com.br/comprar/carro-x/detalhes/1234567?page=detail&sop=foo",
+            "title": "Car A",
+            "thumbnail_url": "https://img.example/a.jpg",
+        },
+        {
+            "source": "mobiauto",
+            "external_id": "1234567",
+            "url": "https://www.mobiauto.com.br/comprar/carro-x/detalhes/1234567",
+            "price": 100000,
+        },
+    ]
+
+    out = finalize_listings("mobiauto", raw)
+    assert len(out) == 1
+    assert out[0]["external_id"] == "1234567"
+    assert out[0]["url"] == "https://www.mobiauto.com.br/comprar/carro-x/detalhes/1234567"
+    assert out[0]["title"] == "Car A"
+    assert out[0]["price"] == 100000
