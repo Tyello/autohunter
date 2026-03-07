@@ -77,6 +77,7 @@ def run_source_for_all_wishlists(
     kind: str = "scheduler",
     force: bool = False,
     ignore_backoff: bool = False,
+    run_reason: str | None = None,
 ) -> Dict[str, Any]:
     """Execute one source against all active wishlists (grouped by URL).
 
@@ -89,6 +90,7 @@ def run_source_for_all_wishlists(
     src = (source_name or "").strip().lower()
     plugin = get_source(src)
     component = f"{kind}_{src}"
+    reason = (run_reason or kind or "scheduler").strip().lower()
 
     if not plugin:
         return {"ok": False, "status": "error", "error": f"unknown_source:{src}"}
@@ -102,12 +104,12 @@ def run_source_for_all_wishlists(
 
     # Disabled?
     if not force and not bool(cfg.is_enabled):
-        return {"ok": True, "status": "skipped", "reason": "disabled"}
+        return {"ok": True, "status": "skipped", "reason": "disabled", "run_reason": reason}
 
     # Not implemented?
     if plugin.scrape is None:
         if not force:
-            return {"ok": True, "status": "skipped", "reason": "not_implemented"}
+            return {"ok": True, "status": "skipped", "reason": "not_implemented", "run_reason": reason}
         return {"ok": False, "status": "error", "error": "not_implemented"}
 
     # Playwright checks
@@ -118,7 +120,7 @@ def run_source_for_all_wishlists(
             source=src,
             kind=kind,
             status="skipped",
-            payload={"reason": "playwright_off"},
+            payload={"reason": "playwright_off", "run_reason": reason},
             proxy_server=cfg.proxy_server,
             browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
             force_browser=bool(cfg.force_browser),
@@ -130,12 +132,12 @@ def run_source_for_all_wishlists(
             source=src,
             run_id=run_row.id,
             message="playwright_off",
-            evidence={"reason": "playwright_off", "kind": kind},
-            tags=[kind, "ops"],
+            evidence={"reason": "playwright_off", "kind": kind, "run_reason": reason},
+            tags=[kind, reason, "ops"],
         )
-        log(db, "warn", component, "playwright_off", source=src, run_id=run_row.id, event_type="playwright_off", tags=[kind, "ops"])
+        log(db, "warn", component, "playwright_off", source=src, run_id=run_row.id, event_type="playwright_off", tags=[kind, reason, "ops"])
         db.commit()
-        return {"ok": True, "status": "skipped", "reason": "playwright_off"}
+        return {"ok": True, "status": "skipped", "reason": "playwright_off", "run_reason": reason}
 
     # Backoff checks
     if not (force or ignore_backoff):
@@ -147,7 +149,7 @@ def run_source_for_all_wishlists(
                 source=src,
                 kind=kind,
                 status="skipped",
-                payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None},
+                payload={"reason": "backoff", "next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None, "run_reason": reason},
                 proxy_server=cfg.proxy_server,
                 browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
                 force_browser=bool(cfg.force_browser),
@@ -159,23 +161,23 @@ def run_source_for_all_wishlists(
                 source=src,
                 run_id=run_row.id,
                 message="skipped_backoff",
-                evidence={"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None, "kind": kind},
-                tags=[kind, "ops"],
+                evidence={"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None, "kind": kind, "run_reason": reason},
+                tags=[kind, reason, "ops"],
             )
-            log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None}, source=src, run_id=run_row.id, event_type="skipped_backoff", tags=[kind, "ops"])
+            log(db, "info", component, "skipped_backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None}, source=src, run_id=run_row.id, event_type="skipped_backoff", tags=[kind, reason, "ops"])
             db.commit()
-            return {"ok": True, "status": "skipped", "reason": "backoff", "next_allowed_at": avail.next_allowed_at}
+            return {"ok": True, "status": "skipped", "reason": "backoff", "next_allowed_at": avail.next_allowed_at, "run_reason": reason}
 
     # Schedule / due checks (based on last_effective_run_at)
     if not force:
         minutes = int(cfg.sched_minutes or 0)
         if minutes <= 0:
-            return {"ok": True, "status": "skipped", "reason": "sched_0"}
+            return {"ok": True, "status": "skipped", "reason": "sched_0", "run_reason": reason}
 
         st = _get_state(db, src)
         last_eff = st.last_effective_run_at if st else None
         if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
-            return {"ok": True, "status": "skipped", "reason": "not_due"}
+            return {"ok": True, "status": "skipped", "reason": "not_due", "run_reason": reason}
 
     # Feed sources (maintenance/inventory) can run without wishlists.
     if not bool(getattr(plugin, "supports_wishlist_monitoring", True)):
@@ -192,7 +194,7 @@ def run_source_for_all_wishlists(
         if not wishlists:
             log(db, "info", component, "no_active_wishlists")
             db.commit()
-            return {"ok": True, "status": "skipped", "reason": "no_active_wishlists"}
+            return {"ok": True, "status": "skipped", "reason": "no_active_wishlists", "run_reason": reason}
 
         groups = {}
         allowed_map = allowed_sources_for_wishlists(db, wishlists)
@@ -210,7 +212,7 @@ def run_source_for_all_wishlists(
         if not groups:
             log(db, "info", component, "no_matching_wishlists")
             db.commit()
-            return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists"}
+            return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists", "run_reason": reason}
 
     ctx = build_scrape_context(db, src)
     flags = read_source_impl_flags(cfg.extra)
@@ -313,7 +315,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err},
+                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -323,12 +325,12 @@ def run_source_for_all_wishlists(
                     source=src,
                     run_id=run_row.id,
                     message="source_blocked",
-                    evidence={"minutes": minutes, "url": res.get("url") or url, "http_status": res.get("status_code"), "kind": kind},
-                    tags=[kind, "blocked"],
+                    evidence={"minutes": minutes, "url": res.get("url") or url, "http_status": res.get("status_code"), "kind": kind, "run_reason": reason},
+                    tags=[kind, reason, "blocked"],
                 )
-                log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, "blocked"])
+                log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, reason, "blocked"])
                 db.commit()
-                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url}
+                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "run_reason": reason}
 
             if bool(res.get("is_bug")):
                 err = res.get("error") or "scrape_failed"
@@ -346,7 +348,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err},
+                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -356,8 +358,8 @@ def run_source_for_all_wishlists(
                     source=src,
                     run_id=run_row.id,
                     message="scrape_failed_bug",
-                    evidence={"error": err, "url": res.get("url") or url, "retry_minutes": minutes, "kind": kind},
-                    tags=[kind, "bug"],
+                    evidence={"error": err, "url": res.get("url") or url, "retry_minutes": minutes, "kind": kind, "run_reason": reason},
+                    tags=[kind, reason, "bug"],
                 )
                 log(
                     db,
@@ -368,10 +370,10 @@ def run_source_for_all_wishlists(
                     source=src,
                     run_id=run_row.id,
                     event_type="scrape_failed_bug",
-                    tags=[kind, "bug"],
+                    tags=[kind, reason, "bug"],
                 )
                 db.commit()
-                return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url}
+                return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "run_reason": reason}
 
             err = res.get("error") or "scrape_failed"
             minutes = mark_error(
@@ -394,7 +396,7 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err},
+                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
             )
             logger.info("source_run_summary", extra=run_summary_err)
             emit_event(
@@ -404,12 +406,12 @@ def run_source_for_all_wishlists(
                 source=src,
                 run_id=run_row.id,
                 message="scrape_failed",
-                evidence={"error": err, "url": res.get("url") or url, "backoff_minutes": minutes, "kind": kind},
-                tags=[kind, "error"],
+                evidence={"error": err, "url": res.get("url") or url, "backoff_minutes": minutes, "kind": kind, "run_reason": reason},
+                tags=[kind, reason, "error"],
             )
-            log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes}, source=src, run_id=run_row.id, event_type="scrape_failed", tags=[kind, "error"])
+            log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes}, source=src, run_id=run_row.id, event_type="scrape_failed", tags=[kind, reason, "error"])
             db.commit()
-            return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url}
+            return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "run_reason": reason}
 
         total_found += int(res.get("found") or 0)
         total_inserted += int(res.get("inserted") or 0)
@@ -427,7 +429,7 @@ def run_source_for_all_wishlists(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "run_reason": reason},
     )
     run_row = record_run(
         db,
@@ -444,7 +446,7 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
-        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "run_summary": run_summary_ok},
+        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "run_summary": run_summary_ok, "run_reason": reason},
     )
     logger.info("source_run_summary", extra=run_summary_ok)
 
@@ -455,11 +457,11 @@ def run_source_for_all_wishlists(
         source=src,
         run_id=run_row.id,
         message="run_ok",
-        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind},
-        tags=[kind, "ok"],
+        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind, "run_reason": reason},
+        tags=[kind, reason, "ok"],
     )
 
-    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, "ok"])
+    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_reason": reason}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, reason, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason}

@@ -13,6 +13,9 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
+from app.services.source_execution_service import run_source_for_all_wishlists
+from app.services.system_logs_service import log
+from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 
 # Fallback (quando não existir plano/assinatura no banco ainda)
@@ -434,7 +437,82 @@ def add_wishlist(db: Session, user_id, query: str):
     except Exception:
         db.rollback()
 
+    run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
+
+    if run_summary.get("triggered", 0) > 0:
+        return True, "Wishlist criada com sucesso e executada agora."
     return True, "Wishlist criada."
+
+
+def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_reason: str = "wishlist_created") -> Dict[str, Any]:
+    """Dispara a primeira execução de uma wishlist recém-criada no pipeline oficial.
+
+    Estratégia:
+    - reaproveita `run_source_for_all_wishlists` (mesmo executor do scheduler)
+    - roda apenas fontes permitidas para a wishlist
+    - força execução para evitar esperar o ciclo normal (`force=True`)
+    - mantém anti-spam pelo dedupe de notifications + atualização de source_state
+    """
+    if not wishlist:
+        return {"triggered": 0, "ok": 0, "skipped": 0, "failed": 0, "sources": []}
+
+    allowed_map = allowed_sources_for_wishlists(db, [wishlist])
+    sources = sorted(allowed_map.get(wishlist.id) or [])
+    if not sources:
+        log(
+            db,
+            "info",
+            "wishlist",
+            "initial_run_skipped_no_sources",
+            {
+                "wishlist_id": str(wishlist.id),
+                "run_reason": run_reason,
+            },
+            event_type="wishlist_initial_run",
+            tags=["wishlist", run_reason, "skipped"],
+        )
+        db.commit()
+        return {"triggered": 0, "ok": 0, "skipped": 1, "failed": 0, "sources": []}
+
+    out = {"triggered": len(sources), "ok": 0, "skipped": 0, "failed": 0, "sources": []}
+    for src in sources:
+        res = run_source_for_all_wishlists(
+            db,
+            src,
+            kind="wishlist_created",
+            force=True,
+            ignore_backoff=False,
+            run_reason=run_reason,
+        )
+        status = str((res or {}).get("status") or "unknown")
+        out["sources"].append({"source": src, "status": status})
+
+        if bool((res or {}).get("ok", False)) and status not in {"error", "blocked"}:
+            out["ok"] += 1
+        elif status in {"skipped", "not_due"}:
+            out["skipped"] += 1
+        else:
+            out["failed"] += 1
+
+    log(
+        db,
+        "info",
+        "wishlist",
+        "initial_run_dispatched",
+        {
+            "wishlist_id": str(wishlist.id),
+            "run_reason": run_reason,
+            "triggered": out["triggered"],
+            "ok": out["ok"],
+            "skipped": out["skipped"],
+            "failed": out["failed"],
+            "sources": out["sources"],
+        },
+        event_type="wishlist_initial_run",
+        tags=["wishlist", run_reason],
+    )
+    db.commit()
+    return out
 
 
 def remove_wishlist(db: Session, user_id, index: int):
