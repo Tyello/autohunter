@@ -3,7 +3,13 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-from app.scrapers.framework import canonicalize_url, clean_text, dedupe_listings, make_listing
+from app.scrapers.framework import (
+    canonicalize_listing_url,
+    canonicalize_url,
+    clean_text,
+    dedupe_listings,
+    make_listing,
+)
 from app.scrapers.diagnostics import current_diagnostics
 
 
@@ -37,7 +43,7 @@ def _fallback_external_id(source: str, url: str) -> str:
             return m.group(1)
 
     # generic fallback: use the canonicalized URL itself
-    return canonicalize_url(u) or u
+    return canonicalize_listing_url(u) or u
 
 
 _CORE_KEYS = {
@@ -77,7 +83,7 @@ def finalize_listings(source: str, raw_items: Iterable[Any]) -> list[dict]:
                 diag.inc("items_drop_non_dict")
             continue
 
-        url = canonicalize_url(it.get("url") or "")
+        url = canonicalize_listing_url(it.get("url") or "")
         if not url:
             if diag is not None:
                 diag.inc("items_drop_no_url")

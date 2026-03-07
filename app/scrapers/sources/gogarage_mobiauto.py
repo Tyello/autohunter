@@ -180,9 +180,14 @@ class MobiautoScraper(BaseScraper):
         url = raw_data.get("url", "")
         if not url:
             return None
-        
-        import hashlib
-        external_id = hashlib.md5(url.encode()).hexdigest()[:16]
+
+        m = re.search(r"/detalhes/(\d+)", url) or re.search(r"/(\d+)/detalhes(?:$|[?#])", url)
+        if m:
+            external_id = m.group(1)
+        else:
+            import hashlib
+
+            external_id = hashlib.md5(url.encode()).hexdigest()[:16]
         
         title = raw_data.get("title", "").strip()
         price = self._parse_price(raw_data.get("price", ""))

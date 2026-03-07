@@ -30,6 +30,31 @@ def test_normalize_strong_fields_and_quality_flags():
     assert "missing_price" not in ad.quality_flags
 
 
+def test_normalize_promotes_fields_from_extras_before_quality():
+    ad = normalize_ad(
+        "mobiauto",
+        {
+            "external_id": "m1",
+            "url": "https://www.mobiauto.com.br/comprar/carro/detalhes/1",
+            "title": "Gol 1.0",
+            "price": 30000,
+            "location": "Campinas - SP",
+            "extras": {
+                "km": "87.000 km",
+                "year": "2017",
+                "gearbox": "manual",
+                "image_urls": ["https://img.example/1.jpg", "https://img.example/2.jpg"],
+                "thumbnail_url": "https://img.example/1.jpg",
+            },
+        },
+    )
+
+    assert ad.km == 87000
+    assert ad.year == 2017
+    assert ad.images_count == 2
+    assert ad.extras.get("gearbox") == "manual"
+
+
 def test_adapters_never_invent_missing_fields():
     ads, meta = adapt_v1("olx", [{"url": "https://x"}])
     assert meta.impl == "v1"

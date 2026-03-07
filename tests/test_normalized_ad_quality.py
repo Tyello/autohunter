@@ -125,6 +125,11 @@ def test_invalid_thumbnail_url_is_dropped():
     assert res.ad.extras.get("thumbnail_url") is None
 
 
+def test_valid_thumbnail_without_images_does_not_flag_missing_images():
+    res = _mk_ad(thumbnail_url="https://img.example/cover.jpg", images=[])
+    assert "missing_images" not in res.quality_flags
+
+
 def test_olx_thumbnail_url_expected_pattern_survives_normalization():
     olx_thumb = "https://img.olx.com.br/images/83/839668503507168.webp"
     ad = normalize_ad(

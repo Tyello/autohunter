@@ -39,6 +39,9 @@ _TRACKING_PARAMS = {
     "spm",
     "pdp_filters",
     "utm_referrer",
+    # common marketplace noise on listing detail urls
+    "sop",
+    "page",
 }
 
 _WS_RE = re.compile(r"\s+")
@@ -79,6 +82,47 @@ def canonicalize_url(url: str | None, *, keep_query_keys: set[str] | None = None
         return urlunparse((p.scheme, p.netloc, p.path, p.params, query, ""))
     except Exception:
         return u.split("#", 1)[0]
+
+
+def canonicalize_listing_url(url: str | None) -> str:
+    """Canonical URL for ad identity comparisons.
+
+    Keeps the generic canonicalization and removes noisy query strings commonly
+    seen on detail pages (ex.: Mobiauto `?page=detail&sop=...`).
+    """
+    u = canonicalize_url(url)
+    if not u:
+        return ""
+    try:
+        p = urlparse(u)
+        if p.path and "/detalhes/" in p.path:
+            return urlunparse((p.scheme, p.netloc, p.path, p.params, "", ""))
+    except Exception:
+        pass
+    return u
+
+
+def normalize_listing_identity(source: Any, external_id: Any, url: Any) -> tuple[str, str, str]:
+    src = str(source or "").strip().lower()
+    ext = str(external_id or "").strip()
+    c_url = canonicalize_listing_url(str(url or ""))
+    return src, ext, c_url
+
+
+def build_listing_key(source: Any, external_id: Any, url: Any) -> tuple[str, str]:
+    """Stable dedupe key.
+
+    Primary identity is (source, external_id) when available.
+    URL is a fallback only.
+    """
+    src, ext, c_url = normalize_listing_identity(source, external_id, url)
+    if not src:
+        return "", ""
+    if ext:
+        return src, ext
+    if c_url:
+        return src, f"url:{c_url}"
+    return "", ""
 
 
 def make_listing(
@@ -137,11 +181,9 @@ def dedupe_listings(listings: Iterable[dict]) -> list[dict]:
     for it in listings or []:
         if not isinstance(it, dict):
             continue
-        src = (it.get("source") or "").strip().lower()
-        ext = (it.get("external_id") or "").strip()
-        if not src or not ext:
+        key = build_listing_key(it.get("source"), it.get("external_id"), it.get("url"))
+        if not key[0] or not key[1]:
             continue
-        key = (src, ext)
         if key in by_key:
             by_key[key] = _merge_best(by_key[key], it)
         else:
