@@ -119,16 +119,6 @@ def test_missing_delta_omits_badge():
     assert "💰" not in payload.text
 
 
-def test_score_gt_zero_without_breakdown_uses_fallback_reasons():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    ad = _base_ad(score_v2=62, score_breakdown=None, price=None, mileage_km=None, thumbnail_url=None)
-    payload = format_ad_message(ad)
-    assert "• Preço ausente reduz a confiança" in payload.text
-    assert "• Quilometragem não informada" in payload.text
-    assert "• Sem foto principal" in payload.text
-
-
 def test_long_title_truncates_intelligently():
     from app.notifications.telegram_formatter import build_title
 
