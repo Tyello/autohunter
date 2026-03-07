@@ -6,7 +6,9 @@ Garante que todos os listings tenham campos consistentes e válidos.
 
 from __future__ import annotations
 from typing import Dict, Any, Optional
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
+
+from app.common.price_parser import parse_price_decimal
 
 
 # Campos obrigatórios
@@ -119,27 +121,8 @@ def normalize_listing(listing: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _normalize_price(value: Any) -> Optional[Decimal]:
-    """Converte preço para Decimal."""
-    if isinstance(value, Decimal):
-        return value
-    
-    if isinstance(value, (int, float)):
-        try:
-            return Decimal(str(value))
-        except (InvalidOperation, ValueError):
-            return None
-    
-    if isinstance(value, str):
-        # Remove símbolos comuns
-        clean = value.replace("R$", "").replace("$", "").strip()
-        clean = clean.replace(".", "").replace(",", ".")
-        
-        try:
-            return Decimal(clean)
-        except (InvalidOperation, ValueError):
-            return None
-    
-    return None
+    """Converte preço para Decimal usando parser central."""
+    return parse_price_decimal(value)
 
 
 def _normalize_year(value: Any) -> Optional[int]:
