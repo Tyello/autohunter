@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import re
-from urllib.parse import urlparse
 
 from app.sources.contract import NormalizedAd
+from app.sources.media import derive_thumbnail_url, is_valid_http_url, normalize_image_urls
 
 
 class QualitySeverity:
@@ -45,13 +45,7 @@ def _clean_text(value: str | None) -> str | None:
 
 
 def _is_valid_url(url: str | None) -> bool:
-    if not url:
-        return False
-    try:
-        p = urlparse(url)
-        return p.scheme in {"http", "https"} and bool(p.netloc)
-    except Exception:
-        return False
+    return is_valid_http_url(url)
 
 
 def _add_flag(flags: set[str], flag: str) -> None:
@@ -111,32 +105,30 @@ def enforce_ad_contract(ad: NormalizedAd) -> ValidationResult:
         _add_flag(flags, "incomplete_location")
 
     image_urls = extras.get("image_urls")
-    if isinstance(image_urls, list):
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        duplicates = 0
-        broken = 0
-        for raw in image_urls:
-            s = _clean_text(raw)
-            if not s:
-                broken += 1
-                continue
-            if not _is_valid_url(s):
-                broken += 1
-                continue
-            if s in seen:
-                duplicates += 1
-                continue
-            seen.add(s)
-            cleaned.append(s)
+    if image_urls is not None:
+        cleaned, duplicates, broken = normalize_image_urls(image_urls)
+        duplicates = int(extras.get("image_duplicates") or 0) + duplicates
+        broken = int(extras.get("image_broken") or 0) + broken
         if duplicates:
             _add_flag(flags, "duplicate_images")
         if broken:
             _add_flag(flags, "broken_images")
         extras["image_urls"] = cleaned
+        extras.pop("image_duplicates", None)
+        extras.pop("image_broken", None)
+        thumb = derive_thumbnail_url(extras.get("thumbnail_url"), cleaned)
+        if thumb is not None:
+            extras["thumbnail_url"] = thumb
+        elif "thumbnail_url" in extras:
+            extras.pop("thumbnail_url", None)
         images_count = len(cleaned)
     else:
         images_count = ad.images_count if ad.images_count is not None else None
+        thumb = derive_thumbnail_url(extras.get("thumbnail_url"), [])
+        if thumb is not None:
+            extras["thumbnail_url"] = thumb
+        elif "thumbnail_url" in extras:
+            extras.pop("thumbnail_url", None)
 
     if images_count is None or images_count <= 0:
         _add_flag(flags, "missing_images")

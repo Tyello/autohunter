@@ -6,6 +6,7 @@ from typing import Any
 from app.common.price_parser import parse_price_int_reais
 from app.scrapers.framework import canonicalize_url
 from app.sources.contract import NormalizedAd
+from app.sources.media import derive_thumbnail_url, normalize_image_urls
 
 _UF_RE = re.compile(r"\b([A-Z]{2})\b")
 _NUM_RE = re.compile(r"\d+")
@@ -76,22 +77,34 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
     year = _norm_year(data.get("year") or data.get("year_model") or data.get("ano"))
     city, uf = _split_city_uf(data.get("city"), data.get("uf"), data.get("location"))
     images = data.get("images") or data.get("photos")
+    explicit_thumbnail = data.get("thumbnail_url") or data.get("thumbnail") or data.get("image_url") or data.get("image")
     image_urls: list[str] | None = None
+    thumb_url: str | None = None
     images_count = None
-    if isinstance(images, list):
-        image_urls = [str(x).strip() for x in images if str(x).strip()]
+    duplicates = 0
+    broken = 0
+    if images is not None:
+        image_urls, duplicates, broken = normalize_image_urls(images)
         images_count = len(image_urls)
     elif data.get("images_count") is not None:
         images_count = _norm_int(data.get("images_count"))
 
+    thumb_url = derive_thumbnail_url(explicit_thumbnail, image_urls if image_urls is not None else images)
+
     known = {
         "source", "source_listing_id", "external_id", "id", "url", "title", "price", "currency",
         "city", "uf", "location", "year", "year_model", "ano", "km", "mileage_km", "mileage",
-        "make", "brand", "model", "images", "photos", "images_count",
+        "make", "brand", "model", "images", "photos", "images_count", "thumbnail_url", "thumbnail", "image_url", "image",
     }
     extras = {k: v for k, v in data.items() if k not in known and v is not None}
     if image_urls is not None:
         extras["image_urls"] = image_urls
+        if duplicates:
+            extras["image_duplicates"] = duplicates
+        if broken:
+            extras["image_broken"] = broken
+    if thumb_url is not None:
+        extras["thumbnail_url"] = thumb_url
 
     return NormalizedAd(
         source=source_name,
