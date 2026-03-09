@@ -8,6 +8,11 @@ import re
 
 _RE_KM_IN_TITLE = re.compile(r"\b(\d{1,3}(?:\.\d{3})*|\d+)\s*km\b", re.I)
 
+_FUEL_ALLOWED = {"gasoline", "ethanol", "flex", "diesel", "electric", "hybrid"}
+_TRANSMISSION_ALLOWED = {"manual", "automatic", "cvt", "automated", "semi_automatic"}
+_SELLER_ALLOWED = {"dealer", "private", "unknown"}
+_LISTING_TYPE_ALLOWED = {"marketplace", "auction_lot", "classified"}
+
 
 def _format_km_ptbr(value: int) -> str:
     # 79000 -> "79.000"
@@ -59,7 +64,34 @@ def _decorate_title_with_year_km(title: str | None, year, km) -> str | None:
 
     return t or None
 
-def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
+def _norm_token(value) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    return s or None
+
+
+def _normalize_controlled_fields(listing: dict) -> dict:
+    out = dict(listing)
+
+    fuel = _norm_token(out.get("fuel_type"))
+    out["fuel_type"] = fuel if fuel in _FUEL_ALLOWED else None
+
+    transmission = _norm_token(out.get("transmission"))
+    out["transmission"] = transmission if transmission in _TRANSMISSION_ALLOWED else None
+
+    seller = _norm_token(out.get("seller_type"))
+    if seller not in _SELLER_ALLOWED:
+        seller = "unknown" if seller else None
+    out["seller_type"] = seller
+
+    listing_type = _norm_token(out.get("listing_type"))
+    out["listing_type"] = listing_type if listing_type in _LISTING_TYPE_ALLOWED else "marketplace"
+
+    return out
+
+
+def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_stats: bool = False):
     """
     Faz bulk upsert por (source, external_id).
 
@@ -112,7 +144,8 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
         if l.get("title") and (year is not None or km is not None):
             l["title"] = _decorate_title_with_year_km(l.get("title"), year, km)
         # keep only columns that actually exist in the table
-        prepared.append({k: v for k, v in l.items() if k in allowed_cols})
+        prepared_listing = {k: v for k, v in l.items() if k in allowed_cols}
+        prepared.append(_normalize_controlled_fields(prepared_listing))
 
     listings = prepared
     if not listings:
@@ -216,9 +249,24 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
         },
     )
 
-    stmt = stmt.returning(CarListing.id)
+    inserted_expr = (CarListing.__table__.c.xmax == 0).label("inserted")
+    stmt = stmt.returning(CarListing.id, inserted_expr)
     result = db.execute(stmt)
-    return [row[0] for row in result.fetchall()]
+    rows = result.fetchall()
+    ids = [row[0] for row in rows]
+
+    if not with_stats:
+        return ids
+
+    inserted_new = sum(1 for row in rows if bool(row[1]))
+    upserted = len(rows)
+    updated = upserted - inserted_new
+    return {
+        "ids": ids,
+        "inserted_new": inserted_new,
+        "updated": updated,
+        "upserted": upserted,
+    }
 
 def _merge_best(a: dict, b: dict) -> dict:
     # Mantém o que já é bom e completa o que está faltando

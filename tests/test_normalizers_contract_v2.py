@@ -1,6 +1,9 @@
 from app.services.source_execution_service import _ad_to_listing
+from app.sources.contract import NormalizedAd
 from app.sources.ad_quality import enforce_ad_contract
 from app.sources.normalize import (
+    normalize_listing_type,
+    normalize_seller_type,
     normalize_ad,
     normalize_color,
     normalize_external_id,
@@ -37,10 +40,20 @@ def test_mileage_normalization_variants():
 
 
 def test_fuel_and_transmission_normalization():
-    assert normalize_fuel_type("gasolina") == "Gasolina"
-    assert normalize_fuel_type("hibrido") == "Híbrido"
-    assert normalize_transmission("Câmbio Automático") == "Automática"
-    assert normalize_transmission("manual") == "Manual"
+    assert normalize_fuel_type("gasolina") == "gasoline"
+    assert normalize_fuel_type("hibrido") == "hybrid"
+    assert normalize_fuel_type("Unknown") is None
+    assert normalize_transmission("Câmbio Automático") == "automatic"
+    assert normalize_transmission("manual") == "manual"
+    assert normalize_transmission("Unknown") is None
+
+
+def test_seller_and_listing_type_normalization():
+    assert normalize_seller_type("particular") == "private"
+    assert normalize_seller_type("dealer") == "dealer"
+    assert normalize_seller_type(None) == "unknown"
+    assert normalize_listing_type("auction_lot") == "auction_lot"
+    assert normalize_listing_type("anything") == "marketplace"
 
 
 def test_thumbnail_resolution_and_make_model_version_split():
@@ -75,11 +88,36 @@ def test_persistence_contract_fields_are_mapped_and_not_empty():
 
     assert listing["version"] == "Sedan Si 2.0 16V 192cv 4p"
     assert listing["seller_type"] == "unknown"
+    assert listing["listing_type"] == "marketplace"
     assert listing["city"] == "Campinas"
     assert listing["state"] == "SP"
     assert listing["color"] == "Prata"
     assert listing["raw_payload"]
     assert listing["extractor_version"]
+
+
+def test_marketplace_payload_like_traceback_is_sanitized_for_persistence():
+    ad = NormalizedAd(
+        source="mercadolivre",
+        external_id="ml-1",
+        url="https://example.com/ml/1",
+        title="Car",
+        price=90000,
+        extras={
+            "fuel_type": "Unknown",
+            "transmission": "Unknown",
+            "seller_type": "unknown",
+            "raw_payload": {"k": "v"},
+            "extractor_version": "v-test",
+        },
+    )
+
+    listing = _ad_to_listing(ad)
+    assert listing["fuel_type"] is None
+    assert listing["transmission"] is None
+    assert listing["seller_type"] == "unknown"
+    assert listing["raw_payload"] == {"k": "v"}
+    assert listing["extractor_version"] == "v-test"
 
 
 def test_mobiauto_thumbnail_does_not_flag_missing_images_with_explicit_thumb():
