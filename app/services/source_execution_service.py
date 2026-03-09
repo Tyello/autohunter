@@ -24,6 +24,12 @@ from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
 from app.sources.flags import read_source_impl_flags
 from app.sources.media import derive_thumbnail_url
+from app.sources.normalize import (
+    normalize_fuel_type,
+    normalize_listing_type,
+    normalize_seller_type,
+    normalize_transmission,
+)
 from app.scrapers.sources import get_scraper
 from app.health.collector import HealthCollector
 from app.health.classify import classify_error
@@ -52,13 +58,14 @@ def _ad_to_listing(ad) -> dict[str, Any]:
         "state": ad.uf,
         "year": ad.year,
         "mileage_km": ad.km,
-        "fuel_type": extras.get("fuel_type"),
-        "transmission": extras.get("transmission"),
+        "fuel_type": normalize_fuel_type(extras.get("fuel_type")),
+        "transmission": normalize_transmission(extras.get("transmission")),
         "images_count": ad.images_count,
         "make": ad.make,
         "model": ad.model,
         "version": extras.get("version"),
-        "seller_type": extras.get("seller_type") or "unknown",
+        "seller_type": normalize_seller_type(extras.get("seller_type")),
+        "listing_type": normalize_listing_type(extras.get("listing_type")),
         "color": extras.get("color"),
         "thumbnail_url": thumbnail_url,
         "raw_payload": extras.get("raw_payload") or {"external_id": ad.external_id, "url": ad.url},

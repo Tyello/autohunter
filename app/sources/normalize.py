@@ -51,6 +51,11 @@ _STATE_NAME_TO_UF = {
     "ceara": "CE",
 }
 
+_CANONICAL_FUEL_TYPES = {"gasoline", "ethanol", "flex", "diesel", "electric", "hybrid"}
+_CANONICAL_TRANSMISSIONS = {"manual", "automatic", "cvt", "automated", "semi_automatic"}
+_CANONICAL_SELLER_TYPES = {"dealer", "private", "unknown"}
+_CANONICAL_LISTING_TYPES = {"marketplace", "auction_lot", "classified"}
+
 
 def _norm_str(value: Any) -> str | None:
     if value is None:
@@ -96,32 +101,58 @@ def _norm_token(value: str | None) -> str:
     return re.sub(r"\s+", " ", value.strip().lower())
 
 
-def normalize_fuel_type(value: Any) -> str:
+def normalize_fuel_type(value: Any) -> str | None:
     token = _norm_token(_norm_str(value)).replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    if token in _CANONICAL_FUEL_TYPES:
+        return token
     if "hibr" in token:
-        return "Híbrido"
+        return "hybrid"
     if "eletr" in token:
-        return "Elétrico"
+        return "electric"
     for k, v in _FUEL_MAP.items():
         if k in token:
-            return v
-    return "Unknown"
+            return {
+                "Gasolina": "gasoline",
+                "Flex": "flex",
+                "Diesel": "diesel",
+                "Híbrido": "hybrid",
+                "Elétrico": "electric",
+            }.get(v)
+    return None
 
 
-def normalize_transmission(value: Any) -> str:
+def normalize_transmission(value: Any) -> str | None:
     raw = _norm_str(value)
     token = _norm_token(raw).replace("â", "a").replace("á", "a")
+    if token in _CANONICAL_TRANSMISSIONS:
+        return token
     if "cvt" in token:
-        return "CVT"
+        return "cvt"
     if "semi" in token:
-        return "Semi-automática"
+        return "semi_automatic"
     if "automatiz" in token:
-        return "Automatizada"
+        return "automated"
     if "automatic" in token or "cambio automatico" in token or "câmbio automático" in (raw or "").lower():
-        return "Automática"
+        return "automatic"
     if "manual" in token:
-        return "Manual"
-    return "Unknown"
+        return "manual"
+    return None
+
+
+def normalize_seller_type(value: Any) -> str:
+    token = _norm_token(_norm_str(value))
+    if token in _CANONICAL_SELLER_TYPES:
+        return token
+    if token in {"loja", "concessionaria", "concessionária", "dealer"}:
+        return "dealer"
+    if token in {"particular", "owner", "private"}:
+        return "private"
+    return "unknown"
+
+
+def normalize_listing_type(value: Any) -> str:
+    token = _norm_token(_norm_str(value))
+    return token if token in _CANONICAL_LISTING_TYPES else "marketplace"
 
 
 def normalize_color(value: Any) -> str | None:
@@ -308,7 +339,8 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
             "fuel_type": normalize_fuel_type(pick("fuel_type")),
             "transmission": normalize_transmission(pick("gearbox", "transmission", "cambio")),
             "version": version,
-            "seller_type": (_norm_str(pick("seller_type")) or "unknown").lower() if (_norm_str(pick("seller_type")) or "").lower() in {"dealer", "private"} else "unknown",
+            "seller_type": normalize_seller_type(pick("seller_type")),
+            "listing_type": normalize_listing_type(pick("listing_type")),
             "color": normalize_color(pick("color")),
             "extractor_version": extractor_version,
             "raw_payload": raw_payload,
