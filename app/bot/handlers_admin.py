@@ -32,6 +32,7 @@ from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
 from app.services.wishlist_tokens_service import extract_tokens
 from app.health.explain import explain_queued_zero, top_buckets
+from app.services.admin_deploy_service import AdminDeployService, DeployActor
 
 
 @dataclass
@@ -201,7 +202,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin deploy")
         return
 
     action = args[0].lower()
@@ -216,6 +217,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if action == "errors":
         await _admin_errors(update, args[1:])
+        return
+    if action == "deploy":
+        await _admin_deploy(update, context, args[1:])
         return
     if action == "fb_sessions":
         await _admin_fb_sessions(update)
@@ -241,7 +245,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin fb_sessions")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin deploy | /admin fb_sessions")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     """Subcomandos para operar SourceConfig (DB)."""
@@ -1431,3 +1435,83 @@ async def _admin_fb_sessions(update: Update):
         await update.message.reply_text(message)
     finally:
         db.close()
+
+
+async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args: list[str]):
+    sub = (args[0].lower() if args else "")
+    actor = DeployActor(
+        chat_id=update.effective_chat.id,
+        tg_user_id=(update.effective_user.id if update.effective_user else None),
+        username=(update.effective_user.username if update.effective_user else None),
+    )
+
+    with SessionLocal() as db:
+        service = AdminDeployService(db)
+        allowed, reason = service.is_allowed(actor)
+        if not allowed:
+            await update.message.reply_text(reason or "Sem permissão.")
+            return
+
+        if sub in ("", "preflight"):
+            try:
+                out = service.request_deploy(actor)
+            except ValueError as e:
+                await update.message.reply_text(str(e))
+                return
+            preflight = out["preflight"]
+            lines = [
+                "Deploy admin (preflight):",
+                f"- operation_id: {out['operation_id']}",
+                f"- branch: {preflight.get('branch')}",
+                f"- commit: {preflight.get('commit')}",
+                f"- working_tree: {preflight.get('working_tree')}",
+                f"- remote_ok: {'yes' if preflight.get('remote_ok') else 'no'}",
+                f"- remote_diff: {preflight.get('remote_diff')}",
+                f"Confirme em até {out['expires_in']}s com:",
+                f"/admin deploy confirm {out['operation_id']}",
+            ]
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        if sub == "confirm":
+            operation_id = (args[1] if len(args) > 1 else "").strip()
+            if not operation_id:
+                await update.message.reply_text("Use: /admin deploy confirm <operation_id>")
+                return
+            await update.message.reply_text("Deploy iniciado. Aguardando execução do wrapper...")
+            try:
+                result = await service.confirm_deploy(actor, operation_id)
+                lines = [
+                    f"Deploy finalizado: {'OK' if result['ok'] else 'FALHA'}",
+                    f"- operation_id: {result['operation_id']}",
+                    f"- branch: {result.get('branch') or '-'}",
+                    f"- before: {result.get('before_commit') or '-'}",
+                    f"- after: {result.get('after_commit') or '-'}",
+                    f"- summary: {result.get('summary') or '-'}",
+                ]
+                if result.get("output_tail"):
+                    lines.append("- output_tail:\n" + sanitize_for_telegram(result["output_tail"]))
+                await update.message.reply_text("\n".join(lines))
+            except ValueError as e:
+                await update.message.reply_text(str(e))
+            return
+
+        if sub == "status":
+            out = service.deploy_status()
+            last = out.get("last")
+            if not last:
+                await update.message.reply_text("Nenhum deploy registrado ainda.")
+                return
+            lines = [
+                f"Deploy em andamento: {'sim' if out.get('running') else 'não'}",
+                f"Último operation_id: {last.operation_id}",
+                f"Status: {last.status}",
+                f"Branch: {last.branch or '-'}",
+                f"Before: {last.before_commit or '-'}",
+                f"After: {last.after_commit or '-'}",
+                f"Resumo: {last.summary or '-'}",
+            ]
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        await update.message.reply_text("Use: /admin deploy | /admin deploy confirm <operation_id> | /admin deploy status")
