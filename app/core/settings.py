@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     # HTTP queue cap (protects DB/RAM)
     http_queue_max_jobs: int = 200
 
+    # Consider queue jobs stuck in "running" after this timeout and requeue them.
+    scrape_job_running_ttl_seconds: int = 900
+
     # Max parallel *scraping* jobs running at once (sender/heartbeat are not gated).
     # 1 is the safest default for Raspberry Pi 3.
     scheduler_max_parallel_sources: int = 1

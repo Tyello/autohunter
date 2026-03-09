@@ -15,6 +15,38 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+
+def requeue_stale_running_jobs(
+    db: Session,
+    *,
+    queue: str,
+    stale_after_seconds: int | None = None,
+) -> int:
+    """Move stale running jobs back to queued so the source is schedulable again."""
+    ttl = int(stale_after_seconds if stale_after_seconds is not None else getattr(settings, "scrape_job_running_ttl_seconds", 900) or 900)
+    if ttl <= 0:
+        return 0
+
+    cutoff = _utcnow() - timedelta(seconds=ttl)
+    rows = (
+        db.query(ScrapeJob)
+        .filter(ScrapeJob.queue == queue)
+        .filter(ScrapeJob.status == "running")
+        .filter(ScrapeJob.locked_at.isnot(None))
+        .filter(ScrapeJob.locked_at < cutoff)
+        .all()
+    )
+
+    for job in rows:
+        job.status = "queued"
+        job.lock_owner = None
+        job.locked_at = None
+        job.started_at = None
+        job.finished_at = None
+        job.run_at = _utcnow() - timedelta(seconds=1)
+
+    return len(rows)
+
 def count_active_jobs(db: Session, *, queue: str = "browser") -> int:
     return int(
         db.execute(
@@ -39,6 +71,8 @@ def enqueue_job(
 
     Retorna True se inseriu; False se já existia job ativo.
     """
+    requeue_stale_running_jobs(db, queue=queue)
+
     src = (source or "").strip().lower()
     if not src:
         return False
@@ -90,6 +124,7 @@ def dequeue_next_job(
 
     Usa FOR UPDATE SKIP LOCKED para suportar múltiplos workers (se quiser no futuro).
     """
+    requeue_stale_running_jobs(db, queue=queue)
     now = _utcnow()
 
     q = (
