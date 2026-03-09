@@ -10,6 +10,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.scrapers.hybrid_cookies import inject_storage_state_cookies
+from app.services.source_audit_capture_service import source_audit_capture_service
 
 
 class FetchBlocked(Exception):
@@ -133,6 +134,12 @@ def _resolve_session_key(ctx: Optional[object]) -> Optional[str]:
         return None
     src = getattr(ctx, 'source', None)
     return str(src).strip().lower() if src else None
+
+
+def _audit_kind_from_url(url: str) -> str:
+    u = (url or "").lower()
+    detail_tokens = ("/item/", "/anuncio", "/anuncio/", "/estoque/", "-20", "-19")
+    return "detail" if any(t in u for t in detail_tokens) else "listing"
 
 
 def _apply_hybrid_cookies(sess: requests.Session, ctx: Optional[object]) -> None:
@@ -298,6 +305,19 @@ def fetch_response(
     if resp.status_code == 200 and _looks_like_bot_challenge(resp.text):
         raise FetchBlocked(200, url, reason="bot_challenge")
 
+    try:
+        source_audit_capture_service.register_runtime_fetch_sample(
+            ctx=ctx,
+            source=getattr(ctx, "source", "unknown") if ctx is not None else "unknown",
+            kind=_audit_kind_from_url(url),
+            url=url,
+            payload=resp.text,
+            content_type=resp.headers.get("Content-Type", "text/html"),
+            stage="fetch_response",
+        )
+    except Exception:
+        pass
+
     resp.raise_for_status()
     return resp
 
@@ -351,5 +371,4 @@ def fetch_json(
         import json as _json
 
         return _json.loads(resp.text)
-
 
