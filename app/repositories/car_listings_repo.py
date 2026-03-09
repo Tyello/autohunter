@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func, case
+from sqlalchemy import func, case, literal_column
 from app.models.car_listing import CarListing
 
 import re
@@ -249,7 +249,9 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
         },
     )
 
-    inserted_expr = (CarListing.__table__.c.xmax == 0).label("inserted")
+    # `xmax` is a PostgreSQL system column (not part of mapped table columns),
+    # so reference it as a literal SQL column in RETURNING.
+    inserted_expr = (literal_column("xmax") == 0).label("inserted")
     stmt = stmt.returning(CarListing.id, inserted_expr)
     result = db.execute(stmt)
     rows = result.fetchall()
