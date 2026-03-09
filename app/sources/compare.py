@@ -49,7 +49,7 @@ def _match(v1: list[NormalizedAd], v2: list[NormalizedAd]) -> dict[int, int]:
             used_v2.add(j)
 
     run_stage(lambda ad: canonicalize_url(ad.url) or None)
-    run_stage(lambda ad: ad.source_listing_id or None)
+    run_stage(lambda ad: ad.external_id or None)
     run_stage(lambda ad: ad.fingerprint())
     return matches
 

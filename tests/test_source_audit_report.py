@@ -16,7 +16,7 @@ def test_build_matrix_and_reports(tmp_path):
         },
         {
             "source": "olx",
-            "field": "year",
+            "field": "mileage_km",
             "present_in_listing": False,
             "present_in_detail": True,
             "captured_before_merge": True,
@@ -27,7 +27,8 @@ def test_build_matrix_and_reports(tmp_path):
     ]
     matrix = build_matrix(samples)
     assert matrix["olx"]["price"].status() == "ok"
-    assert matrix["olx"]["year"].quality_flag_false_positive is True
+    assert matrix["olx"]["mileage_km"].quality_flag_false_positive is True
+    assert "external_id" in matrix["olx"]
 
     out = write_reports(samples, tmp_path)
     assert out["json"].exists()

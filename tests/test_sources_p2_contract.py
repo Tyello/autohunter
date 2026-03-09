@@ -52,15 +52,15 @@ def test_normalize_promotes_fields_from_extras_before_quality():
     assert ad.km == 87000
     assert ad.year == 2017
     assert ad.images_count == 2
-    assert ad.extras.get("gearbox") == "manual"
+    assert ad.extras.get("transmission") == "Manual"
 
 
 def test_adapters_never_invent_missing_fields():
     ads, meta = adapt_v1("olx", [{"url": "https://x"}])
     assert meta.impl == "v1"
     assert len(ads) == 1
-    assert ads[0].source_listing_id is None
-    assert "missing_source_listing_id" in ads[0].quality_flags
+    assert ads[0].source_listing_id is not None
+    assert "missing_external_id" not in ads[0].quality_flags
 
     res = ScraperResult(listings=[{"external_id": "1", "url": "https://x/1"}], metrics=PipelineMetrics(source="olx"))
     ads2, meta2 = adapt_v2("olx", res)

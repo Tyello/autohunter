@@ -18,7 +18,7 @@ class SourceError:
 @dataclass(frozen=True, slots=True)
 class NormalizedAd:
     source: str
-    source_listing_id: str | None
+    external_id: str | None
     url: str
     title: str | None = None
     price: int | None = None
@@ -32,6 +32,11 @@ class NormalizedAd:
     images_count: int | None = None
     quality_flags: tuple[str, ...] = field(default_factory=tuple)
     extras: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def source_listing_id(self) -> str | None:
+        """Backward compatibility alias for legacy pipeline/tests."""
+        return self.external_id
 
     def fingerprint(self) -> tuple[str | int | None, ...]:
         return (

@@ -13,10 +13,12 @@ CRITICAL_FIELDS = (
     "price",
     "title",
     "url",
-    "source_listing_id",
+    "external_id",
     "location",
+    "city",
+    "state",
     "year",
-    "km",
+    "mileage_km",
     "images",
     "thumbnail_url",
 )
@@ -114,7 +116,7 @@ class SourceAuditCaptureService:
         if len(samples) > 12:
             del samples[:-12]
 
-    def capture_from_runtime_samples(self, *, ctx: Any | None, source: str, reasons: list[str] | tuple[str, ...], pipeline_stage: str, source_listing_id: str | None = None, extracted_snapshot: dict[str, Any] | None = None) -> list[Path]:
+    def capture_from_runtime_samples(self, *, ctx: Any | None, source: str, reasons: list[str] | tuple[str, ...], pipeline_stage: str, external_id: str | None = None, extracted_snapshot: dict[str, Any] | None = None) -> list[Path]:
         if ctx is None:
             return []
         extra = getattr(ctx, "extra", None)
@@ -129,7 +131,7 @@ class SourceAuditCaptureService:
                     source=source,
                     kind=s.get("kind") or "listing",
                     url=s.get("url") or "",
-                    source_listing_id=source_listing_id,
+                    external_id=external_id,
                     reason=",".join(reasons),
                     pipeline_stage=pipeline_stage,
                     payload=s.get("payload") or "",
@@ -139,10 +141,10 @@ class SourceAuditCaptureService:
             )
         return saved
 
-    def capture_artifact(self, *, source: str, kind: str, url: str, source_listing_id: str | None, reason: str, pipeline_stage: str, payload: str | dict | list, content_ext: str = ".html", extracted_snapshot: dict[str, Any] | None = None) -> Path:
+    def capture_artifact(self, *, source: str, kind: str, url: str, external_id: str | None, reason: str, pipeline_stage: str, payload: str | dict | list, content_ext: str = ".html", extracted_snapshot: dict[str, Any] | None = None) -> Path:
         src = _slug(source)
         kind_s = "detail" if kind == "detail" else "listing"
-        sid = _slug(source_listing_id, fallback="na")
+        sid = _slug(external_id, fallback="na")
         ts = _utc_iso_now()
         checksum = hashlib.sha1(f"{url}|{reason}|{ts}".encode("utf-8")).hexdigest()[:8]
 
@@ -166,7 +168,7 @@ class SourceAuditCaptureService:
                     "source": src,
                     "kind": kind_s,
                     "url": url,
-                    "source_listing_id": source_listing_id,
+                    "external_id": external_id,
                     "timestamp": ts,
                     "reason": reason,
                     "pipeline_stage": pipeline_stage,

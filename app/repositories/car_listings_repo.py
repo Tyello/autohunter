@@ -188,6 +188,15 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict]):
             "make": func.coalesce(CarListing.make, stmt.excluded.make),
             "model": func.coalesce(CarListing.model, stmt.excluded.model),
             "mileage_km": func.coalesce(CarListing.mileage_km, stmt.excluded.mileage_km),
+            "fuel_type": func.coalesce(CarListing.fuel_type, stmt.excluded.fuel_type),
+            "transmission": func.coalesce(CarListing.transmission, stmt.excluded.transmission),
+            "version": func.coalesce(CarListing.version, stmt.excluded.version),
+            "seller_type": func.coalesce(CarListing.seller_type, stmt.excluded.seller_type),
+            "city": func.coalesce(CarListing.city, stmt.excluded.city),
+            "state": func.coalesce(CarListing.state, stmt.excluded.state),
+            "color": func.coalesce(CarListing.color, stmt.excluded.color),
+            "raw_payload": func.coalesce(CarListing.raw_payload, stmt.excluded.raw_payload),
+            "extractor_version": func.coalesce(CarListing.extractor_version, stmt.excluded.extractor_version),
             # Sold state: once sold, never revert (OR semantics).
             "is_sold": (
                 func.coalesce(CarListing.is_sold, False)
