@@ -57,6 +57,30 @@ MAX_CANDIDATE_LISTINGS_PER_RUN = int(os.getenv("MATCH_CANDIDATES_PER_RUN", "250"
 MAX_QUEUE_PER_WISHLIST_PER_RUN = int(os.getenv("MATCH_MAX_QUEUE_PER_WISHLIST", "10"))
 
 
+def _parse_incremental_max_new(ctx) -> int | None:
+    inc_max_new = (getattr(ctx, "extra", None) or {}).get("incremental_max_new")
+    try:
+        out = int(inc_max_new) if inc_max_new is not None else None
+        return out if out and out > 0 else None
+    except Exception:
+        return None
+
+
+def _cut_listings_before_cursor(listings_all: list[dict], cursor_external_id: str | None) -> list[dict]:
+    if not cursor_external_id:
+        return list(listings_all or [])
+    cut: list[dict] = []
+    for it in listings_all or []:
+        if (it or {}).get("external_id") == cursor_external_id:
+            break
+        cut.append(it)
+    return cut
+
+
+def _incremental_mode_label(*, inc_mode: str | None, inc_enabled: bool) -> str:
+    return inc_mode or ("on" if inc_enabled else "off")
+
+
 def _capture_if_needed(*, ctx, found: int | None, listings: list[dict], reason: str, stage: str, parse_error: bool = False) -> list[str]:
     sample = (listings or [{}])[0] if listings else {}
     qflags = []
@@ -228,7 +252,6 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     listings_all = list(listings or [])
     found = len(listings_all)
     audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
-    audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
     if health is not None:
         health.inc("found", found)
 
@@ -237,13 +260,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     # Incremental mode (per source+url) - default OFF unless enabled via source_configs.extra
     inc_enabled = bool((getattr(ctx, "extra", None) or {}).get("incremental_enabled", False))
-    inc_max_new = (getattr(ctx, "extra", None) or {}).get("incremental_max_new")
-    try:
-        inc_max_new_i = int(inc_max_new) if inc_max_new is not None else None
-        if inc_max_new_i is not None and inc_max_new_i <= 0:
-            inc_max_new_i = None
-    except Exception:
-        inc_max_new_i = None
+    inc_max_new_i = _parse_incremental_max_new(ctx)
 
     listings_to_ingest = listings_all
     inc_mode = None
@@ -288,12 +305,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             # ingest only listings before the cursor (still match on full set)
             if cur and inc_cursor:
                 inc_mode = "cut"
-                cut: list[dict] = []
-                for it in listings_all:
-                    if (it or {}).get("external_id") == inc_cursor:
-                        break
-                    cut.append(it)
-                listings_to_ingest = cut
+                listings_to_ingest = _cut_listings_before_cursor(listings_all, inc_cursor)
                 if inc_max_new_i is not None:
                     listings_to_ingest = listings_to_ingest[:inc_max_new_i]
         except Exception:
@@ -416,7 +428,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
-        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
+        "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary", {
@@ -433,13 +445,13 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
-        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
+        "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
     }, source=ctx.source, event_type="pipeline_summary", tags=["ok"])
 
     db.commit()
 
     return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": matched,
-        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
+        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist], health: HealthCollector | None = None) -> dict:
@@ -490,13 +502,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     thumb_rate = (thumb_present / found) if found else 0.0
 
     inc_enabled = bool((getattr(ctx, "extra", None) or {}).get("incremental_enabled", False))
-    inc_max_new = (getattr(ctx, "extra", None) or {}).get("incremental_max_new")
-    try:
-        inc_max_new_i = int(inc_max_new) if inc_max_new is not None else None
-        if inc_max_new_i is not None and inc_max_new_i <= 0:
-            inc_max_new_i = None
-    except Exception:
-        inc_max_new_i = None
+    inc_max_new_i = _parse_incremental_max_new(ctx)
 
     listings_to_ingest = listings_all
     inc_mode = None
@@ -540,12 +546,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
             if cur and inc_cursor:
                 inc_mode = "cut"
-                cut: list[dict] = []
-                for it in listings_all:
-                    if (it or {}).get("external_id") == inc_cursor:
-                        break
-                    cut.append(it)
-                listings_to_ingest = cut
+                listings_to_ingest = _cut_listings_before_cursor(listings_all, inc_cursor)
                 if inc_max_new_i is not None:
                     listings_to_ingest = listings_to_ingest[:inc_max_new_i]
         except Exception:
@@ -626,7 +627,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
-        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
+        "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary_many", {
@@ -642,9 +643,9 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "reason_buckets": reason_buckets,
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
-        "incremental": {"mode": inc_mode or ("on" if inc_enabled else "off"), "cursor": inc_cursor},
+        "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
     }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"])
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}

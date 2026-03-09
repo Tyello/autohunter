@@ -41,3 +41,24 @@ def test_capture_helper_trigger_on_missing_critical(monkeypatch):
         reason="post_scrape_check",
     )
     assert out == []
+
+
+def test_parse_incremental_max_new_accepts_positive_ints():
+    ctx = SimpleNamespace(extra={"incremental_max_new": "7"})
+    assert jobs._parse_incremental_max_new(ctx) == 7
+
+
+def test_parse_incremental_max_new_rejects_invalid_values():
+    assert jobs._parse_incremental_max_new(SimpleNamespace(extra={"incremental_max_new": "0"})) is None
+    assert jobs._parse_incremental_max_new(SimpleNamespace(extra={"incremental_max_new": "-3"})) is None
+    assert jobs._parse_incremental_max_new(SimpleNamespace(extra={"incremental_max_new": "abc"})) is None
+
+
+def test_cut_listings_before_cursor_stops_at_first_cursor_match():
+    listings = [
+        {"external_id": "a"},
+        {"external_id": "b"},
+        {"external_id": "c"},
+    ]
+    assert jobs._cut_listings_before_cursor(listings, "b") == [{"external_id": "a"}]
+    assert jobs._cut_listings_before_cursor(listings, "x") == listings
