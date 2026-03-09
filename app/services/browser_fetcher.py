@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
 from app.scrapers.base import FetchBlocked
+from app.services.source_audit_capture_service import source_audit_capture_service
 from app.scrapers.diagnostics import current_diagnostics
 from app.core.settings import settings
 from app.services.challenge_fingerprint import fingerprint_from_html
@@ -203,6 +204,19 @@ def fetch_html_browser(
 
     if diag is not None:
         diag.inc("br_ok")
+
+    try:
+        source_audit_capture_service.register_runtime_fetch_sample(
+            ctx=ctx,
+            source=ctx.source,
+            kind="detail" if ("/item/" in (url or "") or "anuncio" in (url or "")) else "listing",
+            url=url,
+            payload=html,
+            content_type="text/html",
+            stage="browser_fetch_html",
+        )
+    except Exception:
+        pass
 
     return BrowserFetchResult(html=html, final_url=final_url)
 

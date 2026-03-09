@@ -23,6 +23,7 @@ from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.health.collector import HealthCollector
+from app.services.source_audit_capture_service import source_audit_capture_service
 
 
 def _is_bug_type(exc_type: str) -> bool:
@@ -54,6 +55,52 @@ def _is_bug_type(exc_type: str) -> bool:
 
 MAX_CANDIDATE_LISTINGS_PER_RUN = int(os.getenv("MATCH_CANDIDATES_PER_RUN", "250"))
 MAX_QUEUE_PER_WISHLIST_PER_RUN = int(os.getenv("MATCH_MAX_QUEUE_PER_WISHLIST", "10"))
+
+
+def _capture_if_needed(*, ctx, found: int | None, listings: list[dict], reason: str, stage: str, parse_error: bool = False) -> list[str]:
+    sample = (listings or [{}])[0] if listings else {}
+    qflags = []
+    extras = sample.get("extras") if isinstance(sample, dict) else None
+    if isinstance(extras, dict) and isinstance(extras.get("quality_flags"), list):
+        qflags = [str(x) for x in extras.get("quality_flags", [])]
+    missing = []
+    if isinstance(sample, dict):
+        if not sample.get("price"):
+            missing.append("price")
+        if not sample.get("title"):
+            missing.append("title")
+        if not sample.get("url"):
+            missing.append("url")
+        if not sample.get("external_id"):
+            missing.append("source_listing_id")
+    normalized_reason = None if reason in {"post_scrape_check", "post_ingest_check"} else reason
+    decision = source_audit_capture_service.decide(
+        explicit_reason=normalized_reason,
+        found=found,
+        missing_critical=missing,
+        quality_flags=qflags,
+        parse_error=parse_error,
+        debug=bool(os.getenv("SOURCE_AUDIT_DEBUG", "").strip()),
+    )
+    if not decision.should_capture:
+        return []
+    return [str(x) for x in source_audit_capture_service.capture_from_runtime_samples(
+        ctx=ctx,
+        source=getattr(ctx, "source", "unknown"),
+        reasons=list(decision.reasons),
+        pipeline_stage=stage,
+        source_listing_id=sample.get("external_id") if isinstance(sample, dict) else None,
+        extracted_snapshot={
+            "price": sample.get("price") if isinstance(sample, dict) else None,
+            "title": sample.get("title") if isinstance(sample, dict) else None,
+            "url": sample.get("url") if isinstance(sample, dict) else None,
+            "source_listing_id": sample.get("external_id") if isinstance(sample, dict) else None,
+            "location": sample.get("location") if isinstance(sample, dict) else None,
+            "year": sample.get("year") if isinstance(sample, dict) else None,
+            "km": sample.get("mileage_km") if isinstance(sample, dict) else None,
+            "thumbnail_url": sample.get("thumbnail_url") if isinstance(sample, dict) else None,
+        },
+    )]
 
 
 def _candidate_listings_for_run(db: Session, *, source: str, raw_listings: list[dict], limit: int) -> list[CarListing]:
@@ -153,7 +200,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, **_ctx_fetch_diag(ctx)}
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -172,11 +219,14 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             "url": search_url,
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
+            "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="parse_or_runtime_error", stage="scrape_exception", parse_error=True),
             **_ctx_fetch_diag(ctx),
         }
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
+    audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
     if health is not None:
         health.inc("found", found)
 
@@ -231,7 +281,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                     "incremental": {"mode": "skip", "cursor": top},
                 }, source=ctx.source, event_type="pipeline_summary", tags=["ok", "incremental"])
                 db.commit()
-                return {"ok": True, "found": found, "inserted": 0, "updated": 0, "upserted": 0, "matched": 0, "queued": 0, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", **_ctx_fetch_diag(ctx)}
+                return {"ok": True, "found": found, "inserted": 0, "updated": 0, "upserted": 0, "matched": 0, "queued": 0, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
 
             # ingest only listings before the cursor (still match on full set)
             if cur and inc_cursor:
@@ -405,7 +455,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, **_ctx_fetch_diag(ctx)}
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -424,11 +474,13 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             "url": search_url,
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
+            "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="parse_or_runtime_error", stage="scrape_exception", parse_error=True),
             **_ctx_fetch_diag(ctx),
         }
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
     if health is not None:
         health.inc("found", found)
 
@@ -482,7 +534,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                     "incremental": {"mode": "skip", "cursor": top},
                 }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok", "incremental"])
                 db.commit()
-                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", **_ctx_fetch_diag(ctx)}
+                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
 
             if cur and inc_cursor:
                 inc_mode = "cut"
@@ -593,4 +645,4 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": inc_mode or ("on" if inc_enabled else "off"), "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
