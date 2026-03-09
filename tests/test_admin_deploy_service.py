@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from datetime import timedelta, timezone, datetime
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db.base import Base
+from app.models.admin_deploy_audit import AdminDeployAudit
+from app.services.admin_deploy_service import AdminDeployService, DeployActor
+
+
+def _db():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[AdminDeployAudit.__table__])
+    return sessionmaker(bind=engine)()
+
+
+def _actor(chat_id=10, user_id=20):
+    return DeployActor(chat_id=chat_id, tg_user_id=user_id, username="admin")
+
+
+def _allow(monkeypatch):
+    monkeypatch.setattr("app.services.admin_deploy_service.settings", SimpleNamespace(
+        admin_deploy_pending_ttl_seconds=120,
+        admin_deploy_rate_limit_seconds=300,
+        admin_deploy_wrapper_timeout_seconds=180,
+        admin_deploy_output_max_chars=60,
+        admin_deploy_wrapper_path="/wrapper",
+        admin_deploy_use_sudo=False,
+        autohunter_admin_user_ids="20",
+        autohunter_admin_chat_ids="10",
+        autohunter_admins="10",
+    ))
+
+
+def test_access_denied_non_admin_user(monkeypatch):
+    _allow(monkeypatch)
+    svc = AdminDeployService(_db())
+    ok, _ = svc.is_allowed(_actor(user_id=999))
+    assert not ok
+
+
+def test_access_denied_non_admin_chat(monkeypatch):
+    _allow(monkeypatch)
+    svc = AdminDeployService(_db())
+    ok, _ = svc.is_allowed(_actor(chat_id=999))
+    assert not ok
+
+
+def test_confirmation_expired(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+
+    import pytest
+    with pytest.raises(ValueError, match="expirada"):
+        import asyncio
+        asyncio.run(svc.confirm_deploy(_actor(), op))
+
+
+def test_rate_limit(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    svc.request_deploy(_actor())
+    import pytest
+    with pytest.raises(ValueError, match="Rate limit"):
+        svc.request_deploy(_actor())
+
+
+def test_lock_global(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+    svc._lock = SimpleNamespace(locked=lambda: True)  # type: ignore[assignment]
+    import pytest, asyncio
+    with pytest.raises(ValueError, match="andamento"):
+        asyncio.run(svc.confirm_deploy(_actor(), op))
+
+
+def test_deploy_success(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    async def _ok(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stdout='{"ok": true, "status": "success", "before_commit": "abc", "after_commit": "def", "branch": "main", "services": [{"name":"x","status":"active"}]}', stderr="")
+    monkeypatch.setattr("app.services.admin_deploy_service.asyncio.to_thread", lambda fn, *a, **k: _ok())
+
+    import asyncio
+    out = asyncio.run(svc.confirm_deploy(_actor(), op))
+    assert out["ok"] is True
+
+
+def test_fail_git_pull(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    async def _bad(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout='{"ok": false, "error_type": "git_pull", "error_message": "failed"}', stderr="err")
+    monkeypatch.setattr("app.services.admin_deploy_service.asyncio.to_thread", lambda fn, *a, **k: _bad())
+
+    import asyncio
+    out = asyncio.run(svc.confirm_deploy(_actor(), op))
+    assert out["ok"] is False
+
+
+def test_fail_service_restart(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    async def _bad(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout='{"ok": false, "error_type": "service_restart", "error_message": "svc"}', stderr="err")
+    monkeypatch.setattr("app.services.admin_deploy_service.asyncio.to_thread", lambda fn, *a, **k: _bad())
+
+    import asyncio
+    out = asyncio.run(svc.confirm_deploy(_actor(), op))
+    assert out["ok"] is False
+
+
+def test_output_truncation_and_audit_persistence(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    async def _bad(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout='{"ok": false, "error_type": "git_pull", "error_message": "x"}', stderr="y" * 500)
+    monkeypatch.setattr("app.services.admin_deploy_service.asyncio.to_thread", lambda fn, *a, **k: _bad())
+
+    import asyncio
+    out = asyncio.run(svc.confirm_deploy(_actor(), op))
+    assert "truncated" in out["output_tail"]
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.status == "failed"
+    assert row.output_tail

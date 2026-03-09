@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     autohunter_admins: str | None = None
     public_base_url: str | None = None
 
+    autohunter_admin_user_ids: str | None = None
+    autohunter_admin_chat_ids: str | None = None
+
+    admin_deploy_pending_ttl_seconds: int = 120
+    admin_deploy_rate_limit_seconds: int = 300
+    admin_deploy_wrapper_timeout_seconds: int = 180
+    admin_deploy_output_max_chars: int = 1200
+    admin_deploy_wrapper_path: str = "/usr/local/bin/autohunter-admin-deploy"
+    admin_deploy_use_sudo: bool = True
+
     # Chat IDs que devem receber alertas automáticos (erros/backoff/monitoramento).
     # Separe por vírgula. Se vazio, usa autohunter_admins (compatibilidade).
     autohunter_admin_alert_chats: str | None = None

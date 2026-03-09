@@ -1,0 +1,2 @@
+# Allow only fixed wrapper execution (no args)
+autohunter ALL=(root) NOPASSWD: /usr/local/bin/autohunter-admin-deploy
