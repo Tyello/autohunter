@@ -72,7 +72,7 @@ def _capture_if_needed(*, ctx, found: int | None, listings: list[dict], reason: 
         if not sample.get("url"):
             missing.append("url")
         if not sample.get("external_id"):
-            missing.append("source_listing_id")
+            missing.append("external_id")
     normalized_reason = None if reason in {"post_scrape_check", "post_ingest_check"} else reason
     decision = source_audit_capture_service.decide(
         explicit_reason=normalized_reason,
@@ -89,15 +89,17 @@ def _capture_if_needed(*, ctx, found: int | None, listings: list[dict], reason: 
         source=getattr(ctx, "source", "unknown"),
         reasons=list(decision.reasons),
         pipeline_stage=stage,
-        source_listing_id=sample.get("external_id") if isinstance(sample, dict) else None,
+        external_id=sample.get("external_id") if isinstance(sample, dict) else None,
         extracted_snapshot={
             "price": sample.get("price") if isinstance(sample, dict) else None,
             "title": sample.get("title") if isinstance(sample, dict) else None,
             "url": sample.get("url") if isinstance(sample, dict) else None,
-            "source_listing_id": sample.get("external_id") if isinstance(sample, dict) else None,
+            "external_id": sample.get("external_id") if isinstance(sample, dict) else None,
             "location": sample.get("location") if isinstance(sample, dict) else None,
+            "city": sample.get("city") if isinstance(sample, dict) else None,
+            "state": sample.get("state") if isinstance(sample, dict) else None,
             "year": sample.get("year") if isinstance(sample, dict) else None,
-            "km": sample.get("mileage_km") if isinstance(sample, dict) else None,
+            "mileage_km": sample.get("mileage_km") if isinstance(sample, dict) else None,
             "thumbnail_url": sample.get("thumbnail_url") if isinstance(sample, dict) else None,
         },
     )]

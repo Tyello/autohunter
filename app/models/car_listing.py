@@ -55,6 +55,11 @@ class CarListing(TimestampMixin, Base):
     transmission: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     make: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    seller_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Marketplace lifecycle
     is_sold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

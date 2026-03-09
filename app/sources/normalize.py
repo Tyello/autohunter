@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -11,6 +12,44 @@ from app.sources.media import derive_thumbnail_url, normalize_image_urls
 _UF_RE = re.compile(r"\b([A-Z]{2})\b")
 _NUM_RE = re.compile(r"\d+")
 _PRICE_RE = re.compile(r"\d+[\d.,]*")
+_PREFIX_LOCATION_RE = re.compile(r"^\s*em\s+", re.I)
+_MAKE_RE = re.compile(r"^([A-Za-zÀ-ÿ0-9]+)\s+(.+)$")
+_PRICE_ID_RE = re.compile(r"^\d{4,}$")
+
+_FUEL_MAP = {
+    "gasolina": "Gasolina",
+    "flex": "Flex",
+    "diesel": "Diesel",
+    "hibrido": "Híbrido",
+    "híbrido": "Híbrido",
+    "eletrico": "Elétrico",
+    "elétrico": "Elétrico",
+}
+
+_TRANSMISSION_MAP = {
+    "automatica": "Automática",
+    "automatica": "Automática",
+    "cambio automatico": "Automática",
+    "câmbio automático": "Automática",
+    "manual": "Manual",
+    "cvt": "CVT",
+    "automatizada": "Automatizada",
+    "semi-automatica": "Semi-automática",
+    "semi automática": "Semi-automática",
+}
+
+_STATE_NAME_TO_UF = {
+    "sao paulo": "SP",
+    "rio de janeiro": "RJ",
+    "minas gerais": "MG",
+    "parana": "PR",
+    "rio grande do sul": "RS",
+    "santa catarina": "SC",
+    "bahia": "BA",
+    "goias": "GO",
+    "pernambuco": "PE",
+    "ceara": "CE",
+}
 
 
 def _norm_str(value: Any) -> str | None:
@@ -47,24 +86,129 @@ def _norm_year(value: Any) -> int | None:
     return year if 1900 <= year <= 2100 else None
 
 
-def _split_city_uf(city: Any, uf: Any, location: Any) -> tuple[str | None, str | None]:
-    c = _norm_str(city)
-    u = _norm_str(uf)
-    if u:
-        u = u.upper()
-    loc = _norm_str(location)
+def normalize_mileage_km(value: Any) -> int | None:
+    return _norm_int(value)
 
-    if not c and loc:
-        parts = [p.strip() for p in re.split(r"[-/,]", loc) if p.strip()]
-        if parts:
-            c = parts[0]
-        if len(parts) > 1 and not u:
-            m = _UF_RE.search(parts[-1].upper())
-            if m:
-                u = m.group(1)
-    if u and len(u) != 2:
-        u = None
-    return c, u
+
+def _norm_token(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def normalize_fuel_type(value: Any) -> str:
+    token = _norm_token(_norm_str(value)).replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    if "hibr" in token:
+        return "Híbrido"
+    if "eletr" in token:
+        return "Elétrico"
+    for k, v in _FUEL_MAP.items():
+        if k in token:
+            return v
+    return "Unknown"
+
+
+def normalize_transmission(value: Any) -> str:
+    raw = _norm_str(value)
+    token = _norm_token(raw).replace("â", "a").replace("á", "a")
+    if "cvt" in token:
+        return "CVT"
+    if "semi" in token:
+        return "Semi-automática"
+    if "automatiz" in token:
+        return "Automatizada"
+    if "automatic" in token or "cambio automatico" in token or "câmbio automático" in (raw or "").lower():
+        return "Automática"
+    if "manual" in token:
+        return "Manual"
+    return "Unknown"
+
+
+def normalize_color(value: Any) -> str | None:
+    txt = _norm_str(value)
+    if not txt:
+        return None
+    return txt[:1].upper() + txt[1:].lower()
+
+
+def normalize_location(location: Any, city: Any = None, state: Any = None) -> tuple[str | None, str | None, str | None]:
+    loc = _norm_str(location)
+    loc = _PREFIX_LOCATION_RE.sub("", loc or "") if loc else None
+    c = _norm_str(city)
+    st = _norm_str(state)
+
+    parts = [p.strip() for p in re.split(r"[-/,]", loc or "") if p.strip()]
+    if not c and parts:
+        c = parts[0]
+
+    if not st and len(parts) > 1:
+        last = parts[-1]
+        m = _UF_RE.search(last.upper())
+        if m:
+            st = m.group(1)
+        else:
+            key = _norm_token(last).replace("ã", "a")
+            st = _STATE_NAME_TO_UF.get(key, st)
+
+    if st:
+        st = st.upper()
+        if len(st) != 2:
+            st = None
+
+    formatted = None
+    if c and st:
+        formatted = f"{c}-{st}"
+    elif loc:
+        formatted = loc
+
+    return formatted, c, st
+
+
+def split_make_model_version(make: Any, model: Any, title: Any) -> tuple[str | None, str | None, str | None]:
+    mk = _norm_str(make)
+    md = _norm_str(model)
+    tt = _norm_str(title)
+
+    if mk and md and tt:
+        prefix = f"{mk} {md}".strip().lower()
+        if tt.lower().startswith(prefix):
+            version = tt[len(prefix):].strip() or None
+            return mk, md, version
+
+    if tt:
+        m = _MAKE_RE.match(tt)
+        if m:
+            mk = mk or m.group(1)
+            rest = m.group(2).strip()
+            first, *tail = rest.split(" ", 1)
+            md = md or first
+            version = tail[0].strip() if tail else None
+            return mk, md, version
+
+    return mk, md, None
+
+
+def resolve_thumbnail_url(explicit_thumbnail: Any, images: Any) -> str | None:
+    return derive_thumbnail_url(explicit_thumbnail, images)
+
+
+def normalize_external_id(*, source: str, raw_external_id: Any, url: str | None, title: Any, price: Any) -> str | None:
+    candidate = _norm_str(raw_external_id)
+    if candidate and _PRICE_ID_RE.match(candidate):
+        try:
+            if parse_price_int_reais(candidate) == parse_price_int_reais(price):
+                candidate = None
+        except Exception:
+            pass
+    if candidate:
+        return candidate
+
+    canonical = canonicalize_url(_norm_str(url) or "") or _norm_str(url)
+    basis = canonical or _norm_str(title)
+    if not basis:
+        return None
+    digest = hashlib.sha1(f"{source}|{basis}".encode("utf-8")).hexdigest()[:16]
+    return digest
 
 
 def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
@@ -80,15 +224,23 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
         return None
 
     source_name = (_norm_str(data.get("source")) or source or "").lower()
-    source_listing_id = _norm_str(pick("source_listing_id", "external_id", "id"))
     url = canonicalize_url(_norm_str(data.get("url")) or "")
     price = _norm_price(pick("price"))
-    km = _norm_int(pick("km", "mileage_km", "mileage"))
+    external_id = normalize_external_id(
+        source=source_name,
+        raw_external_id=pick("external_id", "source_listing_id", "id"),
+        url=url,
+        title=pick("title"),
+        price=pick("price"),
+    )
+
+    mileage_km = normalize_mileage_km(pick("km", "mileage_km", "mileage"))
     year = _norm_year(pick("year", "year_model", "ano"))
-    city, uf = _split_city_uf(pick("city"), pick("uf"), pick("location"))
+    location, city, state = normalize_location(pick("location"), pick("city"), pick("uf", "state"))
+    make, model, version = split_make_model_version(pick("make", "brand"), pick("model"), pick("title"))
+
     images = pick("images", "photos", "image_urls")
     explicit_thumbnail = pick("thumbnail_url", "thumbnail", "image_url", "image")
-    gearbox = _norm_str(pick("gearbox", "transmission", "cambio"))
     image_urls: list[str] | None = None
     thumb_url: str | None = None
     images_count = None
@@ -100,13 +252,13 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
     elif pick("images_count") is not None:
         images_count = _norm_int(pick("images_count"))
 
-    thumb_url = derive_thumbnail_url(explicit_thumbnail, image_urls if image_urls is not None else images)
+    thumb_url = resolve_thumbnail_url(explicit_thumbnail, image_urls if image_urls is not None else images)
 
     known = {
         "source", "source_listing_id", "external_id", "id", "url", "title", "price", "currency",
-        "city", "uf", "location", "year", "year_model", "ano", "km", "mileage_km", "mileage",
-        "make", "brand", "model", "images", "photos", "image_urls", "images_count", "thumbnail_url", "thumbnail", "image_url", "image",
-        "gearbox", "transmission", "cambio", "extras",
+        "city", "uf", "state", "location", "year", "year_model", "ano", "km", "mileage_km", "mileage",
+        "make", "brand", "model", "version", "images", "photos", "image_urls", "images_count", "thumbnail_url", "thumbnail", "image_url", "image",
+        "gearbox", "transmission", "cambio", "fuel_type", "seller_type", "color", "raw_payload", "extractor_version", "extras",
     }
     extras = {k: v for k, v in data.items() if k not in known and v is not None}
     for k, v in base_extras.items():
@@ -121,25 +273,46 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
             extras["image_broken"] = broken
     if thumb_url is not None:
         extras["thumbnail_url"] = thumb_url
-    if gearbox is not None:
-        extras.setdefault("gearbox", gearbox)
+
+    raw_payload = pick("raw_payload")
+    if raw_payload is None:
+        raw_payload = {
+            "source": source_name,
+            "external_id": external_id,
+            "url": url,
+            "title": _norm_str(pick("title")),
+        }
+    elif isinstance(raw_payload, str):
+        raw_payload = {"raw": raw_payload[:2000]}
+
+    extractor_version = _norm_str(pick("extractor_version")) or "normalize_ad_v2"
 
     return NormalizedAd(
         source=source_name,
-        source_listing_id=source_listing_id,
+        external_id=external_id,
         url=url,
         title=_norm_str(pick("title")),
         price=price,
         currency=(_norm_str(pick("currency")) or "BRL").upper(),
         city=city,
-        uf=uf,
+        uf=state,
         year=year,
-        km=km,
-        make=_norm_str(pick("make", "brand")),
-        model=_norm_str(pick("model")),
+        km=mileage_km,
+        make=make,
+        model=model,
         images_count=images_count,
         quality_flags=tuple(),
-        extras=extras,
+        extras={
+            **extras,
+            "location": location,
+            "fuel_type": normalize_fuel_type(pick("fuel_type")),
+            "transmission": normalize_transmission(pick("gearbox", "transmission", "cambio")),
+            "version": version,
+            "seller_type": (_norm_str(pick("seller_type")) or "unknown").lower() if (_norm_str(pick("seller_type")) or "").lower() in {"dealer", "private"} else "unknown",
+            "color": normalize_color(pick("color")),
+            "extractor_version": extractor_version,
+            "raw_payload": raw_payload,
+        },
     )
 
 

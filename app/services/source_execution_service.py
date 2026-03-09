@@ -35,25 +35,34 @@ logger = logging.getLogger(__name__)
 
 
 def _ad_to_listing(ad) -> dict[str, Any]:
-    location = ", ".join([x for x in [ad.city, ad.uf] if x]) or None
+    location = ad.extras.get("location") or ", ".join([x for x in [ad.city, ad.uf] if x]) or None
     extras = dict(ad.extras or {})
     extras.setdefault("quality_flags", list(ad.quality_flags or ()))
     extras.setdefault("quality_has_critical", any(f in {"invalid_url", "missing_url", "empty_title", "missing_source"} for f in ad.quality_flags))
     thumbnail_url = derive_thumbnail_url(extras.get("thumbnail_url"), extras.get("image_urls"))
     return {
         "source": ad.source,
-        "external_id": ad.source_listing_id,
+        "external_id": ad.external_id,
         "url": ad.url,
         "title": ad.title,
         "price": ad.price,
         "currency": ad.currency,
         "location": location,
+        "city": ad.city,
+        "state": ad.uf,
         "year": ad.year,
         "mileage_km": ad.km,
+        "fuel_type": extras.get("fuel_type"),
+        "transmission": extras.get("transmission"),
         "images_count": ad.images_count,
         "make": ad.make,
         "model": ad.model,
+        "version": extras.get("version"),
+        "seller_type": extras.get("seller_type") or "unknown",
+        "color": extras.get("color"),
         "thumbnail_url": thumbnail_url,
+        "raw_payload": extras.get("raw_payload") or {"external_id": ad.external_id, "url": ad.url},
+        "extractor_version": extras.get("extractor_version") or "normalize_ad_v2",
         "extras": extras,
     }
 
@@ -222,7 +231,7 @@ def run_source_for_all_wishlists(
         if flags.impl == "v2" and v2_scraper is not None:
             result = v2_scraper.scrape(search_url, ctx)
             ads, _meta = adapt_v2(src, result)
-            return [_ad_to_listing(ad) for ad in ads if ad.source_listing_id]
+            return [_ad_to_listing(ad) for ad in ads if ad.external_id]
         if flags.impl == "dual" and v2_scraper is not None:
             chosen, report = execute_dual_run(
                 source=src,
@@ -234,10 +243,10 @@ def run_source_for_all_wishlists(
             )
             object.__setattr__(ctx, "_dual_run_summary", report.get("comparison") or {})
             ads, _meta = adapt_v1(src, chosen)
-            return [_ad_to_listing(ad) for ad in ads if ad.source_listing_id]
+            return [_ad_to_listing(ad) for ad in ads if ad.external_id]
         raw = plugin.scrape(search_url, ctx=ctx)
         ads, _meta = adapt_v1(src, raw)
-        return [_ad_to_listing(ad) for ad in ads if ad.source_listing_id]
+        return [_ad_to_listing(ad) for ad in ads if ad.external_id]
 
     groups_count = len(groups)
     total_wishlists = sum(len(g.get("wishlists") or []) for g in groups.values())

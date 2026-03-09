@@ -20,7 +20,7 @@ def test_capture_persists_payload_and_metadata(tmp_path):
         source="olx",
         kind="listing",
         url="https://example.com/list?token=abc123",
-        source_listing_id="123",
+        external_id="123",
         reason="parse_error",
         pipeline_stage="post_scrape",
         payload="<html>contato foo@bar.com +55 11 91234-5678</html>",
@@ -58,7 +58,7 @@ def test_runtime_sample_capture_for_multiple_sources(tmp_path):
         source="mobiauto",
         reasons=["debug_manual"],
         pipeline_stage="post_ingest",
-        source_listing_id="X1",
+        external_id="X1",
     )
     assert out
     assert all(p.exists() for p in out)

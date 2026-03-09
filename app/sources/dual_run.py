@@ -41,7 +41,7 @@ def execute_dual_run(
         chosen = [
             {
                 "source": ad.source,
-                "external_id": ad.source_listing_id,
+                "external_id": ad.external_id,
                 "url": ad.url,
                 "title": ad.title,
                 "price": ad.price,

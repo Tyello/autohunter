@@ -59,7 +59,7 @@ def enforce_ad_contract(ad: NormalizedAd) -> ValidationResult:
 
     title = _clean_text(ad.title)
     source = _clean_text(ad.source)
-    source_listing_id = _clean_text(ad.source_listing_id)
+    external_id = _clean_text(ad.external_id)
     city = _clean_text(ad.city)
     uf = (_clean_text(ad.uf) or "").upper() or None
     make = _clean_text(ad.make)
@@ -68,10 +68,10 @@ def enforce_ad_contract(ad: NormalizedAd) -> ValidationResult:
     if not source:
         _add_flag(flags, "missing_source")
 
-    if not source_listing_id:
-        _add_flag(flags, "missing_source_listing_id")
-    elif not _RE_LISTING_ID_OK.match(source_listing_id):
-        _add_flag(flags, "invalid_source_listing_id")
+    if not external_id:
+        _add_flag(flags, "missing_external_id")
+    elif not _RE_LISTING_ID_OK.match(external_id):
+        _add_flag(flags, "invalid_external_id")
 
     if not ad.url:
         _add_flag(flags, "missing_url")
@@ -95,7 +95,7 @@ def enforce_ad_contract(ad: NormalizedAd) -> ValidationResult:
         _add_flag(flags, "suspect_year")
 
     if ad.km is None:
-        _add_flag(flags, "missing_km")
+        _add_flag(flags, "missing_mileage_km")
     elif ad.km < 0 or ad.km > 1_500_000:
         _add_flag(flags, "suspect_km")
 
@@ -145,7 +145,7 @@ def enforce_ad_contract(ad: NormalizedAd) -> ValidationResult:
     sanitized = replace(
         ad,
         source=source or "",
-        source_listing_id=source_listing_id,
+        external_id=external_id,
         title=title,
         city=city,
         uf=uf,
