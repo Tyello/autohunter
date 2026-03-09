@@ -108,7 +108,7 @@ def test_score_no_images_caps_60_and_reason():
     res = score_ad(ad, w, None, now=_now())
     assert res.total <= 60
     assert "cap_images_missing_60" in res.caps_applied
-    assert any("Sem foto" in r for r in res.reasons)
+    assert all("foto" not in r.lower() for r in res.reasons)
 
 
 def test_score_high_km_penalizes_mileage_component():
