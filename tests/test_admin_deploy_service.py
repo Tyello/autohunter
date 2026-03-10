@@ -425,3 +425,89 @@ def test_preflight_sets_explicit_home_and_xdg(monkeypatch):
     assert envs
     assert envs[0].get("HOME") == "/home/autohunter"
     assert envs[0].get("XDG_CONFIG_HOME") == "/home/autohunter/.config"
+
+
+def test_confirm_blocked_when_preflight_remote_unreachable(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(
+        svc,
+        "_run_preflight",
+        lambda: {
+            "branch": "main",
+            "commit": "abc",
+            "working_tree": "clean",
+            "remote_ok": False,
+            "remote_diff": "indisponível",
+            "privilege_ready": True,
+        },
+    )
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    import pytest, asyncio
+    with pytest.raises(ValueError, match="remote_ok=no"):
+        asyncio.run(svc.confirm_deploy(_actor(), op))
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.status == "blocked"
+    assert row.summary == "blocked_by_preflight_remote"
+
+
+def test_confirm_blocked_when_preflight_host_structural_error(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(
+        svc,
+        "_run_preflight",
+        lambda: {
+            "branch": "unknown",
+            "commit": "unknown",
+            "working_tree": "clean",
+            "remote_ok": True,
+            "remote_diff": "0 0",
+            "privilege_ready": True,
+        },
+    )
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    import pytest, asyncio
+    with pytest.raises(ValueError, match="erro estrutural do host"):
+        asyncio.run(svc.confirm_deploy(_actor(), op))
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.status == "blocked"
+    assert row.summary == "blocked_by_preflight_host"
+
+
+def test_deploy_status_includes_last_deploy_timestamp_and_noop(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+
+    now = datetime.now(timezone.utc)
+    row = AdminDeployAudit(
+        operation_id="abc123noop",
+        requested_by_tg_user_id=20,
+        requested_by_username="admin",
+        chat_id=10,
+        requested_at=now - timedelta(minutes=2),
+        confirmed_at=now - timedelta(minutes=2),
+        started_at=now - timedelta(minutes=2),
+        finished_at=now - timedelta(minutes=1),
+        status="succeeded",
+        branch="main",
+        before_commit="same",
+        after_commit="same",
+        summary="ok",
+    )
+    db.add(row)
+    db.commit()
+
+    svc = AdminDeployService(db)
+    out = svc.deploy_status()
+    assert out["status"] == "noop"
+    assert out["last"] is not None
+    assert out["last"].finished_at is not None

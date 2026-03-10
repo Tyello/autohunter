@@ -244,6 +244,8 @@ sudo chmod 750 /usr/local/bin/autohunter-admin-deploy
 
 Com isso, o preflight de `/admin deploy` passa a informar claramente se o caminho privilegiado está pronto (`privilege_ready=yes`) ou bloqueado (`privilege_ready=no`, com `privilege_error_type`).
 
+Guia operacional curto: `docs/admin_deploy_telegram_ops.md`.
+
 Se o erro incluir `Permission denied` para:
 
 - `/home/autohunter/.ssh/known_hosts` → `protect_home_blocked`

@@ -1478,6 +1478,10 @@ async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args
                     "Deploy bloqueado no preflight: working tree dirty. "
                     "Limpe/reverta arquivos runtime (state/cache/log) e rode /admin deploy novamente."
                 )
+            elif not preflight.get("remote_ok"):
+                lines.append("Deploy bloqueado no preflight: remoto indisponível (remote_ok=no).")
+            elif preflight.get("branch") in (None, "", "unknown") or preflight.get("commit") in (None, "", "unknown"):
+                lines.append("Deploy bloqueado no preflight: erro estrutural do host (estado git inválido).")
             elif privilege_ready:
                 lines.extend([
                     f"Confirme em até {out['expires_in']}s com:",
@@ -1514,18 +1518,32 @@ async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args
         if sub == "status":
             out = service.deploy_status()
             last = out.get("last")
+            current = out.get("current")
             if not last:
-                await update.message.reply_text("Nenhum deploy registrado ainda.")
+                await update.message.reply_text("Deploy status: idle\nÚltimo deploy (UTC): -")
                 return
+
+            duration = "-"
+            if last.started_at and last.finished_at:
+                duration = f"{int((last.finished_at - last.started_at).total_seconds())}s"
+
+            last_deploy_at = _fmt_dt(last.finished_at or last.started_at or last.requested_at)
             lines = [
-                f"Deploy em andamento: {'sim' if out.get('running') else 'não'}",
-                f"Último operation_id: {last.operation_id}",
-                f"Status: {last.status}",
+                f"Deploy status: {out.get('status')}",
+                f"Último deploy (UTC): {last_deploy_at}",
+                f"Último resultado: {last.status}",
                 f"Branch: {last.branch or '-'}",
                 f"Before: {last.before_commit or '-'}",
                 f"After: {last.after_commit or '-'}",
+                f"Duração: {duration}",
                 f"Resumo: {last.summary or '-'}",
             ]
+            if current:
+                lines.extend([
+                    "Operação em andamento:",
+                    f"- operation_id: {current.operation_id}",
+                    f"- started_at_utc: {_fmt_dt(current.started_at)}",
+                ])
             await update.message.reply_text("\n".join(lines))
             return
 
