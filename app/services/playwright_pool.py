@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from app.core.runtime_paths import playwright_browsers_dir, playwright_storage_dir
 from app.core.settings import settings
 from app.scrapers.base import FetchBlocked
 
@@ -104,7 +105,7 @@ class _PlaywrightCore:
         }
 
     def _storage_path(self, proxy_key: str, source: str) -> str:
-        base = Path(settings.playwright_storage_dir or ".data/playwright")
+        base = playwright_storage_dir()
         base.mkdir(parents=True, exist_ok=True)
         safe_proxy = proxy_key.replace(":", "_").replace("/", "_")
         safe_source = source.replace(":", "_").replace("/", "_")
@@ -213,6 +214,10 @@ class _PlaywrightCore:
         if proxy_server:
             launch_kwargs["proxy"] = {"server": proxy_server}
 
+        browsers_path = playwright_browsers_dir()
+        browsers_path.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers_path))
+
         try:
             return self._p.chromium.launch(**launch_kwargs)
         except Exception as e:
@@ -231,8 +236,8 @@ class _PlaywrightCore:
                             break
                         ms_dir = ms_dir.parent
                     if ms_dir.name != "ms-playwright":
-                        # fallback to HOME cache
-                        ms_dir = Path.home() / ".cache" / "ms-playwright"
+                        # fallback to configured runtime cache
+                        ms_dir = playwright_browsers_dir() / "ms-playwright"
 
                     preferred_build = None
                     for part in missing_path.parts:

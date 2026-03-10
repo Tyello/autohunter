@@ -1473,7 +1473,12 @@ async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args
             ]
             if preflight.get("privilege_error_message"):
                 lines.append(f"- privilege_error_message: {preflight.get('privilege_error_message')}")
-            if privilege_ready:
+            if preflight.get("working_tree") != "clean":
+                lines.append(
+                    "Deploy bloqueado no preflight: working tree dirty. "
+                    "Limpe/reverta arquivos runtime (state/cache/log) e rode /admin deploy novamente."
+                )
+            elif privilege_ready:
                 lines.extend([
                     f"Confirme em até {out['expires_in']}s com:",
                     f"/admin deploy confirm {out['operation_id']}",
