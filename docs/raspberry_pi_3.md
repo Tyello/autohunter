@@ -188,3 +188,55 @@ sudo systemctl status autohunter-browser.service
 ```
 
 Se precisar ajustar limites no Pi, edite o unit e mexa em `MemoryMax` e `CPUQuota`.
+
+## 8) Admin Deploy via Telegram (wrapper privilegiado)
+
+Para `/admin deploy` + `/admin deploy confirm <operation_id>` funcionar em produção, o bot **não** pode depender de shell livre: ele só pode executar um wrapper único e fixo.
+
+Checklist operacional:
+
+- O usuário do bot precisa conseguir executar **apenas** o wrapper permitido.
+- Em host com systemd, o `autohunter-bot.service` não deve usar `NoNewPrivileges=true` para esse fluxo.
+- O `sudoers` deve permitir `NOPASSWD` somente para `/usr/local/bin/autohunter-admin-deploy`.
+- O wrapper deve ser root-owned, fora do repo, e sem aceitar comandos arbitrários do Telegram.
+
+### Exemplo: override do systemd
+
+```bash
+sudo systemctl edit autohunter-bot.service
+```
+
+Conteúdo:
+
+```ini
+[Service]
+NoNewPrivileges=false
+```
+
+Aplicar:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart autohunter-bot.service
+```
+
+### Exemplo: sudoers restrito
+
+```bash
+sudo visudo -f /etc/sudoers.d/autohunter-admin-deploy
+```
+
+Conteúdo:
+
+```sudoers
+autohunter ALL=(root) NOPASSWD: /usr/local/bin/autohunter-admin-deploy
+```
+
+Valide permissões do wrapper:
+
+```bash
+sudo chown root:root /usr/local/bin/autohunter-admin-deploy
+sudo chmod 750 /usr/local/bin/autohunter-admin-deploy
+```
+
+Com isso, o preflight de `/admin deploy` passa a informar claramente se o caminho privilegiado está pronto (`privilege_ready=yes`) ou bloqueado (`privilege_ready=no`, com `privilege_error_type`).

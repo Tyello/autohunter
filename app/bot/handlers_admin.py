@@ -1459,6 +1459,7 @@ async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args
                 await update.message.reply_text(str(e))
                 return
             preflight = out["preflight"]
+            privilege_ready = bool(preflight.get("privilege_ready", True))
             lines = [
                 "Deploy admin (preflight):",
                 f"- operation_id: {out['operation_id']}",
@@ -1467,9 +1468,18 @@ async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args
                 f"- working_tree: {preflight.get('working_tree')}",
                 f"- remote_ok: {'yes' if preflight.get('remote_ok') else 'no'}",
                 f"- remote_diff: {preflight.get('remote_diff')}",
-                f"Confirme em até {out['expires_in']}s com:",
-                f"/admin deploy confirm {out['operation_id']}",
+                f"- privilege_ready: {'yes' if privilege_ready else 'no'}",
+                f"- privilege_error_type: {preflight.get('privilege_error_type') or '-'}",
             ]
+            if preflight.get("privilege_error_message"):
+                lines.append(f"- privilege_error_message: {preflight.get('privilege_error_message')}")
+            if privilege_ready:
+                lines.extend([
+                    f"Confirme em até {out['expires_in']}s com:",
+                    f"/admin deploy confirm {out['operation_id']}",
+                ])
+            else:
+                lines.append("Deploy bloqueado no preflight. Corrija a configuração do host antes de confirmar.")
             await update.message.reply_text("\n".join(lines))
             return
 
