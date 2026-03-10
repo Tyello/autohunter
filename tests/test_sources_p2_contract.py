@@ -52,7 +52,7 @@ def test_normalize_promotes_fields_from_extras_before_quality():
     assert ad.km == 87000
     assert ad.year == 2017
     assert ad.images_count == 2
-    assert ad.extras.get("transmission") == "Manual"
+    assert ad.extras.get("transmission") == "manual"
 
 
 def test_adapters_never_invent_missing_fields():
