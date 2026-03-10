@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.settings import settings
 from app.models.notification import Notification
 from app.scoring.score_v2 import score_ad
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
@@ -65,18 +69,25 @@ def queue_notifications_for_matches(
             # Never block queueing due to scoring errors; fall back to minimal breakdown
             sres = None
 
-        db.add(
-            Notification(
-                user_id=wishlist.user_id,
-                wishlist_id=wishlist.id,
-                car_listing_id=listing.id,
-                status="queued",
-                error_message=None,
-                score_v2=(sres.total if sres else None),
-                score_breakdown=(sres.to_dict() if sres else None),
-            )
-        )
-        queued += 1
+        try:
+            with db.begin_nested():
+                db.add(
+                    Notification(
+                        user_id=wishlist.user_id,
+                        wishlist_id=wishlist.id,
+                        car_listing_id=listing.id,
+                        status="queued",
+                        error_message=None,
+                        score_v2=(sres.total if sres else None),
+                        score_breakdown=(sres.to_dict() if sres else None),
+                        next_attempt_at=datetime.now(timezone.utc),
+                        max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
+                    )
+                )
+                db.flush()
+            queued += 1
+        except IntegrityError:
+            pass
 
     # não commit aqui (o job/service que chama decide)
     return queued
@@ -152,16 +163,23 @@ def queue_notifications_for_matches_diag(
 
     queued = 0
     for listing in to_queue:
-        db.add(
-            Notification(
-                user_id=wishlist.user_id,
-                wishlist_id=wishlist.id,
-                car_listing_id=listing.id,
-                status="queued",
-                error_message=None,
-            )
-        )
-        queued += 1
+        try:
+            with db.begin_nested():
+                db.add(
+                    Notification(
+                        user_id=wishlist.user_id,
+                        wishlist_id=wishlist.id,
+                        car_listing_id=listing.id,
+                        status="queued",
+                        error_message=None,
+                        next_attempt_at=datetime.now(timezone.utc),
+                        max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
+                    )
+                )
+                db.flush()
+            queued += 1
+        except IntegrityError:
+            pass
 
     already_notified = len(valid) - len(new_listings)
     cap_skipped = 0

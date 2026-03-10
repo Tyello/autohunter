@@ -170,6 +170,12 @@ def _ctx_fetch_diag(ctx) -> dict:
     }
 
 def queue_notifications_for_new_listings(db: Session, component: str, new_listing_ids: list):
+    from datetime import datetime, timezone
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.settings import settings
+
     listing_rows = db.query(CarListing.id).filter(CarListing.id.in_(new_listing_ids)).all()
     listing_ids = [row[0] for row in listing_rows]
     if not listing_ids:
@@ -186,24 +192,29 @@ def queue_notifications_for_new_listings(db: Session, component: str, new_listin
     ).all()
     existing_keys = {(row[0], row[1], row[2]) for row in existing}
 
-    new_notifications = []
+    queued_count = 0
     for w in wishlists:
         for listing_id in listing_ids:
             key = (w.user_id, w.id, listing_id)
             if key in existing_keys:
                 continue
-            new_notifications.append(Notification(
-                user_id=w.user_id,
-                wishlist_id=w.id,
-                car_listing_id=listing_id,
-                status="queued",
-            ))
-
-    if new_notifications:
-        db.add_all(new_notifications)
+            try:
+                with db.begin_nested():
+                    db.add(Notification(
+                        user_id=w.user_id,
+                        wishlist_id=w.id,
+                        car_listing_id=listing_id,
+                        status="queued",
+                        next_attempt_at=datetime.now(timezone.utc),
+                        max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
+                    ))
+                    db.flush()
+                queued_count += 1
+            except IntegrityError:
+                continue
 
     log(db, "info", component, "queued notifications", {
-        "queued": len(new_notifications),
+        "queued": queued_count,
         "listings": len(listing_ids),
         "wishlists": len(wishlists),
     })
