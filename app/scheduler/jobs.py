@@ -237,7 +237,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_ctx_fetch_diag(ctx)}
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "error": str(e), "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
