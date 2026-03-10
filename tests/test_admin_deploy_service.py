@@ -5,6 +5,7 @@ from datetime import timedelta, timezone, datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql.sqltypes import BigInteger
 
 from app.db.base import Base
 from app.models.admin_deploy_audit import AdminDeployAudit
@@ -154,3 +155,43 @@ def test_output_truncation_and_audit_persistence(monkeypatch):
     assert row is not None
     assert row.status == "failed"
     assert row.output_tail
+
+
+def test_request_deploy_accepts_large_telegram_ids(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+
+    large_id = 5_410_199_985
+    op = svc.request_deploy(_actor(chat_id=large_id, user_id=large_id))["operation_id"]
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.requested_by_tg_user_id == large_id
+    assert row.chat_id == large_id
+
+
+def test_admin_deploy_audit_telegram_columns_are_bigint():
+    assert isinstance(AdminDeployAudit.__table__.c.requested_by_tg_user_id.type, BigInteger)
+    assert isinstance(AdminDeployAudit.__table__.c.chat_id.type, BigInteger)
+
+
+def test_is_allowed_with_large_actor_ids(monkeypatch):
+    large_id = 5_410_199_985
+    monkeypatch.setattr("app.services.admin_deploy_service.settings", SimpleNamespace(
+        admin_deploy_pending_ttl_seconds=120,
+        admin_deploy_rate_limit_seconds=300,
+        admin_deploy_wrapper_timeout_seconds=180,
+        admin_deploy_output_max_chars=60,
+        admin_deploy_wrapper_path="/wrapper",
+        admin_deploy_use_sudo=False,
+        autohunter_admin_user_ids=str(large_id),
+        autohunter_admin_chat_ids=str(large_id),
+        autohunter_admins=str(large_id),
+    ))
+
+    svc = AdminDeployService(_db())
+    ok, reason = svc.is_allowed(_actor(chat_id=large_id, user_id=large_id))
+    assert ok is True
+    assert reason is None
