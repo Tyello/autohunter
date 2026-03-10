@@ -779,6 +779,11 @@ def _render_run_summary_lines(run_summary: Optional[dict]) -> list[str]:
             f"retryable={last_error.get('retryable')}"
         )
 
+    for n in run_summary.get("notes") or []:
+        s = str(n or "").strip()
+        if s.startswith("wm_diag "):
+            lines.append(s)
+
     return lines
 
 
@@ -1009,6 +1014,13 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 if payload.get("hybrid_blocked") is True:
                     hs = payload.get("hybrid_blocked_status")
                     last_line += f" blocked=1" + (f" blocked_http={hs}" if hs is not None else "")
+                wm_diag = payload.get("webmotors_diag")
+                if isinstance(wm_diag, dict):
+                    last_line += (
+                        f" wm={wm_diag.get('bucket')}"
+                        f" path={wm_diag.get('fetch_path')}"
+                        f" at={wm_diag.get('attempt')}"
+                    )
                 # Thumb telemetry (helps detect regressions in photo sending)
                 tr = payload.get("thumb_rate")
                 if tr is not None:

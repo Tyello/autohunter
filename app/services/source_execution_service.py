@@ -31,6 +31,7 @@ from app.sources.normalize import (
     normalize_transmission,
 )
 from app.scrapers.sources import get_scraper
+from app.scrapers.webmotors_ops import extract_webmotors_diag
 from app.health.collector import HealthCollector
 from app.health.classify import classify_error
 from app.health.explain import add_anomaly_notes
@@ -290,6 +291,7 @@ def run_source_for_all_wishlists(
 
         if not res.get("ok"):
             reason = res.get("reason") or "error"
+            wm_diag = extract_webmotors_diag(res.get("error")) if src == "webmotors" else None
             category = "unknown_error"
             retryable = None
             http_status = None
@@ -302,11 +304,34 @@ def run_source_for_all_wishlists(
                 http_status = hs or None
                 retryable = True
                 bucket = "blocked_403" if hs == 403 else "blocked_429" if hs == 429 else "blocked_captcha"
+                if isinstance(wm_diag, dict) and wm_diag.get("bucket") == "BLOCKED":
+                    category = "webmotors_blocked"
                 health.inc("blocked", 1)
             else:
-                category, status_cls, retryable, http_status, bucket = classify_error(Exception(str(res.get("error") or reason)))
+                if isinstance(wm_diag, dict):
+                    wmb = str(wm_diag.get("bucket") or "").upper()
+                    if wmb == "PROXY":
+                        category, status_cls, retryable, bucket = "webmotors_proxy", RunStatus.PROXY, True, "proxy_error"
+                    elif wmb == "NET":
+                        category, status_cls, retryable, bucket = "webmotors_net", RunStatus.NET, True, "timeout"
+                    elif wmb == "BLOCKED":
+                        category, status_cls, retryable, bucket = "webmotors_blocked", RunStatus.BLOCKED, True, "blocked_captcha"
+                    elif wmb == "PARSER":
+                        category, status_cls, retryable, bucket = "webmotors_parser", RunStatus.PARSE, False, "parse_error"
+                    elif wmb == "BROWSER":
+                        category, status_cls, retryable, bucket = "webmotors_browser", RunStatus.ERR, True, "unknown_error"
+                    else:
+                        category, status_cls, retryable, bucket = "webmotors_unknown", RunStatus.ERR, True, "unknown_error"
+                else:
+                    category, status_cls, retryable, http_status, bucket = classify_error(Exception(str(res.get("error") or reason)))
             health.inc("errors", 1)
             health.count(bucket, 1)
+            if isinstance(wm_diag, dict):
+                health.add_note(
+                    "wm_diag "
+                    f"bucket={wm_diag.get('bucket')} stage={wm_diag.get('stage')} "
+                    f"path={wm_diag.get('fetch_path')} attempts={wm_diag.get('attempt')}"
+                )
             health.set_error(category, str(res.get("error") or reason), http_status=http_status, retryable=retryable)
             run_summary_err = add_anomaly_notes(health.finalize(status_cls)).model_dump(mode="json")
             if reason == "blocked":
@@ -331,7 +356,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
+                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "webmotors_diag": wm_diag, "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -364,7 +389,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
+                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "webmotors_diag": wm_diag, "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -412,7 +437,7 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
+                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "webmotors_diag": wm_diag, "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
             )
             logger.info("source_run_summary", extra=run_summary_err)
             emit_event(

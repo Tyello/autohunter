@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from decimal import Decimal
+from dataclasses import replace
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -11,6 +12,10 @@ from app.scrapers.contract import finalize_listings
 from app.scrapers.parsing import parse_brl_price
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
+from app.scrapers.webmotors_ops import (
+    classify_webmotors_error,
+    encode_webmotors_diag,
+)
 
 WEBMOTORS_BASE = "https://www.webmotors.com.br"
 
@@ -170,6 +175,20 @@ def _parse_listings_from_html(html_text: str, page_url: str) -> list[dict]:
     return out[:60]
 
 
+def _looks_like_zero_results(html: str) -> bool:
+    low = (html or "").lower()
+    return any(
+        k in low
+        for k in (
+            "nenhum veículo encontrado",
+            "nenhum veiculo encontrado",
+            "não encontramos resultados",
+            "nao encontramos resultados",
+            "0 resultados",
+        )
+    )
+
+
 def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """Webmotors (Playwright-first) com HTML fallback sempre.
 
@@ -179,32 +198,68 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     Nota: isso elimina a fragilidade do capture de XHR (endpoints mudam, bloqueios variam).
     """
 
-    last_err: Optional[Exception] = None
+    wait_modes = [str(getattr(ctx, "browser_wait_until", None) or "domcontentloaded"), "networkidle"]
+    if wait_modes[0] == wait_modes[1]:
+        wait_modes = [wait_modes[0]]
 
-    for wait_until in (
-        str(getattr(ctx, "browser_wait_until", None) or "domcontentloaded"),
-        "networkidle",
-    ):
-        try:
-            res = fetch_html_browser(
-                search_url,
-                ctx=ctx,
-                timeout_ms=int(getattr(ctx, "browser_timeout_ms", 60000) or 60000),
-                wait_until=wait_until,
-                min_delay_ms=int(getattr(ctx, "browser_min_delay_ms", 120) or 120),
-                max_delay_ms=int(getattr(ctx, "browser_max_delay_ms", 520) or 520),
-            )
-            items = _parse_listings_from_html(res.html, res.final_url or search_url)
-            if items:
-                return finalize_listings("webmotors", items)
-            last_err = RuntimeError("no_items_parsed")
-        except FetchBlocked:
-            raise
-        except Exception as e:
-            last_err = e
-            continue
+    path_ctxs: list[tuple[str, ScrapeContext]] = [("browser_direct", ctx)]
+    if getattr(ctx, "proxy_server", None):
+        path_ctxs = [("browser_proxy", ctx), ("browser_direct", replace(ctx, proxy_server=None))]
 
-    if getattr(ctx, "force_browser", False):
-        raise last_err or RuntimeError("webmotors_html_fallback_failed")
+    attempt = 0
+    fallback_used = False
+    last_diag_err: Optional[Exception] = None
 
-    return []
+    for path_idx, (fetch_path, run_ctx) in enumerate(path_ctxs):
+        if path_idx > 0:
+            fallback_used = True
+        for wait_until in wait_modes:
+            attempt += 1
+            try:
+                res = fetch_html_browser(
+                    search_url,
+                    ctx=run_ctx,
+                    timeout_ms=int(getattr(run_ctx, "browser_timeout_ms", 60000) or 60000),
+                    wait_until=wait_until,
+                    min_delay_ms=int(getattr(run_ctx, "browser_min_delay_ms", 120) or 120),
+                    max_delay_ms=int(getattr(run_ctx, "browser_max_delay_ms", 520) or 520),
+                )
+                items = _parse_listings_from_html(res.html, res.final_url or search_url)
+                if items:
+                    return finalize_listings("webmotors", items)
+                if _looks_like_zero_results(res.html):
+                    return []
+                diag = classify_webmotors_error(
+                    RuntimeError("no_items_parsed"),
+                    stage="parse_listings",
+                    fetch_path=fetch_path,
+                    attempt=attempt,
+                    fallback_used=fallback_used,
+                )
+                last_diag_err = RuntimeError(encode_webmotors_diag(diag))
+            except FetchBlocked as e:
+                diag = classify_webmotors_error(
+                    e,
+                    stage="browser_fetch",
+                    fetch_path=fetch_path,
+                    attempt=attempt,
+                    fallback_used=fallback_used,
+                )
+                # blocked on direct path is terminal; proxy path can fallback to direct once.
+                if fetch_path == "browser_direct":
+                    raise FetchBlocked(e.status_code, search_url, reason=encode_webmotors_diag(diag)) from e
+                last_diag_err = RuntimeError(encode_webmotors_diag(diag))
+                break
+            except Exception as e:
+                diag = classify_webmotors_error(
+                    e,
+                    stage="browser_fetch",
+                    fetch_path=fetch_path,
+                    attempt=attempt,
+                    fallback_used=fallback_used,
+                )
+                last_diag_err = RuntimeError(encode_webmotors_diag(diag))
+                if diag.bucket in {"BLOCKED", "PROXY"}:
+                    break
+
+    raise last_diag_err or RuntimeError("webmotors_html_fallback_failed")

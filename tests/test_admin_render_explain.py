@@ -20,3 +20,18 @@ def test_admin_render_includes_queued_zero_explain():
 
     assert "queued=0 porque:" in text
     assert "already_notified=11" in text
+
+
+def test_admin_render_includes_webmotors_diag_note():
+    summary = {
+        "status": "ERR",
+        "found": 0,
+        "inserted": 0,
+        "matched": 0,
+        "queued": 0,
+        "reason_buckets": {"proxy_error": 1},
+        "last_error": {"category": "webmotors_proxy", "http_status": None, "retryable": True},
+        "notes": ["wm_diag bucket=PROXY stage=browser_fetch path=browser_proxy attempts=1"],
+    }
+    lines = _render_run_summary_lines(summary)
+    assert any("wm_diag bucket=PROXY" in l for l in lines)
