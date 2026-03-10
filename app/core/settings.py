@@ -103,6 +103,10 @@ class Settings(BaseSettings):
 
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
+    notification_sender_batch_size: int = 20
+    notification_processing_ttl_seconds: int = 300
+    notification_retry_base_seconds: int = 30
+    notification_max_attempts: int = 3
 
     # Run a lightweight sender loop inside the Telegram bot process.
     # Useful for DEV/Windows runs where APScheduler (run_scheduler) isn't running.

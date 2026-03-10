@@ -1,11 +1,16 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from app.models.notification import Notification
 from app.services.limits_service import (
     can_send_more_today,
     get_active_subscription_limit_for_user,
     should_send_daily_limit_notice,
+)
+from app.services.notification_delivery_service import (
+    claim_queued_notifications,
+    mark_notification_delivery_error,
+    mark_notification_failed_no_destination,
+    mark_notification_sent,
 )
 from app.services.notifications_service import mark_suppressed_reason
 from app.services.system_logs_service import log
@@ -14,33 +19,18 @@ from app.bot.sender import send_daily_limit_notice_http
 
 
 def send_queued_notifications(db: Session, component: str, sender_fn):
-    q = (
-        db.query(Notification)
-        .filter(Notification.status == "queued")
-        .order_by(Notification.created_at.asc())
-    )
-
-    # Concurrency-safe claim: if multiple sender loops exist (scheduler + bot),
-    # avoid double-send by locking rows on Postgres.
-    try:
-        q = q.with_for_update(skip_locked=True)
-    except Exception:
-        # SQLite / unsupported dialect
-        pass
-
-    queued = q.limit(10).all()
+    queued = claim_queued_notifications(db, owner=component)
 
     sent = 0
     blocked = 0
     failed = 0
+    retried = 0
+    discarded = 0
 
     for n in queued:
         user = n.user
         if not user or not getattr(user, "telegram_chat_id", None):
-            # Can't deliver (no destination). Mark as failed to avoid infinite queue.
-            n.status = "failed"
-            n.reason = "missing_chat_id"
-            n.error_message = "User telegram_chat_id is missing"
+            mark_notification_failed_no_destination(n)
             db.commit()
             failed += 1
             continue
@@ -60,34 +50,30 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
 
             blocked += 1
             continue
-        listing = n.car_listing
 
+        listing = n.car_listing
         try:
             sender_fn(n, listing, user)
-            n.status = "sent"
-            n.sent_at = datetime.now(timezone.utc)
-            n.reason = None
-            n.error_message = None
+            mark_notification_sent(n)
             db.commit()
             sent += 1
         except Exception as e:
-            n.status = "failed"
-            msg = str(e)
-            m = msg.lower()
-            # Best-effort classification (Telegram)
-            if "forbidden" in m or "blocked" in m or "bot was blocked" in m or "chat not found" in m:
-                n.reason = "user_unreachable"
-            else:
-                n.reason = "send_error"
-            n.error_message = str(e)[:5000]
+            outcome = mark_notification_delivery_error(n, error_message=str(e))
             db.commit()
-            failed += 1
+            if outcome == "retry_scheduled":
+                retried += 1
+            elif outcome == "discarded":
+                discarded += 1
+            else:
+                failed += 1
 
     log(db, "info", component, "send queued notifications result", {
+        "claimed": len(queued),
         "sent": sent,
         "blocked_daily_limit": blocked,
         "failed": failed,
-        "checked": len(queued),
+        "retried": retried,
+        "discarded": discarded,
     })
 
     # persiste o SystemLog (o sender já faz commits por notificação)

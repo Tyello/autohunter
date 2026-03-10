@@ -36,8 +36,13 @@ class Notification(TimestampMixin, Base):
         nullable=False,
     )
 
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")  # queued|sent|failed|suppressed
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")  # queued|processing|sent|failed|suppressed|discarded
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_owner: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
 
     # Motivo curto (ex: daily_limit_reached, no_chat_id, telegram_error)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
