@@ -208,13 +208,23 @@ class AdminDeployService:
         preflight = self._run_preflight()
         operation_id = uuid.uuid4().hex[:12]
         working_tree_clean = preflight.get("working_tree") == "clean"
+        remote_ok = bool(preflight.get("remote_ok"))
         privilege_ready = bool(preflight.get("privilege_ready", True))
+        host_structural_ok = bool(preflight.get("branch")) and preflight.get("branch") != "unknown" and bool(preflight.get("commit")) and preflight.get("commit") != "unknown"
         blocked_by_dirty_tree = not working_tree_clean
 
         if blocked_by_dirty_tree:
             summary = "preflight_blocked_dirty_tree"
             error_type = "working_tree_dirty"
             error_message = "Deploy bloqueado: git working tree está dirty. Limpe/reverta arquivos runtime antes de confirmar."
+        elif not remote_ok:
+            summary = "preflight_blocked_remote"
+            error_type = "remote_unreachable"
+            error_message = "Deploy bloqueado: repositório remoto indisponível (remote_ok=no)."
+        elif not host_structural_ok:
+            summary = "preflight_blocked_host"
+            error_type = "host_structural_error"
+            error_message = "Deploy bloqueado: host sem estado git válido (branch/commit indisponível)."
         elif not privilege_ready:
             summary = "preflight_blocked_privilege"
             error_type = f"privilege_{preflight.get('privilege_error_type') or 'unknown'}"
@@ -262,6 +272,18 @@ class AdminDeployService:
                 "Deploy bloqueado no preflight: working tree dirty. "
                 "Limpe/reverta arquivos operacionais (state/cache/log) e rode /admin deploy novamente."
             )
+        if (audit.error_type or "") == "remote_unreachable":
+            audit.status = "blocked"
+            audit.finished_at = now
+            audit.summary = "blocked_by_preflight_remote"
+            self.db.commit()
+            raise ValueError("Deploy bloqueado no preflight: remoto indisponível (remote_ok=no).")
+        if (audit.error_type or "") == "host_structural_error":
+            audit.status = "blocked"
+            audit.finished_at = now
+            audit.summary = "blocked_by_preflight_host"
+            self.db.commit()
+            raise ValueError("Deploy bloqueado no preflight: erro estrutural do host (estado git inválido).")
         if (audit.error_type or "").startswith("privilege_"):
             audit.status = "blocked"
             audit.finished_at = now
@@ -357,8 +379,28 @@ class AdminDeployService:
             }
 
     def deploy_status(self) -> dict:
+        running = (
+            self.db.query(AdminDeployAudit)
+            .filter(AdminDeployAudit.status == "running")
+            .order_by(AdminDeployAudit.started_at.desc())
+            .first()
+        )
         last = self.db.query(AdminDeployAudit).order_by(AdminDeployAudit.requested_at.desc()).first()
+
+        normalized_status = "idle"
+        if running or self._lock.locked():
+            normalized_status = "running"
+        elif last:
+            if last.status == "succeeded" and last.before_commit and last.before_commit == last.after_commit:
+                normalized_status = "noop"
+            elif last.status == "succeeded":
+                normalized_status = "success"
+            else:
+                normalized_status = "failed"
+
         return {
             "running": self._lock.locked(),
+            "status": normalized_status,
             "last": last,
+            "current": running,
         }
