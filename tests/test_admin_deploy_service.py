@@ -195,3 +195,88 @@ def test_is_allowed_with_large_actor_ids(monkeypatch):
     ok, reason = svc.is_allowed(_actor(chat_id=large_id, user_id=large_id))
     assert ok is True
     assert reason is None
+
+
+def test_preflight_maps_no_new_privileges(monkeypatch):
+    monkeypatch.setattr("app.services.admin_deploy_service.settings", SimpleNamespace(
+        admin_deploy_pending_ttl_seconds=120,
+        admin_deploy_rate_limit_seconds=300,
+        admin_deploy_wrapper_timeout_seconds=180,
+        admin_deploy_output_max_chars=60,
+        admin_deploy_wrapper_path="/wrapper",
+        admin_deploy_use_sudo=True,
+        autohunter_admin_user_ids="20",
+        autohunter_admin_chat_ids="10",
+        autohunter_admins="10",
+    ))
+    svc = AdminDeployService(_db())
+
+    def _fake_run(*args, **kwargs):
+        if args[:2] == ("sudo", "-n"):
+            return 1, "", 'sudo: The "no new privileges" flag is set, which prevents sudo from running as root.'
+        return 0, "", ""
+
+    monkeypatch.setattr("app.services.admin_deploy_service.subprocess.run", lambda a, cwd, capture_output, text, timeout: SimpleNamespace(returncode=_fake_run(*a, timeout=timeout)[0], stdout=_fake_run(*a, timeout=timeout)[1], stderr=_fake_run(*a, timeout=timeout)[2]))
+    monkeypatch.setattr("app.services.admin_deploy_service.Path.exists", lambda self: True)
+    monkeypatch.setattr("app.services.admin_deploy_service.Path.is_file", lambda self: True)
+    monkeypatch.setattr("app.services.admin_deploy_service.Path.stat", lambda self: SimpleNamespace(st_mode=0o755))
+
+    preflight = svc._run_preflight()
+    assert preflight["privilege_ready"] is False
+    assert preflight["privilege_error_type"] == "no_new_privileges"
+
+
+def test_confirm_blocked_when_preflight_privilege_not_ready(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(
+        svc,
+        "_run_preflight",
+        lambda: {
+            "branch": "main",
+            "commit": "abc",
+            "working_tree": "clean",
+            "remote_ok": True,
+            "remote_diff": "0 0",
+            "privilege_ready": False,
+            "privilege_error_type": "no_new_privileges",
+            "privilege_error_message": "blocked",
+        },
+    )
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    import pytest, asyncio
+    with pytest.raises(ValueError, match="NoNewPrivileges"):
+        asyncio.run(svc.confirm_deploy(_actor(), op))
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.status == "blocked"
+
+
+def test_request_deploy_persists_privilege_block_in_audit(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(
+        svc,
+        "_run_preflight",
+        lambda: {
+            "branch": "main",
+            "commit": "abc",
+            "working_tree": "clean",
+            "remote_ok": True,
+            "remote_diff": "0 0",
+            "privilege_ready": False,
+            "privilege_error_type": "no_new_privileges",
+            "privilege_error_message": "Serviço do bot está com NoNewPrivileges ativo.",
+        },
+    )
+
+    op = svc.request_deploy(_actor())["operation_id"]
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.summary == "preflight_blocked_privilege"
+    assert row.error_type == "privilege_no_new_privileges"
+    assert "NoNewPrivileges" in (row.error_message or "")

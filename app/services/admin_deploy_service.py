@@ -45,6 +45,22 @@ def _truncate(value: str | None, limit: int) -> str:
     return text[: max(0, limit - 12)] + "\n...[truncated]"
 
 
+def _classify_privilege_error(stderr: str, returncode: int) -> tuple[str, str]:
+    normalized = (stderr or "").strip()
+    lowered = normalized.lower()
+    if "no new privileges" in lowered:
+        return "no_new_privileges", "Serviço do bot está com NoNewPrivileges ativo e não pode usar sudo."
+    if "a password is required" in lowered:
+        return "sudo_password_required", "sudo requer senha interativa; configure NOPASSWD para o wrapper permitido."
+    if "not allowed to run sudo" in lowered or "is not in the sudoers file" in lowered:
+        return "sudo_not_allowed", "Usuário do bot não possui regra sudoers para o wrapper configurado."
+    if "command not found" in lowered and "sudo" in lowered:
+        return "sudo_not_found", "Comando sudo não encontrado no host."
+    if returncode != 0:
+        return "sudo_check_failed", f"Validação de sudo falhou (exit={returncode})."
+    return "unknown", "Falha desconhecida ao validar execução privilegiada."
+
+
 @dataclass
 class DeployActor:
     chat_id: int
@@ -93,6 +109,12 @@ class AdminDeployService:
         tree = "dirty"
         remote_ok = False
         remote_diff = "indisponível"
+        wrapper_path = str(getattr(settings, "admin_deploy_wrapper_path", "/usr/local/bin/autohunter-admin-deploy"))
+        use_sudo = bool(getattr(settings, "admin_deploy_use_sudo", True))
+
+        privilege_ready = True
+        privilege_error_type = None
+        privilege_error_message = None
 
         rc, out, _ = run("git", "rev-parse", "--abbrev-ref", "HEAD")
         if rc == 0 and out:
@@ -117,12 +139,32 @@ class AdminDeployService:
             elif err:
                 remote_diff = err
 
+        wrapper = Path(wrapper_path)
+        if not wrapper.exists():
+            privilege_ready = False
+            privilege_error_type = "wrapper_not_found"
+            privilege_error_message = f"Wrapper não encontrado em {wrapper_path}."
+        elif (not wrapper.is_file()) or not (wrapper.stat().st_mode & 0o111):
+            privilege_ready = False
+            privilege_error_type = "wrapper_not_executable"
+            privilege_error_message = f"Wrapper sem permissão de execução em {wrapper_path}."
+        elif use_sudo:
+            rc, _, stderr = run("sudo", "-n", "-l", "--", wrapper_path)
+            if rc != 0:
+                privilege_ready = False
+                mapped_type, mapped_message = _classify_privilege_error(stderr, rc)
+                privilege_error_type = mapped_type
+                privilege_error_message = f"{mapped_message} stderr={_truncate(stderr or '-', 240)}"
+
         return {
             "branch": branch,
             "commit": commit,
             "working_tree": tree,
             "remote_ok": remote_ok,
             "remote_diff": remote_diff,
+            "privilege_ready": privilege_ready,
+            "privilege_error_type": privilege_error_type,
+            "privilege_error_message": privilege_error_message,
         }
 
     def request_deploy(self, actor: DeployActor) -> dict:
@@ -144,7 +186,13 @@ class AdminDeployService:
             status="pending_confirmation",
             branch=preflight["branch"],
             before_commit=preflight["commit"],
-            summary="preflight_ok",
+            summary=("preflight_ok" if preflight.get("privilege_ready", True) else "preflight_blocked_privilege"),
+            error_type=(
+                None
+                if preflight.get("privilege_ready", True)
+                else f"privilege_{preflight.get('privilege_error_type') or 'unknown'}"
+            ),
+            error_message=(None if preflight.get("privilege_ready", True) else preflight.get("privilege_error_message")),
         )
         self.db.add(audit)
         self.db.commit()
@@ -161,6 +209,17 @@ class AdminDeployService:
             raise ValueError("operation_id inválido.")
         if audit.status != "pending_confirmation":
             raise ValueError("Operação já confirmada/finalizada.")
+        if (audit.error_type or "").startswith("privilege_"):
+            audit.status = "blocked"
+            audit.finished_at = now
+            audit.summary = "blocked_by_preflight_privilege"
+            self.db.commit()
+            raise ValueError(
+                "Deploy bloqueado por configuração do host: o serviço do bot está com NoNewPrivileges e não pode usar sudo. "
+                "Ajuste o systemd/sudoers e rode /admin deploy novamente."
+                if audit.error_type == "privilege_no_new_privileges"
+                else f"Deploy bloqueado no preflight: {audit.error_message or 'privilégio indisponível.'}"
+            )
         if not audit.expires_at or _as_utc(audit.expires_at) < now:
             audit.status = "expired"
             self.db.commit()
