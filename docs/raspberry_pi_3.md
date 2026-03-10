@@ -196,7 +196,7 @@ Para `/admin deploy` + `/admin deploy confirm <operation_id>` funcionar em produ
 Checklist operacional:
 
 - O usuário do bot precisa conseguir executar **apenas** o wrapper permitido.
-- Em host com systemd, o `autohunter-bot.service` não deve usar `NoNewPrivileges=true` para esse fluxo.
+- Em host com systemd, o `autohunter-bot.service` não deve bloquear escalonamento (`NoNewPrivileges=true`) nem bloquear acesso ao HOME do usuário da aplicação (`ProtectHome=true`).
 - O `sudoers` deve permitir `NOPASSWD` somente para `/usr/local/bin/autohunter-admin-deploy`.
 - O wrapper deve ser root-owned, fora do repo, e sem aceitar comandos arbitrários do Telegram.
 
@@ -211,6 +211,7 @@ Conteúdo:
 ```ini
 [Service]
 NoNewPrivileges=false
+ProtectHome=false
 ```
 
 Aplicar:
@@ -232,6 +233,8 @@ Conteúdo:
 autohunter ALL=(root) NOPASSWD: /usr/local/bin/autohunter-admin-deploy
 ```
 
+Referência de implementação do wrapper: `deploy/raspberry/scripts/autohunter-admin-deploy.example.sh` (copie para `/usr/local/bin/autohunter-admin-deploy` e mantenha fora do repo em produção).
+
 Valide permissões do wrapper:
 
 ```bash
@@ -240,3 +243,10 @@ sudo chmod 750 /usr/local/bin/autohunter-admin-deploy
 ```
 
 Com isso, o preflight de `/admin deploy` passa a informar claramente se o caminho privilegiado está pronto (`privilege_ready=yes`) ou bloqueado (`privilege_ready=no`, com `privilege_error_type`).
+
+Se o erro incluir `Permission denied` para:
+
+- `/home/autohunter/.ssh/known_hosts` → `protect_home_blocked`
+- `/home/autohunter/.config/git/ignore` → `home_not_accessible_from_service`
+
+trata-se de sintoma típico de sandbox de systemd no serviço do bot. Revise o override de `autohunter-bot.service` e confirme que o processo consegue ler `/home/autohunter`.

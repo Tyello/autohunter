@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     admin_deploy_wrapper_timeout_seconds: int = 180
     admin_deploy_output_max_chars: int = 1200
     admin_deploy_wrapper_path: str = "/usr/local/bin/autohunter-admin-deploy"
+    admin_deploy_app_home: str = "/home/autohunter"
     admin_deploy_use_sudo: bool = True
 
     # Chat IDs que devem receber alertas automáticos (erros/backoff/monitoramento).
