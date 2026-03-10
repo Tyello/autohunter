@@ -62,6 +62,25 @@ def _classify_privilege_error(stderr: str, returncode: int) -> tuple[str, str]:
     return "unknown", "Falha desconhecida ao validar execução privilegiada."
 
 
+def _classify_home_access_error(raw_output: str) -> tuple[str, str] | None:
+    lowered = (raw_output or "").lower()
+    if "permission denied" not in lowered:
+        return None
+    if "/home/autohunter/.ssh/known_hosts" in lowered:
+        return (
+            "protect_home_blocked",
+            "Acesso negado em /home/autohunter/.ssh/known_hosts durante git/ssh. "
+            "Provável sandbox do systemd (ex.: ProtectHome). Revise autohunter-bot.service.",
+        )
+    if "/home/autohunter/.config/git/ignore" in lowered:
+        return (
+            "home_not_accessible_from_service",
+            "Acesso negado em /home/autohunter/.config/git/ignore durante git. "
+            "O serviço do bot não está acessando o HOME do usuário do app; revise autohunter-bot.service.",
+        )
+    return None
+
+
 @dataclass
 class DeployActor:
     chat_id: int
@@ -100,10 +119,11 @@ class AdminDeployService:
 
     def _run_preflight(self) -> dict:
         root = Path(__file__).resolve().parents[2]
+        app_home = str(getattr(settings, "admin_deploy_app_home", "/home/autohunter"))
 
         env = os.environ.copy()
-        env.setdefault("HOME", str(Path.home()))
-        env.setdefault("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+        env["HOME"] = app_home
+        env["XDG_CONFIG_HOME"] = f"{app_home}/.config"
         env.setdefault("GIT_CONFIG_NOSYSTEM", "1")
 
         def run(*args: str, timeout: int = 15) -> tuple[int, str, str]:
@@ -144,6 +164,11 @@ class AdminDeployService:
                 remote_diff = out
             elif err:
                 remote_diff = err
+
+        home_access_error = _classify_home_access_error(remote_diff)
+        if home_access_error:
+            privilege_ready = False
+            privilege_error_type, privilege_error_message = home_access_error
 
         wrapper = Path(wrapper_path)
         if not wrapper.exists():
@@ -267,6 +292,10 @@ class AdminDeployService:
                 wrapper_cmd = [getattr(settings, "admin_deploy_wrapper_path", "/usr/local/bin/autohunter-admin-deploy")]
                 if bool(getattr(settings, "admin_deploy_use_sudo", True)):
                     wrapper_cmd = ["sudo"] + wrapper_cmd
+                app_home = str(getattr(settings, "admin_deploy_app_home", "/home/autohunter"))
+                cmd_env = os.environ.copy()
+                cmd_env["HOME"] = app_home
+                cmd_env["XDG_CONFIG_HOME"] = f"{app_home}/.config"
                 cp = await asyncio.to_thread(
                     subprocess.run,
                     wrapper_cmd,
@@ -274,6 +303,7 @@ class AdminDeployService:
                     text=True,
                     timeout=self.wrapper_timeout_seconds,
                     check=False,
+                    env=cmd_env,
                 )
             except subprocess.TimeoutExpired:
                 audit.finished_at = _utcnow()
@@ -295,6 +325,7 @@ class AdminDeployService:
                 payload = None
 
             ok = bool(payload and payload.get("ok") and cp.returncode == 0)
+            home_access_error = _classify_home_access_error(f"{cp.stderr}\n{cp.stdout}")
             audit.finished_at = _utcnow()
             audit.status = "succeeded" if ok else "failed"
             audit.summary = (payload or {}).get("status") or ("ok" if ok else "error")
@@ -304,8 +335,13 @@ class AdminDeployService:
             audit.services_json = (payload or {}).get("services") if isinstance((payload or {}).get("services"), dict | list) else None
             audit.output_tail = output_tail
             if not ok:
-                audit.error_type = (payload or {}).get("error_type") or f"exit_{cp.returncode}"
-                audit.error_message = (payload or {}).get("error_message") or _truncate(stderr_tail or stdout_tail, 240)
+                if home_access_error:
+                    mapped_type, mapped_message = home_access_error
+                    audit.error_type = mapped_type
+                    audit.error_message = mapped_message
+                else:
+                    audit.error_type = (payload or {}).get("error_type") or f"exit_{cp.returncode}"
+                    audit.error_message = (payload or {}).get("error_message") or _truncate(stderr_tail or stdout_tail, 240)
             audit.summary = f"{audit.summary}; duration_ms={duration_ms}"
             self.db.commit()
 

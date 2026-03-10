@@ -9,7 +9,7 @@ from sqlalchemy.sql.sqltypes import BigInteger
 
 from app.db.base import Base
 from app.models.admin_deploy_audit import AdminDeployAudit
-from app.services.admin_deploy_service import AdminDeployService, DeployActor
+from app.services.admin_deploy_service import AdminDeployService, DeployActor, _classify_home_access_error
 
 
 def _db():
@@ -197,6 +197,23 @@ def test_is_allowed_with_large_actor_ids(monkeypatch):
     assert reason is None
 
 
+
+
+def test_classify_home_access_error_known_hosts():
+    mapped = _classify_home_access_error('git@github.com: /home/autohunter/.ssh/known_hosts: Permission denied')
+    assert mapped is not None
+    error_type, message = mapped
+    assert error_type == "protect_home_blocked"
+    assert "autohunter-bot.service" in message
+
+
+def test_classify_home_access_error_git_ignore():
+    mapped = _classify_home_access_error('fatal: could not open /home/autohunter/.config/git/ignore: Permission denied')
+    assert mapped is not None
+    error_type, message = mapped
+    assert error_type == "home_not_accessible_from_service"
+    assert "HOME" in message
+
 def test_preflight_maps_no_new_privileges(monkeypatch):
     monkeypatch.setattr("app.services.admin_deploy_service.settings", SimpleNamespace(
         admin_deploy_pending_ttl_seconds=120,
@@ -332,3 +349,79 @@ def test_confirm_blocked_when_preflight_dirty_tree(monkeypatch):
     assert row is not None
     assert row.status == "blocked"
     assert row.summary == "blocked_by_preflight_dirty_tree"
+
+
+def test_confirm_maps_known_hosts_permission_denied_to_operational_error(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    async def _bad(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout='{"ok": false}', stderr='fatal: /home/autohunter/.ssh/known_hosts: Permission denied')
+
+    monkeypatch.setattr("app.services.admin_deploy_service.asyncio.to_thread", lambda fn, *a, **k: _bad())
+
+    import asyncio
+    out = asyncio.run(svc.confirm_deploy(_actor(), op))
+    assert out["ok"] is False
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.error_type == "protect_home_blocked"
+    assert "autohunter-bot.service" in (row.error_message or "")
+
+
+def test_confirm_maps_git_ignore_permission_denied_to_operational_error(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(svc, "_run_preflight", lambda: {"branch": "main", "commit": "abc", "working_tree": "clean", "remote_ok": True, "remote_diff": "0 0"})
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    async def _bad(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout='{"ok": false}', stderr='fatal: could not open /home/autohunter/.config/git/ignore: Permission denied')
+
+    monkeypatch.setattr("app.services.admin_deploy_service.asyncio.to_thread", lambda fn, *a, **k: _bad())
+
+    import asyncio
+    out = asyncio.run(svc.confirm_deploy(_actor(), op))
+    assert out["ok"] is False
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.error_type == "home_not_accessible_from_service"
+    assert "HOME" in (row.error_message or "")
+
+
+def test_preflight_sets_explicit_home_and_xdg(monkeypatch):
+    monkeypatch.setattr("app.services.admin_deploy_service.settings", SimpleNamespace(
+        admin_deploy_pending_ttl_seconds=120,
+        admin_deploy_rate_limit_seconds=300,
+        admin_deploy_wrapper_timeout_seconds=180,
+        admin_deploy_output_max_chars=60,
+        admin_deploy_wrapper_path="/wrapper",
+        admin_deploy_use_sudo=False,
+        admin_deploy_app_home="/home/autohunter",
+        autohunter_admin_user_ids="20",
+        autohunter_admin_chat_ids="10",
+        autohunter_admins="10",
+    ))
+    svc = AdminDeployService(_db())
+    envs = []
+
+    def _fake_run(args, cwd, capture_output, text, timeout, env=None):
+        envs.append(env or {})
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("app.services.admin_deploy_service.subprocess.run", _fake_run)
+    monkeypatch.setattr("app.services.admin_deploy_service.Path.exists", lambda self: True)
+    monkeypatch.setattr("app.services.admin_deploy_service.Path.is_file", lambda self: True)
+    monkeypatch.setattr("app.services.admin_deploy_service.Path.stat", lambda self: SimpleNamespace(st_mode=0o755))
+
+    svc._run_preflight()
+
+    assert envs
+    assert envs[0].get("HOME") == "/home/autohunter"
+    assert envs[0].get("XDG_CONFIG_HOME") == "/home/autohunter/.config"
