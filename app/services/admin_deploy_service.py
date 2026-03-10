@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import time
 import uuid
@@ -100,8 +101,13 @@ class AdminDeployService:
     def _run_preflight(self) -> dict:
         root = Path(__file__).resolve().parents[2]
 
+        env = os.environ.copy()
+        env.setdefault("HOME", str(Path.home()))
+        env.setdefault("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+        env.setdefault("GIT_CONFIG_NOSYSTEM", "1")
+
         def run(*args: str, timeout: int = 15) -> tuple[int, str, str]:
-            cp = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=timeout)
+            cp = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=timeout, env=env)
             return cp.returncode, cp.stdout.strip(), cp.stderr.strip()
 
         branch = "unknown"
@@ -176,6 +182,23 @@ class AdminDeployService:
 
         preflight = self._run_preflight()
         operation_id = uuid.uuid4().hex[:12]
+        working_tree_clean = preflight.get("working_tree") == "clean"
+        privilege_ready = bool(preflight.get("privilege_ready", True))
+        blocked_by_dirty_tree = not working_tree_clean
+
+        if blocked_by_dirty_tree:
+            summary = "preflight_blocked_dirty_tree"
+            error_type = "working_tree_dirty"
+            error_message = "Deploy bloqueado: git working tree está dirty. Limpe/reverta arquivos runtime antes de confirmar."
+        elif not privilege_ready:
+            summary = "preflight_blocked_privilege"
+            error_type = f"privilege_{preflight.get('privilege_error_type') or 'unknown'}"
+            error_message = preflight.get("privilege_error_message")
+        else:
+            summary = "preflight_ok"
+            error_type = None
+            error_message = None
+
         audit = AdminDeployAudit(
             operation_id=operation_id,
             requested_by_tg_user_id=actor.tg_user_id,
@@ -186,13 +209,9 @@ class AdminDeployService:
             status="pending_confirmation",
             branch=preflight["branch"],
             before_commit=preflight["commit"],
-            summary=("preflight_ok" if preflight.get("privilege_ready", True) else "preflight_blocked_privilege"),
-            error_type=(
-                None
-                if preflight.get("privilege_ready", True)
-                else f"privilege_{preflight.get('privilege_error_type') or 'unknown'}"
-            ),
-            error_message=(None if preflight.get("privilege_ready", True) else preflight.get("privilege_error_message")),
+            summary=summary,
+            error_type=error_type,
+            error_message=error_message,
         )
         self.db.add(audit)
         self.db.commit()
@@ -209,6 +228,15 @@ class AdminDeployService:
             raise ValueError("operation_id inválido.")
         if audit.status != "pending_confirmation":
             raise ValueError("Operação já confirmada/finalizada.")
+        if (audit.error_type or "") == "working_tree_dirty":
+            audit.status = "blocked"
+            audit.finished_at = now
+            audit.summary = "blocked_by_preflight_dirty_tree"
+            self.db.commit()
+            raise ValueError(
+                "Deploy bloqueado no preflight: working tree dirty. "
+                "Limpe/reverta arquivos operacionais (state/cache/log) e rode /admin deploy novamente."
+            )
         if (audit.error_type or "").startswith("privilege_"):
             audit.status = "blocked"
             audit.finished_at = now

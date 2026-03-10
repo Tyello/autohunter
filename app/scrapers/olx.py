@@ -18,6 +18,7 @@ from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.parsing import parse_brl_price
 from app.scrapers.contract import finalize_listings
 from app.core.settings import settings
+from app.core.runtime_paths import health_dir, playwright_storage_dir
 from app.services.browser_fetcher import fetch_html_browser, fetch_json_browser
 from app.sources.types import ScrapeContext
 
@@ -33,7 +34,7 @@ except Exception:  # pragma: no cover
 # ----------------------------
 
 _OLX_HEALTH_LOCK = threading.Lock()
-_OLX_HEALTH_PATH = os.getenv("OLX_HEALTH_PATH", ".data/health/olx.json")
+_OLX_HEALTH_PATH = os.getenv("OLX_HEALTH_PATH", str(health_dir() / "olx.json"))
 _OLX_FORCE_BROWSER_HOURS_DEFAULT = int(os.getenv("OLX_FORCE_BROWSER_HOURS", "6"))
 _OLX_IMPERSONATE = os.getenv("OLX_IMPERSONATE", "chrome120")
 
@@ -308,7 +309,7 @@ def _looks_like_cf_or_bot(html: str) -> bool:
 
 
 def _storage_state_path_for_ctx(ctx: ScrapeContext, source: str) -> str:
-    base = Path(getattr(settings, "playwright_storage_dir", None) or ".data/playwright")
+    base = playwright_storage_dir()
     base.mkdir(parents=True, exist_ok=True)
     proxy_key = ctx.proxy_server or "__no_proxy__"
     safe_proxy = proxy_key.replace(":", "_").replace("/", "_")

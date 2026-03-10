@@ -42,8 +42,17 @@ class Settings(BaseSettings):
     enable_playwright: bool = True
     playwright_headless: bool = True
 
+    # Runtime filesystem paths (must stay outside git repo in production)
+    runtime_state_dir: str = '/var/lib/autohunter'
+    runtime_cache_dir: str = '/var/cache/autohunter'
+    runtime_log_dir: str = '/var/log/autohunter'
+
+    health_state_dir: str = '/var/lib/autohunter/health'
+    source_audit_root: str = '/var/cache/autohunter/artifacts/source_audit_candidates'
+    playwright_browsers_dir: str = '/var/cache/autohunter/pw-browsers'
+
     # Cookie/session stickiness (Playwright)
-    playwright_storage_dir: str = '.data/playwright'
+    playwright_storage_dir: str = '/var/lib/autohunter/playwright'
 
     # Playwright queue & dedupe (scaling)
     # - queue_max_jobs: hard cap to avoid RAM blowups on Raspberry Pi
@@ -77,8 +86,8 @@ class Settings(BaseSettings):
     playwright_smoke_on_boot: bool = True
 
     # Facebook Marketplace auth/session
-    fb_profile_base_dir: str = "/opt/autohunter/profiles/fb"
-    fb_debug_base_dir: str = "/opt/autohunter/debug/fb"
+    fb_profile_base_dir: str = '/var/lib/autohunter/profiles/fb'
+    fb_debug_base_dir: str = '/var/cache/autohunter/debug/fb'
     fb_max_parallel_browsers: int = 1
     fb_healthcheck_hours: int = 6
 

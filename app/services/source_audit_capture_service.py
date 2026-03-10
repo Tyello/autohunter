@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.core.runtime_paths import source_audit_dir
+
 CRITICAL_FIELDS = (
     "price",
     "title",
@@ -23,7 +25,7 @@ CRITICAL_FIELDS = (
     "thumbnail_url",
 )
 
-_DEFAULT_ROOT = Path(os.getenv("SOURCE_AUDIT_ROOT", "artifacts/source_audit_candidates"))
+_DEFAULT_ROOT = source_audit_dir()
 _MAX_SAMPLE_BYTES = int(os.getenv("SOURCE_AUDIT_MAX_BYTES", "250000"))
 
 

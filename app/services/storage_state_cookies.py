@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Dict, Optional
 
-from app.core.settings import settings
+from app.core.runtime_paths import playwright_storage_dir
 
 
 def _safe(s: str) -> str:
@@ -13,7 +13,8 @@ def _safe(s: str) -> str:
 
 
 def storage_state_path(*, source: str, proxy_server: Optional[str]) -> Path:
-    base = Path(settings.playwright_storage_dir or ".data/playwright")
+    base = playwright_storage_dir()
+    base.mkdir(parents=True, exist_ok=True)
     proxy_key = proxy_server or "__no_proxy__"
     return base / f"storage_{_safe(source)}__{_safe(proxy_key)}.json"
 

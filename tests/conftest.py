@@ -23,6 +23,14 @@ os.environ.setdefault(
 os.environ.setdefault("ENABLE_SCHEDULER_IN_API", "false")
 os.environ.setdefault("ENABLE_PLAYWRIGHT", "false")
 
+os.environ.setdefault("RUNTIME_STATE_DIR", str(_DATA_DIR / "runtime" / "state"))
+os.environ.setdefault("RUNTIME_CACHE_DIR", str(_DATA_DIR / "runtime" / "cache"))
+os.environ.setdefault("RUNTIME_LOG_DIR", str(_DATA_DIR / "runtime" / "log"))
+os.environ.setdefault("HEALTH_STATE_DIR", str(_DATA_DIR / "runtime" / "state" / "health"))
+os.environ.setdefault("PLAYWRIGHT_STORAGE_DIR", str(_DATA_DIR / "runtime" / "state" / "playwright"))
+os.environ.setdefault("SOURCE_AUDIT_ROOT", str(_DATA_DIR / "runtime" / "cache" / "artifacts" / "source_audit_candidates"))
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_DIR", str(_DATA_DIR / "runtime" / "cache" / "pw-browsers"))
+
 # Keep OLX health file isolated per test run.
 os.environ.setdefault("OLX_HEALTH_PATH", str(_DATA_DIR / "olx_health.json"))
 

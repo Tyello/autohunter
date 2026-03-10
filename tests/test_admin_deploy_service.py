@@ -216,7 +216,7 @@ def test_preflight_maps_no_new_privileges(monkeypatch):
             return 1, "", 'sudo: The "no new privileges" flag is set, which prevents sudo from running as root.'
         return 0, "", ""
 
-    monkeypatch.setattr("app.services.admin_deploy_service.subprocess.run", lambda a, cwd, capture_output, text, timeout: SimpleNamespace(returncode=_fake_run(*a, timeout=timeout)[0], stdout=_fake_run(*a, timeout=timeout)[1], stderr=_fake_run(*a, timeout=timeout)[2]))
+    monkeypatch.setattr("app.services.admin_deploy_service.subprocess.run", lambda a, cwd, capture_output, text, timeout, env=None: SimpleNamespace(returncode=_fake_run(*a, timeout=timeout)[0], stdout=_fake_run(*a, timeout=timeout)[1], stderr=_fake_run(*a, timeout=timeout)[2]))
     monkeypatch.setattr("app.services.admin_deploy_service.Path.exists", lambda self: True)
     monkeypatch.setattr("app.services.admin_deploy_service.Path.is_file", lambda self: True)
     monkeypatch.setattr("app.services.admin_deploy_service.Path.stat", lambda self: SimpleNamespace(st_mode=0o755))
@@ -280,3 +280,55 @@ def test_request_deploy_persists_privilege_block_in_audit(monkeypatch):
     assert row.summary == "preflight_blocked_privilege"
     assert row.error_type == "privilege_no_new_privileges"
     assert "NoNewPrivileges" in (row.error_message or "")
+
+
+def test_request_deploy_persists_dirty_tree_block(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(
+        svc,
+        "_run_preflight",
+        lambda: {
+            "branch": "main",
+            "commit": "abc",
+            "working_tree": "dirty",
+            "remote_ok": True,
+            "remote_diff": "0 0",
+            "privilege_ready": True,
+        },
+    )
+
+    op = svc.request_deploy(_actor())["operation_id"]
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.summary == "preflight_blocked_dirty_tree"
+    assert row.error_type == "working_tree_dirty"
+
+
+def test_confirm_blocked_when_preflight_dirty_tree(monkeypatch):
+    _allow(monkeypatch)
+    db = _db()
+    svc = AdminDeployService(db)
+    monkeypatch.setattr(
+        svc,
+        "_run_preflight",
+        lambda: {
+            "branch": "main",
+            "commit": "abc",
+            "working_tree": "dirty",
+            "remote_ok": True,
+            "remote_diff": "0 0",
+            "privilege_ready": True,
+        },
+    )
+    op = svc.request_deploy(_actor())["operation_id"]
+
+    import pytest, asyncio
+    with pytest.raises(ValueError, match="working tree dirty"):
+        asyncio.run(svc.confirm_deploy(_actor(), op))
+
+    row = db.query(AdminDeployAudit).filter(AdminDeployAudit.operation_id == op).first()
+    assert row is not None
+    assert row.status == "blocked"
+    assert row.summary == "blocked_by_preflight_dirty_tree"

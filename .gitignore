@@ -3,3 +3,11 @@ __pycache__/
 .env
 .venv/
 .data/
+.cache/
+.pki/
+artifacts/
+debug/
+profiles/
+pw-browsers/
+run.log
+nohup.out

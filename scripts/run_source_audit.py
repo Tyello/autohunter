@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from app.core.runtime_paths import source_audit_dir
 from app.services.source_audit_report_service import write_reports
 
 
@@ -26,7 +27,7 @@ def _load_samples(path: Path) -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate source audit coverage matrix.")
     ap.add_argument("--input", required=True, help="JSON or JSONL with field audit rows")
-    ap.add_argument("--out", default="artifacts/source_audit_reports", help="Output directory")
+    ap.add_argument("--out", default=str(source_audit_dir().parent / "source_audit_reports"), help="Output directory")
     args = ap.parse_args()
 
     rows = _load_samples(Path(args.input))
