@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -72,3 +73,49 @@ def test_webmotors_blocked_error_preserves_diagnostic(monkeypatch):
 
     assert exc.value.reason is not None
     assert "WM_DIAG::" in exc.value.reason
+
+
+def test_webmotors_soft_block_200_is_not_treated_as_empty(monkeypatch):
+    html = """
+    <html><head><title>Just a moment...</title></head>
+    <body><div>Checking your browser before accessing Webmotors</div></body></html>
+    """
+
+    def _fake_fetch(url, *, ctx, **kwargs):
+        return SimpleNamespace(html=html, final_url=url)
+
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", _fake_fetch)
+
+    ctx = ScrapeContext(source="webmotors")
+    with pytest.raises(FetchBlocked) as exc:
+        scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ctx)
+
+    assert exc.value.status_code == 200
+    assert '"bucket":"BLOCKED"' in (exc.value.reason or "")
+    assert '"detected_signals":["challenge_cloudflare","soft_block_interstitial"' in (exc.value.reason or "")
+
+
+def test_webmotors_debug_artifacts_created_when_enabled(monkeypatch, tmp_path):
+    html = "<html><head><title>Access denied</title></head><body>verify you are human</body></html>"
+
+    def _fake_fetch(url, *, ctx, **kwargs):
+        return SimpleNamespace(html=html, final_url=url)
+
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", _fake_fetch)
+    monkeypatch.setattr("app.scrapers.webmotors_debug.settings.webmotors_debug_dir", str(tmp_path / "wm_debug"))
+    monkeypatch.setattr("app.scrapers.webmotors_debug.settings.webmotors_debug_max_artifacts", 10)
+    monkeypatch.setattr("app.scrapers.webmotors_debug.settings.webmotors_debug_text_snippet_chars", 120)
+
+    ctx = ScrapeContext(source="webmotors", extra={"webmotors_debug_capture": True})
+    with pytest.raises(FetchBlocked):
+        scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ctx)
+
+    runs = list((tmp_path / "wm_debug").glob("*"))
+    assert runs
+    metadata_file = runs[0] / "metadata.json"
+    assert metadata_file.exists()
+    data = json.loads(metadata_file.read_text(encoding="utf-8"))
+    assert data["status"] == "blocked"
+    assert data["cards_found"] == 0
+    assert data["url_initial"].startswith("https://www.webmotors.com.br/")
+    assert "blocked_reason" in data
