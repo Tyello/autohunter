@@ -1,0 +1,45 @@
+{
+  "source": "mercadolivre",
+  "scenario": "basic_realistic",
+  "required_fields": [
+    "external_id",
+    "url",
+    "title",
+    "price",
+    "thumbnail_url"
+  ],
+  "optional_fields": [
+    "year",
+    "km"
+  ],
+  "records": {
+    "MLB6160123242": {
+      "expected": {
+        "price": 165590,
+        "title_contains": [
+          "Honda Civic Hatch Si 1994"
+        ],
+        "location": null
+      },
+      "must_have": [
+        "price"
+      ]
+    },
+    "MLB6177621992": {
+      "expected": {
+        "price": 48900,
+        "title_contains": [
+          "Honda Civic LX 2001"
+        ],
+        "location": null
+      },
+      "must_have": [
+        "price"
+      ],
+      "optional_absent": [
+        "year",
+        "km"
+      ]
+    }
+  }
+}
