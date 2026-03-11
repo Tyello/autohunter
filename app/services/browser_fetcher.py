@@ -199,7 +199,17 @@ def fetch_html_browser(
             diag.note("blocked_reason", "bot_challenge")
         fp = fingerprint_from_html(html, final_url=url)
         if fp:
-            raise FetchBlocked(f"blocked(provider={fp.provider}; title={fp.title}; url={fp.final_url}; snippet={fp.snippet[:160]})")
+            raise FetchBlocked(
+                200,
+                url,
+                reason=(
+                    "bot_challenge_fingerprint"
+                    f" provider={fp.provider}"
+                    f" title={fp.title}"
+                    f" final_url={fp.final_url}"
+                    f" snippet={fp.snippet[:160]}"
+                ),
+            )
         raise FetchBlocked(200, url, reason="bot_challenge")
 
     if diag is not None:
