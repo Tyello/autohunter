@@ -28,6 +28,28 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+def _log_suppressed_exception(*, stage: str, exc: Exception, impact: str, fallback: str, worker: str | None = None) -> None:
+    worker_label = worker or "scheduler"
+    try:
+        with SessionLocal() as db:
+            log(
+                db,
+                "warn",
+                worker_label,
+                "suppressed_exception",
+                {
+                    "stage": stage,
+                    "exc_type": type(exc).__name__,
+                    "message": str(exc)[:280],
+                    "impact": impact,
+                    "fallback": fallback,
+                },
+            )
+            db.commit()
+    except Exception:
+        return
+
+
 def _get_cfg(db, source: str):
     return db.execute(select(SourceConfig).where(SourceConfig.source == source)).scalar_one_or_none()
 
@@ -164,11 +186,23 @@ def start_scheduler() -> BackgroundScheduler:
                     db.commit()
                     try:
                         maybe_alert_programming_error("boot/playwright", e)
-                    except Exception:
-                        pass
-        except Exception:
+                    except Exception as alert_exc:
+                        _log_suppressed_exception(
+                            stage="bootstrap.playwright_smoke.alert",
+                            exc=alert_exc,
+                            impact="alert_not_sent",
+                            fallback="scheduler_continues_without_admin_alert",
+                            worker="boot",
+                        )
+        except Exception as boot_exc:
             # nunca deixa o scheduler morrer por causa do smoke
-            pass
+            _log_suppressed_exception(
+                stage="bootstrap.playwright_smoke.import",
+                exc=boot_exc,
+                impact="smoke_check_skipped",
+                fallback="scheduler_continues",
+                worker="boot",
+            )
 
     # Pluggable sources: schedule a small "tick" for each source.
     # Real cadence is DB-driven (source_configs.sched_minutes + source_states.last_effective_run_at).
@@ -213,8 +247,14 @@ def start_scheduler() -> BackgroundScheduler:
             coalesce=True,
             executor="browser",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _log_suppressed_exception(
+            stage="bootstrap.browser_queue_worker",
+            exc=e,
+            impact="browser_queue_worker_not_registered",
+            fallback="scheduler_continues_without_browser_worker",
+            worker="boot",
+        )
 
     # HTTP queue workers: executa jobs HTTP em paralelo controlado
     try:
@@ -237,8 +277,14 @@ def start_scheduler() -> BackgroundScheduler:
                 coalesce=True,
                 executor="http",
             )
-    except Exception:
-        pass
+    except Exception as e:
+        _log_suppressed_exception(
+            stage="bootstrap.http_queue_worker",
+            exc=e,
+            impact="http_queue_workers_not_registered",
+            fallback="scheduler_continues_without_http_workers",
+            worker="boot",
+        )
 
     from app.scheduler.sender_job import job_send_notifications
     sched.add_job(
@@ -274,8 +320,14 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
             max_instances=1,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _log_suppressed_exception(
+            stage="bootstrap.fb_sessions_healthcheck",
+            exc=e,
+            impact="fb_healthcheck_not_registered",
+            fallback="scheduler_continues_without_fb_healthcheck",
+            worker="boot",
+        )
 
     # Autopilot (detecta regressões/bloqueios e manda alertas compactos)
     if getattr(settings, "autopilot_enabled", True):
@@ -315,8 +367,14 @@ def start_scheduler() -> BackgroundScheduler:
         try:
             from app.services.playwright_pool import get_playwright_pool
             get_playwright_pool().start()
-        except Exception:
-            pass
+        except Exception as e:
+            _log_suppressed_exception(
+                stage="bootstrap.playwright_warmup",
+                exc=e,
+                impact="warmup_skipped",
+                fallback="lazy_playwright_start",
+                worker="boot",
+            )
 
     sched.start()
     return sched

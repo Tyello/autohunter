@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.scrapers.base import FetchBlocked
+from app.scrapers.parse_failure import decide_parse_failure
 
 import traceback
 
@@ -262,6 +263,26 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    parse_failure = decide_parse_failure(
+        source=str(getattr(ctx, "source", "") or ""),
+        url=search_url,
+        found=found,
+        adapter_meta=getattr(ctx, "_last_adapter_meta", None),
+    )
+    if parse_failure is not None:
+        err = parse_failure.as_error(source=str(getattr(ctx, "source", "") or "unknown"), url=search_url)
+        emit_event(db, level="error", event_type="scrape_parse_failure", source=ctx.source, message="scrape_parse_failure", evidence={"error": err, "url": search_url, "classification": parse_failure.classification, "impact": parse_failure.impact}, tags=["error", "parse_failure"])
+        log(db, "error", job_name, "scrape_parse_failure", {"error": err, "url": search_url, "classification": parse_failure.classification, "impact": parse_failure.impact}, source=ctx.source, event_type="scrape_parse_failure", tags=["error", "parse_failure"])
+        return {
+            "ok": False,
+            "reason": "error",
+            "error": err,
+            "url": search_url,
+            "exc_type": "ParseFailure",
+            "is_bug": False,
+            "audit_artifacts": _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="explicit_parse_failure", stage="post_scrape", parse_error=True),
+            **_ctx_fetch_diag(ctx),
+        }
     audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
     if health is not None:
         health.inc("found", found)
@@ -505,6 +526,26 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    parse_failure = decide_parse_failure(
+        source=str(getattr(ctx, "source", "") or ""),
+        url=search_url,
+        found=found,
+        adapter_meta=getattr(ctx, "_last_adapter_meta", None),
+    )
+    if parse_failure is not None:
+        err = parse_failure.as_error(source=str(getattr(ctx, "source", "") or "unknown"), url=search_url)
+        emit_event(db, level="error", event_type="scrape_parse_failure", source=ctx.source, message="scrape_parse_failure", evidence={"error": err, "url": search_url, "classification": parse_failure.classification, "impact": parse_failure.impact}, tags=["error", "parse_failure"])
+        log(db, "error", job_name, "scrape_parse_failure", {"error": err, "url": search_url, "classification": parse_failure.classification, "impact": parse_failure.impact}, source=ctx.source, event_type="scrape_parse_failure", tags=["error", "parse_failure"])
+        return {
+            "ok": False,
+            "reason": "error",
+            "error": err,
+            "url": search_url,
+            "exc_type": "ParseFailure",
+            "is_bug": False,
+            "audit_artifacts": _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="explicit_parse_failure", stage="post_scrape", parse_error=True),
+            **_ctx_fetch_diag(ctx),
+        }
     audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
     if health is not None:
         health.inc("found", found)

@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
     notification_sender_batch_size: int = 20
+    # Transaction flush size for sender status updates.
+    # 1 = safest (commit per notification). >1 enables micro-batching.
+    notification_sender_commit_batch_size: int = 1
     notification_processing_ttl_seconds: int = 300
     notification_retry_base_seconds: int = 30
     notification_max_attempts: int = 3
