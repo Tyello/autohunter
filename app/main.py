@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, WebSocket
+from fastapi import FastAPI, Depends, Query, WebSocket
 from sqlalchemy import text
 from typing import List
 from sqlalchemy.orm import Session
@@ -54,7 +54,7 @@ def db_check(db: Session = Depends(get_db)):
 @app.get("/listings", response_model=List[CarListingOut])
 def list_listings(
     source: str | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db)
 ):
     query = db.query(CarListing)
