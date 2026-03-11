@@ -1,0 +1,44 @@
+{
+  "source": "icarros",
+  "scenario": "basic_realistic",
+  "required_fields": [
+    "external_id",
+    "url",
+    "title",
+    "price",
+    "location",
+    "thumbnail_url"
+  ],
+  "optional_fields": [
+    "km",
+    "year"
+  ],
+  "records": {
+    "52934717": {
+      "expected": {
+        "price": 98900,
+        "title_contains": [
+          "Honda Civic EXL",
+          "2020",
+          "45.000 km"
+        ],
+        "location": "Sao Paulo-SP"
+      },
+      "must_have": []
+    },
+    "52934718": {
+      "expected": {
+        "price": 79900,
+        "title_contains": [
+          "Toyota Corolla GLi",
+          "2018"
+        ],
+        "location": "Campinas-SP"
+      },
+      "must_have": [],
+      "optional_absent": [
+        "km"
+      ]
+    }
+  }
+}
