@@ -73,5 +73,6 @@ def job_compute_market_stats_daily():
             try:
                 log(db, "error", "market_stats", "daily_compute_failed", {"error": str(e)[:500], "window_days": window_days, "ms": dt_ms})
                 db.commit()
-            except Exception:
-                pass
+            except Exception as mark_exc:
+                log(db, "warn", "market_stats", "suppressed_exception", {"stage": "worker.mark_failed", "exc_type": type(mark_exc).__name__, "message": str(mark_exc)[:240], "impact": "job_status_may_stay_running", "fallback": "worker_continues"})
+                db.commit()

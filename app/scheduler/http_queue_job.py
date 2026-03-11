@@ -57,10 +57,15 @@ def job_http_queue_worker(worker_id: str = "http_worker"):
                 if job is not None:
                     mark_failed(job, error=f"{type(e).__name__}: {e}", retry_in_seconds=60)
                     db.commit()
-            except Exception:
-                pass
+            except Exception as mark_exc:
+                log(db, "warn", "http_queue_worker", "suppressed_exception", {"stage": "worker.mark_failed", "exc_type": type(mark_exc).__name__, "message": str(mark_exc)[:240], "impact": "job_status_may_stay_running", "fallback": "worker_continues"})
+                db.commit()
             try:
                 log(db, "error", worker_id, "job_failed", {"err": f"{type(e).__name__}: {e}"})
                 db.commit()
-            except Exception:
-                pass
+            except Exception as log_exc:
+                try:
+                    log(db, "warn", "http_queue_worker", "suppressed_exception", {"stage": "worker.log_job_failed", "exc_type": type(log_exc).__name__, "message": str(log_exc)[:240], "impact": "error_log_drop", "fallback": "worker_continues"})
+                    db.commit()
+                except Exception:
+                    pass
