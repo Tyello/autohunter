@@ -1,7 +1,12 @@
+import os
+from pathlib import Path
+
+from pydantic import PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    _per_source_scraper_flags: dict[str, bool] = PrivateAttr(default_factory=dict)
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',
@@ -11,6 +16,7 @@ class Settings(BaseSettings):
 
     database_url: str
     telegram_bot_token: str | None = None
+    telegram_enabled: bool = True
     autohunter_admins: str | None = None
     public_base_url: str | None = None
 
@@ -33,6 +39,8 @@ class Settings(BaseSettings):
 
     # Feature flags
     enable_scheduler_in_api: bool = False
+    use_new_scrapers: bool = False
+    use_new_scraper_sources: str = ""
 
     # OLX
     enable_olx_browser_fallback: bool = True
@@ -42,6 +50,8 @@ class Settings(BaseSettings):
     # Playwright / Browser mode
     enable_playwright: bool = True
     playwright_headless: bool = True
+    playwright_service_host: str = "127.0.0.1"
+    playwright_service_port: int = 8787
 
     # Runtime filesystem paths (must stay outside git repo in production)
     runtime_state_dir: str = '/var/lib/autohunter'
@@ -79,6 +89,8 @@ class Settings(BaseSettings):
     # - max contexts: hard cap to avoid RAM blowups on small machines
     playwright_context_ttl_seconds: int = 900  # 15 minutes
     playwright_max_contexts: int = 2
+    browser_manager_context_ttl_seconds: int = 300
+    browser_manager_max_contexts: int = 5
 
     # Warm up the Playwright worker thread at scheduler start (cheap; does not launch Chromium yet).
     playwright_warmup_on_start: bool = True
@@ -107,6 +119,57 @@ class Settings(BaseSettings):
     notification_processing_ttl_seconds: int = 300
     notification_retry_base_seconds: int = 30
     notification_max_attempts: int = 3
+    match_candidates_per_run: int = 250
+    match_max_queue_per_wishlist: int = 10
+
+    # Logging
+    log_level: str = "info"
+    log_stdout: bool = False
+
+    # Source audit
+    source_audit_debug: bool = False
+    source_audit_max_bytes: int = 250000
+
+    # OLX
+    olx_health_path: str | None = None
+    olx_force_browser_hours: int = 6
+    olx_impersonate: str = "chrome120"
+
+    # Notifications (legacy module compatibility)
+    whatsapp_enabled: bool = False
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_whatsapp_number: str = "whatsapp:+14155238886"
+    email_enabled: bool = False
+    use_aws_ses: bool = False
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    from_email: str | None = None
+    aws_region: str = "us-east-1"
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    ses_from_email: str | None = None
+    sms_enabled: bool = False
+    twilio_sms_number: str | None = None
+    webhook_enabled: bool = False
+    webhook_url: str | None = None
+    webhook_secret: str | None = None
+    webhook_method: str = "POST"
+    telegram_rate_limit: int = 20
+    whatsapp_rate_limit: int = 10
+    email_rate_limit: int = 50
+    sms_rate_limit: int = 10
+    webhook_rate_limit: int = 100
+    notification_queue_max_size: int = 1000
+    notification_worker_enabled: bool = True
+    notification_max_retries: int = 3
+    notification_retry_backoff: float = 2.0
+
+    # Integrations/scripts
+    use_redis_cache: bool = False
+    redis_url: str | None = None
 
     # Run a lightweight sender loop inside the Telegram bot process.
     # Useful for DEV/Windows runs where APScheduler (run_scheduler) isn't running.
@@ -153,4 +216,47 @@ class Settings(BaseSettings):
     telegram_text_max: int = 4000
     safe_chunk: int = 3800
 
+    def model_post_init(self, __context) -> None:
+        self._per_source_scraper_flags: dict[str, bool] = {}
+        for key, value in os.environ.items():
+            if not key.startswith("USE_NEW_SCRAPER_"):
+                continue
+            source = key.removeprefix("USE_NEW_SCRAPER_").strip().lower()
+            if not source:
+                continue
+            self._per_source_scraper_flags[source] = str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def should_use_new_scraper_for(self, source: str) -> bool | None:
+        src = (source or "").strip().lower()
+        if not src:
+            return None
+        if src in self._per_source_scraper_flags:
+            return self._per_source_scraper_flags[src]
+        if self.use_new_scraper_sources.strip():
+            allowed = {item.strip().lower() for item in self.use_new_scraper_sources.split(",") if item.strip()}
+            return src in allowed
+        return None
+
+    def ensure_playwright_browsers_env(self) -> None:
+        browsers_path = Path(self.playwright_browsers_dir).expanduser().resolve()
+        browsers_path.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers_path))
+
+    def merged_subprocess_env(self, *, home: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
+        env = os.environ.copy()
+        if home:
+            env["HOME"] = home
+            env["XDG_CONFIG_HOME"] = f"{home}/.config"
+        if extra:
+            env.update(extra)
+        return env
+
 settings = Settings()
+
+
+def merged_subprocess_env(*, home: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
+    return settings.merged_subprocess_env(home=home, extra=extra)
+
+
+def ensure_playwright_browsers_env() -> None:
+    settings.ensure_playwright_browsers_env()

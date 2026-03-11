@@ -4,12 +4,12 @@ Webhook Notifier
 Notificador genérico via HTTP webhooks.
 """
 
-import os
 import requests
 from typing import Optional, Dict, Any
 import hmac
 import hashlib
 
+from app.core.settings import settings
 from app.notifications.base import (
     BaseNotifier,
     Notification,
@@ -38,8 +38,8 @@ class WebhookNotifier(BaseNotifier):
         """
         super().__init__(NotificationChannel.WEBHOOK)
         
-        self.webhook_url = webhook_url or os.getenv("WEBHOOK_URL")
-        self.secret = secret or os.getenv("WEBHOOK_SECRET")
+        self.webhook_url = webhook_url or settings.webhook_url
+        self.secret = secret or settings.webhook_secret
         self.method = method.upper()
         self.headers = headers or {}
         

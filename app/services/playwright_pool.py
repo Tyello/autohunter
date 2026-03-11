@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from app.core.runtime_paths import playwright_browsers_dir, playwright_storage_dir
-from app.core.settings import settings
+from app.core.settings import settings, ensure_playwright_browsers_env
 from app.scrapers.base import FetchBlocked
 
 
@@ -216,7 +216,7 @@ class _PlaywrightCore:
 
         browsers_path = playwright_browsers_dir()
         browsers_path.mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers_path))
+        ensure_playwright_browsers_env()
 
         try:
             return self._p.chromium.launch(**launch_kwargs)
@@ -263,11 +263,7 @@ class _PlaywrightCore:
         if b is not None:
             return b
 
-        headless_env = os.getenv("PLAYWRIGHT_HEADLESS")
-        if headless_env is None:
-            headless = bool(settings.playwright_headless)
-        else:
-            headless = headless_env.lower() not in ("0", "false", "no")
+        headless = bool(settings.playwright_headless)
 
         b = self._launch_browser(proxy_server=proxy_server, headless=headless)
         self._browsers[key] = b

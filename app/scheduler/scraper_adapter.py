@@ -5,11 +5,11 @@ Este módulo permite usar tanto scrapers legacy quanto novos sem breaking change
 """
 
 from __future__ import annotations
-import os
 from typing import Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
+from app.core.settings import settings
 from app.sources.types import ScrapeContext
 from app.scrapers.sources import get_scraper, has_scraper
 from app.services.source_configs_service import get_source_config
@@ -30,18 +30,16 @@ def should_use_new_scraper(source: str) -> bool:
         True se deve usar novo scraper
     """
     # Feature flag global
-    use_new = os.getenv("USE_NEW_SCRAPERS", "false").lower() == "true"
+    use_new = settings.use_new_scrapers
     if not use_new:
         return False
     
     # Feature flag específico (override)
-    source_upper = source.upper()
-    flag_name = f"USE_NEW_SCRAPER_{source_upper}"
-    source_flag = os.getenv(flag_name)
-    
+    source_flag = settings.should_use_new_scraper_for(source)
+
     if source_flag is not None:
-        return source_flag.lower() == "true"
-    
+        return source_flag
+
     # Se não tem flag específico, usa global + verifica existência
     return has_scraper(source)
 

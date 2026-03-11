@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import random
 import re
 import threading
@@ -34,9 +33,9 @@ except Exception:  # pragma: no cover
 # ----------------------------
 
 _OLX_HEALTH_LOCK = threading.Lock()
-_OLX_HEALTH_PATH = os.getenv("OLX_HEALTH_PATH", str(health_dir() / "olx.json"))
-_OLX_FORCE_BROWSER_HOURS_DEFAULT = int(os.getenv("OLX_FORCE_BROWSER_HOURS", "6"))
-_OLX_IMPERSONATE = os.getenv("OLX_IMPERSONATE", "chrome120")
+_OLX_HEALTH_PATH = settings.olx_health_path or str(health_dir() / "olx.json")
+_OLX_FORCE_BROWSER_HOURS_DEFAULT = int(settings.olx_force_browser_hours)
+_OLX_IMPERSONATE = settings.olx_impersonate
 
 
 def _now_ts() -> int:

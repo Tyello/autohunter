@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -24,6 +23,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.health.collector import HealthCollector
 from app.services.source_audit_capture_service import source_audit_capture_service
+from app.core.settings import settings
 
 
 def _is_bug_type(exc_type: str) -> bool:
@@ -53,8 +53,8 @@ def _is_bug_type(exc_type: str) -> bool:
 #
 # Safety caps avoid huge backfills on first run.
 
-MAX_CANDIDATE_LISTINGS_PER_RUN = int(os.getenv("MATCH_CANDIDATES_PER_RUN", "250"))
-MAX_QUEUE_PER_WISHLIST_PER_RUN = int(os.getenv("MATCH_MAX_QUEUE_PER_WISHLIST", "10"))
+MAX_CANDIDATE_LISTINGS_PER_RUN = int(settings.match_candidates_per_run)
+MAX_QUEUE_PER_WISHLIST_PER_RUN = int(settings.match_max_queue_per_wishlist)
 
 
 def _parse_incremental_max_new(ctx) -> int | None:
@@ -104,7 +104,7 @@ def _capture_if_needed(*, ctx, found: int | None, listings: list[dict], reason: 
         missing_critical=missing,
         quality_flags=qflags,
         parse_error=parse_error,
-        debug=bool(os.getenv("SOURCE_AUDIT_DEBUG", "").strip()),
+        debug=bool(settings.source_audit_debug),
     )
     if not decision.should_capture:
         return []

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.runtime_paths import source_audit_dir
+from app.core.settings import settings
 
 CRITICAL_FIELDS = (
     "price",
@@ -26,7 +26,7 @@ CRITICAL_FIELDS = (
 )
 
 _DEFAULT_ROOT = source_audit_dir()
-_MAX_SAMPLE_BYTES = int(os.getenv("SOURCE_AUDIT_MAX_BYTES", "250000"))
+_MAX_SAMPLE_BYTES = int(settings.source_audit_max_bytes)
 
 
 def _utc_iso_now() -> str:

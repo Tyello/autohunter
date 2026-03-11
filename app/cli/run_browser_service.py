@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import signal
 import uvicorn
 
@@ -19,8 +18,8 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _handle)
     signal.signal(signal.SIGINT, _handle)
 
-    host = os.getenv("BROWSER_SERVICE_HOST") or getattr(settings, "playwright_service_host", "127.0.0.1")
-    port = int(os.getenv("BROWSER_SERVICE_PORT") or getattr(settings, "playwright_service_port", 8787))
+    host = getattr(settings, "playwright_service_host", "127.0.0.1")
+    port = int(getattr(settings, "playwright_service_port", 8787))
 
     # Single worker. Keep it simple + predictable on Raspberry Pi.
     uvicorn.run(
@@ -28,7 +27,7 @@ def main() -> int:
         host=host,
         port=port,
         workers=1,
-        log_level=os.getenv("LOG_LEVEL", "info"),
+        log_level=getattr(settings, "log_level", "info"),
     )
     return 0
 
