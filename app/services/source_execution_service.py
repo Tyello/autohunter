@@ -79,6 +79,13 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
 def _get_state(db: Session, source: str) -> Optional[SourceState]:
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
 
@@ -192,7 +199,7 @@ def run_source_for_all_wishlists(
             return {"ok": True, "status": "skipped", "reason": "sched_0", "run_reason": reason}
 
         st = _get_state(db, src)
-        last_eff = st.last_effective_run_at if st else None
+        last_eff = _ensure_utc(st.last_effective_run_at) if st else None
         if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
             return {"ok": True, "status": "skipped", "reason": "not_due", "run_reason": reason}
 

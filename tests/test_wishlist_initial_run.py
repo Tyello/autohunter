@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.models.source_config import SourceConfig
@@ -81,7 +81,7 @@ def test_add_wishlist_when_no_source_keeps_legacy_feedback(db, monkeypatch):
 
 
 def test_scheduler_not_due_after_recent_effective_run(db, monkeypatch):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     db.add(
         SourceConfig(
