@@ -1,3 +1,4 @@
+from app.scrapers.base import FetchBlocked
 from app.scrapers.webmotors_ops import classify_webmotors_error, encode_webmotors_diag, extract_webmotors_diag
 
 
@@ -19,3 +20,40 @@ def test_diag_roundtrip():
     assert out is not None
     assert out["bucket"] == "PARSER"
     assert out["stage"] == "parse_listings"
+
+
+def test_classify_fetchblocked_as_blocked():
+    diag = classify_webmotors_error(
+        FetchBlocked(403, "https://www.webmotors.com.br/carros/estoque", reason="bot_challenge"),
+        stage="browser_fetch",
+        fetch_path="browser_direct",
+        attempt=1,
+    )
+    assert diag.bucket == "BLOCKED"
+    assert diag.blocked_likely is True
+
+
+def test_classify_browser_error_bucket():
+    diag = classify_webmotors_error(
+        RuntimeError("Playwright Target page, context or browser has been closed"),
+        stage="browser_fetch",
+        fetch_path="browser_direct",
+        attempt=2,
+    )
+    assert diag.bucket == "BROWSER"
+
+
+def test_classification_with_unprintable_exception_never_breaks():
+    class BrokenExc(Exception):
+        def __str__(self):
+            raise RuntimeError("broken_str")
+
+    diag = classify_webmotors_error(
+        BrokenExc(),
+        stage="browser_fetch",
+        fetch_path="browser_direct",
+        attempt=3,
+    )
+    assert diag.bucket == "UNKNOWN"
+    assert diag.reason in {"unclassified_failure", "diagnostic_mapping_error"}
+    assert "BrokenExc" in diag.evidence
