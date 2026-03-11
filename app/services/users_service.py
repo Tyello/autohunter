@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.models.account import Account
 from app.models.account_member import AccountMember
-from app.models.plan import Plan
+from app.models.plan import PLAN_CODE_FREE
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.services.plans_bootstrap_service import get_required_plan
 
 
 def get_or_create_user_by_chat(db: Session, chat_id: int, username: str | None):
@@ -43,9 +44,7 @@ def get_or_create_user_by_chat(db: Session, chat_id: int, username: str | None):
 
         db.add(AccountMember(account_id=acc.id, user_id=u.id, role="owner"))
 
-        free = db.query(Plan).filter(Plan.code == "free").first()
-        if not free:
-            raise RuntimeError("Plan free not found. Run migrations/seed.")
+        free = get_required_plan(db, PLAN_CODE_FREE)
 
         # starts_at é NOT NULL -> sempre preencher
         db.add(
