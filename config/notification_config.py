@@ -4,64 +4,65 @@ Notification Configuration
 Arquivo de configuração centralizado para notificações.
 """
 
-import os
 from typing import Dict, Any
+
+from app.core.settings import settings
 
 
 class NotificationConfig:
     """Configuração de notificações."""
     
     # ========== Telegram ==========
-    TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_ENABLED = settings.telegram_enabled
+    TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
     
     # ========== WhatsApp (Twilio) ==========
-    WHATSAPP_ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() == "true"
-    TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-    TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+    WHATSAPP_ENABLED = settings.whatsapp_enabled
+    TWILIO_ACCOUNT_SID = settings.twilio_account_sid
+    TWILIO_AUTH_TOKEN = settings.twilio_auth_token
+    TWILIO_WHATSAPP_NUMBER = settings.twilio_whatsapp_number
     
     # ========== Email ==========
-    EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
+    EMAIL_ENABLED = settings.email_enabled
     
     # SMTP
-    USE_AWS_SES = os.getenv("USE_AWS_SES", "false").lower() == "true"
-    SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-    SMTP_USER = os.getenv("SMTP_USER")
-    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-    FROM_EMAIL = os.getenv("FROM_EMAIL")
+    USE_AWS_SES = settings.use_aws_ses
+    SMTP_HOST = settings.smtp_host
+    SMTP_PORT = int(settings.smtp_port)
+    SMTP_USER = settings.smtp_user
+    SMTP_PASSWORD = settings.smtp_password
+    FROM_EMAIL = settings.from_email
     
     # AWS SES (alternativa ao SMTP)
-    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    SES_FROM_EMAIL = os.getenv("SES_FROM_EMAIL")
+    AWS_REGION = settings.aws_region
+    AWS_ACCESS_KEY_ID = settings.aws_access_key_id
+    AWS_SECRET_ACCESS_KEY = settings.aws_secret_access_key
+    SES_FROM_EMAIL = settings.ses_from_email
     
     # ========== SMS (Twilio) ==========
-    SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
-    TWILIO_SMS_NUMBER = os.getenv("TWILIO_SMS_NUMBER")
+    SMS_ENABLED = settings.sms_enabled
+    TWILIO_SMS_NUMBER = settings.twilio_sms_number
     
     # ========== Webhook ==========
-    WEBHOOK_ENABLED = os.getenv("WEBHOOK_ENABLED", "false").lower() == "true"
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-    WEBHOOK_METHOD = os.getenv("WEBHOOK_METHOD", "POST")
+    WEBHOOK_ENABLED = settings.webhook_enabled
+    WEBHOOK_URL = settings.webhook_url
+    WEBHOOK_SECRET = settings.webhook_secret
+    WEBHOOK_METHOD = settings.webhook_method
     
     # ========== Rate Limiting ==========
-    TELEGRAM_RATE_LIMIT = int(os.getenv("TELEGRAM_RATE_LIMIT", "20"))  # por minuto
-    WHATSAPP_RATE_LIMIT = int(os.getenv("WHATSAPP_RATE_LIMIT", "10"))
-    EMAIL_RATE_LIMIT = int(os.getenv("EMAIL_RATE_LIMIT", "50"))
-    SMS_RATE_LIMIT = int(os.getenv("SMS_RATE_LIMIT", "10"))
-    WEBHOOK_RATE_LIMIT = int(os.getenv("WEBHOOK_RATE_LIMIT", "100"))
+    TELEGRAM_RATE_LIMIT = int(settings.telegram_rate_limit)  # por minuto
+    WHATSAPP_RATE_LIMIT = int(settings.whatsapp_rate_limit)
+    EMAIL_RATE_LIMIT = int(settings.email_rate_limit)
+    SMS_RATE_LIMIT = int(settings.sms_rate_limit)
+    WEBHOOK_RATE_LIMIT = int(settings.webhook_rate_limit)
     
     # ========== Queue ==========
-    NOTIFICATION_QUEUE_MAX_SIZE = int(os.getenv("NOTIFICATION_QUEUE_MAX_SIZE", "1000"))
-    NOTIFICATION_WORKER_ENABLED = os.getenv("NOTIFICATION_WORKER_ENABLED", "true").lower() == "true"
+    NOTIFICATION_QUEUE_MAX_SIZE = int(settings.notification_queue_max_size)
+    NOTIFICATION_WORKER_ENABLED = settings.notification_worker_enabled
     
     # ========== Retry ==========
-    NOTIFICATION_MAX_RETRIES = int(os.getenv("NOTIFICATION_MAX_RETRIES", "3"))
-    NOTIFICATION_RETRY_BACKOFF = float(os.getenv("NOTIFICATION_RETRY_BACKOFF", "2.0"))
+    NOTIFICATION_MAX_RETRIES = int(settings.notification_max_retries)
+    NOTIFICATION_RETRY_BACKOFF = float(settings.notification_retry_backoff)
     
     @classmethod
     def to_dict(cls) -> Dict[str, Any]:

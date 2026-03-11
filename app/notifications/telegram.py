@@ -4,11 +4,11 @@ Telegram Notifier
 Notificador via Telegram Bot API.
 """
 
-import os
 import requests
 from typing import Optional
 from datetime import datetime
 
+from app.core.settings import settings
 from app.notifications.base import (
     BaseNotifier,
     Notification,
@@ -28,7 +28,7 @@ class TelegramNotifier(BaseNotifier):
         """
         super().__init__(NotificationChannel.TELEGRAM)
         
-        self.bot_token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
+        self.bot_token = bot_token or settings.telegram_bot_token
         
         if self.bot_token:
             self.enable()

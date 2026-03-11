@@ -14,6 +14,8 @@ import hashlib
 import time
 from datetime import timedelta
 
+from app.core.settings import settings
+
 
 class CacheManager:
     """Gerenciador de cache flexível.
@@ -137,9 +139,8 @@ def get_cache() -> CacheManager:
     global _cache
     if _cache is None:
         # Tenta Redis, fallback para memória
-        import os
-        use_redis = os.getenv("USE_REDIS_CACHE", "false").lower() == "true"
-        redis_url = os.getenv("REDIS_URL")
+        use_redis = settings.use_redis_cache
+        redis_url = settings.redis_url
         _cache = CacheManager(use_redis=use_redis, redis_url=redis_url)
     return _cache
 

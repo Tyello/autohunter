@@ -4,13 +4,13 @@ Email Notifier
 Notificador via SMTP ou AWS SES.
 """
 
-import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 import re
 
+from app.core.settings import settings
 from app.notifications.base import (
     BaseNotifier,
     Notification,
@@ -45,7 +45,7 @@ class EmailNotifier(BaseNotifier):
         """
         super().__init__(NotificationChannel.EMAIL)
         
-        self.use_ses = use_ses or os.getenv("USE_AWS_SES", "false").lower() == "true"
+        self.use_ses = use_ses or settings.use_aws_ses
         
         if self.use_ses:
             self._init_ses()
@@ -54,11 +54,11 @@ class EmailNotifier(BaseNotifier):
     
     def _init_smtp(self, host, port, user, password, from_email, use_tls):
         """Inicializa SMTP."""
-        self.smtp_host = host or os.getenv("SMTP_HOST")
-        self.smtp_port = port or int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_user = user or os.getenv("SMTP_USER")
-        self.smtp_password = password or os.getenv("SMTP_PASSWORD")
-        self.from_email = from_email or os.getenv("FROM_EMAIL", self.smtp_user)
+        self.smtp_host = host or settings.smtp_host
+        self.smtp_port = port or int(settings.smtp_port)
+        self.smtp_user = user or settings.smtp_user
+        self.smtp_password = password or settings.smtp_password
+        self.from_email = from_email or settings.from_email or self.smtp_user
         self.use_tls = use_tls
         
         if self.smtp_host and self.smtp_user and self.smtp_password:
@@ -72,11 +72,11 @@ class EmailNotifier(BaseNotifier):
             import boto3
             self.ses_client = boto3.client(
                 'ses',
-                region_name=os.getenv("AWS_REGION", "us-east-1"),
-                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+                region_name=settings.aws_region,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
             )
-            self.from_email = os.getenv("SES_FROM_EMAIL")
+            self.from_email = settings.ses_from_email
             
             if self.from_email:
                 self.enable()

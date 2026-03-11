@@ -4,9 +4,9 @@ WhatsApp Notifier
 Notificador via WhatsApp usando Twilio API.
 """
 
-import os
 from typing import Optional
 
+from app.core.settings import settings
 from app.notifications.base import (
     BaseNotifier,
     Notification,
@@ -33,9 +33,9 @@ class WhatsAppNotifier(BaseNotifier):
         """
         super().__init__(NotificationChannel.WHATSAPP)
         
-        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
-        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
-        self.from_number = from_number or os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+        self.account_sid = account_sid or settings.twilio_account_sid
+        self.auth_token = auth_token or settings.twilio_auth_token
+        self.from_number = from_number or settings.twilio_whatsapp_number
         
         if self.account_sid and self.auth_token:
             try:

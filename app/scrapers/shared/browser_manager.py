@@ -10,11 +10,12 @@ Otimizado para Raspberry Pi 4:
 """
 
 from __future__ import annotations
-import os
 import time
 import threading
 from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
+
+from app.core.settings import settings
 
 
 @dataclass
@@ -79,8 +80,8 @@ class BrowserManager:
         self._context_last_used: Dict[Tuple[str, str], float] = {}
         
         # Configurações
-        self._max_contexts = int(os.getenv('PLAYWRIGHT_MAX_CONTEXTS', '5'))
-        self._context_ttl_s = int(os.getenv('PLAYWRIGHT_CONTEXT_TTL_SECONDS', '300'))  # 5min
+        self._max_contexts = int(getattr(settings, 'browser_manager_max_contexts', 5) or 5)
+        self._context_ttl_s = int(getattr(settings, 'browser_manager_context_ttl_seconds', 300) or 300)  # 5min
         
         self._startup_lock = threading.Lock()
         self._context_lock = threading.Lock()

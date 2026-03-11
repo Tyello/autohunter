@@ -13,7 +13,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.settings import settings
+from app.core.settings import settings, merged_subprocess_env
 from app.models.admin_deploy_audit import AdminDeployAudit
 
 
@@ -121,10 +121,7 @@ class AdminDeployService:
         root = Path(__file__).resolve().parents[2]
         app_home = str(getattr(settings, "admin_deploy_app_home", "/home/autohunter"))
 
-        env = os.environ.copy()
-        env["HOME"] = app_home
-        env["XDG_CONFIG_HOME"] = f"{app_home}/.config"
-        env.setdefault("GIT_CONFIG_NOSYSTEM", "1")
+        env = merged_subprocess_env(home=app_home, extra={"GIT_CONFIG_NOSYSTEM": "1"})
 
         def run(*args: str, timeout: int = 15) -> tuple[int, str, str]:
             cp = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=timeout, env=env)
@@ -315,9 +312,7 @@ class AdminDeployService:
                 if bool(getattr(settings, "admin_deploy_use_sudo", True)):
                     wrapper_cmd = ["sudo"] + wrapper_cmd
                 app_home = str(getattr(settings, "admin_deploy_app_home", "/home/autohunter"))
-                cmd_env = os.environ.copy()
-                cmd_env["HOME"] = app_home
-                cmd_env["XDG_CONFIG_HOME"] = f"{app_home}/.config"
+                cmd_env = merged_subprocess_env(home=app_home)
                 cp = await asyncio.to_thread(
                     subprocess.run,
                     wrapper_cmd,

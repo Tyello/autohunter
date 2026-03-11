@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import os
 from typing import Any, Optional, Dict, Iterable
 import uuid
 
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.system_log import SystemLog
 from app.utils.fingerprint import compute_fingerprint
+from app.core.settings import settings
 
 
 def _truthy(v: str | None) -> bool:
@@ -19,7 +19,7 @@ def _truthy(v: str | None) -> bool:
 
 
 def _log_stdout_enabled() -> bool:
-    return _truthy(os.getenv("LOG_STDOUT"))
+    return bool(settings.log_stdout)
 
 
 def _to_json(payload: Optional[Dict[str, Any]]) -> str:
