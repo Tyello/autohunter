@@ -330,11 +330,14 @@ def run_source_for_all_wishlists(
                 health.add_note(
                     "wm_diag "
                     f"bucket={wm_diag.get('bucket')} stage={wm_diag.get('stage')} "
-                    f"path={wm_diag.get('fetch_path')} attempts={wm_diag.get('attempt')}"
+                    f"path={wm_diag.get('fetch_path')} attempts={wm_diag.get('attempt')} "
+                    f"http={wm_diag.get('http_status')} cards={wm_diag.get('cards_found')} "
+                    f"title={wm_diag.get('page_title')} final_url={wm_diag.get('final_url')}"
                 )
             health.set_error(category, str(res.get("error") or reason), http_status=http_status, retryable=retryable)
             run_summary_err = add_anomaly_notes(health.finalize(status_cls)).model_dump(mode="json")
             if reason == "blocked":
+                duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
                 minutes = mark_blocked(
                     db,
                     src,
@@ -349,7 +352,7 @@ def run_source_for_all_wishlists(
                     status="blocked",
                     url=res.get("url") or url,
                     http_status=res.get("status_code"),
-                    duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                    duration_ms=duration_ms,
                     groups=groups_count,
                     wishlists=total_wishlists,
                     proxy_server=ctx.proxy_server,
@@ -371,10 +374,11 @@ def run_source_for_all_wishlists(
                 )
                 log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, reason, "blocked"])
                 db.commit()
-                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "run_reason": reason}
+                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
 
             if bool(res.get("is_bug")):
                 err = res.get("error") or "scrape_failed"
+                duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
                 minutes = mark_bug(db, src, error=err, url=res.get("url") or url)
                 run_row = record_run(
                     db,
@@ -382,7 +386,7 @@ def run_source_for_all_wishlists(
                     kind=kind,
                     status="error",
                     url=res.get("url") or url,
-                    duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                    duration_ms=duration_ms,
                     groups=groups_count,
                     wishlists=total_wishlists,
                     proxy_server=ctx.proxy_server,
@@ -414,9 +418,10 @@ def run_source_for_all_wishlists(
                     tags=[kind, reason, "bug"],
                 )
                 db.commit()
-                return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "run_reason": reason}
+                return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
 
             err = res.get("error") or "scrape_failed"
+            duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
             minutes = mark_error(
                 db,
                 src,
@@ -430,7 +435,7 @@ def run_source_for_all_wishlists(
                 kind=kind,
                 status="error",
                 url=res.get("url") or url,
-                duration_ms=int((datetime.now(timezone.utc) - t0).total_seconds() * 1000),
+                duration_ms=duration_ms,
                 groups=groups_count,
                 wishlists=total_wishlists,
                 proxy_server=ctx.proxy_server,
@@ -452,7 +457,7 @@ def run_source_for_all_wishlists(
             )
             log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes}, source=src, run_id=run_row.id, event_type="scrape_failed", tags=[kind, reason, "error"])
             db.commit()
-            return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "run_reason": reason}
+            return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
 
         total_found += int(res.get("found") or 0)
         total_inserted += int(res.get("inserted") or 0)

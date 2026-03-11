@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from types import SimpleNamespace
 
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
@@ -131,3 +132,42 @@ def test_manual_run_reason_is_propagated_on_skips(db):
     assert res["ok"] is True
     assert res["status"] == "skipped"
     assert res["run_reason"] == "wishlist_created"
+
+
+def test_blocked_run_includes_duration_ms(db, monkeypatch):
+    db.add(
+        SourceConfig(
+            source="webmotors",
+            is_enabled=True,
+            sched_minutes=30,
+            cooldown_minutes=1,
+            rate_limit_seconds=0,
+            browser_fallback_enabled=True,
+            force_browser=False,
+            extra={},
+        )
+    )
+    db.commit()
+
+    plugin = SimpleNamespace(
+        name="webmotors",
+        scrape=lambda *args, **kwargs: [],
+        build_url=lambda _q: "https://www.webmotors.com.br/carros/estoque",
+        fetch_mode="http",
+        supports_wishlist_monitoring=False,
+    )
+    monkeypatch.setattr("app.services.source_execution_service.get_source", lambda _src: plugin)
+    monkeypatch.setattr("app.services.source_execution_service.ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr("app.services.source_execution_service.get_scraper", lambda _src: None)
+    monkeypatch.setattr("app.services.source_execution_service.log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "app.services.source_execution_service.scrape_ingest_match_many",
+        lambda *args, **kwargs: {"ok": False, "reason": "blocked", "status_code": 200, "url": "https://www.webmotors.com.br/carros/estoque", "error": "WM_DIAG::{}"},
+    )
+
+    res = run_source_for_all_wishlists(db, "webmotors", kind="admin", force=True, ignore_backoff=True, run_reason="admin")
+
+    assert res["status"] == "blocked"
+    assert isinstance(res.get("duration_ms"), int)
+    assert res["duration_ms"] >= 0

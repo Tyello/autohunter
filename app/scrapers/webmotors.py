@@ -7,10 +7,12 @@ from dataclasses import replace
 from typing import Optional
 from urllib.parse import urljoin
 
+from app.core.settings import settings
 from app.scrapers.base import FetchBlocked
 from app.scrapers.contract import finalize_listings
 from app.scrapers.parsing import parse_brl_price
 from app.services.browser_fetcher import fetch_html_browser
+from app.scrapers.webmotors_debug import maybe_capture_webmotors_artifacts
 from app.sources.types import ScrapeContext
 from app.scrapers.webmotors_ops import (
     classify_webmotors_error,
@@ -18,6 +20,7 @@ from app.scrapers.webmotors_ops import (
 )
 
 WEBMOTORS_BASE = "https://www.webmotors.com.br"
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 def _clean(s: str) -> str:
@@ -189,6 +192,36 @@ def _looks_like_zero_results(html: str) -> bool:
     )
 
 
+def _extract_title(html: str) -> str:
+    m = _TITLE_RE.search(html or "")
+    if not m:
+        return ""
+    return _clean(m.group(1) or "")[:180]
+
+
+def _detect_block_signals(html: str, *, final_url: str) -> list[str]:
+    low = (html or "").lower()
+    signals: list[str] = []
+    checks = {
+        "challenge_cloudflare": ["cloudflare", "just a moment", "cf-chl"],
+        "challenge_captcha": ["captcha", "hcaptcha", "recaptcha", "data-sitekey"],
+        "challenge_bot": ["verify you are", "are you human", "access denied", "perimeterx", "datadome", "incapsula"],
+        "soft_block_interstitial": ["unusual traffic", "aguarde", "security check", "checking your browser"],
+    }
+    for key, needles in checks.items():
+        if any(n in low for n in needles):
+            signals.append(key)
+
+    if len((html or "").strip()) < 1200:
+        signals.append("suspicious_html_too_small")
+    if "__next" in low and "/comprar/" not in low and "estoque" not in low:
+        signals.append("js_shell_without_listing_content")
+    f_low = (final_url or "").lower()
+    if any(k in f_low for k in ("/challenge", "/security", "captcha", "blocked")):
+        signals.append("suspicious_final_url")
+    return signals
+
+
 def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """Webmotors (Playwright-first) com HTML fallback sempre.
 
@@ -209,6 +242,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     attempt = 0
     fallback_used = False
     last_diag_err: Optional[Exception] = None
+    debug_enabled = bool((getattr(ctx, "extra", None) or {}).get("webmotors_debug_capture", settings.webmotors_debug_capture_enabled))
 
     for path_idx, (fetch_path, run_ctx) in enumerate(path_ctxs):
         if path_idx > 0:
@@ -229,21 +263,68 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                     return finalize_listings("webmotors", items)
                 if _looks_like_zero_results(res.html):
                     return []
+                page_title = _extract_title(res.html)
+                signals = _detect_block_signals(res.html, final_url=res.final_url or search_url)
+                strong_signals = [s for s in signals if s != "suspicious_html_too_small"]
+                if strong_signals:
+                    diag = classify_webmotors_error(
+                        FetchBlocked(200, search_url, reason="soft_block_or_challenge_200"),
+                        stage="parse_listings",
+                        fetch_path=fetch_path,
+                        attempt=attempt,
+                        http_status=200,
+                        final_url=res.final_url or search_url,
+                        page_title=page_title,
+                        blocked_reason="soft_block_or_challenge_200",
+                        detected_signals=strong_signals,
+                        cards_found=len(items),
+                        fallback_used=fallback_used,
+                    )
+                    cap = maybe_capture_webmotors_artifacts(
+                        enabled=debug_enabled,
+                        url=search_url,
+                        fetch_path=fetch_path,
+                        status="blocked",
+                        final_url=res.final_url,
+                        html=res.html,
+                        cards_found=len(items),
+                        blocked_reason="soft_block_or_challenge_200",
+                        detected_signals=strong_signals,
+                        fallback_used=fallback_used,
+                        attempt=attempt,
+                        page_title=page_title,
+                    )
+                    if cap is not None:
+                        diag = replace(diag, evidence=f"{diag.evidence};debug_metadata={cap.metadata_path}")
+                    raise FetchBlocked(200, search_url, reason=encode_webmotors_diag(diag))
                 diag = classify_webmotors_error(
                     RuntimeError("no_items_parsed"),
                     stage="parse_listings",
                     fetch_path=fetch_path,
                     attempt=attempt,
                     fallback_used=fallback_used,
+                    http_status=200,
+                    final_url=res.final_url or search_url,
+                    page_title=page_title,
+                    blocked_reason="no_cards_parsed",
+                    detected_signals=[],
+                    cards_found=len(items),
                 )
                 last_diag_err = RuntimeError(encode_webmotors_diag(diag))
             except FetchBlocked as e:
+                if "WM_DIAG::" in str(getattr(e, "reason", "") or ""):
+                    if fetch_path == "browser_direct":
+                        raise
+                    last_diag_err = RuntimeError(str(getattr(e, "reason", "") or "blocked"))
+                    break
                 diag = classify_webmotors_error(
                     e,
                     stage="browser_fetch",
                     fetch_path=fetch_path,
                     attempt=attempt,
                     fallback_used=fallback_used,
+                    http_status=int(getattr(e, "status_code", 0) or 0) or None,
+                    blocked_reason=str(getattr(e, "reason", "") or "fetch_blocked"),
                 )
                 # blocked on direct path is terminal; proxy path can fallback to direct once.
                 if fetch_path == "browser_direct":

@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     fb_max_parallel_browsers: int = 1
     fb_healthcheck_hours: int = 6
 
+    # WebMotors debug artifacts (outside repo/runtime-only)
+    webmotors_debug_capture_enabled: bool = False
+    webmotors_debug_dir: str = '/var/cache/autohunter/debug/webmotors'
+    webmotors_debug_max_artifacts: int = 25
+    webmotors_debug_text_snippet_chars: int = 500
+
     # Bug retry (sem backoff exponencial)
     source_bug_retry_minutes: int = 2
 

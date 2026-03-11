@@ -707,7 +707,7 @@ async def _admin_runall(update: Update, raw_args: List[str]):
                     )
                 elif st == "error":
                     lines.append(
-                        f"- {src}: ⚪ error backoff={res.get('backoff_minutes')}m err={_short(str(res.get('error')), 160)}"
+                        f"- {src}: ⚪ error backoff={res.get('backoff_minutes')}m dur={res.get('duration_ms')}ms err={_short(str(res.get('error')), 160)}"
                     )
                 elif st == "no_work":
                     lines.append(f"- {src}: ⚪ no_work eligible={res.get('eligible_wishlists')}")
