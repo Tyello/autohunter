@@ -29,6 +29,19 @@ def _normalize_openapi(spec: Dict[str, Any]) -> Dict[str, Any]:
       for consumers of our API.
     """
 
+    def _compact_schema(schema: Dict[str, Any] | None, *, keep_properties: bool) -> Dict[str, Any] | None:
+        if not isinstance(schema, dict):
+            return schema
+        compact = {
+            "title": schema.get("title"),
+            "type": schema.get("type"),
+        }
+        if schema.get("required") is not None:
+            compact["required"] = schema.get("required")
+        if keep_properties:
+            compact["properties"] = schema.get("properties")
+        return compact
+
     paths = spec.get("paths", {})
     keep_paths = {
         "/health": paths.get("/health"),
@@ -40,10 +53,10 @@ def _normalize_openapi(spec: Dict[str, Any]) -> Dict[str, Any]:
     schemas = ((spec.get("components") or {}).get("schemas") or {})
     keep_schemas = {
         # our main output contract
-        "CarListingOut": schemas.get("CarListingOut"),
+        "CarListingOut": _compact_schema(schemas.get("CarListingOut"), keep_properties=True),
         # FastAPI standard validation models
-        "HTTPValidationError": schemas.get("HTTPValidationError"),
-        "ValidationError": schemas.get("ValidationError"),
+        "HTTPValidationError": _compact_schema(schemas.get("HTTPValidationError"), keep_properties=False),
+        "ValidationError": _compact_schema(schemas.get("ValidationError"), keep_properties=False),
     }
 
     normalized = {
