@@ -25,7 +25,7 @@ def _is_blocked_error(exc: Exception) -> bool:
 def _set_ctx_diag(ctx: ScrapeContext, **values: object) -> None:
     for k, v in values.items():
         try:
-            setattr(ctx, k, v)
+            object.__setattr__(ctx, k, v)
         except Exception:
             pass
 

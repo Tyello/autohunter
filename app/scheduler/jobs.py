@@ -414,7 +414,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                 for k, v in (diag.get("buckets") or {}).items():
                     reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
             # expose matching scalability stats for admin/telemetry
-            ctx._matching_stats = mstats
+            object.__setattr__(ctx, "_matching_stats", mstats)
 
     # Update cursor on success (top item)
     if inc_enabled and found:

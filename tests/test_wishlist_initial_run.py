@@ -9,6 +9,7 @@ from app.models.source_state import SourceState
 from app.models.user import User
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlists_service import add_wishlist
+from app.sources.types import ScrapeContext
 
 
 def _make_user(db):
@@ -171,3 +172,15 @@ def test_blocked_run_includes_duration_ms(db, monkeypatch):
     assert res["status"] == "blocked"
     assert isinstance(res.get("duration_ms"), int)
     assert res["duration_ms"] >= 0
+
+
+def test_scrape_context_allows_runtime_metadata_slots():
+    ctx = ScrapeContext(source="olx")
+
+    object.__setattr__(ctx, "_last_adapter_meta", {"impl": "v1"})
+    object.__setattr__(ctx, "_matching_stats", {"matched_wishlists": 2})
+    object.__setattr__(ctx, "_hybrid_browser_used", True)
+
+    assert ctx._last_adapter_meta == {"impl": "v1"}
+    assert ctx._matching_stats == {"matched_wishlists": 2}
+    assert ctx._hybrid_browser_used is True

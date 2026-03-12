@@ -48,6 +48,15 @@ class ScrapeContext:
     # Free-form extra (keep it small)
     extra: Optional[Dict[str, Any]] = None
 
+    # Runtime diagnostics / orchestration metadata
+    _hybrid_browser_used: bool = False
+    _hybrid_blocked: bool = False
+    _hybrid_blocked_status: Optional[int] = None
+    _matching_stats: Optional[Dict[str, Any]] = None
+    _dual_run_report_path: Optional[str] = None
+    _dual_run_summary: Optional[Dict[str, Any]] = None
+    _last_adapter_meta: Optional[Dict[str, Any]] = None
+
 
 ScrapeFn = Callable[[str, ScrapeContext], List[Dict[str, Any]]]
 BuildUrlFn = Callable[[str], str]
