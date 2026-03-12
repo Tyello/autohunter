@@ -15,6 +15,7 @@ from app.services.notifications_queue_service import (
     queue_notifications_for_matches,
     queue_notifications_for_matches_diag,
 )
+from app.services.listing_activity_service import build_seen_identity
 from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists, match_listings_for_active_wishlists
 from app.services.listings_service import ingest_listings, ingest_listings_stats
 from app.services.source_url_cursors_service import get_cursor, touch_cursor
@@ -355,7 +356,6 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     queued = 0
     already_notified = 0
     reason_buckets = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
-
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlist is not None:
         candidates = _candidate_listings_for_run(
@@ -615,6 +615,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     total_queued = 0
     total_already_notified = 0
     reason_buckets = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
+    seen_identities_by_wishlist: dict[str, list] = {}
 
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlists:
@@ -629,6 +630,13 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
             for w in wishlists:
                 matched_listings = matches_by_wishlist.get(w.id) or []
+                if matched_listings:
+                    wid_key = str(w.id)
+                    bucket = seen_identities_by_wishlist.setdefault(wid_key, [])
+                    for ml in matched_listings:
+                        ident = build_seen_identity(ml)
+                        if ident is not None:
+                            bucket.append(ident)
                 m = len(matched_listings)
                 if not m:
                     continue
@@ -700,4 +708,4 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, "seen_identities_by_wishlist": seen_identities_by_wishlist, **_ctx_fetch_diag(ctx)}

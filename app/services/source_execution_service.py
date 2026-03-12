@@ -36,6 +36,7 @@ from app.health.collector import HealthCollector
 from app.health.classify import classify_error
 from app.health.explain import add_anomaly_notes
 from app.health.models import RunStatus
+from app.services.listing_activity_service import reconcile_listing_activity_for_source_run
 
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,7 @@ def run_source_for_all_wishlists(
             source=src,
             run_id=run_row.id,
             message="playwright_off",
-            evidence={"reason": "playwright_off", "kind": kind, "run_reason": reason},
+                evidence={"reason": "playwright_off", "kind": kind, "run_reason": reason},
             tags=[kind, reason, "ops"],
         )
         log(db, "warn", component, "playwright_off", source=src, run_id=run_row.id, event_type="playwright_off", tags=[kind, reason, "ops"])
@@ -324,6 +325,7 @@ def run_source_for_all_wishlists(
     total_already_notified = 0
     total_reason_buckets: dict[str, int] = {}
     total_thumb_present = 0
+    seen_identities_by_wishlist: dict[str, list] = {}
     any_hybrid_browser = False
     any_hybrid_blocked = False
     last_hybrid_blocked_status: int | None = None
@@ -523,6 +525,9 @@ def run_source_for_all_wishlists(
         for k, v in (res.get("reason_buckets") or {}).items():
             total_reason_buckets[k] = int(total_reason_buckets.get(k, 0)) + int(v or 0)
         total_thumb_present += int(res.get("thumb_present") or 0)
+        for wid, seen_items in (res.get("seen_identities_by_wishlist") or {}).items():
+            bucket = seen_identities_by_wishlist.setdefault(str(wid), [])
+            bucket.extend(seen_items or [])
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
     run_summary_ok = add_anomaly_notes(health.finalize(RunStatus.OK)).model_dump(mode="json")
@@ -550,6 +555,20 @@ def run_source_for_all_wishlists(
         force_browser=bool(ctx.force_browser),
         payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "run_summary": run_summary_ok, "run_reason": reason},
     )
+
+    activity_stats = reconcile_listing_activity_for_source_run(
+        db,
+        source_name=src,
+        wishlist_seen={w.id: (seen_identities_by_wishlist.get(str(w.id)) or []) for w in wishlists},
+        target_wishlist_ids=[w.id for w in wishlists],
+        missing_threshold=int(settings.listing_inactive_missing_runs_threshold or 3),
+        valid_run_id=run_row.id,
+    )
+    run_row.payload = {
+        **(run_row.payload or {}),
+        "activity": activity_stats.to_dict(),
+        "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3),
+    }
     logger.info("source_run_summary", extra=run_summary_ok)
 
     emit_event(
@@ -559,11 +578,11 @@ def run_source_for_all_wishlists(
         source=src,
         run_id=run_row.id,
         message="run_ok",
-        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind, "run_reason": reason},
+        evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)},
         tags=[kind, reason, "ok"],
     )
 
-    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_reason": reason}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, reason, "ok"])
+    log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, reason, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}

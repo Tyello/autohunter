@@ -133,6 +133,7 @@ class Settings(BaseSettings):
     notification_max_attempts: int = 3
     match_candidates_per_run: int = 250
     match_max_queue_per_wishlist: int = 10
+    listing_inactive_missing_runs_threshold: int = 3
 
     # Logging
     log_level: str = "info"
