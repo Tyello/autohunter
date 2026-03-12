@@ -11,7 +11,7 @@ from app.db.base import Base
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
-from app.services.wishlists_service import remove_wishlist
+from app.services.wishlists_service import remove_all_wishlists, remove_wishlist
 
 
 def _enable_fk(db) -> None:
@@ -104,3 +104,22 @@ def test_remove_wishlist_service_deletes_children_explicitly(db):
     ok, _msg = remove_wishlist(db, user.id, 1)
     assert ok is True
     assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 0
+
+
+def test_remove_all_wishlists_service_deletes_children_explicitly(db):
+    _enable_fk(db)
+
+    user = User(id=uuid.uuid4(), telegram_chat_id=999003)
+    db.add(user)
+    db.flush()
+
+    wishlist = Wishlist(user_id=user.id, query="jetta", is_active=True)
+    db.add(wishlist)
+    db.flush()
+
+    db.add(WishlistFilter(wishlist_id=wishlist.id, field="year", operator="gte", value="2018"))
+    db.commit()
+
+    ok, _msg = remove_all_wishlists(db, user.id)
+    assert ok is True
+    assert db.query(Wishlist).filter(Wishlist.user_id == user.id).count() == 0

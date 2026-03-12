@@ -16,6 +16,7 @@ from app.services.wishlists_service import (
     list_wishlists,
     add_wishlist,
     remove_wishlist,
+    remove_all_wishlists,
     add_filter,
     list_filters,
     remove_filter,
@@ -83,12 +84,9 @@ async def cb_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        wishlists = list_wishlists(db, user.id)
-        for w in wishlists:
-            db.delete(w)
-        db.commit()
+        ok, msg = remove_all_wishlists(db, user.id)
 
-    await q.edit_message_text("🔥 Todas as wishlists foram removidas.")
+    await q.edit_message_text("🔥 Todas as wishlists foram removidas." if ok else f"⚠️ {msg}")
 
 
 # ---------- Wishlist Add (wizard) ----------
