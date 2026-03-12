@@ -2,6 +2,7 @@ import logging
 import asyncio
 
 from telegram import Update
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import ContextTypes, Application, CommandHandler, CallbackQueryHandler
 
 from app.core.settings import settings
@@ -27,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _post_init(application: Application):
-    await setup_bot_commands(application.bot)
+    try:
+        await setup_bot_commands(application.bot)
+    except (TimedOut, NetworkError):
+        logger.warning("telegram command registration skipped due to network timeout", exc_info=True)
 
     # Ensure queued notifications are delivered even when APScheduler isn't running
     # (common in Windows/local runs where only the bot is started).
