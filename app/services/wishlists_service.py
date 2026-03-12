@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import delete, func
@@ -18,6 +19,9 @@ from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
+
+
+logger = logging.getLogger(__name__)
 
 # Fallback (quando não existir plano/assinatura no banco ainda)
 DEFAULT_MAX_WISHLISTS_PER_USER = 3
@@ -523,10 +527,14 @@ def remove_wishlist(db: Session, user_id, index: int):
 
     w = wishlists[index - 1]
     try:
-        # Deleção explícita de dependências para evitar cascatas implícitas.
-        db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == w.id))
-        db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == w.id))
-        db.delete(w)
+        _delete_wishlist_explicit(
+            db,
+            w,
+            actor_user_id=user_id,
+            caller="wishlists_service.remove_wishlist",
+            reason="user_requested_single_delete",
+            flow_context="wishlist_remove",
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -541,9 +549,14 @@ def remove_all_wishlists(db: Session, user_id):
     wishlists = list_wishlists(db, user_id)
     try:
         for w in wishlists:
-            db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == w.id))
-            db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == w.id))
-            db.delete(w)
+            _delete_wishlist_explicit(
+                db,
+                w,
+                actor_user_id=user_id,
+                caller="wishlists_service.remove_all_wishlists",
+                reason="user_requested_bulk_delete",
+                flow_context="wishlist_clear",
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -607,3 +620,36 @@ def remove_filter(db: Session, wishlist_id, index: int):
     db.delete(f)
     db.commit()
     return True, "Filtro removido."
+
+
+def _delete_wishlist_explicit(
+    db: Session,
+    wishlist: Wishlist,
+    *,
+    actor_user_id,
+    caller: str,
+    reason: str,
+    flow_context: str,
+) -> None:
+    """Centraliza remoção explícita de wishlist com auditoria obrigatória."""
+    payload = {
+        "wishlist_id": str(wishlist.id),
+        "user_id": str(getattr(wishlist, "user_id", actor_user_id)),
+        "actor_user_id": str(actor_user_id),
+        "caller": caller,
+        "reason": reason,
+        "flow_context": flow_context,
+    }
+    logger.info("wishlist_delete_explicit", extra=payload)
+    log(
+        db,
+        "warn",
+        "wishlist",
+        "wishlist_delete_explicit",
+        payload,
+        event_type="wishlist_delete_explicit",
+    )
+
+    db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == wishlist.id))
+    db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id))
+    db.delete(wishlist)

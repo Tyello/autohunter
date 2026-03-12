@@ -40,6 +40,20 @@ def _wishlist_help_text() -> str:
     )
 
 
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        w = list_wishlists(db, user.id)
+
+    await reply_text(
+        update,
+        "👋 Bem-vindo ao AutoHunter!\n\n"
+        f"Você tem {len(w)} wishlist(s) ativa(s).\n"
+        "Use /wishlist para listar, /wishlist_add para criar e /wishlist_help para ajuda."
+    )
+
 async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text(update, _wishlist_help_text())
 
