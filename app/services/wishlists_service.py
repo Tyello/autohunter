@@ -534,6 +534,22 @@ def remove_wishlist(db: Session, user_id, index: int):
     return True, "Wishlist removida."
 
 
+
+
+def remove_all_wishlists(db: Session, user_id):
+    """Remove todas as wishlists do usuário com limpeza explícita de dependências."""
+    wishlists = list_wishlists(db, user_id)
+    try:
+        for w in wishlists:
+            db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == w.id))
+            db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == w.id))
+            db.delete(w)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return False, "Erro ao remover wishlists. Remova dependências e tente novamente."
+    return True, f"{len(wishlists)} wishlists removidas."
+
 def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     field = (field or "").strip().lower()
     operator = (operator or "").strip().lower()

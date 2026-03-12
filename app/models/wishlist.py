@@ -25,5 +25,4 @@ class Wishlist(TimestampMixin, Base):
     tokens = relationship(
         "WishlistToken",
         back_populates="wishlist",
-        passive_deletes=True,
     )
