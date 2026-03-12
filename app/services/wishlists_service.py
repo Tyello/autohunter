@@ -4,7 +4,7 @@ import re
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import delete, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
+from app.models.wishlist_token import WishlistToken
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
@@ -521,14 +522,33 @@ def remove_wishlist(db: Session, user_id, index: int):
         return False, "Número inválido. Use /wishlist listar."
 
     w = wishlists[index - 1]
-    db.delete(w)
     try:
+        # Deleção explícita de dependências para evitar cascatas implícitas.
+        db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == w.id))
+        db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == w.id))
+        db.delete(w)
         db.commit()
     except Exception:
         db.rollback()
-        return False, "Erro ao remover wishlist."
+        return False, "Erro ao remover wishlist. Remova dependências e tente novamente."
     return True, "Wishlist removida."
 
+
+
+
+def remove_all_wishlists(db: Session, user_id):
+    """Remove todas as wishlists do usuário com limpeza explícita de dependências."""
+    wishlists = list_wishlists(db, user_id)
+    try:
+        for w in wishlists:
+            db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == w.id))
+            db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == w.id))
+            db.delete(w)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return False, "Erro ao remover wishlists. Remova dependências e tente novamente."
+    return True, f"{len(wishlists)} wishlists removidas."
 
 def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     field = (field or "").strip().lower()

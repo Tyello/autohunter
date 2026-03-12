@@ -26,7 +26,7 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
 
-        sa.ForeignKeyConstraint(["wishlist_id"], ["wishlists.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["wishlist_id"], ["wishlists.id"], ondelete="RESTRICT"),
     )
 
     op.create_index("ix_wishlist_filters_wishlist_id", "wishlist_filters", ["wishlist_id"])

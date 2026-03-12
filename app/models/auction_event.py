@@ -69,7 +69,7 @@ class AuctionEvent(Base):
                        onupdate=datetime.utcnow, nullable=False)
     
     # Relacionamentos
-    lots = relationship("AuctionLot", back_populates="event", cascade="all, delete-orphan")
+    lots = relationship("AuctionLot", back_populates="event")
     
     # Índices compostos
     __table_args__ = (

@@ -78,6 +78,10 @@ Este projeto usa Alembic:
 alembic upgrade head
 ```
 
+Os planos base (`free`, `pro`, `ultra`) são garantidos por bootstrap automático no código
+quando um usuário novo é criado. Mesmo assim, mantenha as migrations em dia para garantir
+que a tabela `plans` exista no mesmo banco apontado por `DATABASE_URL`.
+
 ### 4) Rodar componentes
 
 **Bot (Telegram):**

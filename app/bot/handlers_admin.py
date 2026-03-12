@@ -33,6 +33,13 @@ from app.services.wishlist_tokens_service import reindex_active_wishlists
 from app.services.wishlist_tokens_service import extract_tokens
 from app.health.explain import explain_queued_zero, top_buckets
 from app.services.admin_deploy_service import AdminDeployService, DeployActor
+from app.bot.admin_handlers_sources import (
+    admin_sources_dispatch as _admin_sources_dispatch_impl,
+    admin_sources_show as _admin_sources_show_impl,
+    admin_sources_set_simple as _admin_sources_set_simple_impl,
+    admin_sources_reset as _admin_sources_reset_impl,
+)
+from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 
 
 @dataclass
@@ -248,170 +255,26 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin deploy | /admin fb_sessions")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
-    """Subcomandos para operar SourceConfig (DB)."""
-    args = [a.strip() for a in (raw_args or []) if a.strip()]
-
-    if not args:
-        await _admin_sources(update, verbose=False)
-        return
-
-    # allow /admin sources verbose
-    if any(a.lower() in ("v", "-v", "verbose", "full", "details") for a in args):
-        await _admin_sources(update, verbose=True)
-        return
-
-    cmd = args[0].lower()
-
-    if cmd in ("list",):
-        await _admin_sources(update, verbose=False)
-        return
-
-    if cmd in ("show", "get") and len(args) >= 2:
-        await _admin_sources_show(update, args[1])
-        return
-
-    if cmd in ("enable", "on") and len(args) >= 2:
-        await _admin_sources_set_simple(update, args[1], "is_enabled", "true")
-        return
-
-    if cmd in ("disable", "off") and len(args) >= 2:
-        await _admin_sources_set_simple(update, args[1], "is_enabled", "false")
-        return
-
-    if cmd in ("sched", "schedule") and len(args) >= 3:
-        await _admin_sources_set_simple(update, args[1], "sched_minutes", args[2])
-        return
-
-    if cmd in ("cool", "cooldown") and len(args) >= 3:
-        await _admin_sources_set_simple(update, args[1], "cooldown_minutes", args[2])
-        return
-
-    if cmd in ("rate", "ratelimit", "rate_limit") and len(args) >= 3:
-        await _admin_sources_set_simple(update, args[1], "rate_limit_seconds", args[2])
-        return
-
-    if cmd == "proxy" and len(args) >= 3:
-        v = " ".join(args[2:])
-        if v.strip().lower() in ("off", "none", "null", "-"):
-            v = ""
-        await _admin_sources_set_simple(update, args[1], "proxy_server", v)
-        return
-
-    if cmd in ("fallback", "browser_fallback") and len(args) >= 3:
-        await _admin_sources_set_simple(update, args[1], "browser_fallback_enabled", args[2])
-        return
-
-    if cmd in ("force", "force_browser") and len(args) >= 3:
-        await _admin_sources_set_simple(update, args[1], "force_browser", args[2])
-        return
-
-    if cmd == "set" and len(args) >= 4:
-        source = args[1]
-        field = args[2]
-        value = " ".join(args[3:])
-        await _admin_sources_set_simple(update, source, field, value)
-        return
-
-    if cmd == "reset" and len(args) >= 2:
-        await _admin_sources_reset(update, args[1])
-        return
-
-    await update.message.reply_text(
-        "Uso:\n"
-        "/admin sources\n"
-        "/admin sources verbose\n"
-        "/admin sources show <source>\n"
-        "/admin sources enable <source>\n"
-        "/admin sources disable <source>\n"
-        "/admin sources sched <source> <minutes>\n"
-        "/admin sources cool <source> <minutes>\n"
-        "/admin sources rate <source> <seconds>\n"
-        "/admin sources proxy <source> <url|off>\n"
-        "/admin sources fallback <source> on|off\n"
-        "/admin sources force <source> on|off\n"
-        "/admin sources set <source> <field> <value>\n"
-        "/admin sources reset <source>"
+    return await _admin_sources_dispatch_impl(
+        update,
+        raw_args,
+        admin_sources_fn=_admin_sources,
+        admin_sources_show_fn=_admin_sources_show,
+        admin_sources_set_simple_fn=_admin_sources_set_simple,
+        admin_sources_reset_fn=_admin_sources_reset,
     )
 
 
 async def _admin_sources_show(update: Update, source: str):
-    with SessionLocal() as db:
-        ensure_source_configs(db)
-        cfg = get_source_config(db, source)
-        if not cfg:
-            await update.message.reply_text("Source não encontrada.")
-            return
-        lines = [
-            f"🧰 Admin — Source: {cfg.source}",
-            f"enabled={bool(cfg.is_enabled)}",
-            f"sched_minutes={int(cfg.sched_minutes or 0)}",
-            f"cooldown_minutes={int(cfg.cooldown_minutes or 0)}",
-            f"rate_limit_seconds={int(cfg.rate_limit_seconds or 0)}",
-            f"proxy_server={cfg.proxy_server or '-'}",
-            f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
-            f"force_browser={bool(cfg.force_browser)}",
-        ]
-        await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
+    return await _admin_sources_show_impl(update, source)
 
 
 async def _admin_sources_set_simple(update: Update, source: str, field: str, value: str):
-    try:
-        with SessionLocal() as db:
-            ensure_source_configs(db)
-            cfg = set_source_field(db, source, field, value)
-
-            snap = {
-                "source": cfg.source,
-                "enabled": bool(cfg.is_enabled),
-                "sched": int(cfg.sched_minutes or 0),
-                "cool": int(cfg.cooldown_minutes or 0),
-                "rate": int(cfg.rate_limit_seconds or 0),
-                "proxy": cfg.proxy_server or "-",
-                "fallback": bool(cfg.browser_fallback_enabled),
-                "force": bool(cfg.force_browser),
-            }
-
-            db.commit()
-
-        await update.message.reply_text(
-            sanitize_for_telegram(
-                f"✅ Atualizado {snap['source']}: {field}={value}\n"
-                f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
-                f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
-            )
-        )
-    except Exception as e:
-        await update.message.reply_text(sanitize_for_telegram(f"Erro: {e}"))
+    return await _admin_sources_set_simple_impl(update, source, field, value)
 
 
 async def _admin_sources_reset(update: Update, source: str):
-    try:
-        with SessionLocal() as db:
-            ensure_source_configs(db)
-            cfg = reset_source_config(db, source)
-
-            snap = {
-                "source": cfg.source,
-                "enabled": bool(cfg.is_enabled),
-                "sched": int(cfg.sched_minutes or 0),
-                "cool": int(cfg.cooldown_minutes or 0),
-                "rate": int(cfg.rate_limit_seconds or 0),
-                "proxy": cfg.proxy_server or "-",
-                "fallback": bool(cfg.browser_fallback_enabled),
-                "force": bool(cfg.force_browser),
-            }
-
-            db.commit()
-
-        await update.message.reply_text(
-            sanitize_for_telegram(
-                f"✅ Resetado {snap['source']} para defaults\n"
-                f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
-                f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
-            )
-        )
-    except Exception as e:
-        await update.message.reply_text(sanitize_for_telegram(f"Erro: {e}"))
+    return await _admin_sources_reset_impl(update, source)
 
 
 def _chunk_lines(text: str, max_len: int = 3600) -> List[str]:
@@ -1450,113 +1313,4 @@ async def _admin_fb_sessions(update: Update):
 
 
 async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args: list[str]):
-    sub = (args[0].lower() if args else "")
-    actor = DeployActor(
-        chat_id=update.effective_chat.id,
-        tg_user_id=(update.effective_user.id if update.effective_user else None),
-        username=(update.effective_user.username if update.effective_user else None),
-    )
-
-    with SessionLocal() as db:
-        service = AdminDeployService(db)
-        allowed, reason = service.is_allowed(actor)
-        if not allowed:
-            await update.message.reply_text(reason or "Sem permissão.")
-            return
-
-        if sub in ("", "preflight"):
-            try:
-                out = service.request_deploy(actor)
-            except ValueError as e:
-                await update.message.reply_text(str(e))
-                return
-            preflight = out["preflight"]
-            privilege_ready = bool(preflight.get("privilege_ready", True))
-            lines = [
-                "Deploy admin (preflight):",
-                f"- operation_id: {out['operation_id']}",
-                f"- branch: {preflight.get('branch')}",
-                f"- commit: {preflight.get('commit')}",
-                f"- working_tree: {preflight.get('working_tree')}",
-                f"- remote_ok: {'yes' if preflight.get('remote_ok') else 'no'}",
-                f"- remote_diff: {preflight.get('remote_diff')}",
-                f"- privilege_ready: {'yes' if privilege_ready else 'no'}",
-                f"- privilege_error_type: {preflight.get('privilege_error_type') or '-'}",
-            ]
-            if preflight.get("privilege_error_message"):
-                lines.append(f"- privilege_error_message: {preflight.get('privilege_error_message')}")
-            if preflight.get("working_tree") != "clean":
-                lines.append(
-                    "Deploy bloqueado no preflight: working tree dirty. "
-                    "Limpe/reverta arquivos runtime (state/cache/log) e rode /admin deploy novamente."
-                )
-            elif not preflight.get("remote_ok"):
-                lines.append("Deploy bloqueado no preflight: remoto indisponível (remote_ok=no).")
-            elif preflight.get("branch") in (None, "", "unknown") or preflight.get("commit") in (None, "", "unknown"):
-                lines.append("Deploy bloqueado no preflight: erro estrutural do host (estado git inválido).")
-            elif privilege_ready:
-                lines.extend([
-                    f"Confirme em até {out['expires_in']}s com:",
-                    f"/admin deploy confirm {out['operation_id']}",
-                ])
-            else:
-                lines.append("Deploy bloqueado no preflight. Corrija a configuração do host antes de confirmar.")
-            await update.message.reply_text("\n".join(lines))
-            return
-
-        if sub == "confirm":
-            operation_id = (args[1] if len(args) > 1 else "").strip()
-            if not operation_id:
-                await update.message.reply_text("Use: /admin deploy confirm <operation_id>")
-                return
-            await update.message.reply_text("Deploy iniciado. Aguardando execução do wrapper...")
-            try:
-                result = await service.confirm_deploy(actor, operation_id)
-                lines = [
-                    f"Deploy finalizado: {'OK' if result['ok'] else 'FALHA'}",
-                    f"- operation_id: {result['operation_id']}",
-                    f"- branch: {result.get('branch') or '-'}",
-                    f"- before: {result.get('before_commit') or '-'}",
-                    f"- after: {result.get('after_commit') or '-'}",
-                    f"- summary: {result.get('summary') or '-'}",
-                ]
-                if result.get("output_tail"):
-                    lines.append("- output_tail:\n" + sanitize_for_telegram(result["output_tail"]))
-                await update.message.reply_text("\n".join(lines))
-            except ValueError as e:
-                await update.message.reply_text(str(e))
-            return
-
-        if sub == "status":
-            out = service.deploy_status()
-            last = out.get("last")
-            current = out.get("current")
-            if not last:
-                await update.message.reply_text("Deploy status: idle\nÚltimo deploy (UTC): -")
-                return
-
-            duration = "-"
-            if last.started_at and last.finished_at:
-                duration = f"{int((last.finished_at - last.started_at).total_seconds())}s"
-
-            last_deploy_at = _fmt_dt(last.finished_at or last.started_at or last.requested_at)
-            lines = [
-                f"Deploy status: {out.get('status')}",
-                f"Último deploy (UTC): {last_deploy_at}",
-                f"Último resultado: {last.status}",
-                f"Branch: {last.branch or '-'}",
-                f"Before: {last.before_commit or '-'}",
-                f"After: {last.after_commit or '-'}",
-                f"Duração: {duration}",
-                f"Resumo: {last.summary or '-'}",
-            ]
-            if current:
-                lines.extend([
-                    "Operação em andamento:",
-                    f"- operation_id: {current.operation_id}",
-                    f"- started_at_utc: {_fmt_dt(current.started_at)}",
-                ])
-            await update.message.reply_text("\n".join(lines))
-            return
-
-        await update.message.reply_text("Use: /admin deploy | /admin deploy confirm <operation_id> | /admin deploy status")
+    return await _admin_deploy_impl(update, args, fmt_dt=_fmt_dt)

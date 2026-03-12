@@ -5,6 +5,11 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base, TimestampMixin
 
+
+PLAN_CODE_FREE = "free"
+PLAN_CODE_PRO = "pro"
+PLAN_CODE_ULTRA = "ultra"
+
 class Plan(TimestampMixin, Base):
     __tablename__ = "plans"
 

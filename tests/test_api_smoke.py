@@ -76,3 +76,11 @@ def test_admin_health_includes_olx_snapshot(client):
     # keep it robust: just validate some stable keys
     assert "browser_fallback_24h" in payload["olx"]
     assert "force_browser_config_enabled" in payload["olx"]
+
+
+def test_listings_limit_validation(client):
+    resp = client.get("/listings", params={"limit": 0})
+    assert resp.status_code == 422
+
+    resp = client.get("/listings", params={"limit": 500})
+    assert resp.status_code == 422

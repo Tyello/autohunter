@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
+from app.core.settings import settings
 from app.services.limits_service import (
     can_send_more_today,
     get_active_subscription_limit_for_user,
@@ -26,18 +27,31 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
     failed = 0
     retried = 0
     discarded = 0
+    commit_batch_size = max(1, int(getattr(settings, "notification_sender_commit_batch_size", 1) or 1))
+    pending_mutations = 0
+
+    def _flush(force: bool = False):
+        nonlocal pending_mutations
+        if pending_mutations <= 0:
+            return
+        if force or pending_mutations >= commit_batch_size:
+            db.commit()
+            pending_mutations = 0
 
     for n in queued:
         user = n.user
         if not user or not getattr(user, "telegram_chat_id", None):
             mark_notification_failed_no_destination(n)
-            db.commit()
+            pending_mutations += 1
+            _flush()
             failed += 1
             continue
 
         if not can_send_more_today(db, n.user_id):
             # política (não é erro)
             mark_suppressed_reason(db, n.id, "daily_limit_reached")
+            pending_mutations += 1
+            _flush()
 
             # aviso 1x por dia (no fuso do usuário)
             user = n.user
@@ -46,7 +60,8 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
                 ok = send_daily_limit_notice_http(user, limit)
                 if ok:
                     user.last_daily_limit_notice_at = datetime.now(timezone.utc)
-                    db.commit()
+                    pending_mutations += 1
+                    _flush()
 
             blocked += 1
             continue
@@ -55,17 +70,21 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
         try:
             sender_fn(n, listing, user)
             mark_notification_sent(n)
-            db.commit()
+            pending_mutations += 1
+            _flush()
             sent += 1
         except Exception as e:
             outcome = mark_notification_delivery_error(n, error_message=str(e))
-            db.commit()
+            pending_mutations += 1
+            _flush()
             if outcome == "retry_scheduled":
                 retried += 1
             elif outcome == "discarded":
                 discarded += 1
             else:
                 failed += 1
+
+    _flush(force=True)
 
     log(db, "info", component, "send queued notifications result", {
         "claimed": len(queued),
@@ -74,9 +93,9 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
         "failed": failed,
         "retried": retried,
         "discarded": discarded,
+        "commit_batch_size": commit_batch_size,
     })
 
-    # persiste o SystemLog (o sender já faz commits por notificação)
     db.commit()
 
     return sent
