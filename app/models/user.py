@@ -24,4 +24,4 @@ class User(TimestampMixin, Base):
 
     account = relationship("Account", back_populates="users")
 
-    wishlists = relationship("Wishlist", back_populates="user", cascade="all, delete-orphan")
+    wishlists = relationship("Wishlist", back_populates="user")

@@ -25,9 +25,9 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
 
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["wishlist_id"], ["wishlists.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["car_listing_id"], ["car_listings.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["car_listing_id"], ["car_listings.id"], ondelete="RESTRICT"),
     )
 
     op.create_index("ix_notifications_user_id", "notifications", ["user_id"])

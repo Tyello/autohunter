@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS wishlist_tokens (
   id uuid PRIMARY KEY,
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
-  wishlist_id uuid NOT NULL REFERENCES wishlists(id) ON DELETE CASCADE,
+  wishlist_id uuid NOT NULL REFERENCES wishlists(id) ON DELETE RESTRICT,
   token text NOT NULL
 );
 
