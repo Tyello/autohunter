@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -25,6 +26,30 @@ def test_no_model_fk_uses_cascade_delete() -> None:
                 cascades.append((table.name, str(fk.target_fullname)))
 
     assert cascades == []
+
+
+def test_no_orm_relationship_uses_delete_cascade() -> None:
+    dangerous: list[str] = []
+
+    for mapper in Base.registry.mappers:
+        for rel in mapper.relationships:
+            cascade_options = {opt.lower() for opt in rel.cascade}
+            if "delete" in cascade_options or "delete-orphan" in cascade_options:
+                dangerous.append(f"{mapper.class_.__name__}.{rel.key}={sorted(cascade_options)}")
+
+    assert dangerous == []
+
+
+def test_no_migration_reintroduces_on_delete_cascade() -> None:
+    migrations_dir = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+    offenders: list[str] = []
+
+    for migration_file in sorted(migrations_dir.glob("*.py")):
+        content = migration_file.read_text(encoding="utf-8").upper()
+        if "ONDELETE=\"CASCADE\"" in content or "ONDELETE='CASCADE'" in content:
+            offenders.append(str(migration_file.relative_to(Path(__file__).resolve().parents[1])))
+
+    assert offenders == []
 
 
 def test_delete_user_with_wishlist_is_restricted(db):
