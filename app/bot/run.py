@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes, Application, CommandHandler, CallbackQuer
 from app.core.settings import settings
 
 from app.bot.commands import setup_bot_commands
-from app.bot.handlers_core import cmd_help, cmd_status, cmd_version, cmd_wishlist_help
+from app.bot.handlers_core import cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help
 from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit
 from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_admin import cmd_admin
@@ -90,6 +90,7 @@ def main():
     # core
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("debug", cmd_debug))
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("wishlist_help", cmd_wishlist_help))
     app.add_handler(CommandHandler("status", cmd_status))

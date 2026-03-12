@@ -11,6 +11,7 @@ from app.db.base import Base
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
+from app.models.system_log import SystemLog
 from app.services.wishlists_service import remove_all_wishlists, remove_wishlist
 
 
@@ -123,3 +124,48 @@ def test_remove_all_wishlists_service_deletes_children_explicitly(db):
     ok, _msg = remove_all_wishlists(db, user.id)
     assert ok is True
     assert db.query(Wishlist).filter(Wishlist.user_id == user.id).count() == 0
+
+
+def test_remove_wishlist_service_writes_explicit_audit_log(db):
+    _enable_fk(db)
+
+    user = User(id=uuid.uuid4(), telegram_chat_id=999004)
+    db.add(user)
+    db.flush()
+
+    wishlist = Wishlist(user_id=user.id, query="tiguan", is_active=True)
+    db.add(wishlist)
+    db.commit()
+
+    ok, _msg = remove_wishlist(db, user.id, 1)
+    assert ok is True
+
+    evt = (
+        db.query(SystemLog)
+        .filter(SystemLog.event_type == "wishlist_delete_explicit")
+        .order_by(SystemLog.created_at.desc())
+        .first()
+    )
+    assert evt is not None
+    assert evt.payload["wishlist_id"] == str(wishlist.id)
+    assert evt.payload["user_id"] == str(user.id)
+    assert evt.payload["caller"] == "wishlists_service.remove_wishlist"
+    assert evt.payload["flow_context"] == "wishlist_remove"
+
+
+def test_scheduler_and_runall_paths_do_not_call_wishlist_remove_services() -> None:
+    root = Path(__file__).resolve().parents[1]
+    offenders: list[str] = []
+    targets = [
+        root / "app" / "scheduler" / "run.py",
+        root / "app" / "scheduler" / "jobs.py",
+        root / "app" / "services" / "source_execution_service.py",
+        root / "app" / "bot" / "handlers_admin.py",
+    ]
+
+    for path in targets:
+        content = path.read_text(encoding="utf-8")
+        if "remove_wishlist(" in content or "remove_all_wishlists(" in content:
+            offenders.append(str(path.relative_to(root)))
+
+    assert offenders == []

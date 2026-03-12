@@ -62,6 +62,7 @@ async def cmd_wishlist_remove(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def cmd_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["wishlist_clear_armed"] = True
     kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Sim, limpar", callback_data="W:CLEAR:YES"),
@@ -80,7 +81,12 @@ async def cb_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_answer_callback(q)
 
     if q.data == "W:CLEAR:NO":
+        context.user_data.pop("wishlist_clear_armed", None)
         await q.edit_message_text("Cancelado.")
+        return
+
+    if not bool(context.user_data.pop("wishlist_clear_armed", False)):
+        await q.edit_message_text("Confirmação expirada. Use /wishlist_clear novamente.")
         return
 
     with SessionLocal() as db:
