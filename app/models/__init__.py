@@ -20,6 +20,7 @@ from .scrape_job import ScrapeJob
 from .fb_session import FBSession
 from .fb_agent_session import FBAgentSession
 from .admin_deploy_audit import AdminDeployAudit
+from .wishlist_listing_activity import WishlistListingActivity
 
 __all__ = [
     "User",
@@ -44,4 +45,5 @@ __all__ = [
     "FBSession",
     "FBAgentSession",
     "AdminDeployAudit",
+    "WishlistListingActivity",
 ]
