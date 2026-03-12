@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -76,7 +77,7 @@ async def cmd_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cb_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
+    await _safe_answer_callback(q)
 
     if q.data == "W:CLEAR:NO":
         await q.edit_message_text("Cancelado.")
@@ -92,6 +93,16 @@ async def cb_wishlist_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- Wishlist Add (wizard) ----------
 
 WADD_QUERY = 1
+
+
+async def _safe_answer_callback(q) -> None:
+    try:
+        await q.answer()
+    except BadRequest as exc:
+        msg = str(exc).lower()
+        if "query is too old" in msg or "query id is invalid" in msg:
+            return
+        raise
 
 
 def _confirm_kb() -> InlineKeyboardMarkup:
@@ -155,7 +166,7 @@ async def cmd_wishlist_add_on_query(update: Update, context: ContextTypes.DEFAUL
 
 async def cb_wishlist_add_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
+    await _safe_answer_callback(q)
 
     if q.data == "W:ADD:CANCEL":
         context.user_data.pop("wadd_query", None)

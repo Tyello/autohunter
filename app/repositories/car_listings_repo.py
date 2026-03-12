@@ -1,9 +1,13 @@
+from datetime import datetime, timezone
+import re
+import uuid
+
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func, case, literal_column
-from app.models.car_listing import CarListing
+from sqlalchemy.exc import ProgrammingError
 
-import re
+from app.models.car_listing import CarListing
 
 
 _RE_KM_IN_TITLE = re.compile(r"\b(\d{1,3}(?:\.\d{3})*|\d+)\s*km\b", re.I)
@@ -89,6 +93,149 @@ def _normalize_controlled_fields(listing: dict) -> dict:
     out["listing_type"] = listing_type if listing_type in _LISTING_TYPE_ALLOWED else "marketplace"
 
     return out
+
+
+def _prefer_title(existing: str | None, incoming: str | None, source: str | None) -> str | None:
+    if incoming is None:
+        return existing
+    source = (source or "").lower()
+    if source == "gogarage":
+        return incoming
+    if source == "turboclass":
+        if existing is None or len(incoming) > (len(existing) + 3):
+            return incoming
+        return existing
+
+    existing_l = (existing or "").lower()
+    looks_bad = (
+        existing is None
+        or len(existing) < 6
+        or existing_l.startswith("link para")
+        or " visto" in existing_l
+        or " pts" in existing_l
+        or " pontos" in existing_l
+        or "comparar" in existing_l
+        or existing_l.startswith("reservado")
+        or "| a" in existing_l
+        or existing_l.startswith("comprar")
+    )
+    return incoming if looks_bad else existing
+
+
+def _prefer_thumbnail(existing: str | None, incoming: str | None) -> str | None:
+    if existing is None and incoming is not None:
+        return incoming
+    if incoming is None:
+        return existing
+
+    existing_l = (existing or "").lower()
+    incoming_l = incoming.lower()
+    looks_bad = (
+        "logo_icarros_compartilhar" in existing_l
+        or "/comum/imagens/logo" in existing_l
+        or "thumb" in existing_l
+        or "fit-in/320" in existing_l
+        or "fit-in/480" in existing_l
+    )
+    if looks_bad and "logo_icarros_compartilhar" not in incoming_l:
+        return incoming
+    return existing
+
+
+def _is_missing_on_conflict_constraint(exc: ProgrammingError) -> bool:
+    msg = str(getattr(exc, "orig", exc)).lower()
+    return "there is no unique or exclusion constraint matching the on conflict specification" in msg
+
+
+def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, with_stats: bool):
+    now = datetime.now(timezone.utc)
+    ids: list[uuid.UUID] = []
+    inserted_new = 0
+    updated = 0
+
+    for listing in listings:
+        source = listing.get("source")
+        external_id = listing.get("external_id")
+        if not source or not external_id:
+            continue
+
+        row = (
+            db.query(CarListing)
+            .filter(CarListing.source == source, CarListing.external_id == external_id)
+            .order_by(CarListing.created_at.asc())
+            .first()
+        )
+
+        if row is None:
+            row = CarListing(
+                id=uuid.uuid4(),
+                source=source,
+                external_id=external_id,
+                title=listing.get("title"),
+                url=listing.get("url"),
+                thumbnail_url=listing.get("thumbnail_url"),
+                price=listing.get("price"),
+                currency=listing.get("currency") or "BRL",
+                location=listing.get("location"),
+                extras=listing.get("extras") or {},
+                raw_payload=listing.get("raw_payload"),
+                listing_type=listing.get("listing_type") or "marketplace",
+                extractor_version=listing.get("extractor_version"),
+                year=listing.get("year"),
+                mileage_km=listing.get("mileage_km"),
+                fuel_type=listing.get("fuel_type"),
+                transmission=listing.get("transmission"),
+                make=listing.get("make"),
+                model=listing.get("model"),
+                version=listing.get("version"),
+                seller_type=listing.get("seller_type"),
+                city=listing.get("city"),
+                state=listing.get("state"),
+                color=listing.get("color"),
+                is_sold=bool(listing.get("is_sold")),
+                sold_at=listing.get("sold_at"),
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(row)
+            db.flush()
+            inserted_new += 1
+        else:
+            row.title = _prefer_title(row.title, listing.get("title"), row.source)
+            row.url = listing.get("url") or row.url
+            row.thumbnail_url = _prefer_thumbnail(row.thumbnail_url, listing.get("thumbnail_url"))
+            row.price = row.price if row.price is not None else listing.get("price")
+            row.location = row.location if row.location is not None else listing.get("location")
+            row.year = row.year if row.year is not None else listing.get("year")
+            row.make = row.make if row.make is not None else listing.get("make")
+            row.model = row.model if row.model is not None else listing.get("model")
+            row.mileage_km = row.mileage_km if row.mileage_km is not None else listing.get("mileage_km")
+            row.fuel_type = row.fuel_type if row.fuel_type is not None else listing.get("fuel_type")
+            row.transmission = row.transmission if row.transmission is not None else listing.get("transmission")
+            row.version = row.version if row.version is not None else listing.get("version")
+            row.seller_type = row.seller_type if row.seller_type is not None else listing.get("seller_type")
+            row.city = row.city if row.city is not None else listing.get("city")
+            row.state = row.state if row.state is not None else listing.get("state")
+            row.color = row.color if row.color is not None else listing.get("color")
+            row.raw_payload = row.raw_payload if row.raw_payload is not None else listing.get("raw_payload")
+            row.extractor_version = row.extractor_version if row.extractor_version is not None else listing.get("extractor_version")
+            row.is_sold = bool(row.is_sold) or bool(listing.get("is_sold"))
+            if row.sold_at is None and listing.get("sold_at") is not None:
+                row.sold_at = listing.get("sold_at")
+            row.updated_at = now
+            updated += 1
+
+        ids.append(row.id)
+
+    if not with_stats:
+        return ids
+
+    return {
+        "ids": ids,
+        "inserted_new": inserted_new,
+        "updated": updated,
+        "upserted": len(ids),
+    }
 
 
 def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_stats: bool = False):
@@ -253,7 +400,13 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
     # so reference it as a literal SQL column in RETURNING.
     inserted_expr = (literal_column("xmax") == 0).label("inserted")
     stmt = stmt.returning(CarListing.id, inserted_expr)
-    result = db.execute(stmt)
+    try:
+        result = db.execute(stmt)
+    except ProgrammingError as exc:
+        if not _is_missing_on_conflict_constraint(exc):
+            raise
+        db.rollback()
+        return _fallback_upsert_without_constraint(db, listings, with_stats=with_stats)
     rows = result.fetchall()
     ids = [row[0] for row in rows]
 
