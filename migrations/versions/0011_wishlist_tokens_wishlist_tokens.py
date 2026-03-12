@@ -24,7 +24,7 @@ def upgrade():
         sa.Column("token", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("wishlist_id", "token", name="pk_wishlist_tokens"),
-        sa.ForeignKeyConstraint(["wishlist_id"], ["wishlists.id"], ondelete="CASCADE", name="fk_wishlist_tokens_wishlist_id"),
+        sa.ForeignKeyConstraint(["wishlist_id"], ["wishlists.id"], ondelete="RESTRICT", name="fk_wishlist_tokens_wishlist_id"),
     )
     # Fast lookup: token -> wishlists
     op.create_index("ix_wishlist_tokens_token", "wishlist_tokens", ["token"], unique=False)

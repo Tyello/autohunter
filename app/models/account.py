@@ -13,6 +13,6 @@ class Account(TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    members = relationship("AccountMember", back_populates="account", cascade="all, delete-orphan")
-    subscriptions = relationship("Subscription", back_populates="account", cascade="all, delete-orphan")
+    members = relationship("AccountMember", back_populates="account")
+    subscriptions = relationship("Subscription", back_populates="account")
     users = relationship("User", back_populates="account")

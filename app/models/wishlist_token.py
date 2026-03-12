@@ -15,7 +15,7 @@ class WishlistToken(Base):
 
     wishlist_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("wishlists.id", ondelete="CASCADE"),
+        ForeignKey("wishlists.id", ondelete="RESTRICT"),
         primary_key=True,
         nullable=False,
     )
