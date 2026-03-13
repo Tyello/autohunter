@@ -213,6 +213,13 @@ class Settings(BaseSettings):
     source_backoff_max_minutes: int = 720
     source_backoff_jitter_seconds: int = 20
 
+    # Source/scheduler staleness diagnostics
+    source_stale_factor: float = 2.0
+    source_stale_min_minutes: int = 180
+    scheduler_heartbeat_stale_minutes: int = 15
+    scheduler_global_stale_min_sources: int = 3
+    scheduler_global_stale_ratio: float = 0.6
+
 
     # Autopilot (observabilidade + detecção de regressões)
     autopilot_enabled: bool = True
