@@ -13,9 +13,13 @@ from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.services.app_kv_service import get_kv, set_kv
 from app.services.admin_alerts_service import send_admin_text
+from app.models.source_config import SourceConfig
+from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
+from app.services.system_logs_service import log
 
 
 KV_KEY = "admin_monitor:cursor"
+KV_KEY_GLOBAL_STALE = "admin_monitor:global_stale"
 
 
 def _utcnow() -> datetime:
@@ -120,6 +124,46 @@ def job_admin_monitor() -> None:
             .all()
         )
 
+        # 3) staleness snapshot (source + global scheduler)
+        configs = db.query(SourceConfig).all()
+        states = {s.source: s for s in db.query(SourceState).all()}
+        stale_rows: list[tuple[str, int | None, int, int | None]] = []
+        for cfg in configs:
+            if not bool(cfg.is_enabled):
+                continue
+            st = states.get(cfg.source)
+            eval_ = evaluate_source_staleness(
+                now=now,
+                last_run_at=(st.last_run_at if st else None),
+                sched_minutes=int(cfg.sched_minutes or 0),
+                factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0),
+                min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180),
+            )
+            if eval_.stale:
+                stale_rows.append((cfg.source, eval_.age_minutes, eval_.threshold_minutes, eval_.overdue_minutes))
+
+        last_hb = (
+            db.query(SystemLog)
+            .filter(SystemLog.component == "scheduler")
+            .filter(SystemLog.message == "heartbeat")
+            .order_by(SystemLog.created_at.desc())
+            .first()
+        )
+        last_hb_at = getattr(last_hb, "created_at", None)
+        hb_stale = heartbeat_is_stale(
+            now,
+            last_hb_at,
+            stale_after_minutes=int(getattr(settings, "scheduler_heartbeat_stale_minutes", 15) or 15),
+        )
+
+        enabled_count = sum(1 for c in configs if bool(c.is_enabled))
+        stale_count = len(stale_rows)
+        stale_ratio = (stale_count / enabled_count) if enabled_count else 0.0
+        is_global_stale = (
+            stale_count >= int(getattr(settings, "scheduler_global_stale_min_sources", 3) or 3)
+            and stale_ratio >= float(getattr(settings, "scheduler_global_stale_ratio", 0.6) or 0.6)
+        ) or hb_stale
+
         # Avança cursor já (evita loop se falhar envio)
         _set_cursor(db, now)
         db.commit()
@@ -141,6 +185,49 @@ def job_admin_monitor() -> None:
                 f"err: {(err[:240] + ('…' if len(err) > 240 else '')) or '-'}"
             )
             send_admin_text(msg)
+
+        for source, age_m, threshold_m, overdue_m in stale_rows:
+            err = f"source stale age={age_m}m threshold={threshold_m}m overdue={overdue_m}m"
+            if not _should_alert_source(db, source, "stale", err, now):
+                continue
+            send_admin_text(f"⚠️ Fonte {source}: STALE\n{err}")
+
+        prev_global = get_kv(db, KV_KEY_GLOBAL_STALE) or {}
+        prev_state = bool(prev_global.get("is_global_stale", False))
+        if is_global_stale and not prev_state:
+            send_admin_text(
+                "🚨 Scheduler possivelmente stale/parado\n"
+                f"stale_sources={stale_count}/{enabled_count} ({int(round(stale_ratio * 100))}%)\n"
+                f"last_heartbeat={_iso(last_hb_at) if last_hb_at else '-'}"
+            )
+            log(
+                db,
+                "warn",
+                "admin_monitor",
+                "scheduler_global_stale_detected",
+                {
+                    "stale_sources": stale_count,
+                    "enabled_sources": enabled_count,
+                    "stale_ratio": stale_ratio,
+                    "last_heartbeat": _iso(last_hb_at) if last_hb_at else None,
+                },
+                event_type="scheduler_global_stale",
+            )
+        if (not is_global_stale) and prev_state:
+            log(
+                db,
+                "info",
+                "admin_monitor",
+                "scheduler_global_stale_recovered",
+                {
+                    "stale_sources": stale_count,
+                    "enabled_sources": enabled_count,
+                    "stale_ratio": stale_ratio,
+                    "last_heartbeat": _iso(last_hb_at) if last_hb_at else None,
+                },
+                event_type="scheduler_global_stale",
+            )
+        set_kv(db, KV_KEY_GLOBAL_STALE, {"is_global_stale": is_global_stale, "updated_at": _iso(now)})
 
         # Digest de system logs (evita spam, manda 1 mensagem compacta)
         limit = int(getattr(settings, "admin_errors_digest_limit", 10) or 10)

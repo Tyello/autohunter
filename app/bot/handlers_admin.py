@@ -27,6 +27,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
+from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
@@ -744,10 +745,25 @@ async def _admin_sources(update: Update, verbose: bool = False):
             a.avg_found = int(sum_found / sum_cnt_found) if sum_cnt_found else None
             aggs[src] = a
 
+        last_scheduler_heartbeat = (
+            db.query(SystemLog)
+            .filter(SystemLog.component == "scheduler")
+            .filter(SystemLog.message == "heartbeat")
+            .order_by(SystemLog.created_at.desc())
+            .first()
+        )
+
     lines: List[str] = []
+    stale_sources = 0
+    enabled_sources = 0
     lines.append("🧰 Admin — Sources")
     lines.append(f"Agora (UTC): {_fmt_dt(now)}")
     lines.append(f"Janela: 24h desde {_fmt_dt(since)}")
+    hb_at = getattr(last_scheduler_heartbeat, "created_at", None)
+    hb_stale = heartbeat_is_stale(now, hb_at, stale_after_minutes=int(getattr(settings, "scheduler_heartbeat_stale_minutes", 15) or 15))
+    lines.append(f"Scheduler heartbeat: {_fmt_dt(hb_at)}")
+    if hb_stale:
+        lines.append("⚠️ scheduler heartbeat stale (orquestrador pode estar parado)")
     lines.append("")
 
     for i, p in enumerate(plugins, start=1):
@@ -775,6 +791,9 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 state = f"⏳ backoff {mins}m" if mins is not None else "⏳ backoff"
             else:
                 state = "✅ ok"
+
+        if enabled and implemented:
+            enabled_sources += 1
 
         flags: list[str] = []
         flags.append("impl✅" if implemented else "impl❌")
@@ -807,6 +826,21 @@ async def _admin_sources(update: Update, verbose: bool = False):
             why = "disabled via source_configs"
             action = "use: /admin sources enable <source>"
         else:
+            last_run_at = None
+            if st and st.last_run_at:
+                last_run_at = st.last_run_at
+            elif lr and lr.created_at:
+                last_run_at = lr.created_at
+            stale_eval = evaluate_source_staleness(
+                now=now,
+                last_run_at=last_run_at,
+                sched_minutes=sched_m,
+                factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0),
+                min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180),
+            )
+            if stale_eval.stale:
+                stale_sources += 1
+
             if lr_cause is None:
                 kind = "ERR"
                 emoji = "❔"
@@ -856,8 +890,25 @@ async def _admin_sources(update: Update, verbose: bool = False):
                     why = _short(lr_cause.error, 120)
                     action = "ver logs"
 
+            if stale_eval.stale:
+                kind = "STALE"
+                emoji = "🟤"
+                state = f"🟤 stale {stale_eval.age_minutes}m" if stale_eval.age_minutes is not None else "🟤 stale"
+                if stale_eval.age_minutes is None:
+                    why = f"sem last_run_at; threshold={stale_eval.threshold_minutes}m"
+                else:
+                    why = (
+                        f"sem run recente: age={stale_eval.age_minutes}m "
+                        f"threshold={stale_eval.threshold_minutes}m overdue={stale_eval.overdue_minutes}m"
+                    )
+                action = "verificar scheduler/orquestrador e fila global"
+
         ok_pct = int(round((a.success / a.total) * 100)) if a.total else 0
         snap = f"24h ok={a.success}/{a.total} ({ok_pct}%) err={a.error} blk={a.blocked} skip={a.skipped}"
+        expected_24h = int((24 * 60) / sched_m) if sched_m and sched_m > 0 else None
+        if expected_24h:
+            cov_pct = int(round((a.total / expected_24h) * 100)) if expected_24h else 0
+            snap += f" runs={a.total}/{expected_24h} ({cov_pct}%)"
         if a.avg_duration_ms is not None:
             snap += f" avg={a.avg_duration_ms}ms"
 
@@ -923,6 +974,14 @@ async def _admin_sources(update: Update, verbose: bool = False):
             lines.append(f"   err_full: {_short(lr.error, 420)}")
 
         lines.append("")
+
+    stale_ratio = (stale_sources / enabled_sources) if enabled_sources else 0.0
+    stale_min_sources = int(getattr(settings, "scheduler_global_stale_min_sources", 3) or 3)
+    stale_ratio_cut = float(getattr(settings, "scheduler_global_stale_ratio", 0.6) or 0.6)
+    if stale_sources > 0:
+        lines.insert(4, f"Stale sources: {stale_sources}/{enabled_sources} ({int(round(stale_ratio * 100))}%)")
+    if stale_sources >= stale_min_sources and stale_ratio >= stale_ratio_cut:
+        lines.insert(5, "🚨 indício global: várias sources stale simultaneamente (scheduler/orquestrador)")
 
     text = "\n".join(lines)
     await _reply_chunked(update, text)
