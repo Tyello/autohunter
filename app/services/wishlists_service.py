@@ -39,6 +39,11 @@ KNOWN_SOURCES = {
     "facebook_marketplace",
 }
 
+KNOWN_STATES = {
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+    "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+}
+
 # Aceita:
 #  - "até 2004" / "ate 2004" / "ano<=2004"
 #  - "a partir de 2014" / "ano>=2014"
@@ -568,14 +573,17 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     operator = (operator or "").strip().lower()
     value = (value or "").strip()
 
-    if field not in ("price", "source", "year"):
-        return False, "Campo inválido. Use: price | year | source"
+    if field not in ("price", "source", "year", "color", "city", "state"):
+        return False, "Campo inválido. Use: price | year | source | color | city | state"
 
     if field in ("price", "year") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq"):
         return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq"
 
     if field == "source" and operator not in ("eq", "neq"):
         return False, "Operador inválido para source. Use: eq|neq"
+
+    if field in ("color", "city", "state") and operator not in ("eq", "neq"):
+        return False, f"Operador inválido para {field}. Use: eq|neq"
 
     if field == "source":
         v = value.strip().lower()
@@ -591,6 +599,17 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         if y < 1900 or y > 2100:
             return False, "Ano fora do intervalo (1900-2100)."
         value = str(y)
+
+    if field in ("color", "city"):
+        if len(value.strip()) < 2:
+            return False, f"Valor inválido para {field}."
+        value = value.strip()
+
+    if field == "state":
+        uf = value.strip().upper()
+        if uf not in KNOWN_STATES:
+            return False, "Valor inválido para state. Use UF (ex: SP, RJ, MG)."
+        value = uf
 
     row = WishlistFilter(wishlist_id=wishlist_id, field=field, operator=operator, value=value)
     db.add(row)

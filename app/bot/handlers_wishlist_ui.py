@@ -256,7 +256,8 @@ async def cmd_wishlist_filter_add(update: Update, context: ContextTypes.DEFAULT_
         await reply_text(
             update,
             "Use: /wishlist_filter_add <n> <campo> <op> <valor>\n"
-            "Ex: /wishlist_filter_add 1 year lte 2005"
+            "Ex: /wishlist_filter_add 1 year lte 2005\n"
+            "Ex: /wishlist_filter_add 1 city eq Sao Paulo"
         )
         return
 
