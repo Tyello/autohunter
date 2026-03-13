@@ -1,5 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
+from zoneinfo import ZoneInfo
 
 import threading
 from datetime import datetime, timezone, timedelta
@@ -292,6 +293,20 @@ def start_scheduler() -> BackgroundScheduler:
         "interval",
         seconds=settings.sched_sender_seconds,
         id="sender_job",
+        replace_existing=True,
+        executor="sender",
+    )
+
+    # Digest semanal para usuários (sábado 10:00 no timezone padrão do produto)
+    from app.scheduler.weekly_wishlist_digest_job import job_weekly_wishlist_digest
+    sched.add_job(
+        job_weekly_wishlist_digest,
+        "cron",
+        day_of_week="sat",
+        hour=10,
+        minute=0,
+        timezone=ZoneInfo(getattr(settings, "default_user_timezone", "America/Sao_Paulo")),
+        id="weekly_wishlist_digest",
         replace_existing=True,
         executor="sender",
     )
