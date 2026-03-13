@@ -32,6 +32,58 @@ _STOPWORDS = {
 }
 
 _RE_YEAR_TOKEN = re.compile(r"^(19\d{2}|20\d{2})$")
+_RE_UF = re.compile(r"\b([A-Za-z]{2})\b")
+
+_STATE_NAME_TO_UF = {
+    "acre": "AC",
+    "alagoas": "AL",
+    "amapa": "AP",
+    "amazonas": "AM",
+    "bahia": "BA",
+    "ceara": "CE",
+    "distrito federal": "DF",
+    "espirito santo": "ES",
+    "goias": "GO",
+    "maranhao": "MA",
+    "mato grosso": "MT",
+    "mato grosso do sul": "MS",
+    "minas gerais": "MG",
+    "para": "PA",
+    "paraiba": "PB",
+    "parana": "PR",
+    "pernambuco": "PE",
+    "piaui": "PI",
+    "rio de janeiro": "RJ",
+    "rio grande do norte": "RN",
+    "rio grande do sul": "RS",
+    "rondonia": "RO",
+    "roraima": "RR",
+    "santa catarina": "SC",
+    "sao paulo": "SP",
+    "sergipe": "SE",
+    "tocantins": "TO",
+}
+
+_COLOR_ALIASES = {
+    "preto": "preto",
+    "negro": "preto",
+    "branco": "branco",
+    "branca": "branco",
+    "prata": "prata",
+    "cinza": "cinza",
+    "grafite": "cinza",
+    "chumbo": "cinza",
+    "vermelho": "vermelho",
+    "vinho": "vermelho",
+    "azul": "azul",
+    "verde": "verde",
+    "amarelo": "amarelo",
+    "laranja": "laranja",
+    "marrom": "marrom",
+    "bege": "bege",
+    "dourado": "dourado",
+    "ouro": "dourado",
+}
 
 def _is_year_token(t: str) -> bool:
     return bool(t) and bool(_RE_YEAR_TOKEN.match(t))
@@ -321,6 +373,78 @@ def _cmp_int(a: int, op: str, b: int) -> bool:
     return True
 
 
+def _norm_state(value: str | None) -> str | None:
+    token = normalize(value or "")
+    if not token:
+        return None
+    if len(token) == 2 and token.isalpha():
+        return token.upper()
+    return _STATE_NAME_TO_UF.get(token)
+
+
+def _norm_city(value: str | None) -> str | None:
+    token = normalize(value or "")
+    return token or None
+
+
+def _norm_color(value: str | None) -> str | None:
+    token = normalize(value or "")
+    if not token:
+        return None
+    return _COLOR_ALIASES.get(token, token)
+
+
+def _extract_city_state_from_location(location: str | None) -> tuple[str | None, str | None]:
+    if not location:
+        return None, None
+
+    raw = location.strip()
+    parts = [p.strip() for p in re.split(r"[-/,]", raw) if p and p.strip()]
+    city = _norm_city(parts[0]) if parts else None
+
+    state = None
+    if len(parts) > 1:
+        state = _norm_state(parts[-1])
+    if not state:
+        m = _RE_UF.search(raw)
+        if m:
+            state = _norm_state(m.group(1))
+
+    return city, state
+
+
+def _listing_city_state(listing: CarListing) -> tuple[str | None, str | None]:
+    city = _norm_city(getattr(listing, "city", None))
+    state = _norm_state(getattr(listing, "state", None))
+    if city and state:
+        return city, state
+
+    loc_city, loc_state = _extract_city_state_from_location(getattr(listing, "location", None))
+    return city or loc_city, state or loc_state
+
+
+def _field_match(listing: CarListing, field: str, op: str, val: str) -> bool:
+    if field == "state":
+        current = _listing_city_state(listing)[1]
+        target = _norm_state(val)
+    elif field == "city":
+        current = _listing_city_state(listing)[0]
+        target = _norm_city(val)
+    elif field == "color":
+        current = _norm_color(getattr(listing, "color", None))
+        target = _norm_color(val)
+    else:
+        return True
+
+    if not current or not target:
+        return False
+    if op == "eq":
+        return current == target
+    if op == "neq":
+        return current != target
+    return True
+
+
 def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
     """Aplica filtros da wishlist.
 
@@ -371,6 +495,11 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
                 return False
             continue
 
+        if field in {"color", "city", "state"}:
+            if not _field_match(listing, field, op, val):
+                return False
+            continue
+
         # campo desconhecido → ignora (para não quebrar quando você evoluir)
         continue
 
@@ -417,6 +546,11 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
             except Exception:
                 return False
             if not _cmp_int(int(year), op, ty):
+                return False
+            continue
+
+        if field in {"color", "city", "state"}:
+            if not _field_match(listing, field, op, val):
                 return False
             continue
 
@@ -552,6 +686,21 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
                 return "filter_year_bad_value"
             if not _cmp_int(int(year), op, ty):
                 return "filter_year_cmp"
+            continue
+
+        if field in {"color", "city", "state"}:
+            if op not in {"eq", "neq"}:
+                return f"filter_{field}_bad_operator"
+            if not _field_match(listing, field, op, val):
+                if field == "color" and not _norm_color(getattr(listing, "color", None)):
+                    return "filter_color_missing"
+                if field in {"city", "state"}:
+                    city, state = _listing_city_state(listing)
+                    if field == "city" and not city:
+                        return "filter_city_missing"
+                    if field == "state" and not state:
+                        return "filter_state_missing"
+                return f"filter_{field}_cmp"
             continue
 
     terms = _effective_terms(getattr(wishlist, "query", "") or "")
