@@ -4,11 +4,48 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import ProgrammingError
 
 from app.core.settings import settings
 from app.models.scrape_job import ScrapeJob
+
+
+ACTIVE_JOB_CONFLICT_COLUMNS = ("source", "queue")
+ACTIVE_JOB_CONFLICT_PREDICATE_SQL = "status IN ('queued','running')"
+
+
+def _is_missing_on_conflict_constraint(exc: ProgrammingError) -> bool:
+    orig = getattr(exc, "orig", None)
+    msg = str(orig or exc).lower()
+    return "no unique or exclusion constraint matching the on conflict specification" in msg
+
+
+def _build_schema_mismatch_detail(db: Session, *, queue: str) -> str:
+    bind = db.get_bind()
+    if not bind or bind.dialect.name != "postgresql":
+        return "schema snapshot unavailable (dialect is not postgresql)"
+
+    rows = db.execute(
+        text(
+            """
+            select
+                i.indexname,
+                i.indexdef
+            from pg_indexes i
+            where i.schemaname = current_schema()
+              and i.tablename = 'scrape_jobs'
+            order by i.indexname
+            """
+        )
+    ).all()
+    indexes = [f"{name}: {definition}" for name, definition in rows]
+    rendered = "; ".join(indexes) if indexes else "<no indexes found for scrape_jobs>"
+    return (
+        f"queue={queue}; expected conflict_target={ACTIVE_JOB_CONFLICT_COLUMNS}; "
+        f"expected_predicate={ACTIVE_JOB_CONFLICT_PREDICATE_SQL}; indexes={rendered}"
+    )
 
 
 def _utcnow() -> datetime:
@@ -104,12 +141,26 @@ def enqueue_job(
             max_attempts=int(max_attempts or 3),
         )
         .on_conflict_do_nothing(
-            index_elements=["source", "queue"],
-            index_where=(ScrapeJob.status.in_(["queued", "running"])),
+            index_elements=list(ACTIVE_JOB_CONFLICT_COLUMNS),
+            # Importante: usar SQL literal para casar 1:1 com o índice parcial.
+            # Com bind params, o PostgreSQL pode falhar inferência com erro
+            # "no unique or exclusion constraint matching the ON CONFLICT specification".
+            index_where=text(ACTIVE_JOB_CONFLICT_PREDICATE_SQL),
         )
     )
 
-    res = db.execute(stmt)
+    try:
+        res = db.execute(stmt)
+    except ProgrammingError as exc:
+        if not _is_missing_on_conflict_constraint(exc):
+            raise
+        detail = _build_schema_mismatch_detail(db, queue=queue)
+        raise RuntimeError(
+            "scrape_jobs enqueue schema mismatch: "
+            f"ON CONFLICT ({', '.join(ACTIVE_JOB_CONFLICT_COLUMNS)}) "
+            f"WHERE {ACTIVE_JOB_CONFLICT_PREDICATE_SQL}. {detail}"
+        ) from exc
+
     # rowcount==1 => inseriu
     return bool(getattr(res, "rowcount", 0) == 1)
 
