@@ -14,6 +14,7 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
+from app.models.wishlist_listing_activity import WishlistListingActivity
 from app.models.wishlist_token import WishlistToken
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.system_logs_service import log
@@ -541,9 +542,12 @@ def remove_wishlist(db: Session, user_id, index: int):
             flow_context="wishlist_remove",
         )
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
-        return False, "Erro ao remover wishlist. Remova dependências e tente novamente."
+        return False, "Erro ao remover wishlist: dependências remanescentes inesperadas."
+    except SQLAlchemyError:
+        db.rollback()
+        return False, "Erro ao remover wishlist por falha no banco de dados."
     return True, "Wishlist removida."
 
 
@@ -563,9 +567,12 @@ def remove_all_wishlists(db: Session, user_id):
                 flow_context="wishlist_clear",
             )
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
-        return False, "Erro ao remover wishlists. Remova dependências e tente novamente."
+        return False, "Erro ao remover wishlists: dependências remanescentes inesperadas."
+    except SQLAlchemyError:
+        db.rollback()
+        return False, "Erro ao remover wishlists por falha no banco de dados."
     return True, f"{len(wishlists)} wishlists removidas."
 
 def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
@@ -669,6 +676,20 @@ def _delete_wishlist_explicit(
         event_type="wishlist_delete_explicit",
     )
 
-    db.execute(delete(WishlistFilter).where(WishlistFilter.wishlist_id == wishlist.id))
-    db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id))
+    deleted_filters = db.execute(
+        delete(WishlistFilter).where(WishlistFilter.wishlist_id == wishlist.id)
+    ).rowcount or 0
+    deleted_listing_activity = db.execute(
+        delete(WishlistListingActivity).where(WishlistListingActivity.wishlist_id == wishlist.id)
+    ).rowcount or 0
+    deleted_tokens = db.execute(
+        delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id)
+    ).rowcount or 0
+
+    payload["deleted_counts"] = {
+        "wishlist_filters": int(deleted_filters),
+        "wishlist_listing_activity": int(deleted_listing_activity),
+        "wishlist_tokens": int(deleted_tokens),
+    }
+
     db.delete(wishlist)
