@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.db.base import Base
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
+from app.models.wishlist_listing_activity import WishlistListingActivity
+from app.models.wishlist_token import WishlistToken
+from app.models.notification import Notification
+from app.models.telemetry_event import TelemetryEvent
+from app.models.car_listing import CarListing
 from app.models.system_log import SystemLog
 from app.services.wishlists_service import remove_all_wishlists, remove_wishlist
 
@@ -169,3 +175,115 @@ def test_scheduler_and_runall_paths_do_not_call_wishlist_remove_services() -> No
             offenders.append(str(path.relative_to(root)))
 
     assert offenders == []
+
+
+def test_remove_wishlist_service_deletes_filters_activity_tokens_only(db):
+    _enable_fk(db)
+
+    user = User(id=uuid.uuid4(), telegram_chat_id=999005)
+    db.add(user)
+    db.flush()
+
+    listing = CarListing(source="olx", external_id="ad-1", url="https://example.com/ad-1", title="Car")
+    db.add(listing)
+    db.flush()
+
+    wishlist = Wishlist(user_id=user.id, query="civic", is_active=True)
+    db.add(wishlist)
+    db.flush()
+
+    db.add(WishlistFilter(wishlist_id=wishlist.id, field="source", operator="eq", value="olx"))
+    db.add(WishlistToken(wishlist_id=wishlist.id, token="honda"))
+    db.add(
+        WishlistListingActivity(
+            wishlist_id=wishlist.id,
+            listing_identity_key="olx:ad-1",
+            source_name="olx",
+            source_listing_id="ad-1",
+            listing_url="https://example.com/ad-1",
+            first_seen_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(timezone.utc),
+        )
+    )
+
+    notification = Notification(user_id=user.id, wishlist_id=wishlist.id, car_listing_id=listing.id, status="queued")
+    telemetry = TelemetryEvent(event_type="test_evt", fingerprint="fp-1", wishlist_id=wishlist.id, user_id=user.id)
+    db.add(notification)
+    db.add(telemetry)
+    db.commit()
+
+    ok, _msg = remove_wishlist(db, user.id, 1)
+    assert ok is True
+
+    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 0
+    assert db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).count() == 0
+    assert db.query(WishlistListingActivity).filter(WishlistListingActivity.wishlist_id == wishlist.id).count() == 0
+    assert db.query(WishlistToken).filter(WishlistToken.wishlist_id == wishlist.id).count() == 0
+
+    notification_db = db.query(Notification).filter(Notification.id == notification.id).first()
+    telemetry_db = db.query(TelemetryEvent).filter(TelemetryEvent.id == telemetry.id).first()
+    assert notification_db is not None
+    assert telemetry_db is not None
+    assert notification_db.wishlist_id is None
+    assert telemetry_db.wishlist_id is None
+
+
+def test_remove_wishlist_service_is_transactional_on_delete_failure(db, monkeypatch):
+    _enable_fk(db)
+
+    user = User(id=uuid.uuid4(), telegram_chat_id=999006)
+    db.add(user)
+    db.flush()
+
+    wishlist = Wishlist(user_id=user.id, query="focus", is_active=True)
+    db.add(wishlist)
+    db.flush()
+
+    db.add(WishlistFilter(wishlist_id=wishlist.id, field="year", operator="gte", value="2019"))
+    db.add(WishlistToken(wishlist_id=wishlist.id, token="ford"))
+    db.add(
+        WishlistListingActivity(
+            wishlist_id=wishlist.id,
+            listing_identity_key="olx:ad-2",
+            source_name="olx",
+            source_listing_id="ad-2",
+            listing_url="https://example.com/ad-2",
+            first_seen_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
+    original_delete = db.delete
+
+    def _boom(instance):
+        if isinstance(instance, Wishlist):
+            raise SQLAlchemyError("forced-delete-failure")
+        return original_delete(instance)
+
+    monkeypatch.setattr(db, "delete", _boom)
+
+    ok, msg = remove_wishlist(db, user.id, 1)
+    assert ok is False
+    assert "falha no banco" in msg
+
+    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 1
+    assert db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).count() == 1
+    assert db.query(WishlistListingActivity).filter(WishlistListingActivity.wishlist_id == wishlist.id).count() == 1
+    assert db.query(WishlistToken).filter(WishlistToken.wishlist_id == wishlist.id).count() == 1
+
+
+def test_remove_wishlist_service_without_dependencies_still_removes(db):
+    _enable_fk(db)
+
+    user = User(id=uuid.uuid4(), telegram_chat_id=999007)
+    db.add(user)
+    db.flush()
+
+    wishlist = Wishlist(user_id=user.id, query="polo", is_active=True)
+    db.add(wishlist)
+    db.commit()
+
+    ok, _msg = remove_wishlist(db, user.id, 1)
+    assert ok is True
+    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 0
