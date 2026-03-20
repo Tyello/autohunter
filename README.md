@@ -253,6 +253,8 @@ Pronto: o scheduler já agenda automaticamente e a busca manual já passa a inge
 
 ## Documentações adicionais
 
+- `AGENTS.md`: mapa rápido para agentes/IA e onboarding técnico
+- `docs/PROJECT_GUIDELINE.md`: guideline vivo do runtime atual (fonte recomendada para arquitetura real)
 - `docs/projeto.md`: visão geral e arquitetura
 - `docs/matching_guide.md`: guia de matching e semântica
 - `docs/fontes_novas.md`: status das fontes e roadmap
