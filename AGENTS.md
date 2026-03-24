@@ -1,50 +1,39 @@
 # AGENTS.md — AutoHunter
 
-## What this project is
-AutoHunter é uma plataforma **Telegram-first** para monitoramento contínuo de anúncios de carros usados em múltiplas fontes. Não é apenas scraping pontual: o runtime principal é recorrente (scheduler + filas + workers + matching + notificação).
+## O que este projeto é
+AutoHunter é um produto **Telegram-first** para monitoramento contínuo de anúncios de carros usados.
 
-## Primary purpose
-Servir usuários que querem ser avisados quando surgirem anúncios que batem com suas wishlists, reduzindo busca manual e latência entre publicação e descoberta.
+Não é web-first e não é apenas scraping manual: o runtime central é recorrente.
 
-## Current operational model
+## Caminho oficial do produto
 Fluxo principal observado no código:
-**wishlist -> scheduler tick -> enqueue scrape jobs -> queue workers (http/browser) -> scrape+normalize+ingest -> dedupe -> matching -> notifications queue -> sender (Telegram)**.
-Há também trilha de operação/admin (health, backoff, staleness, alertas, comandos administrativos e digest).
 
-## Core concepts
-- Wishlist
-- Source
-- Listing / car listing
-- Matching
-- Notification
-- Digest
-- Source config
-- Admin/monitoring
-- Queue/job/worker
-- Backoff / health
+`wishlist -> scheduler tick -> enqueue scrape_jobs -> workers (http/browser) -> scrape+normalização+ingestão -> dedupe -> matching -> queue de notifications -> sender Telegram`
 
-## Source of truth
-- O **código atual** é fonte de verdade superior a docs históricas.
-- Configuração operacional de source é majoritariamente **DB-driven** (`source_configs`, `source_states`) com fallback para defaults de plugin.
-- Diferencie explicitamente comportamento confirmado em runtime vs contexto histórico em docs.
+## Papel da API
+A API/FastAPI é superfície **auxiliar** (health/admin/integrativa, incluindo Facebook Agent).
+A jornada principal de usuário final ocorre no Telegram.
 
-## How to work safely in this repo
-- Não redesenhe a arquitetura inteira.
-- Trabalhe incrementalmente, preservando contratos existentes.
-- Separe claramente: bug real, risco operacional, melhoria técnica e melhoria de produto.
-- Valide usos reais antes de remover qualquer trecho suspeito de legado.
-- Não assuma que arquivo antigo está morto sem evidência de execução/import/uso.
+## Fonte de verdade
+1. **Código atual** > documentação histórica.
+2. Configuração operacional de fontes é majoritariamente **DB-driven** (`source_configs`, `source_states`), com seed/default vindo dos plugins.
+3. Sempre diferencie explicitamente: fato confirmado no runtime vs hipótese.
 
-## What seems legacy or needs caution
-- Há coexistência de caminhos v1/v2/dual em scraping/adaptação.
-- Existem modos manuais, admin e integrações auxiliares (ex.: Facebook Agent) que não devem ser removidos sem validação.
-- Docs antigas são contexto útil, mas não devem sobrepor comportamento efetivo observado no código.
+## Como trabalhar sem quebrar o repo
+- Faça mudanças incrementais e reversíveis.
+- Preserve contratos de scheduler, filas, matching e notificações.
+- Não redesenhe arquitetura sem necessidade explícita.
+- Não remova “legado” sem evidência de uso (import/call/dados/operação).
+- Separe claramente: bug real, risco operacional, melhoria técnica, melhoria de produto.
 
-## Recommended first reading path
+## Áreas que exigem cautela
+- Coexistência de caminhos v1/v2/dual em scraping/adaptação.
+- Comandos/fluxos de compatibilidade no bot (UX antiga + UX nova).
+- Integrações operacionais auxiliares (ex.: Facebook Agent, admin deploy, autopilot).
+
+## Ordem de leitura recomendada
 1. `README.md`
 2. `docs/PROJECT_GUIDELINE.md`
-3. `app/bot/` (superfície principal Telegram)
-4. `app/scheduler/` (ticks, filas, workers, sender, monitor)
-5. `app/services/source_execution_service.py` + `app/services/*` (ingest/match/notificação/backoff)
-6. `app/sources/` e `app/scrapers/` (plugins, estratégias por fonte)
-7. `app/models/` (entidades persistidas)
+3. `docs/OPERATIONS_RUNBOOK.md`
+4. `docs/LEGACY_INVENTORY.md`
+5. Código: `app/bot/`, `app/scheduler/`, `app/services/source_execution_service.py`, `app/sources/`, `app/models/`
