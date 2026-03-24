@@ -24,6 +24,8 @@ class FBCodePayload(BaseModel):
     code: str
 
 
+# Legacy path kept for backward compatibility with older onboarding links.
+# Prefer the newer fb-agent bootstrap flow for new operational setups.
 @router.get("/auth/facebook/legacy", response_class=HTMLResponse)
 async def auth_facebook_page(code: str):
     html = f"""
