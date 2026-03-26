@@ -26,3 +26,7 @@ class Wishlist(TimestampMixin, Base):
         "WishlistToken",
         back_populates="wishlist",
     )
+
+    tracked_listings = relationship(
+        "WishlistTrackedListing",
+    )

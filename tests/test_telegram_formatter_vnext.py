@@ -72,8 +72,9 @@ def test_complete_score_gt_zero_snapshot_and_order():
     assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
     assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
     assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
-    assert lines[3:] == [
-        "• Preço 8% abaixo da mediana",
+    assert lines[3] == "Por que você recebeu:"
+    assert lines[4] == "• Motivo principal: Preço 8% abaixo da mediana"
+    assert lines[5:] == [
         "• Match forte com sua wishlist",
         "• Anúncio completo",
     ]
@@ -188,3 +189,19 @@ def test_single_open_button_only():
     assert len(payload.inline_keyboard) == 1
     assert len(payload.inline_keyboard[0]) == 1
     assert payload.inline_keyboard[0][0]["text"] == "Abrir anúncio"
+
+
+def test_explainability_includes_compact_wishlist_filters():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad()
+    ad.wishlist_filters = [
+        {"field": "color", "operator": "eq", "value": "prata"},
+        {"field": "state", "operator": "eq", "value": "SP"},
+    ]
+
+    payload = format_ad_message(ad)
+
+    assert "Por que você recebeu:" in payload.text
+    assert "• Critério: cor = prata" in payload.text
+    assert "• Critério: estado = SP" in payload.text
