@@ -35,10 +35,24 @@ class ListingFlags:
 
 
 _RE_WS = re.compile(r"\s+")
+_MAX_LINE = 220
+_MAX_REASON = 88
+_MAX_FILTER_VALUE = 36
+_MAX_BADGES = 8
+_MAX_REASONS = 3
 
 
 def _clean(s: str | None) -> str:
     return _RE_WS.sub(" ", (s or "").strip())
+
+def _clip(text: str | None, max_len: int) -> str:
+    v = _clean(text)
+    if len(v) <= max_len:
+        return v
+    cut = v[: max_len - 1].rstrip()
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return f"{cut}…"
 
 
 def _norm_text(s: str | None) -> str:
@@ -361,7 +375,12 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
     if listing_flags.blindado:
         badges.append("🛡️ Blindado")
 
-    return badges
+    compact: list[str] = []
+    for b in badges[:_MAX_BADGES]:
+        item = _clip(b, 34)
+        if item:
+            compact.append(item)
+    return compact
 
 
 def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
@@ -371,9 +390,17 @@ def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
     breakdown = _get_breakdown(ad, score_result) or {}
     reasons = breakdown.get("reasons") or getattr(ad, "reasons", None) or []
     if isinstance(reasons, list):
-        clean = [str(r).strip() for r in reasons if str(r).strip()]
+        clean: list[str] = []
+        seen: set[str] = set()
+        for r in reasons:
+            item = _clip(str(r), _MAX_REASON)
+            key = _norm_text(item)
+            if not item or key in seen:
+                continue
+            clean.append(item)
+            seen.add(key)
         if clean:
-            return clean[:3]
+            return clean[:_MAX_REASONS]
 
     fallback: list[str] = []
     return fallback[:3]
@@ -393,7 +420,7 @@ def _compact_filters(ad: Any) -> list[str]:
             continue
         field = str(f.get("field") or "").strip().lower()
         op = str(f.get("operator") or "").strip().lower()
-        value = _clean(str(f.get("value") or ""))
+        value = _clip(str(f.get("value") or ""), _MAX_FILTER_VALUE)
         if not field or not op or not value:
             continue
         out.append(f"{alias.get(field, field)} {op_map.get(op, op)} {value}")
@@ -462,4 +489,5 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
     for r in extra_reasons[:2]:
         lines.append(f"• {r}")
 
-    return TelegramMessagePayload(text="\n".join(lines).strip(), inline_keyboard=build_open_button(ad))
+    compact_lines = [_clip(line, _MAX_LINE) for line in lines if _clean(line)]
+    return TelegramMessagePayload(text="\n".join(compact_lines).strip(), inline_keyboard=build_open_button(ad))

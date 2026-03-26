@@ -19,7 +19,7 @@ class WishlistTrackedListing(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("wishlist_id", "car_listing_id", name="uq_wishlist_tracked_listing_pair"),
         UniqueConstraint("wishlist_id", "slot", name="uq_wishlist_tracked_listing_slot"),
-        CheckConstraint("slot >= 1 AND slot <= 3", name="ck_wishlist_tracked_listings_slot_1_3"),
+        CheckConstraint("slot >= 1 AND slot <= 3", name="ck_wishlist_tracked_listing_slot_range"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
