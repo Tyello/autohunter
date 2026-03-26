@@ -72,11 +72,10 @@ def test_complete_score_gt_zero_snapshot_and_order():
     assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
     assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
     assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
-    assert lines[3] == "Por que você recebeu:"
-    assert lines[4] == "• Motivo principal: Preço 8% abaixo da mediana"
+    assert lines[3] == "Por que você recebeu (resumo):"
+    assert lines[4] == "• Preço 8% abaixo da mediana"
     assert lines[5:] == [
         "• Match forte com sua wishlist",
-        "• Anúncio completo",
     ]
     assert payload.inline_keyboard == [[{"text": "Abrir anúncio", "url": "https://www.webmotors.com.br/comprar/1"}]]
 
@@ -202,6 +201,41 @@ def test_explainability_includes_compact_wishlist_filters():
 
     payload = format_ad_message(ad)
 
-    assert "Por que você recebeu:" in payload.text
+    assert "Por que você recebeu (resumo):" in payload.text
     assert "• Critério: cor = prata" in payload.text
     assert "• Critério: estado = SP" in payload.text
+
+
+def test_formatter_caps_extreme_fields_and_prioritizes_core_content():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    long = "Muito " * 80
+    ad = _base_ad(
+        title=f"Honda Civic {long}",
+        location=f"São Paulo-{long}",
+        score_v2=91,
+        score_breakdown={
+            "total": 91,
+            "delta_vs_median_pct": -0.12,
+            "reasons": [
+                f"Motivo principal {long}",
+                f"Sinal extra 1 {long}",
+                f"Sinal extra 2 {long}",
+                f"Sinal extra 3 {long}",
+            ],
+        },
+    )
+    ad.wishlist_filters = [
+        {"field": "city", "operator": "eq", "value": f"Sao Paulo {long}"},
+        {"field": "state", "operator": "eq", "value": "SP"},
+        {"field": "color", "operator": "eq", "value": "Prata"},
+        {"field": "source", "operator": "eq", "value": "webmotors"},
+    ]
+
+    payload = format_ad_message(ad)
+    lines = payload.text.splitlines()
+
+    assert len(lines) <= 8
+    assert lines[0].startswith("🔥 91/100")
+    assert "Por que você recebeu (resumo):" in payload.text
+    assert payload.text.count("• Critério:") <= 2

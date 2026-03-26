@@ -4,6 +4,8 @@ import uuid
 
 from app.models.car_listing import CarListing
 from app.models.user import User
+from app.models.wishlist import Wishlist
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.wishlists_service import add_wishlist
 from app.services.wishlist_tracking_service import add_tracked_listing, list_tracked_listings, remove_tracked_listing
 
@@ -57,6 +59,7 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l4.external_id)
     assert ok is False
     assert "Limite atingido" in msg
+    assert "/wishlist_track_remove" in msg
 
     ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
     assert ok is True
@@ -76,8 +79,24 @@ def test_tracking_validates_wishlist_ownership_and_eligibility(db, monkeypatch):
 
     ok, msg = add_tracked_listing(db, user_id=user2.id, wishlist_index=1, listing_ref="EXT404")
     assert ok is False
-    assert "não existe" in msg.lower()
+    assert "não encontrada" in msg.lower()
 
     ok, msg = add_tracked_listing(db, user_id=user1.id, wishlist_index=1, listing_ref="EXT404")
     assert ok is False
-    assert "não elegível" in msg
+    assert "não encontrei" in msg.lower()
+
+
+def test_tracking_list_handles_orphan_listing_row(db, monkeypatch):
+    user = _mk_user(db, 3001)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    ok, _ = add_wishlist(db, user.id, "civic")
+    assert ok is True
+
+    wishlist = db.query(Wishlist).filter(Wishlist.user_id == user.id).one()
+    tracked = WishlistTrackedListing(wishlist_id=wishlist.id, car_listing_id=None, slot=1)
+    db.add(tracked)
+    db.commit()
+
+    ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
+    assert ok is True
+    assert "indisponível" in msg.lower()

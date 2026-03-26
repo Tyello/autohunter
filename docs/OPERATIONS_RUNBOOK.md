@@ -154,3 +154,53 @@ Escalar para investigação mais profunda quando houver:
 - `AGENTS.md`
 - `docs/PROJECT_GUIDELINE.md`
 - `docs/LEGACY_INVENTORY.md`
+
+## 10) Validação pós-migration (tracking de wishlist)
+Quando subir migration de `wishlist_tracked_listings`, rode:
+
+```bash
+python scripts/check_tracking_post_migration.py
+```
+
+Esse check falha (`exit 1`) se houver:
+- tabela de tracking ausente;
+- slots fora do intervalo 1..3;
+- wishlists com mais de 3 rastreados;
+- vínculos órfãos com `wishlists`;
+- vínculos órfãos com `car_listings` quando `car_listing_id` não for nulo.
+
+Queries úteis de triagem:
+
+```sql
+-- rastreados por wishlist (top)
+select wishlist_id, count(*) as tracked
+from wishlist_tracked_listings
+group by wishlist_id
+order by tracked desc
+limit 20;
+
+-- wishlists com mais de 3 rastreados (não esperado)
+select wishlist_id, count(*) as tracked
+from wishlist_tracked_listings
+group by wishlist_id
+having count(*) > 3;
+
+-- slots fora da faixa operacional
+select id, wishlist_id, slot
+from wishlist_tracked_listings
+where slot < 1 or slot > 3;
+
+-- linhas de tracking sem anúncio associado (esperado em casos de remoção de listing)
+select count(*) as tracking_sem_listing
+from wishlist_tracked_listings
+where car_listing_id is null;
+
+-- wishlists legadas sem filtros novos (city/state/color)
+select count(*) as wishlists_sem_filtros_novos
+from wishlists w
+where not exists (
+  select 1 from wishlist_filters wf
+  where wf.wishlist_id = w.id
+    and wf.field in ('color', 'city', 'state')
+);
+```
