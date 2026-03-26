@@ -368,6 +368,35 @@ def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
     return fallback[:3]
 
 
+
+
+def _compact_filters(ad: Any) -> list[str]:
+    raw = getattr(ad, "wishlist_filters", None) or []
+    out: list[str] = []
+    if not isinstance(raw, list):
+        return out
+
+    alias = {"price": "preço", "year": "ano", "source": "fonte", "color": "cor", "city": "cidade", "state": "estado"}
+    op_map = {"eq": "=", "neq": "≠", "lte": "≤", "gte": "≥", "lt": "<", "gt": ">"}
+
+    for f in raw[:3]:
+        if not isinstance(f, dict):
+            continue
+        field = str(f.get("field") or "").strip().lower()
+        op = str(f.get("operator") or "").strip().lower()
+        value = _clean(str(f.get("value") or ""))
+        if not field or not op or not value:
+            continue
+        out.append(f"{alias.get(field, field)} {op_map.get(op, op)} {value}")
+    return out
+
+
+def _main_reason(reasons: list[str]) -> str | None:
+    if not reasons:
+        return None
+    first = _clean(reasons[0])
+    return first or None
+
 def build_open_button(ad: Any) -> list[list[dict[str, str]]]:
     url = normalize_listing_url(
         getattr(ad, "url", None) or "",
@@ -405,12 +434,23 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
     line3 = f"{price_txt} • Fonte: {source}" if source else price_txt
 
     reasons = build_reasons(ad, score_result, score_i)
+    main_reason = _main_reason(reasons)
+    matched_filters = _compact_filters(ad)
 
     lines = [line1]
     if line2:
         lines.append(line2)
     lines.append(line3)
-    for r in reasons:
+
+    if score_i > 0 and (main_reason or matched_filters):
+        lines.append("Por que você recebeu:")
+        if main_reason:
+            lines.append(f"• Motivo principal: {main_reason}")
+        for ftxt in matched_filters:
+            lines.append(f"• Critério: {ftxt}")
+
+    extra_reasons = [r for r in reasons if _clean(r) and _clean(r) != _clean(main_reason)]
+    for r in extra_reasons[:2]:
         lines.append(f"• {r}")
 
     return TelegramMessagePayload(text="\n".join(lines).strip(), inline_keyboard=build_open_button(ad))

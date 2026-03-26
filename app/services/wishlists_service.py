@@ -16,6 +16,7 @@ from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
 from app.models.wishlist_listing_activity import WishlistListingActivity
 from app.models.wishlist_token import WishlistToken
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
@@ -38,6 +39,15 @@ KNOWN_SOURCES = {
     "mobiauto",
     "kavak",
     "facebook_marketplace",
+}
+
+_STATE_NAME_TO_UF = {
+    "acre": "AC", "alagoas": "AL", "amapa": "AP", "amazonas": "AM", "bahia": "BA", "ceara": "CE",
+    "distrito federal": "DF", "espirito santo": "ES", "goias": "GO", "maranhao": "MA",
+    "mato grosso": "MT", "mato grosso do sul": "MS", "minas gerais": "MG", "para": "PA",
+    "paraiba": "PB", "parana": "PR", "pernambuco": "PE", "piaui": "PI", "rio de janeiro": "RJ",
+    "rio grande do norte": "RN", "rio grande do sul": "RS", "rondonia": "RO", "roraima": "RR",
+    "santa catarina": "SC", "sao paulo": "SP", "sergipe": "SE", "tocantins": "TO",
 }
 
 KNOWN_STATES = {
@@ -613,9 +623,21 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         value = value.strip()
 
     if field == "state":
-        uf = value.strip().upper()
+        raw_state = value.strip()
+        uf = raw_state.upper()
         if uf not in KNOWN_STATES:
-            return False, "Valor inválido para state. Use UF (ex: SP, RJ, MG)."
+            normalized = (
+                raw_state.lower()
+                .replace("á", "a").replace("à", "a").replace("â", "a").replace("ã", "a")
+                .replace("é", "e").replace("ê", "e")
+                .replace("í", "i")
+                .replace("ó", "o").replace("ô", "o").replace("õ", "o")
+                .replace("ú", "u")
+                .replace("ç", "c")
+            )
+            uf = _STATE_NAME_TO_UF.get(normalized, "")
+        if uf not in KNOWN_STATES:
+            return False, "Valor inválido para state. Use UF (ex: SP) ou nome do estado."
         value = uf
 
     row = WishlistFilter(wishlist_id=wishlist_id, field=field, operator=operator, value=value)
@@ -685,11 +707,15 @@ def _delete_wishlist_explicit(
     deleted_tokens = db.execute(
         delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id)
     ).rowcount or 0
+    deleted_tracked = db.execute(
+        delete(WishlistTrackedListing).where(WishlistTrackedListing.wishlist_id == wishlist.id)
+    ).rowcount or 0
 
     payload["deleted_counts"] = {
         "wishlist_filters": int(deleted_filters),
         "wishlist_listing_activity": int(deleted_listing_activity),
         "wishlist_tokens": int(deleted_tokens),
+        "wishlist_tracked_listings": int(deleted_tracked),
     }
 
     db.delete(wishlist)
