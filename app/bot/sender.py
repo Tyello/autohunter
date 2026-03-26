@@ -26,6 +26,21 @@ class _AdView:
         self.score_v2 = getattr(notification, 'score_v2', None) if notification is not None else None
         self.score_breakdown = getattr(notification, 'score_breakdown', None) if notification is not None else None
 
+        self.wishlist_query = None
+        self.wishlist_filters = []
+        try:
+            w = getattr(notification, "wishlist", None) if notification is not None else None
+            if w is not None:
+                self.wishlist_query = getattr(w, "query", None)
+                fs = getattr(w, "filters", None) or []
+                self.wishlist_filters = [
+                    {"field": getattr(f, "field", None), "operator": getattr(f, "operator", None), "value": getattr(f, "value", None)}
+                    for f in fs
+                ]
+        except Exception:
+            self.wishlist_query = None
+            self.wishlist_filters = []
+
     def __getattr__(self, item):
         return getattr(self._listing, item)
 

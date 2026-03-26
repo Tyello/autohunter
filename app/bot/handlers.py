@@ -213,8 +213,8 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     update,
                     "Você não tem wishlists.\n"
                     "Opções:\n"
-                    "• /wishlist_add (assistente)\n"
-                    "• /wishlist add <termos> (modo antigo)"
+                    "• /wishlist_add (fluxo oficial)\n"
+                    "• /wishlist add <termos> (compatibilidade legado)"
                 )
                 return
             lines = [f"{i+1}. {x.query}" for i, x in enumerate(w)]
@@ -308,7 +308,7 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await reply_text(update, "Ação inválida. Use: add|list|rm")
             return
 
-        await reply_text(update, "Use: /wishlist listar | /wishlist add <termos> | /wishlist rm <numero>")
+        await reply_text(update, "Use: /wishlist listar | /wishlist_add (oficial) | /wishlist add <termos> (legado) | /wishlist rm <numero>")
 
 
 async def cmd_alertas(update: Update, context: ContextTypes.DEFAULT_TYPE):

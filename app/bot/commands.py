@@ -15,6 +15,9 @@ COMMANDS = [
     BotCommand("wishlist_help", "Ajuda de wishlists (filtros e exemplos)"),
     BotCommand("wishlist_remove", "Remover wishlist"),
     BotCommand("wishlist_clear", "Remover todas as wishlists"),
+    BotCommand("wishlist_track_add", "Rastrear anúncio da wishlist"),
+    BotCommand("wishlist_track_list", "Listar rastreados da wishlist"),
+    BotCommand("wishlist_track_remove", "Remover rastreado da wishlist"),
 
     BotCommand("alertas", "Info / painel simples"),
     BotCommand("me", "Seu chat_id"),

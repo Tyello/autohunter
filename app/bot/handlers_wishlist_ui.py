@@ -23,6 +23,11 @@ from app.services.wishlists_service import (
     remove_filter,
     get_max_wishlists_for_user,
 )
+from app.services.wishlist_tracking_service import (
+    add_tracked_listing,
+    list_tracked_listings,
+    remove_tracked_listing,
+)
 
 
 # ---------- Wishlist Remove / Clear (UX simples e previsível) ----------
@@ -303,5 +308,64 @@ async def cmd_wishlist_filter_remove(update: Update, context: ContextTypes.DEFAU
 
         wl = wishlists[n - 1]
         _ok, msg = remove_filter(db, wl.id, k)
+
+    await reply_text(update, msg)
+
+
+# ---------- Tracking de anúncios por wishlist ----------
+
+async def cmd_wishlist_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Use: /wishlist_track_add <n> <url|external_id>"""
+    if len(context.args or []) < 2:
+        await reply_text(update, "Use: /wishlist_track_add <n> <url|external_id>")
+        return
+
+    n = parse_int(context.args[0])
+    if n is None:
+        await reply_text(update, "Wishlist inválida. Use /wishlist.")
+        return
+
+    listing_ref = " ".join(context.args[1:]).strip()
+
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        _ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=n, listing_ref=listing_ref)
+
+    await reply_text(update, msg)
+
+
+async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Use: /wishlist_track_list <n>"""
+    if len(context.args or []) < 1:
+        await reply_text(update, "Use: /wishlist_track_list <n>")
+        return
+
+    n = parse_int(context.args[0])
+    if n is None:
+        await reply_text(update, "Wishlist inválida. Use /wishlist.")
+        return
+
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        _ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=n)
+
+    await reply_text(update, msg)
+
+
+async def cmd_wishlist_track_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Use: /wishlist_track_remove <n> <slot>"""
+    if len(context.args or []) < 2:
+        await reply_text(update, "Use: /wishlist_track_remove <n> <slot>")
+        return
+
+    n = parse_int(context.args[0])
+    slot = parse_int(context.args[1])
+    if n is None or slot is None:
+        await reply_text(update, "Use: /wishlist_track_remove <n> <slot>")
+        return
+
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        _ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=n, slot=slot)
 
     await reply_text(update, msg)
