@@ -99,10 +99,8 @@ def _short_gearbox(raw: str | None) -> str | None:
     return s[:20]
 
 
-def _format_location_badge(location: str | None) -> str | None:
+def _format_location_badge(location: str | None, *, city: str | None = None, state: str | None = None) -> str | None:
     s = _clean(location)
-    if not s:
-        return None
 
     m = re.search(r"([A-Za-zÀ-ÿ\s'.]+?)[,\-]\s*([A-Z]{2})\b", s)
     if m:
@@ -112,7 +110,16 @@ def _format_location_badge(location: str | None) -> str | None:
             return f"{city}-{uf}"
         if uf:
             return uf
-    return s[:30]
+    if s:
+        return s[:30]
+
+    city_clean = _clean(city)
+    state_clean = _clean(state).upper()
+    if city_clean and state_clean:
+        return f"{city_clean}-{state_clean}"
+    if state_clean:
+        return state_clean
+    return None
 
 
 def _delta_badge_text(delta_pct: float | None) -> str | None:
@@ -305,7 +312,11 @@ def build_title(ad: Any, *, max_len: int = 90) -> str:
 def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags) -> list[str]:
     badges: list[str] = []
 
-    loc_badge = _format_location_badge(getattr(ad, "location", None))
+    loc_badge = _format_location_badge(
+        getattr(ad, "location", None),
+        city=getattr(ad, "city", None),
+        state=getattr(ad, "state", None),
+    )
     if loc_badge:
         badges.append(f"📍 {loc_badge}")
 
@@ -366,8 +377,6 @@ def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
 
     fallback: list[str] = []
     return fallback[:3]
-
-
 
 
 def _compact_filters(ad: Any) -> list[str]:

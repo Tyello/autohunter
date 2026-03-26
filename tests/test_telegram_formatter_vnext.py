@@ -205,3 +205,14 @@ def test_explainability_includes_compact_wishlist_filters():
     assert "Por que você recebeu:" in payload.text
     assert "• Critério: cor = prata" in payload.text
     assert "• Critério: estado = SP" in payload.text
+
+
+def test_location_badge_falls_back_to_city_state():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(location=None)
+    ad.city = "Curitiba"
+    ad.state = "PR"
+
+    payload = format_ad_message(ad)
+    assert "📍 Curitiba-PR" in payload.text

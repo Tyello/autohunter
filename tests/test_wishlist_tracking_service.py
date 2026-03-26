@@ -81,3 +81,19 @@ def test_tracking_validates_wishlist_ownership_and_eligibility(db, monkeypatch):
     ok, msg = add_tracked_listing(db, user_id=user1.id, wishlist_index=1, listing_ref="EXT404")
     assert ok is False
     assert "não elegível" in msg
+
+
+def test_tracking_add_accepts_url_with_query_fragment(db, monkeypatch):
+    user = _mk_user(db, 3001)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    add_wishlist(db, user.id, "civic")
+
+    listing = _mk_listing(db, 30)
+
+    ok, msg = add_tracked_listing(
+        db,
+        user_id=user.id,
+        wishlist_index=1,
+        listing_ref=f"{listing.url}?utm_source=x#frag",
+    )
+    assert ok is True, msg
