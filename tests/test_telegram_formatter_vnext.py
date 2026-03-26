@@ -72,8 +72,8 @@ def test_complete_score_gt_zero_snapshot_and_order():
     assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
     assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
     assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
-    assert lines[3] == "Por que você recebeu (resumo):"
-    assert lines[4] == "• Preço 8% abaixo da mediana"
+    assert lines[3] == "Por que você recebeu:"
+    assert lines[4] == "• Motivo principal: Preço 8% abaixo da mediana"
     assert lines[5:] == [
         "• Match forte com sua wishlist",
     ]

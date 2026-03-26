@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from typing import Optional
+
 from sqlalchemy import CheckConstraint, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,7 +30,7 @@ class WishlistTrackedListing(TimestampMixin, Base):
         nullable=False,
     )
 
-    car_listing_id: Mapped[uuid.UUID] = mapped_column(
+    car_listing_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("car_listings.id", ondelete="SET NULL"),
         nullable=True,

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit, urlunsplit
+
+from sqlalchemy.exc import IntegrityError
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -9,6 +12,17 @@ from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 
 MAX_TRACKED_PER_WISHLIST = 3
+
+
+def _normalize_listing_ref(ref: str) -> str:
+    raw = (ref or "").strip()
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if not parts.scheme or not parts.netloc:
+        return raw
+    clean = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
+    return clean
 
 
 def _wishlist_from_index(db: Session, *, user_id, wishlist_index: int) -> Wishlist | None:
@@ -24,7 +38,7 @@ def _wishlist_from_index(db: Session, *, user_id, wishlist_index: int) -> Wishli
 
 
 def _find_listing(db: Session, listing_ref: str) -> CarListing | None:
-    ref = (listing_ref or "").strip()
+    ref = _normalize_listing_ref(listing_ref)
     if not ref:
         return None
 
@@ -33,14 +47,14 @@ def _find_listing(db: Session, listing_ref: str) -> CarListing | None:
         return row
 
     row = db.query(CarListing).filter(CarListing.url == ref).order_by(CarListing.created_at.desc()).first()
-    return row
+    if row:
+        return row
 
-
-def _short_label(value: Any, max_len: int = 80) -> str:
-    txt = str(value or "").strip()
-    if len(txt) <= max_len:
-        return txt
-    return txt[: max_len - 1].rstrip() + "…"
+    # Fallback: match by canonical url (without query/fragment).
+    for cand in db.query(CarListing).order_by(CarListing.created_at.desc()).limit(300).all():
+        if _normalize_listing_ref(getattr(cand, "url", "") or "") == ref:
+            return cand
+    return None
 
 
 def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_ref: str) -> tuple[bool, str]:
@@ -82,10 +96,14 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
             slot=slot,
         )
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False, "Esse anúncio já está rastreado nessa wishlist."
 
-    title = _short_label(listing.title or "Anúncio")
-    return True, f"Rastreamento ativado na wishlist {wishlist_index} (slot {slot}/{MAX_TRACKED_PER_WISHLIST}): {title}"
+    title = (listing.title or "Anúncio").strip()
+    return True, f"Rastreamento ativado (slot {slot}/{MAX_TRACKED_PER_WISHLIST}): {title[:80]}"
 
 
 def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple[bool, str]:

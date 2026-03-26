@@ -29,6 +29,7 @@ def upgrade():
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("wishlist_id", "car_listing_id", name="uq_wishlist_tracked_listing_pair"),
         sa.UniqueConstraint("wishlist_id", "slot", name="uq_wishlist_tracked_listing_slot"),
+        sa.CheckConstraint("slot >= 1 AND slot <= 3", name="ck_wishlist_tracked_listings_slot_1_3"),
     )
 
     op.create_index(

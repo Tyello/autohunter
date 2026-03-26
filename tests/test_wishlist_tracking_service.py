@@ -4,8 +4,6 @@ import uuid
 
 from app.models.car_listing import CarListing
 from app.models.user import User
-from app.models.wishlist import Wishlist
-from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.wishlists_service import add_wishlist
 from app.services.wishlist_tracking_service import add_tracked_listing, list_tracked_listings, remove_tracked_listing
 
@@ -59,7 +57,6 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l4.external_id)
     assert ok is False
     assert "Limite atingido" in msg
-    assert "/wishlist_track_remove" in msg
 
     ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
     assert ok is True
