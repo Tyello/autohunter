@@ -18,10 +18,8 @@ from app.services.source_configs_service import ensure_source_configs, build_scr
 from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
+from app.services.source_execution_helpers import build_scrape_dispatch, build_run_payload
 from app.sources.registry import get_source
-from app.sources.adapters.v1 import adapt_v1
-from app.sources.adapters.v2 import adapt_v2
-from app.sources.dual_run import execute_dual_run
 from app.sources.flags import read_source_impl_flags
 from app.sources.media import derive_thumbnail_url
 from app.sources.normalize import (
@@ -271,47 +269,13 @@ def run_source_for_all_wishlists(
     flags = read_source_impl_flags(cfg.extra)
     v2_scraper = get_scraper(src)
 
-    def _scrape_dispatch(search_url: str, ctx):
-        if flags.impl == "v2" and v2_scraper is not None:
-            result = v2_scraper.scrape(search_url, ctx)
-            ads, meta = adapt_v2(src, result)
-            object.__setattr__(ctx, "_last_adapter_meta", {
-                "impl": "v2",
-                "raw_count": int(getattr(meta, "raw_count", 0) or 0),
-                "normalized_count": int(getattr(meta, "normalized_count", 0) or 0),
-                "partial_failure": bool(getattr(meta, "partial_failure", False)),
-                "blocked": bool(getattr(meta, "blocked", False)),
-            })
-            return [_ad_to_listing(ad) for ad in ads if ad.external_id]
-        if flags.impl == "dual" and v2_scraper is not None:
-            chosen, report = execute_dual_run(
-                source=src,
-                search_url=search_url,
-                ctx=ctx,
-                v1_scrape_fn=plugin.scrape,
-                v2_scraper=v2_scraper,
-                flags=flags,
-            )
-            object.__setattr__(ctx, "_dual_run_summary", report.get("comparison") or {})
-            ads, meta = adapt_v1(src, chosen)
-            object.__setattr__(ctx, "_last_adapter_meta", {
-                "impl": "dual_v1",
-                "raw_count": int(getattr(meta, "raw_count", 0) or 0),
-                "normalized_count": int(getattr(meta, "normalized_count", 0) or 0),
-                "partial_failure": False,
-                "blocked": False,
-            })
-            return [_ad_to_listing(ad) for ad in ads if ad.external_id]
-        raw = plugin.scrape(search_url, ctx=ctx)
-        ads, meta = adapt_v1(src, raw)
-        object.__setattr__(ctx, "_last_adapter_meta", {
-            "impl": "v1",
-            "raw_count": int(getattr(meta, "raw_count", 0) or 0),
-            "normalized_count": int(getattr(meta, "normalized_count", 0) or 0),
-            "partial_failure": False,
-            "blocked": False,
-        })
-        return [_ad_to_listing(ad) for ad in ads if ad.external_id]
+    _scrape_dispatch = build_scrape_dispatch(
+        src=src,
+        flags=flags,
+        plugin=plugin,
+        v2_scraper=v2_scraper,
+        ad_to_listing=_ad_to_listing,
+    )
 
     groups_count = len(groups)
     total_wishlists = sum(len(g.get("wishlists") or []) for g in groups.values())
@@ -417,7 +381,16 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "webmotors_diag": wm_diag, "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
+                    payload=build_run_payload(
+                        run_summary=run_summary_err,
+                        run_reason=reason,
+                        hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                        hybrid_blocked=bool(res.get("hybrid_blocked")),
+                        hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                        backoff_minutes=minutes,
+                        webmotors_diag=wm_diag,
+                        dual_report=getattr(ctx, "_dual_run_report_path", None),
+                    ),
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -451,7 +424,17 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"{err} (bug_retry={minutes}m)",
-                    payload={"retry_minutes": minutes, "is_bug": True, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "webmotors_diag": wm_diag, "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
+                    payload=build_run_payload(
+                        run_summary=run_summary_err,
+                        run_reason=reason,
+                        hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                        hybrid_blocked=bool(res.get("hybrid_blocked")),
+                        hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                        retry_minutes=minutes,
+                        is_bug=True,
+                        webmotors_diag=wm_diag,
+                        dual_report=getattr(ctx, "_dual_run_report_path", None),
+                    ),
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -500,7 +483,16 @@ def run_source_for_all_wishlists(
                 browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                 force_browser=bool(ctx.force_browser),
                 error=f"{err} (backoff={minutes}m)",
-                payload={"backoff_minutes": minutes, "hybrid_browser_used": bool(res.get("hybrid_browser_used")), "hybrid_blocked": bool(res.get("hybrid_blocked")), "hybrid_blocked_status": res.get("hybrid_blocked_status"), "webmotors_diag": wm_diag, "dual_report": getattr(ctx, "_dual_run_report_path", None), "run_summary": run_summary_err, "run_reason": reason},
+                payload=build_run_payload(
+                    run_summary=run_summary_err,
+                    run_reason=reason,
+                    hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                    hybrid_blocked=bool(res.get("hybrid_blocked")),
+                    hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                    backoff_minutes=minutes,
+                    webmotors_diag=wm_diag,
+                    dual_report=getattr(ctx, "_dual_run_report_path", None),
+                ),
             )
             logger.info("source_run_summary", extra=run_summary_err)
             emit_event(
@@ -553,7 +545,15 @@ def run_source_for_all_wishlists(
         proxy_server=ctx.proxy_server,
         browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
         force_browser=bool(ctx.force_browser),
-        payload={"hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "run_summary": run_summary_ok, "run_reason": reason},
+        payload=build_run_payload(
+            run_summary=run_summary_ok,
+            run_reason=reason,
+            hybrid_browser_used=any_hybrid_browser,
+            hybrid_blocked=any_hybrid_blocked,
+            hybrid_blocked_status=last_hybrid_blocked_status,
+            thumb_present=total_thumb_present,
+            thumb_rate=(float(total_thumb_present) / float(total_found)) if total_found else 0.0,
+        ),
     )
 
     activity_stats = reconcile_listing_activity_for_source_run(
