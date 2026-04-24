@@ -4,6 +4,8 @@ import uuid
 
 from app.models.car_listing import CarListing
 from app.models.user import User
+from app.models.wishlist import Wishlist
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.wishlists_service import add_wishlist
 from app.services.wishlist_tracking_service import add_tracked_listing, list_tracked_listings, remove_tracked_listing
 

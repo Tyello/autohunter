@@ -13,7 +13,7 @@ Não aumentar agressividade de scraping. Melhorar controle operacional e previsi
 | mercadolivre | http | não | sim | médio (ondas anti-bot pontuais) | **monitorar** |
 | olx | http | não | sim | médio/alto (bloqueio intermitente) | **monitorar** |
 | chavesnamao | browser | sim | sim | médio (variação regional/SSR) | **browser-first** |
-| webmotors | browser | sim | sim | alto (challenge HTTP 200/anti-bot) | **browser-first** |
+| webmotors | browser | sim | sim | alto (challenge HTTP 200/anti-bot recorrente) | **frágil/despriorizada** |
 | gogarage | browser | sim | sim | alto (JS-heavy) | **browser-first** |
 | icarros | browser | sim | sim | alto (JS-heavy + anti-bot) | **monitorar** |
 | mobiauto | browser | sim | sim | alto (JS-heavy + anti-bot) | **monitorar** |
@@ -26,9 +26,12 @@ Não aumentar agressividade de scraping. Melhorar controle operacional e previsi
 - `blocked/challenge/parser/network` devem ser tratados como categorias explícitas no health/admin.
 - Priorizar ação operacional: backoff, warmup de browser, sessão/cookies, ajuste de cadência.
 - Não usar retry agressivo para “furar” proteção anti-bot.
+- **WebMotors**: tratar como source frágil com bloqueio recorrente (ex.: backoff de 240m). Se as demais sources estiverem saudáveis, isso **não é incidente crítico diário**.
+- Ação padrão para WebMotors: monitorar + backoff + manter despriorizada.
+- Investigar retomada só com decisão explícita de produto/operação para torná-la prioritária novamente.
+- Não aumentar agressividade e não tentar burlar anti-bot/captcha/challenge.
 
 ## Próximos passos seguros
 1. Revisar cadência de sources de alto risco para evitar fila cronicamente saturada.
 2. Operar com alertas por recorrência (não por evento isolado).
 3. Manter estratégia dual/v1/v2 observável antes de consolidar adaptadores.
-

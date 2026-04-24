@@ -62,6 +62,14 @@ def _fmt_dt(dt: Optional[datetime]) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _get_bool_setting(attr: Optional[str], default: bool = True) -> bool:
     if not attr:
         return default
@@ -989,6 +997,11 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
 
 async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
+        await update.message.reply_text("Sem permissão.")
+        return
+
     now = datetime.now(timezone.utc)
     verbose = any((a or "").strip().lower() in {"-v", "verbose", "--verbose", "full"} for a in (raw_args or []))
     lines: List[str] = []
@@ -1056,7 +1069,7 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
             .order_by(SystemLog.created_at.desc())
             .first()
         )
-        hb_at = getattr(hb, "created_at", None)
+        hb_at = _as_utc(getattr(hb, "created_at", None))
         hb_age_min = int((now - hb_at).total_seconds() // 60) if hb_at else None
         hb_stale = heartbeat_is_stale(
             now,
@@ -1072,23 +1085,35 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
 
         last_global = db.query(SourceRun).order_by(SourceRun.created_at.desc()).first()
         if last_global:
-            age_m = int((now - last_global.created_at).total_seconds() // 60)
-            lines.append(f"Última execução global: {_fmt_dt(last_global.created_at)} age={age_m}m")
+            lg_at = _as_utc(last_global.created_at)
+            age_m = int((now - lg_at).total_seconds() // 60) if lg_at else 0
+            lines.append(f"Última execução global: {_fmt_dt(lg_at)} age={age_m}m")
         else:
             lines.append("Última execução global: -")
 
         rows = db.query(SourceState).all()
-        paused = [r for r in rows if r.next_allowed_at and r.next_allowed_at > now]
+        paused = [r for r in rows if _as_utc(r.next_allowed_at) and _as_utc(r.next_allowed_at) > now]
         if paused:
             lines.append("")
             lines.append("Sources paused (backoff/throttle):")
             for r in sorted(paused, key=lambda x: x.source):
+                extra_hint = ""
+                if r.source == "webmotors":
+                    extra_hint = " note=source frágil/anti-bot recorrente"
+                next_allowed = _as_utc(r.next_allowed_at)
                 lines.append(
-                    f"- {r.source}: until {_fmt_dt(r.next_allowed_at)} status={r.last_status or '-'}"
+                    f"- {r.source}: until {_fmt_dt(next_allowed)} status={r.last_status or '-'}{extra_hint}"
                 )
 
         # per-source latest run (compact, stale-first)
-        all_sources = sorted({p.name for p in list_sources()})
+        plugins = {p.name: p for p in list_sources()}
+        all_sources = sorted(plugins.keys())
+        cfg_by_source: Dict[str, SourceConfig] = {
+            c.source: c for c in db.query(SourceConfig).filter(SourceConfig.source.in_(all_sources)).all()
+        }
+        state_by_source: Dict[str, SourceState] = {
+            s.source: s for s in db.query(SourceState).filter(SourceState.source.in_(all_sources)).all()
+        }
         latest_rows = (
             db.query(SourceRun)
             .order_by(SourceRun.source.asc(), SourceRun.created_at.desc())
@@ -1102,11 +1127,21 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
                 break
         stale_lines: list[str] = []
         ok_lines: list[str] = []
+        disabled_lines: list[str] = []
+        aux_lines: list[str] = []
         for src in all_sources:
+            plugin = plugins.get(src)
             lr = latest_by_source.get(src)
-            cfg = db.query(SourceConfig).filter(SourceConfig.source == src).first()
+            cfg = cfg_by_source.get(src)
+            state = state_by_source.get(src)
             sched_m = int((cfg.sched_minutes if cfg else 0) or 0)
-            lr_at = lr.created_at if lr else None
+            is_enabled = bool(cfg.is_enabled) if cfg else bool(getattr(plugin, "default_enabled", True))
+            supports_wishlist = bool(getattr(plugin, "supports_wishlist_monitoring", True))
+            is_implemented = bool(getattr(plugin, "scrape", None))
+            state_next_allowed = _as_utc(getattr(state, "next_allowed_at", None))
+            paused = bool(state and state_next_allowed and state_next_allowed > now)
+            paused_mins = _mins_left(state_next_allowed, now)
+            lr_at = _as_utc(lr.created_at) if lr else None
             stale_eval = evaluate_source_staleness(
                 now=now,
                 last_run_at=lr_at,
@@ -1114,10 +1149,31 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
                 factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0),
                 min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180),
             )
+            if not is_enabled:
+                if verbose:
+                    disabled_lines.append(f"- {src}: disabled")
+                continue
+            if not supports_wishlist:
+                if verbose:
+                    aux_lines.append(f"- {src}: auxiliary/feed source (sem wishlist monitoring)")
+                continue
+            if not is_implemented:
+                if verbose:
+                    aux_lines.append(f"- {src}: not_implemented")
+                continue
             if stale_eval.stale:
-                stale_lines.append(f"- {src}: stale age={stale_eval.age_minutes}m thr={stale_eval.threshold_minutes}m")
+                if paused:
+                    reason = "blocked/backoff"
+                    if src == "webmotors":
+                        reason = "source frágil / anti-bot recorrente; monitorar ou manter despriorizada"
+                    stale_lines.append(
+                        f"- {src}: stale age={stale_eval.age_minutes}m thr={stale_eval.threshold_minutes}m "
+                        f"(paused {paused_mins}m, {reason})"
+                    )
+                else:
+                    stale_lines.append(f"- {src}: stale age={stale_eval.age_minutes}m thr={stale_eval.threshold_minutes}m")
             elif verbose and lr:
-                age = int((now - lr.created_at).total_seconds() // 60)
+                age = int((now - _as_utc(lr.created_at)).total_seconds() // 60)
                 ok_lines.append(f"- {src}: {lr.status} age={age}m")
         if stale_lines:
             lines.append("")
@@ -1127,6 +1183,14 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
             lines.append("")
             lines.append("Sources recentes:")
             lines.extend(ok_lines[:12])
+        if verbose and disabled_lines:
+            lines.append("")
+            lines.append("Sources disabled:")
+            lines.extend(disabled_lines[:20])
+        if verbose and aux_lines:
+            lines.append("")
+            lines.append("Sources auxiliary/not_implemented:")
+            lines.extend(aux_lines[:20])
 
         # Scrape queue and stuck runners
         job_counts = (

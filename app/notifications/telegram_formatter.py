@@ -40,6 +40,7 @@ _MAX_REASON = 88
 _MAX_FILTER_VALUE = 36
 _MAX_BADGES = 8
 _MAX_REASONS = 3
+_NON_ACTIONABLE_REASONS = {"anuncio completo", "anúncio completo"}
 
 
 def _clean(s: str | None) -> str:
@@ -415,7 +416,7 @@ def _compact_filters(ad: Any) -> list[str]:
     alias = {"price": "preço", "year": "ano", "source": "fonte", "color": "cor", "city": "cidade", "state": "estado"}
     op_map = {"eq": "=", "neq": "≠", "lte": "≤", "gte": "≥", "lt": "<", "gt": ">"}
 
-    for f in raw[:3]:
+    for f in raw[:2]:
         if not isinstance(f, dict):
             continue
         field = str(f.get("field") or "").strip().lower()
@@ -479,13 +480,21 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
     lines.append(line3)
 
     if score_i > 0 and (main_reason or matched_filters):
-        lines.append("Por que você recebeu:")
+        lines.append("Por que você recebeu (resumo):")
         if main_reason:
             lines.append(f"• Motivo principal: {main_reason}")
         for ftxt in matched_filters:
             lines.append(f"• Critério: {ftxt}")
 
-    extra_reasons = [r for r in reasons if _clean(r) and _clean(r) != _clean(main_reason)]
+    extra_reasons = []
+    if not matched_filters:
+        for r in reasons:
+            clean = _clean(r)
+            if not clean or clean == _clean(main_reason):
+                continue
+            if _norm_text(clean) in _NON_ACTIONABLE_REASONS:
+                continue
+            extra_reasons.append(r)
     for r in extra_reasons[:2]:
         lines.append(f"• {r}")
 
