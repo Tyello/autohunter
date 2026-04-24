@@ -25,6 +25,7 @@ from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
+from app.models.scrape_job import ScrapeJob
 from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
@@ -218,7 +219,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _admin_sources_dispatch(update, args[1:])
         return
     if action == "health":
-        await _admin_health(update)
+        await _admin_health(update, args[1:])
         return
     if action == "users":
         await _admin_users(update, args[1:])
@@ -987,8 +988,9 @@ async def _admin_sources(update: Update, verbose: bool = False):
     await _reply_chunked(update, text)
 
 
-async def _admin_health(update: Update):
+async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
     now = datetime.now(timezone.utc)
+    verbose = any((a or "").strip().lower() in {"-v", "verbose", "--verbose", "full"} for a in (raw_args or []))
     lines: List[str] = []
     lines.append("🧰 Admin — Health")
     lines.append(f"Agora (UTC): {_fmt_dt(now)}")
@@ -1045,8 +1047,36 @@ async def _admin_health(update: Update):
     except Exception:
         pass
 
-    # Backoff/throttle snapshot
+    # Runtime + DB snapshots
     with SessionLocal() as db:
+        hb = (
+            db.query(SystemLog)
+            .filter(SystemLog.component == "scheduler")
+            .filter(SystemLog.message == "heartbeat")
+            .order_by(SystemLog.created_at.desc())
+            .first()
+        )
+        hb_at = getattr(hb, "created_at", None)
+        hb_age_min = int((now - hb_at).total_seconds() // 60) if hb_at else None
+        hb_stale = heartbeat_is_stale(
+            now,
+            hb_at,
+            stale_after_minutes=int(getattr(settings, "scheduler_heartbeat_stale_minutes", 15) or 15),
+        )
+        lines.append("")
+        lines.append(
+            "Scheduler heartbeat: "
+            + (f"{_fmt_dt(hb_at)} age={hb_age_min}m" if hb_at else "-")
+            + (" ⚠️stale" if hb_stale else "")
+        )
+
+        last_global = db.query(SourceRun).order_by(SourceRun.created_at.desc()).first()
+        if last_global:
+            age_m = int((now - last_global.created_at).total_seconds() // 60)
+            lines.append(f"Última execução global: {_fmt_dt(last_global.created_at)} age={age_m}m")
+        else:
+            lines.append("Última execução global: -")
+
         rows = db.query(SourceState).all()
         paused = [r for r in rows if r.next_allowed_at and r.next_allowed_at > now]
         if paused:
@@ -1057,11 +1087,110 @@ async def _admin_health(update: Update):
                     f"- {r.source}: until {_fmt_dt(r.next_allowed_at)} status={r.last_status or '-'}"
                 )
 
+        # per-source latest run (compact, stale-first)
+        all_sources = sorted({p.name for p in list_sources()})
+        latest_rows = (
+            db.query(SourceRun)
+            .order_by(SourceRun.source.asc(), SourceRun.created_at.desc())
+            .all()
+        )
+        latest_by_source: Dict[str, SourceRun] = {}
+        for r in latest_rows:
+            if r.source not in latest_by_source:
+                latest_by_source[r.source] = r
+            if len(latest_by_source) >= len(all_sources):
+                break
+        stale_lines: list[str] = []
+        ok_lines: list[str] = []
+        for src in all_sources:
+            lr = latest_by_source.get(src)
+            cfg = db.query(SourceConfig).filter(SourceConfig.source == src).first()
+            sched_m = int((cfg.sched_minutes if cfg else 0) or 0)
+            lr_at = lr.created_at if lr else None
+            stale_eval = evaluate_source_staleness(
+                now=now,
+                last_run_at=lr_at,
+                sched_minutes=sched_m,
+                factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0),
+                min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180),
+            )
+            if stale_eval.stale:
+                stale_lines.append(f"- {src}: stale age={stale_eval.age_minutes}m thr={stale_eval.threshold_minutes}m")
+            elif verbose and lr:
+                age = int((now - lr.created_at).total_seconds() // 60)
+                ok_lines.append(f"- {src}: {lr.status} age={age}m")
+        if stale_lines:
+            lines.append("")
+            lines.append("Sources stale:")
+            lines.extend(stale_lines[:12])
+        elif verbose and ok_lines:
+            lines.append("")
+            lines.append("Sources recentes:")
+            lines.extend(ok_lines[:12])
+
+        # Scrape queue and stuck runners
+        job_counts = (
+            db.query(ScrapeJob.queue, ScrapeJob.status, func.count(ScrapeJob.id))
+            .group_by(ScrapeJob.queue, ScrapeJob.status)
+            .all()
+        )
+        if job_counts:
+            lines.append("")
+            lines.append("scrape_jobs:")
+            byq: Dict[str, Dict[str, int]] = {}
+            for q, st, c in job_counts:
+                byq.setdefault(str(q), {})[str(st)] = int(c or 0)
+            for q in sorted(byq.keys()):
+                st = byq[q]
+                lines.append(f"- {q}: queued={st.get('queued',0)} running={st.get('running',0)} done={st.get('done',0)} failed={st.get('failed',0)}")
+        stuck_cut = now - timedelta(minutes=int(getattr(settings, "scrape_job_stuck_minutes", 30) or 30))
+        stuck_running = (
+            db.query(func.count(ScrapeJob.id))
+            .filter(ScrapeJob.status == "running")
+            .filter(ScrapeJob.started_at.is_not(None))
+            .filter(ScrapeJob.started_at < stuck_cut)
+            .scalar()
+            or 0
+        )
+        if stuck_running:
+            lines.append(f"⚠️ running travados: {int(stuck_running)} (>30m)")
+
+        # Notifications / sender health
+        notif_counts = db.query(Notification.status, func.count(Notification.id)).group_by(Notification.status).all()
+        if notif_counts:
+            lines.append("")
+            lines.append("notifications:")
+            lines.append(
+                "- "
+                + " ".join([f"{str(st)}={int(c)}" for st, c in sorted(notif_counts, key=lambda x: str(x[0]))])
+            )
+        sender_stall_cut = now - timedelta(minutes=int(getattr(settings, "sender_stall_minutes", 20) or 20))
+        queued_old = (
+            db.query(func.count(Notification.id))
+            .filter(Notification.status == "queued")
+            .filter(Notification.created_at < sender_stall_cut)
+            .scalar()
+            or 0
+        )
+        if queued_old:
+            lines.append(f"⚠️ sender possivelmente parado: queued_old={int(queued_old)} (>20m)")
+
+        # Last failures by source
+        fail_rows = (
+            db.query(SourceRun.source, SourceRun.status, SourceRun.created_at, SourceRun.error)
+            .filter(SourceRun.status.in_(["error", "blocked"]))
+            .order_by(SourceRun.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        if fail_rows:
+            lines.append("")
+            lines.append("Últimas falhas:")
+            for src, st, dt, err in fail_rows:
+                lines.append(f"- {src} {st} at={_fmt_dt(dt)} err={_short(err, 90)}")
+
     text = "\n".join(lines)
-    if len(text) > 3800:
-        text = text[:3797] + "..."
-    safe = sanitize_for_telegram(text)
-    await update.message.reply_text(safe)
+    await _reply_chunked(update, sanitize_for_telegram(text))
 
 
 

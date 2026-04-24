@@ -47,6 +47,7 @@ Para o produto funcionar (Telegram-first), estes blocos precisam estar saudávei
 ### Telegram/admin
 - comandos admin funcionando (`/admin health`, `/admin sources`).
 - alertas do monitor chegando nos chats admin configurados.
+- para diagnóstico mais detalhado, usar `/admin health verbose`.
 
 ## 4) Sinais de problema
 - Source sem execução efetiva há tempo acima de `sched_minutes * fator_stale`.
@@ -129,6 +130,14 @@ order by status;
 5. Se job travou, usar caminho seguro já previsto (requeue de stale running via serviço).
 6. Registrar ação e impacto para não perder contexto.
 
+## 6.1) Comandos operacionais de health (Telegram-first)
+- `/admin health`  
+  visão compacta com heartbeat, fila, notifications e últimas falhas.
+- `/admin health verbose`  
+  inclui mais detalhes de fontes e execução.
+- `/admin sources`  
+  visão por source com estado/causa/ação.
+
 ### O que não fazer impulsivamente
 - Não desligar múltiplas sources sem diagnóstico mínimo.
 - Não zerar/limpar tabelas de fila/notificação em produção.
@@ -154,6 +163,7 @@ Escalar para investigação mais profunda quando houver:
 - `AGENTS.md`
 - `docs/PROJECT_GUIDELINE.md`
 - `docs/LEGACY_INVENTORY.md`
+- `docs/BACKUP_RESTORE.md`
 
 ## 10) Validação pós-migration (tracking de wishlist)
 Quando subir migration de `wishlist_tracked_listings`, rode:
