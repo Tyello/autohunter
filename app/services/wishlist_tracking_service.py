@@ -14,6 +14,16 @@ from app.models.wishlist_tracked_listing import WishlistTrackedListing
 MAX_TRACKED_PER_WISHLIST = 3
 
 
+def _short_label(text: Any, *, max_len: int = 70) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return "Anúncio"
+    compact = " ".join(raw.split())
+    if len(compact) <= max_len:
+        return compact
+    return compact[: max(1, max_len - 1)].rstrip() + "…"
+
+
 def _normalize_listing_ref(ref: str) -> str:
     raw = (ref or "").strip()
     if not raw:

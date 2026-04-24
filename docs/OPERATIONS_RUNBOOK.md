@@ -150,6 +150,13 @@ Implicação operacional: parte das falhas é estrutural da origem (anti-bot, va
 
 Em fontes JS-heavy, alternância HTTP/browser pode ser necessária conforme contexto da execução.
 
+### WebMotors (política atual)
+- WebMotors tem bloqueio anti-bot recorrente (incluindo challenge com HTTP 200) e pode ficar em backoff prolongado (ex.: 240 minutos).
+- Se outras sources prioritárias estiverem saudáveis, WebMotors bloqueada **não deve ser tratada como incidente crítico diário**.
+- Ação padrão: monitorar no `/admin health`, manter backoff ativo e despriorizar operacionalmente.
+- Só abrir investigação de retomada profunda se houver decisão explícita de voltar WebMotors ao conjunto prioritário.
+- Não aumentar agressividade de scraping e não tentar burlar anti-bot/captcha/challenge.
+
 ## 8) Quando escalar investigação
 Escalar para investigação mais profunda quando houver:
 - stale global persistente mesmo com scheduler ativo;
