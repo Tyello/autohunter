@@ -31,6 +31,13 @@ Não aumentar agressividade de scraping. Melhorar controle operacional e previsi
 - Investigar retomada só com decisão explícita de produto/operação para torná-la prioritária novamente.
 - Não aumentar agressividade e não tentar burlar anti-bot/captcha/challenge.
 
+## Política operacional de sources
+- **principal**: source habilitada, com `supports_wishlist_monitoring=True` e `scrape` executável; participa do produto e pode entrar no stale crítico.
+- **auxiliar/feed**: `supports_wishlist_monitoring=False`; monitorar separadamente e **não** tratar como quebra do produto principal.
+- **experimental/despriorizada**: manter observabilidade, mas sem elevar automaticamente como incidente crítico.
+- **disabled**: source desabilitada em `source_configs`; não gera alerta crítico de stale.
+- **WebMotors**: source frágil/anti-bot recorrente; quando blocked/backoff, manter hint operacional e investigar só por decisão explícita.
+
 ## Próximos passos seguros
 1. Revisar cadência de sources de alto risco para evitar fila cronicamente saturada.
 2. Operar com alertas por recorrência (não por evento isolado).

@@ -15,6 +15,7 @@ from app.models.source_state import SourceState
 from app.models.system_log import SystemLog
 from app.models.user import User
 from app.models.wishlist import Wishlist
+from app.sources.types import SourcePlugin
 
 
 class _Msg:
@@ -173,6 +174,32 @@ def test_admin_health_auxiliary_source_is_not_stale_critical(monkeypatch, db):
     assert "- turboclass_vendidos: stale" not in text
     assert "Sources auxiliary/not_implemented:" in text
     assert "turboclass_vendidos" in text
+
+
+def test_admin_health_not_implemented_source_is_not_stale_critical(monkeypatch, db):
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(minutes=500)
+    plugin = SourcePlugin(
+        name="not_impl_source",
+        build_url=lambda _q: "https://example.com",
+        scrape=None,
+        supports_manual_search=False,
+        supports_wishlist_monitoring=True,
+        fetch_mode="http",
+        default_enabled=False,
+        default_sched_minutes=60,
+    )
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [plugin])
+    db.add(SourceConfig(source="not_impl_source", is_enabled=True, sched_minutes=60))
+    db.add(SourceRun(source="not_impl_source", kind="scheduler", status="success", created_at=old))
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    text = _run_health(monkeypatch, _Update(), ["verbose"])
+
+    assert "Sources stale:" not in text or "- not_impl_source: stale" not in text
+    assert "Sources auxiliary/not_implemented:" in text
+    assert "not_impl_source: not_implemented" in text
 
 
 def test_admin_health_verbose_uses_chunking(monkeypatch, db):
