@@ -6,6 +6,11 @@ Escopo: PostgreSQL/Supabase.
 ## Objetivo
 Garantir recuperação mínima de dados core sem expor secrets e sem sobrescrita agressiva.
 
+## Drill operacional em staging
+- Procedimento completo: `docs/BACKUP_RESTORE_STAGING_DRILL.md`.
+- O drill é obrigatório antes de qualquer decisão de restore em produção.
+
+
 ## Tabelas cobertas
 - `users`
 - `wishlists`
@@ -73,8 +78,11 @@ Comportamento:
 - sem overwrite silencioso
 
 ## 6) Como validar contagens após restore
-- Comparar `meta.table_row_counts` do backup com contagens no banco destino.
-- Executar queries por tabela (`users`, `wishlists`, `wishlist_filters`, `wishlist_tracked_listings` e, se aplicável, `car_listings`).
+- Comparar `meta.table_row_counts` do backup com contagens no banco destino usando:
+```bash
+PYTHONPATH=. python scripts/compare_core_backup_to_db.py --input backup_core.json
+```
+- O script retorna exit code `1` quando detectar divergência relevante.
 - Reexecutar `restore --apply`: o esperado é alta taxa de `skipped` e baixa/zero de `inserted` (idempotência).
 
 ## 7) O que nunca fazer em produção
