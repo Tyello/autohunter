@@ -176,6 +176,22 @@ def test_admin_health_auxiliary_source_is_not_stale_critical(monkeypatch, db):
     assert "turboclass_vendidos" in text
 
 
+def test_admin_health_experimental_enabled_source_is_not_stale_critical(monkeypatch, db):
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(minutes=500)
+    db.add(SourceConfig(source="kavak", is_enabled=True, sched_minutes=60))
+    db.add(SourceRun(source="kavak", kind="scheduler", status="success", created_at=old))
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    text = _run_health(monkeypatch, _Update(), ["verbose"])
+
+    assert "- kavak: stale" not in text
+    assert "Sources auxiliary/not_implemented:" in text
+    assert "kavak: role=experimental" in text
+    assert "Sources stale:" not in text or "- kavak: stale" not in text
+
+
 def test_admin_health_not_implemented_source_is_not_stale_critical(monkeypatch, db):
     now = datetime.now(timezone.utc)
     old = now - timedelta(minutes=500)

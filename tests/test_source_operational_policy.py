@@ -67,6 +67,7 @@ def test_explicit_experimental_is_not_included_in_critical_stale():
     op = classify_source_operational_role(plugin, cfg=SimpleNamespace(is_enabled=True))
     assert op.role == "experimental"
     assert should_include_in_critical_stale(plugin, cfg=SimpleNamespace(is_enabled=True)) is False
+    assert source_operational_hint(plugin, state=SimpleNamespace(last_status="blocked")) is None
 
 
 def test_explicit_deprioritized_is_not_included_in_critical_stale():

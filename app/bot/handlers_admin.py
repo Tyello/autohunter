@@ -792,6 +792,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
         implemented = p.scrape is not None
 
         st = states.get(p.name)
+        op_class = classify_source_operational_role(p, cfg=cfg, state=st)
         lr = last_runs.get(p.name)
         le = last_effective.get(p.name)
         a = aggs.get(p.name, _Agg24h())
@@ -833,6 +834,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
         why = "-"
         action = "—"
         emoji = "✅"
+        stale_eval = None
 
         if not enabled:
             kind = "DISABLED"
@@ -904,18 +906,18 @@ async def _admin_sources(update: Update, verbose: bool = False):
                     why = _short(lr_cause.error, 120)
                     action = "ver logs"
 
-            if stale_eval.stale:
-                kind = "STALE"
-                emoji = "🟤"
-                state = f"🟤 stale {stale_eval.age_minutes}m" if stale_eval.age_minutes is not None else "🟤 stale"
-                if stale_eval.age_minutes is None:
-                    why = f"sem last_run_at; threshold={stale_eval.threshold_minutes}m"
-                else:
-                    why = (
-                        f"sem run recente: age={stale_eval.age_minutes}m "
-                        f"threshold={stale_eval.threshold_minutes}m overdue={stale_eval.overdue_minutes}m"
-                    )
-                action = "verificar scheduler/orquestrador e fila global"
+        if stale_eval is not None and stale_eval.stale:
+            kind = "STALE"
+            emoji = "🟤"
+            state = f"🟤 stale {stale_eval.age_minutes}m" if stale_eval.age_minutes is not None else "🟤 stale"
+            if stale_eval.age_minutes is None:
+                why = f"sem last_run_at; threshold={stale_eval.threshold_minutes}m"
+            else:
+                why = (
+                    f"sem run recente: age={stale_eval.age_minutes}m "
+                    f"threshold={stale_eval.threshold_minutes}m overdue={stale_eval.overdue_minutes}m"
+                )
+            action = "verificar scheduler/orquestrador e fila global"
 
         ok_pct = int(round((a.success / a.total) * 100)) if a.total else 0
         snap = f"24h ok={a.success}/{a.total} ({ok_pct}%) err={a.error} blk={a.blocked} skip={a.skipped}"
@@ -983,6 +985,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
         if kind != "OK" or backoff_active:
             lines.append(f"   causa: {why}")
             lines.append(f"   ação: {action}")
+        if stale_eval is not None and stale_eval.stale and not op_class.include_in_critical_stale:
+            lines.append(f"   note: role={op_class.role} (stale não crítico em /admin health)")
 
         if verbose and lr and lr.error:
             lines.append(f"   err_full: {_short(lr.error, 420)}")
