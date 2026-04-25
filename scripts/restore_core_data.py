@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 from app.core.settings import settings
@@ -16,6 +17,39 @@ TABLE_ORDER = [
     "wishlist_tracked_listings",
     "car_listings",
 ]
+
+
+def _extract_ids(rows: Iterable[dict], key: str = "id") -> set:
+    return {row.get(key) for row in rows if isinstance(row, dict) and row.get(key) is not None}
+
+
+def _compute_fk_missing(rows: list[dict], fk_name: str, valid_refs: set) -> int:
+    if not rows:
+        return 0
+    missing = 0
+    for row in rows:
+        ref = row.get(fk_name)
+        if ref is not None and ref not in valid_refs:
+            missing += 1
+    return missing
+
+
+def _table_exists(conn, table: str) -> bool:
+    inspector = inspect(conn)
+    return table in inspector.get_table_names()
+
+
+def _validate_payload_shape(payload: dict) -> tuple[dict, list[str]]:
+    issues: list[str] = []
+    data = payload.get("data") or {}
+    if not isinstance(data, dict):
+        raise SystemExit("Formato inválido: chave data ausente/inválida")
+    meta = payload.get("meta") or {}
+    if not isinstance(meta, dict):
+        issues.append("meta ausente/inválida")
+    if not meta.get("created_at_utc"):
+        issues.append("meta.created_at_utc ausente")
+    return data, issues
 
 
 def _validate_database_url() -> str:
@@ -57,24 +91,70 @@ def main() -> int:
     with open(args.input, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
-    data = payload.get("data") or {}
-    if not isinstance(data, dict):
-        raise SystemExit("Formato inválido: chave data ausente/inválida")
+    data, payload_issues = _validate_payload_shape(payload)
 
     dry_run = not bool(args.apply)
     print(f"Modo: {'DRY-RUN' if dry_run else 'APPLY'}")
+    if dry_run:
+        print("Nenhuma escrita será aplicada no banco.")
 
     engine = create_engine(database_url)
     with engine.begin() as conn:
+        existing_ids: dict[str, set] = {}
+        for table in TABLE_ORDER:
+            if table in data and _table_exists(conn, table):
+                rows = conn.execute(text(f"SELECT id FROM {table}")).mappings().all()
+                existing_ids[table] = _extract_ids(rows)
+            else:
+                existing_ids[table] = set()
+
+        backup_ids = {table: _extract_ids(data.get(table) or []) for table in TABLE_ORDER}
+        fk_base_wishlists = existing_ids.get("wishlists", set()) | backup_ids.get("wishlists", set())
+        fk_base_users = existing_ids.get("users", set()) | backup_ids.get("users", set())
+        fk_base_car_listings = existing_ids.get("car_listings", set()) | backup_ids.get("car_listings", set())
+
+        risks: list[str] = list(payload_issues)
         for table in TABLE_ORDER:
             rows = data.get(table) or []
             if not rows:
                 continue
+
+            current_existing = existing_ids.get(table, set())
+            row_ids = _extract_ids(rows)
+            already_exists = len([rid for rid in row_ids if rid in current_existing])
+
+            fk_missing = 0
+            if table == "wishlists":
+                fk_missing = _compute_fk_missing(rows, "user_id", fk_base_users)
+            elif table in {"wishlist_filters", "wishlist_tracked_listings"}:
+                fk_missing = _compute_fk_missing(rows, "wishlist_id", fk_base_wishlists)
+                if table == "wishlist_tracked_listings":
+                    for row in rows:
+                        car_listing_id = row.get("car_listing_id")
+                        if car_listing_id is not None and car_listing_id not in fk_base_car_listings:
+                            fk_missing += 1
+
+            insertable = max(0, len(rows) - already_exists - fk_missing)
+            if fk_missing > 0:
+                risks.append(f"{table}: {fk_missing} linhas com FK ausente")
+
             if dry_run:
-                print(f"[dry-run] {table}: {len(rows)} rows (nenhuma escrita)")
+                print(
+                    f"[dry-run] {table}: processar={len(rows)} existentes={already_exists} "
+                    f"fk_ausente={fk_missing} inseriveis={insertable}"
+                )
                 continue
+
             inserted = _insert_on_conflict_do_nothing(conn, table, rows)
             print(f"[apply] {table}: input={len(rows)} inserted={inserted} skipped={len(rows)-inserted}")
+
+        if risks:
+            print("Riscos detectados:")
+            for risk in risks:
+                print(f" - {risk}")
+            print("Atenção: há risco de restore parcial.")
+        else:
+            print("Compatibilidade aparente com schema atual: sem riscos estruturais detectados.")
 
     print("Restore concluído.")
     return 0

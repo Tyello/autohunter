@@ -49,7 +49,9 @@ def main() -> int:
     payload: dict = {
         "meta": {
             "created_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "backup_version": "1",
             "tables": tables,
+            "table_row_counts": {},
         },
         "data": {},
     }
@@ -60,8 +62,9 @@ def main() -> int:
                 q = text("SELECT * FROM car_listings ORDER BY created_at DESC LIMIT :lim")
                 rows = conn.execute(q, {"lim": max(1, int(args.car_listings_limit or 1))}).mappings().all()
             else:
-                rows = conn.execute(text(f"SELECT * FROM {tbl}")) .mappings().all()
+                rows = conn.execute(text(f"SELECT * FROM {tbl}")).mappings().all()
             payload["data"][tbl] = [dict(r) for r in rows]
+            payload["meta"]["table_row_counts"][tbl] = len(rows)
             print(f"[ok] {tbl}: {len(rows)} rows")
 
     with open(out, "w", encoding="utf-8") as f:
