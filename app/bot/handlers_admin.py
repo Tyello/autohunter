@@ -29,6 +29,11 @@ from app.models.scrape_job import ScrapeJob
 from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
+from app.services.source_operational_policy import (
+    classify_source_operational_role,
+    should_include_in_critical_stale,
+    source_operational_hint,
+)
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
@@ -1091,6 +1096,7 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
         else:
             lines.append("Última execução global: -")
 
+        plugins = {p.name: p for p in list_sources()}
         rows = db.query(SourceState).all()
         paused = [r for r in rows if _as_utc(r.next_allowed_at) and _as_utc(r.next_allowed_at) > now]
         if paused:
@@ -1098,15 +1104,16 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
             lines.append("Sources paused (backoff/throttle):")
             for r in sorted(paused, key=lambda x: x.source):
                 extra_hint = ""
-                if r.source == "webmotors":
-                    extra_hint = " note=source frágil/anti-bot recorrente"
+                plugin = plugins.get(r.source)
+                hint = source_operational_hint(plugin, state=r) if plugin is not None else None
+                if hint:
+                    extra_hint = f" note={hint}"
                 next_allowed = _as_utc(r.next_allowed_at)
                 lines.append(
                     f"- {r.source}: until {_fmt_dt(next_allowed)} status={r.last_status or '-'}{extra_hint}"
                 )
 
         # per-source latest run (compact, stale-first)
-        plugins = {p.name: p for p in list_sources()}
         all_sources = sorted(plugins.keys())
         cfg_by_source: Dict[str, SourceConfig] = {
             c.source: c for c in db.query(SourceConfig).filter(SourceConfig.source.in_(all_sources)).all()
@@ -1138,6 +1145,7 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
             is_enabled = bool(cfg.is_enabled) if cfg else bool(getattr(plugin, "default_enabled", True))
             supports_wishlist = bool(getattr(plugin, "supports_wishlist_monitoring", True))
             is_implemented = bool(getattr(plugin, "scrape", None))
+            op_class = classify_source_operational_role(plugin, cfg=cfg, state=state)
             state_next_allowed = _as_utc(getattr(state, "next_allowed_at", None))
             paused = bool(state and state_next_allowed and state_next_allowed > now)
             paused_mins = _mins_left(state_next_allowed, now)
@@ -1153,19 +1161,24 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
                 if verbose:
                     disabled_lines.append(f"- {src}: disabled")
                 continue
-            if not supports_wishlist:
+            if op_class.role == "auxiliary" or not supports_wishlist:
                 if verbose:
                     aux_lines.append(f"- {src}: auxiliary/feed source (sem wishlist monitoring)")
                 continue
-            if not is_implemented:
+            if op_class.role == "not_implemented" or not is_implemented:
                 if verbose:
                     aux_lines.append(f"- {src}: not_implemented")
+                continue
+            if not should_include_in_critical_stale(plugin, cfg):
+                if verbose:
+                    aux_lines.append(f"- {src}: role={op_class.role}")
                 continue
             if stale_eval.stale:
                 if paused:
                     reason = "blocked/backoff"
-                    if src == "webmotors":
-                        reason = "source frágil / anti-bot recorrente; monitorar ou manter despriorizada"
+                    hint = source_operational_hint(plugin, state=state)
+                    if hint:
+                        reason = f"{hint}; monitorar ou manter despriorizada"
                     stale_lines.append(
                         f"- {src}: stale age={stale_eval.age_minutes}m thr={stale_eval.threshold_minutes}m "
                         f"(paused {paused_mins}m, {reason})"
