@@ -5,6 +5,17 @@ from typing import Any, Optional
 
 from app.sources.types import SourcePlugin
 
+ALLOWED_OPERATIONAL_ROLES = {
+    "primary",
+    "auxiliary",
+    "experimental",
+    "fragile",
+    "deprioritized",
+    "disabled",
+}
+
+CRITICAL_ROLES = {"primary", "fragile"}
+
 
 @dataclass(frozen=True, slots=True)
 class SourceOperationalClassification:
@@ -25,7 +36,9 @@ def _manual_role_override(plugin: SourcePlugin) -> Optional[str]:
         return None
     role = extra.get("operational_role")
     if isinstance(role, str) and role.strip():
-        return role.strip().lower()
+        normalized = role.strip().lower()
+        if normalized in ALLOWED_OPERATIONAL_ROLES:
+            return normalized
     return None
 
 
@@ -42,15 +55,22 @@ def classify_source_operational_role(
 
     supports_wishlist = bool(getattr(plugin, "supports_wishlist_monitoring", True))
     implemented = callable(getattr(plugin, "scrape", None))
+    explicit_role = _manual_role_override(plugin)
 
-    if not supports_wishlist:
+    if explicit_role == "disabled":
+        return SourceOperationalClassification("disabled", False, "explicit:disabled")
+    if not supports_wishlist or explicit_role == "auxiliary":
         return SourceOperationalClassification("auxiliary", False, "auxiliary/feed")
     if not implemented:
         return SourceOperationalClassification("not_implemented", False, "scrape=None")
 
-    explicit_role = _manual_role_override(plugin)
-    if explicit_role in {"experimental", "deprioritized", "fragile"}:
-        return SourceOperationalClassification(explicit_role, True, f"explicit:{explicit_role}")
+    if explicit_role:
+        include_in_critical = explicit_role in CRITICAL_ROLES
+        return SourceOperationalClassification(
+            explicit_role,
+            include_in_critical,
+            f"explicit:{explicit_role}",
+        )
 
     return SourceOperationalClassification("primary", True, "wishlist+implemented+enabled")
 
