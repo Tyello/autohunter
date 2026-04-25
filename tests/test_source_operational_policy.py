@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.services.source_operational_policy import (
+    ALLOWED_OPERATIONAL_ROLES,
     classify_source_operational_role,
     should_include_in_critical_stale,
     source_operational_hint,
@@ -52,6 +53,35 @@ def test_not_implemented_source_not_included_in_critical_stale():
     op = classify_source_operational_role(plugin, cfg=SimpleNamespace(is_enabled=True))
     assert op.role == "not_implemented"
     assert should_include_in_critical_stale(plugin, cfg=SimpleNamespace(is_enabled=True)) is False
+
+
+def test_explicit_fragile_is_included_in_critical_stale():
+    plugin = _plugin(default_extra={"operational_role": "fragile"})
+    op = classify_source_operational_role(plugin, cfg=SimpleNamespace(is_enabled=True))
+    assert op.role == "fragile"
+    assert should_include_in_critical_stale(plugin, cfg=SimpleNamespace(is_enabled=True)) is True
+
+
+def test_explicit_experimental_is_not_included_in_critical_stale():
+    plugin = _plugin(default_extra={"operational_role": "experimental"})
+    op = classify_source_operational_role(plugin, cfg=SimpleNamespace(is_enabled=True))
+    assert op.role == "experimental"
+    assert should_include_in_critical_stale(plugin, cfg=SimpleNamespace(is_enabled=True)) is False
+
+
+def test_explicit_deprioritized_is_not_included_in_critical_stale():
+    plugin = _plugin(default_extra={"operational_role": "deprioritized"})
+    op = classify_source_operational_role(plugin, cfg=SimpleNamespace(is_enabled=True))
+    assert op.role == "deprioritized"
+    assert should_include_in_critical_stale(plugin, cfg=SimpleNamespace(is_enabled=True)) is False
+
+
+def test_invalid_explicit_role_falls_back_to_primary_when_enabled():
+    plugin = _plugin(default_extra={"operational_role": "unknown"})
+    op = classify_source_operational_role(plugin, cfg=SimpleNamespace(is_enabled=True))
+    assert "unknown" not in ALLOWED_OPERATIONAL_ROLES
+    assert op.role == "primary"
+    assert should_include_in_critical_stale(plugin, cfg=SimpleNamespace(is_enabled=True)) is True
 
 
 def test_webmotors_blocked_state_receives_antibot_hint():

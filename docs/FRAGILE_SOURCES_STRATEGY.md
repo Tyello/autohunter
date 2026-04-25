@@ -6,21 +6,21 @@ Base: `app/sources/builtins.py` + comportamento de health/backoff no runtime.
 ## Objetivo
 Não aumentar agressividade de scraping. Melhorar controle operacional e previsibilidade.
 
-## Matriz por source
+## Matriz curta (role operacional explícita)
 
-| source | fetch_mode | force_browser default | fallback browser | risco esperado | estratégia recomendada |
-|---|---:|---:|---:|---|---|
-| mercadolivre | http | não | sim | médio (ondas anti-bot pontuais) | **monitorar** |
-| olx | http | não | sim | médio/alto (bloqueio intermitente) | **monitorar** |
-| chavesnamao | browser | sim | sim | médio (variação regional/SSR) | **browser-first** |
-| webmotors | browser | sim | sim | alto (challenge HTTP 200/anti-bot recorrente) | **frágil/despriorizada** |
-| gogarage | browser | sim | sim | alto (JS-heavy) | **browser-first** |
-| icarros | browser | sim | sim | alto (JS-heavy + anti-bot) | **monitorar** |
-| mobiauto | browser | sim | sim | alto (JS-heavy + anti-bot) | **monitorar** |
-| kavak | browser | sim | não explícito | médio/alto | **monitorar** |
-| facebook_marketplace | browser | sim | não explícito | alto (restrições e sessão) | **experimental** |
-| turboclass | http | não | sim | baixo/médio | **estável** |
-| turboclass_vendidos | http | não | sim | baixo/médio | **reduzir cadência** |
+| source | operational_role | motivo curto | expectativa operacional |
+|---|---|---|---|
+| mercadolivre | primary | fonte core do produto | entra no stale crítico se habilitada |
+| olx | primary | fonte core com monitoramento contínuo | entra no stale crítico se habilitada |
+| chavesnamao | primary | cobertura core (browser-first por estabilidade) | entra no stale crítico se habilitada |
+| webmotors | deprioritized | anti-bot/challenge recorrente | monitorar sem incidente diário |
+| gogarage | fragile | JS-heavy com risco operacional recorrente | entra no stale crítico se habilitada |
+| icarros | fragile | JS-heavy + bloqueios ocasionais | entra no stale crítico se habilitada |
+| mobiauto | fragile | JS-heavy + bloqueios ocasionais | entra no stale crítico se habilitada |
+| kavak | experimental | cobertura em validação operacional | experimental, observar manualmente |
+| facebook_marketplace | experimental | restrições de sessão/plataforma | experimental, observar manualmente |
+| turboclass | experimental | integração recente, default desabilitada | experimental, observar manualmente |
+| turboclass_vendidos | auxiliary | feed de vendidos (sem wishlist) | feed auxiliar, não crítico |
 
 ## Diretriz operacional
 - `blocked/challenge/parser/network` devem ser tratados como categorias explícitas no health/admin.
@@ -32,11 +32,9 @@ Não aumentar agressividade de scraping. Melhorar controle operacional e previsi
 - Não aumentar agressividade e não tentar burlar anti-bot/captcha/challenge.
 
 ## Política operacional de sources
-- **principal**: source habilitada, com `supports_wishlist_monitoring=True` e `scrape` executável; participa do produto e pode entrar no stale crítico.
-- **auxiliar/feed**: `supports_wishlist_monitoring=False`; monitorar separadamente e **não** tratar como quebra do produto principal.
-- **experimental/despriorizada**: manter observabilidade, mas sem elevar automaticamente como incidente crítico.
-- **disabled**: source desabilitada em `source_configs`; não gera alerta crítico de stale.
-- **WebMotors**: source frágil/anti-bot recorrente; quando blocked/backoff, manter hint operacional e investigar só por decisão explícita.
+- **primary/fragile**: entram no stale crítico quando habilitadas e executáveis.
+- **auxiliary/experimental/deprioritized/disabled**: ficam fora do stale crítico por padrão.
+- **fallback seguro**: source sem `operational_role` explícita continua classificada por comportamento (compatibilidade legada).
 
 ## Próximos passos seguros
 1. Revisar cadência de sources de alto risco para evitar fila cronicamente saturada.

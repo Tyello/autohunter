@@ -69,6 +69,7 @@ register_source(
         # from silently dying on anti-bot waves.
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "primary",
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 120,
@@ -96,6 +97,7 @@ register_source(
         fetch_mode="http",
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "primary",
             "http_connect_timeout_s": 6,
             "http_read_timeout_s": 22,
             "http_min_delay_ms": 600,
@@ -122,6 +124,7 @@ register_source(
         default_force_browser=True,
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "primary",
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 180,
@@ -150,6 +153,9 @@ register_source(
         default_sched_minutes=90,
         default_browser_fallback_enabled=True,
         default_force_browser=True,
+        default_extra={
+            "operational_role": "deprioritized",
+        },
     )
 )
 
@@ -171,6 +177,7 @@ register_source(
         default_force_browser=True,
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "fragile",
             "browser_timeout_ms": 45000,
             "browser_wait_until": "domcontentloaded",
         },
@@ -192,6 +199,7 @@ register_source(
         default_force_browser=True,
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "fragile",
             "browser_timeout_ms": 45000,
             "browser_wait_until": "domcontentloaded",
         },
@@ -214,6 +222,7 @@ register_source(
         default_force_browser=True,
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "fragile",
             "browser_timeout_ms": 45000,
             "browser_wait_until": "domcontentloaded",
         },
@@ -233,6 +242,9 @@ register_source(
         supports_wishlist_monitoring=True,
         fetch_mode="browser",
         default_force_browser=True,
+        default_extra={
+            "operational_role": "experimental",
+        },
     )
 )
 
@@ -250,6 +262,9 @@ register_source(
         fetch_mode="browser",
         default_force_browser=True,
         default_cooldown_minutes=180,
+        default_extra={
+            "operational_role": "experimental",
+        },
     )
 )
 
@@ -271,6 +286,7 @@ register_source(
         default_sched_minutes=90,
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "experimental",
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 220,
@@ -299,6 +315,7 @@ register_source(
         default_sched_minutes=360,
         default_browser_fallback_enabled=True,
         default_extra={
+            "operational_role": "auxiliary",
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 220,
