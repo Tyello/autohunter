@@ -8,11 +8,12 @@ from collections import defaultdict
 
 from sqlalchemy.orm import Session
 
-from app.core.text_norm import tokens, normalize
+from app.core.text_norm import tokens, normalize, STOPWORDS as _STOPWORDS, expand_alphanum_pairs as _expand_alphanum_pairs
 from app.models.car_listing import CarListing
 from app.models.wishlist import Wishlist
 from app.services.wishlist_semantic_rules import semantic_match
 from app.services.wishlist_query_parser import parse_wishlist_query
+from app.core.geo import STATE_NAME_TO_UF as _STATE_NAME_TO_UF
 
 
 @dataclass(frozen=True)
@@ -25,44 +26,9 @@ class FilterRule:
 
 # Stopwords leves para evitar que termos "a", "de", "até", "entre" bloqueiem matches.
 # Sem NLP pesado: só robustez para o produto rodar 24/7 em hardware fraco.
-_STOPWORDS = {
-    "a","o","os","as","de","do","da","dos","das","e","em","no","na","nos","nas","para","por","com","sem",
-    "ate","até","entre","apenas","so","só","somente","partir","apartir","desde","ano","year","anos",
-    "valor","preco","preço","precos","preços",
-}
 
 _RE_YEAR_TOKEN = re.compile(r"^(19\d{2}|20\d{2})$")
 _RE_UF = re.compile(r"\b([A-Za-z]{2})\b")
-
-_STATE_NAME_TO_UF = {
-    "acre": "AC",
-    "alagoas": "AL",
-    "amapa": "AP",
-    "amazonas": "AM",
-    "bahia": "BA",
-    "ceara": "CE",
-    "distrito federal": "DF",
-    "espirito santo": "ES",
-    "goias": "GO",
-    "maranhao": "MA",
-    "mato grosso": "MT",
-    "mato grosso do sul": "MS",
-    "minas gerais": "MG",
-    "para": "PA",
-    "paraiba": "PB",
-    "parana": "PR",
-    "pernambuco": "PE",
-    "piaui": "PI",
-    "rio de janeiro": "RJ",
-    "rio grande do norte": "RN",
-    "rio grande do sul": "RS",
-    "rondonia": "RO",
-    "roraima": "RR",
-    "santa catarina": "SC",
-    "sao paulo": "SP",
-    "sergipe": "SE",
-    "tocantins": "TO",
-}
 
 _COLOR_ALIASES = {
     "preto": "preto",
@@ -83,6 +49,7 @@ _COLOR_ALIASES = {
     "bege": "bege",
     "dourado": "dourado",
     "ouro": "dourado",
+    "perolado": "pérola",
 }
 
 def _is_year_token(t: str) -> bool:
@@ -93,27 +60,6 @@ def _effective_terms(query: str) -> list[str]:
     return [t for t in ts if t and t not in _STOPWORDS]
 
 
-
-def _expand_alphanum_pairs(ts: list[str]) -> set[str]:
-    """Expande tokens adjacentes para cobrir casos como 'A 6' vs 'A6'.
-
-    Exemplos:
-      - ['a', '6'] -> {'a6'}
-      - ['320', 'i'] -> {'320i'}
-
-    Isso aumenta recall sem NLP pesado.
-    """
-    out: set[str] = set()
-    for i in range(len(ts) - 1):
-        a = ts[i]
-        b = ts[i + 1]
-        if not a or not b:
-            continue
-        if a.isalpha() and len(a) <= 3 and b.isdigit() and len(b) <= 4:
-            out.add(a + b)
-        if a.isdigit() and len(a) <= 4 and b.isalpha() and len(b) <= 3:
-            out.add(a + b)
-    return out
 
 def _extract_year_from_url(url: str) -> int | None:
     if not url:

@@ -6,17 +6,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from app.core.text_norm import tokens as _tokens
+from app.core.text_norm import tokens as _tokens, STOPWORDS as _STOPWORDS, expand_alphanum_pairs as _expand_alphanum_pairs
 
 from .types import MarketStats, ScoreResult
 
 
 # Stopwords leves: melhora recall/robustez sem NLP pesado.
-_STOPWORDS = {
-    "a", "o", "os", "as", "de", "do", "da", "dos", "das", "e", "em", "no", "na", "nos", "nas",
-    "para", "por", "com", "sem", "ate", "até", "entre", "apenas", "so", "só", "somente",
-    "partir", "apartir", "desde", "ano", "year", "anos", "valor", "preco", "preço",
-}
 
 _RE_YEAR = re.compile(r"^(19\d{2}|20\d{2})$")
 
@@ -24,19 +19,6 @@ _RE_YEAR = re.compile(r"^(19\d{2}|20\d{2})$")
 def _is_year_token(t: str) -> bool:
     return bool(t) and bool(_RE_YEAR.match(t))
 
-
-def _expand_alphanum_pairs(ts: list[str]) -> set[str]:
-    """Covers 'A 6' vs 'A6', '320 i' vs '320i'."""
-    out: set[str] = set()
-    for i in range(len(ts) - 1):
-        a, b = ts[i], ts[i + 1]
-        if not a or not b:
-            continue
-        if a.isalpha() and len(a) <= 3 and b.isdigit() and len(b) <= 4:
-            out.add(a + b)
-        if a.isdigit() and len(a) <= 4 and b.isalpha() and len(b) <= 3:
-            out.add(a + b)
-    return out
 
 
 def _extract_year_from_text(text: str) -> int | None:

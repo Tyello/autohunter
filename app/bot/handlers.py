@@ -1,6 +1,5 @@
 import re
 from datetime import datetime, timezone
-from functools import lru_cache
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -57,7 +56,6 @@ def _get_active_subscription_and_plan(db, user: User):
     return sub, plan
 
 
-@lru_cache(maxsize=1)
 def _get_known_sources() -> set[str]:
     try:
         return {p.name.lower() for p in list_sources()}
