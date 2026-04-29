@@ -147,3 +147,28 @@ def test_chavesnamao_style_price_external_id_is_replaced():
         },
     )
     assert ad.external_id != "90000"
+
+
+def test_fuel_normalization_supports_gnv_variants():
+    assert normalize_fuel_type("gnv") == "gnv"
+    assert normalize_fuel_type("gás natural") == "gnv"
+    assert normalize_fuel_type("gas natural veicular") == "gnv"
+    assert normalize_fuel_type("bigas") == "gnv"
+
+
+def test_transmission_normalization_supports_automatica_token():
+    assert normalize_transmission("automatica") == "automatic"
+
+
+def test_normalize_ad_preserves_doors_and_tolerates_invalid_doors():
+    ad = normalize_ad("kavak", {"url": "https://example.com/1", "title": "Car", "price": 1, "doors": 4})
+    assert ad.extras.get("doors") == 4
+
+    ad_invalid = normalize_ad("kavak", {"url": "https://example.com/2", "title": "Car", "price": 1, "doors": "abc"})
+    assert ad_invalid.extras.get("doors") == "abc"
+
+
+def test_normalize_ad_preserves_body_type_raw_value():
+    for body in ["hatch", "sedan", "suv", "pickup", "coupe"]:
+        ad = normalize_ad("kavak", {"url": f"https://example.com/{body}", "title": "Car", "price": 1, "body_type": body})
+        assert ad.extras.get("body_type") == body

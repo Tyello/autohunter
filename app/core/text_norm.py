@@ -35,3 +35,23 @@ def tokens(text: str) -> list[str]:
     """Tokenize normalized text into words."""
     n = normalize(text)
     return n.split() if n else []
+
+
+STOPWORDS: frozenset[str] = frozenset({
+    "a","o","os","as","de","do","da","dos","das","e","em","no","na","nos","nas",
+    "para","por","com","sem","ate","até","entre","apenas","so","só","somente",
+    "partir","apartir","desde","ano","year","anos","valor","preco","preço","precos","preços",
+})
+
+def expand_alphanum_pairs(ts: list[str]) -> set[str]:
+    out: set[str] = set()
+    for i in range(len(ts) - 1):
+        a = ts[i]
+        b = ts[i + 1]
+        if not a or not b:
+            continue
+        if a.isalpha() and len(a) <= 3 and b.isdigit() and len(b) <= 4:
+            out.add(a + b)
+        if a.isdigit() and len(a) <= 4 and b.isalpha() and len(b) <= 3:
+            out.add(a + b)
+    return out
