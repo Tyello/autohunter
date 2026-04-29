@@ -91,7 +91,6 @@
           "price",
           "currency",
           "thumbnail_url",
-          "listing_url",
           "location",
           "created_at"
         ],
