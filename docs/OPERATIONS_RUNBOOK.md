@@ -221,3 +221,12 @@ where not exists (
     and wf.field in ('color', 'city', 'state')
 );
 ```
+
+## 11) Topologia Alembic (head único)
+A topologia de migrations Alembic foi normalizada para **head único** via migration de merge (sem operações de schema).
+
+Boas práticas para novas migrations:
+- sempre gerar nova revision a partir do head atual;
+- rodar `alembic heads` antes de abrir PR com migration;
+- se aparecer mais de um head, criar merge revision explícita e documentar no PR;
+- só manter branch paralela intencional quando houver motivo operacional claro e documentado.
