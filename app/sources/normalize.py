@@ -8,6 +8,7 @@ from app.common.price_parser import parse_price_int_reais
 from app.scrapers.framework import canonicalize_url
 from app.sources.contract import NormalizedAd
 from app.sources.media import derive_thumbnail_url, normalize_image_urls
+from app.core.geo import STATE_NAME_TO_UF as _STATE_NAME_TO_UF
 
 _UF_RE = re.compile(r"\b([A-Z]{2})\b")
 _NUM_RE = re.compile(r"\d+")
@@ -24,10 +25,14 @@ _FUEL_MAP = {
     "híbrido": "Híbrido",
     "eletrico": "Elétrico",
     "elétrico": "Elétrico",
+    "gnv": "GNV",
+    "gas natural": "GNV",
+    "gás natural": "GNV",
+    "gas natural veicular": "GNV",
+    "bigas": "GNV",
 }
 
 _TRANSMISSION_MAP = {
-    "automatica": "Automática",
     "automatica": "Automática",
     "cambio automatico": "Automática",
     "câmbio automático": "Automática",
@@ -38,20 +43,7 @@ _TRANSMISSION_MAP = {
     "semi automática": "Semi-automática",
 }
 
-_STATE_NAME_TO_UF = {
-    "sao paulo": "SP",
-    "rio de janeiro": "RJ",
-    "minas gerais": "MG",
-    "parana": "PR",
-    "rio grande do sul": "RS",
-    "santa catarina": "SC",
-    "bahia": "BA",
-    "goias": "GO",
-    "pernambuco": "PE",
-    "ceara": "CE",
-}
-
-_CANONICAL_FUEL_TYPES = {"gasoline", "ethanol", "flex", "diesel", "electric", "hybrid"}
+_CANONICAL_FUEL_TYPES = {"gasoline", "ethanol", "flex", "diesel", "electric", "hybrid", "gnv"}
 _CANONICAL_TRANSMISSIONS = {"manual", "automatic", "cvt", "automated", "semi_automatic"}
 _CANONICAL_SELLER_TYPES = {"dealer", "private", "unknown"}
 _CANONICAL_LISTING_TYPES = {"marketplace", "auction_lot", "classified"}
@@ -117,6 +109,7 @@ def normalize_fuel_type(value: Any) -> str | None:
                 "Diesel": "diesel",
                 "Híbrido": "hybrid",
                 "Elétrico": "electric",
+                "GNV": "gnv",
             }.get(v)
     return None
 

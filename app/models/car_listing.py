@@ -60,15 +60,11 @@ class CarListing(TimestampMixin, Base):
     city: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     state: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     color: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    doors: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    body_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cross_source_fingerprint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Marketplace lifecycle
     is_sold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    @property
-    def listing_url(self) -> str | None:
-        """Compat layer for API schema.
-
-        FastAPI response uses `listing_url` while DB column is `url`.
-        """
-        return self.url

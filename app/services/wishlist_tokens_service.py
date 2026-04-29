@@ -7,15 +7,11 @@ from typing import Iterable, Sequence
 from sqlalchemy import delete, select, func
 from sqlalchemy.orm import Session
 
-from app.core.text_norm import tokens as tokenize
+from app.core.text_norm import tokens as tokenize, STOPWORDS as _STOPWORDS
 from app.models.wishlist import Wishlist
 from app.models.wishlist_token import WishlistToken
 
 
-_STOPWORDS = {
-    "a","o","os","as","de","do","da","dos","das","e","em","no","na","nos","nas","para","por","com","sem",
-    "ate","até","entre","apenas","so","só","somente","partir","apartir","desde","ano","anos",
-}
 
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 

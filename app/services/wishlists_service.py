@@ -21,6 +21,7 @@ from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
+from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
 
 
 logger = logging.getLogger(__name__)
@@ -29,32 +30,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_WISHLISTS_PER_USER = 3
 
 # Fontes conhecidas hoje (expanda sem medo)
-KNOWN_SOURCES = {
-    "mercadolivre",
-    "olx",
-    "webmotors",
-    "chavesnamao",
-    "gogarage",
-    "icarros",
-    "mobiauto",
-    "kavak",
-    "facebook_marketplace",
-}
-
-_STATE_NAME_TO_UF = {
-    "acre": "AC", "alagoas": "AL", "amapa": "AP", "amazonas": "AM", "bahia": "BA", "ceara": "CE",
-    "distrito federal": "DF", "espirito santo": "ES", "goias": "GO", "maranhao": "MA",
-    "mato grosso": "MT", "mato grosso do sul": "MS", "minas gerais": "MG", "para": "PA",
-    "paraiba": "PB", "parana": "PR", "pernambuco": "PE", "piaui": "PI", "rio de janeiro": "RJ",
-    "rio grande do norte": "RN", "rio grande do sul": "RS", "rondonia": "RO", "roraima": "RR",
-    "santa catarina": "SC", "sao paulo": "SP", "sergipe": "SE", "tocantins": "TO",
-}
-
-KNOWN_STATES = {
-    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
-    "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
-}
-
 # Aceita:
 #  - "até 2004" / "ate 2004" / "ano<=2004"
 #  - "a partir de 2014" / "ano>=2014"
@@ -121,6 +96,15 @@ _PRICE_MIN_PATTERNS = [
     ),
 ]
 
+
+
+
+def _known_sources() -> set[str]:
+    from app.sources import list_sources
+    try:
+        return {p.name.lower() for p in list_sources()}
+    except Exception:
+        return set()
 
 def _parse_human_money_to_int(raw: str) -> Optional[int]:
     """Converte valores do tipo '200k', '1.2m', '120.000', 'R$ 80.000' em inteiro (centavos ignorados)."""
@@ -604,8 +588,8 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
 
     if field == "source":
         v = value.strip().lower()
-        if v not in KNOWN_SOURCES:
-            return False, "Valor inválido para source. Use: " + " | ".join(sorted(KNOWN_SOURCES))
+        if v not in _known_sources():
+            return False, "Valor inválido para source. Use: " + " | ".join(sorted(_known_sources()))
         value = v
 
     if field == "year":
@@ -635,7 +619,7 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
                 .replace("ú", "u")
                 .replace("ç", "c")
             )
-            uf = _STATE_NAME_TO_UF.get(normalized, "")
+            uf = STATE_NAME_TO_UF.get(normalized, "")
         if uf not in KNOWN_STATES:
             return False, "Valor inválido para state. Use UF (ex: SP) ou nome do estado."
         value = uf
