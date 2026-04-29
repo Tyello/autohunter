@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
@@ -11,7 +11,7 @@ class CarListingOut(BaseModel):
     price: Optional[float]
     currency: Optional[str]
     thumbnail_url: Optional[str]
-    listing_url: Optional[str] = Field(default=None, validation_alias="url")
+    listing_url: Optional[str] = Field(default=None, validation_alias=AliasChoices("url", "listing_url"))
     location: Optional[str]
     created_at: datetime
 

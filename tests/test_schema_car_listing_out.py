@@ -31,3 +31,33 @@ def test_car_listing_out_from_orm(db):
     assert out.price == 459.0
     assert out.currency == "BRL"
     assert out.created_at == listing.created_at
+
+
+def test_car_listing_out_accepts_url_payload_alias():
+    out = CarListingOut.model_validate({
+        "id": "11111111-1111-1111-1111-111111111111",
+        "source": "olx",
+        "title": "Car",
+        "price": 10,
+        "currency": "BRL",
+        "thumbnail_url": None,
+        "url": "https://example.com/url",
+        "location": "SP",
+        "created_at": "2026-04-29T00:00:00Z",
+    })
+    assert out.listing_url == "https://example.com/url"
+
+
+def test_car_listing_out_accepts_legacy_listing_url_payload():
+    out = CarListingOut.model_validate({
+        "id": "22222222-2222-2222-2222-222222222222",
+        "source": "olx",
+        "title": "Car",
+        "price": 10,
+        "currency": "BRL",
+        "thumbnail_url": None,
+        "listing_url": "https://example.com/legacy",
+        "location": "SP",
+        "created_at": "2026-04-29T00:00:00Z",
+    })
+    assert out.listing_url == "https://example.com/legacy"

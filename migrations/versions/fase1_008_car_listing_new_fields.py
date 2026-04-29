@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = 'fase1_008_car_listing_new_fields'
-down_revision = 'fase1_007_car_listings_contract_fields'
+down_revision = 'fase1_007_car_contract'
 branch_labels = None
 depends_on = None
 
