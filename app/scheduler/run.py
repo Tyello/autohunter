@@ -296,6 +296,16 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
         executor="sender",
     )
+    if bool(getattr(settings, "tracking_price_alerts_enabled", False)):
+        from app.scheduler.tracking_alerts_job import job_tracking_price_alerts
+        sched.add_job(
+            job_tracking_price_alerts,
+            "interval",
+            minutes=max(5, int(getattr(settings, "tracking_price_alerts_interval_minutes", 60) or 60)),
+            id="tracking_price_alerts_job",
+            replace_existing=True,
+            executor="sender",
+        )
 
     # Digest semanal para usuários (sábado 10:00 no timezone padrão do produto)
     from app.scheduler.weekly_wishlist_digest_job import job_weekly_wishlist_digest

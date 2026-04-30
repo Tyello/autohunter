@@ -24,6 +24,8 @@ from app.bot.handlers_wishlist_ui import (
     cmd_wishlist_clear,
     cmd_wishlist_remove,
     cmd_wishlist_track_add,
+    cmd_wishlist_track_alert_off,
+    cmd_wishlist_track_alert_on,
     cmd_wishlist_track_list,
     cmd_wishlist_track_remove,
 )
@@ -118,6 +120,8 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_add", cmd_wishlist_track_add))
     app.add_handler(CommandHandler("wishlist_track_list", cmd_wishlist_track_list))
     app.add_handler(CommandHandler("wishlist_track_remove", cmd_wishlist_track_remove))
+    app.add_handler(CommandHandler("wishlist_track_alert_on", cmd_wishlist_track_alert_on))
+    app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))

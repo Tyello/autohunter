@@ -18,6 +18,8 @@ COMMANDS = [
     BotCommand("wishlist_track_add", "Rastrear anúncio da wishlist"),
     BotCommand("wishlist_track_list", "Listar rastreados da wishlist"),
     BotCommand("wishlist_track_remove", "Remover rastreado da wishlist"),
+    BotCommand("wishlist_track_alert_on", "Ativar alerta de queda por slot"),
+    BotCommand("wishlist_track_alert_off", "Desativar alerta de queda por slot"),
 
     BotCommand("alertas", "Info / painel simples"),
     BotCommand("me", "Seu chat_id"),
