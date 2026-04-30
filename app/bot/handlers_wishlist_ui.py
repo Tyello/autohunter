@@ -257,6 +257,12 @@ async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT
                 lo = f"{int(lo_s):,}".replace(",", ".")
                 hi = f"{int(hi_s):,}".replace(",", ".")
                 return f"Quilometragem entre {lo} e {hi} km"
+        if f.field == "seller_type":
+            label = {"private": "particular", "dealer": "loja/revenda"}.get((f.value or "").lower(), f.value)
+            if f.operator == "eq":
+                return f"Vendedor: {label}"
+            if f.operator == "neq":
+                return f"Excluir vendedor: {label}"
         return f"{f.field} {f.operator} {f.value}"
 
     lines = [f"{i+1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]
