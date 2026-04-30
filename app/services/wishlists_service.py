@@ -22,7 +22,7 @@ from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
-from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type
+from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type, normalize_doors
 
 
 logger = logging.getLogger(__name__)
@@ -601,6 +601,12 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         "body": "body_type",
         "body_type": "body_type",
         "estilo": "body_type",
+        "porta": "doors",
+        "portas": "doors",
+        "qtd_portas": "doors",
+        "quantidade_portas": "doors",
+        "quantidade_de_portas": "doors",
+        "doors": "doors",
     }
     field = field_aliases.get(field, field)
 
@@ -629,10 +635,10 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     }
     operator = op_aliases.get(operator, operator)
 
-    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km", "seller_type", "body_type"):
-        return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state | seller_type | body_type"
+    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km", "seller_type", "body_type", "doors"):
+        return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state | seller_type | body_type | doors"
 
-    if field in ("price", "year", "mileage_km") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq", "between"):
+    if field in ("price", "year", "mileage_km", "doors") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq", "between"):
         return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq|between"
 
     if field == "source" and operator not in ("eq", "neq"):
@@ -682,6 +688,25 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
             if km < 0 or km > 1_500_000:
                 return False, "Quilometragem fora do intervalo (0-1500000)."
             value = str(km)
+
+    if field == "doors":
+        if operator == "between":
+            parts = value.split()
+            if len(parts) != 2:
+                return False, "Portas inválido. Ex: doors between 2 4"
+            bounds: list[int] = []
+            for p in parts:
+                d = normalize_doors(p)
+                if d is None:
+                    return False, "Portas inválido. Use um número inteiro entre 1 e 6."
+                bounds.append(d)
+            lo, hi = sorted(bounds)
+            value = f"{lo},{hi}"
+        else:
+            doors = normalize_doors(value)
+            if doors is None:
+                return False, "Portas inválido. Use um número inteiro entre 1 e 6."
+            value = str(doors)
 
     if field in ("color", "city"):
         if len(value.strip()) < 2:

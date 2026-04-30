@@ -11,6 +11,7 @@ from app.sources.normalize import (
     normalize_fuel_type,
     normalize_location,
     normalize_mileage_km,
+    normalize_doors,
     normalize_transmission,
     resolve_thumbnail_url,
     split_make_model_version,
@@ -166,7 +167,16 @@ def test_normalize_ad_preserves_doors_and_tolerates_invalid_doors():
     assert ad.extras.get("doors") == 4
 
     ad_invalid = normalize_ad("kavak", {"url": "https://example.com/2", "title": "Car", "price": 1, "doors": "abc"})
-    assert ad_invalid.extras.get("doors") == "abc"
+    assert ad_invalid.extras.get("doors") is None
+
+
+def test_doors_normalization_contract():
+    assert normalize_doors(4) == 4
+    assert normalize_doors("4 portas") == 4
+    assert normalize_doors("2p") == 2
+    assert normalize_doors("abc") is None
+    assert normalize_doors(0) is None
+    assert normalize_doors(7) is None
 
 
 def test_body_type_normalization_contract():

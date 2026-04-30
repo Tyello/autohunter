@@ -87,6 +87,12 @@ def _norm_year(value: Any) -> int | None:
 def normalize_mileage_km(value: Any) -> int | None:
     return _norm_int(value)
 
+def normalize_doors(value: Any) -> int | None:
+    doors = _norm_int(value)
+    if doors is None:
+        return None
+    return doors if 1 <= doors <= 6 else None
+
 
 def _norm_token(value: str | None) -> str:
     if not value:
@@ -389,6 +395,7 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
             "listing_type": normalize_listing_type(pick("listing_type")),
             "color": normalize_color(pick("color")),
             "body_type": normalize_body_type(pick("body_type", "carroceria")),
+            "doors": normalize_doors(pick("doors", "portas")),
             "extractor_version": extractor_version,
             "raw_payload": raw_payload,
         },
