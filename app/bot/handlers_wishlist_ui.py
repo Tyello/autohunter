@@ -263,6 +263,15 @@ async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT
                 return f"Vendedor: {label}"
             if f.operator == "neq":
                 return f"Excluir vendedor: {label}"
+        if f.field == "body_type":
+            label = {
+                "suv": "SUV",
+                "convertible": "conversível",
+            }.get((f.value or "").lower(), f.value)
+            if f.operator == "eq":
+                return f"Carroceria: {label}"
+            if f.operator == "neq":
+                return f"Excluir carroceria: {label}"
         return f"{f.field} {f.operator} {f.value}"
 
     lines = [f"{i+1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]

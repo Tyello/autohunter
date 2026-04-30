@@ -47,6 +47,7 @@ _CANONICAL_FUEL_TYPES = {"gasoline", "ethanol", "flex", "diesel", "electric", "h
 _CANONICAL_TRANSMISSIONS = {"manual", "automatic", "cvt", "automated", "semi_automatic"}
 _CANONICAL_SELLER_TYPES = {"dealer", "private", "unknown"}
 _CANONICAL_LISTING_TYPES = {"marketplace", "auction_lot", "classified"}
+_CANONICAL_BODY_TYPES = {"hatch", "sedan", "suv", "pickup", "coupe", "convertible", "wagon", "minivan", "van"}
 
 
 def _norm_str(value: Any) -> str | None:
@@ -172,6 +173,32 @@ def normalize_seller_type_filter_value(value: Any) -> str | None:
 def normalize_listing_type(value: Any) -> str:
     token = _norm_token(_norm_str(value))
     return token if token in _CANONICAL_LISTING_TYPES else "marketplace"
+
+
+def normalize_body_type(value: Any) -> str | None:
+    token = _norm_token(_norm_str(value))
+    if not token:
+        return None
+
+    aliases = {
+        "hatchback": "hatch",
+        "hatches": "hatch",
+        "seda": "sedan",
+        "sedã": "sedan",
+        "sedan": "sedan",
+        "utilitario esportivo": "suv",
+        "utilitário esportivo": "suv",
+        "picape": "pickup",
+        "caminhonete": "pickup",
+        "coupé": "coupe",
+        "conversivel": "convertible",
+        "conversível": "convertible",
+        "cabriolet": "convertible",
+        "perua": "wagon",
+        "station wagon": "wagon",
+    }
+    canonical = aliases.get(token, token)
+    return canonical if canonical in _CANONICAL_BODY_TYPES else None
 
 
 def normalize_color(value: Any) -> str | None:
@@ -308,7 +335,7 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
         "source", "source_listing_id", "external_id", "id", "url", "title", "price", "currency",
         "city", "uf", "state", "location", "year", "year_model", "ano", "km", "mileage_km", "mileage",
         "make", "brand", "model", "version", "images", "photos", "image_urls", "images_count", "thumbnail_url", "thumbnail", "image_url", "image",
-        "gearbox", "transmission", "cambio", "fuel_type", "seller_type", "color", "raw_payload", "extractor_version", "extras",
+        "gearbox", "transmission", "cambio", "fuel_type", "seller_type", "color", "body_type", "raw_payload", "extractor_version", "extras",
     }
     extras = {k: v for k, v in data.items() if k not in known and v is not None}
     for k, v in base_extras.items():
@@ -361,6 +388,7 @@ def normalize_ad(source: str, raw: dict[str, Any]) -> NormalizedAd:
             "seller_type": normalize_seller_type(pick("seller_type")),
             "listing_type": normalize_listing_type(pick("listing_type")),
             "color": normalize_color(pick("color")),
+            "body_type": normalize_body_type(pick("body_type", "carroceria")),
             "extractor_version": extractor_version,
             "raw_payload": raw_payload,
         },
