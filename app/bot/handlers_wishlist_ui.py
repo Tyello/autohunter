@@ -449,32 +449,90 @@ async def cmd_wishlist_track_alert_off(update: Update, context: ContextTypes.DEF
     await reply_text(update, msg)
 
 
+def _extract_slot_from_message(msg: str) -> int | None:
+    import re
+
+    m = re.search(r"slot\s+(\d+)", str(msg or ""), flags=re.I)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+async def _safe_edit_message_text(q, text: str) -> None:
+    try:
+        await q.edit_message_text(text)
+    except BadRequest:
+        return
+
+
 async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await _safe_answer_callback(q)
     parts = (q.data or "").split(":")
     if len(parts) != 3:
-        await q.edit_message_text("Callback inválido.")
+        await _safe_edit_message_text(q, "Não encontrei essa notificação. Tente rastrear a partir de uma notificação mais recente.")
         return
     notification_id = parts[2]
+
+    short_msg = ""
+    full_msg = ""
+
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         n = db.query(Notification).filter(Notification.id == notification_id).first()
         if not n or not n.wishlist_id:
-            await q.edit_message_text("Notificação não encontrada para rastreamento.")
-            return
-        wl = db.query(Wishlist).filter(Wishlist.id == n.wishlist_id).first()
-        if not wl or wl.user_id != user.id:
-            await q.edit_message_text("Você não pode rastrear este anúncio nessa wishlist.")
-            return
-        listing = db.query(CarListing).filter(CarListing.id == n.car_listing_id).first()
-        if not listing:
-            await q.edit_message_text("Esse anúncio não está mais disponível para rastreamento.")
-            return
-        wishlists = list_wishlists(db, user.id)
-        widx = next((i + 1 for i, row in enumerate(wishlists) if row.id == wl.id), None)
-        if widx is None:
-            await q.edit_message_text("Wishlist não encontrada.")
-            return
-        _ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=widx, listing_ref=listing.external_id or listing.url)
-    await q.edit_message_text(msg)
+            short_msg = "Notificação inválida"
+            full_msg = "Não encontrei essa notificação. Tente rastrear a partir de uma notificação mais recente."
+        else:
+            wl = db.query(Wishlist).filter(Wishlist.id == n.wishlist_id).first()
+            if not wl or wl.user_id != user.id:
+                short_msg = "Sem permissão"
+                full_msg = "Não encontrei essa notificação para sua conta."
+            else:
+                listing = db.query(CarListing).filter(CarListing.id == n.car_listing_id).first()
+                if not listing or not (listing.external_id or listing.url):
+                    short_msg = "Anúncio indisponível"
+                    full_msg = "Não consegui rastrear esse anúncio porque ele não está mais disponível."
+                else:
+                    wishlists = list_wishlists(db, user.id)
+                    widx = next((i + 1 for i, row in enumerate(wishlists) if row.id == wl.id), None)
+                    if widx is None:
+                        short_msg = "Notificação inválida"
+                        full_msg = "Não encontrei essa notificação. Tente rastrear a partir de uma notificação mais recente."
+                    else:
+                        ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=widx, listing_ref=listing.external_id or listing.url)
+                        slot = _extract_slot_from_message(msg)
+                        if ok:
+                            if user_has_tracking_automation(db, user_id=user.id):
+                                short_msg = f"Rastreado no slot {slot or 1}"
+                                full_msg = (
+                                    f"✅ Anúncio rastreado no slot {slot or 1}.\n"
+                                    "Vou acompanhar preço e status automaticamente."
+                                )
+                            else:
+                                short_msg = f"Rastreado no slot {slot or 1}"
+                                full_msg = (
+                                    f"✅ Anúncio rastreado no slot {slot or 1}.\n"
+                                    f"Veja em: /wishlist_track_list {widx}\n"
+                                    "Notificações automáticas são Premium."
+                                )
+                        else:
+                            low = (msg or "").lower()
+                            if "já está rastreado" in low:
+                                short_msg = "Já rastreado"
+                                full_msg = f"Esse anúncio já está rastreado no slot {slot or 1}.\nVeja em: /wishlist_track_list {widx}"
+                            elif "limite" in low:
+                                short_msg = "Slots cheios"
+                                full_msg = f"Você já usa todos os slots dessa wishlist.\nVeja: /wishlist_track_list {widx}"
+                            else:
+                                short_msg = "Não foi possível rastrear"
+                                full_msg = msg or "Não consegui rastrear este anúncio agora."
+
+    try:
+        await q.answer(short_msg[:180] or "OK", show_alert=False)
+    except BadRequest:
+        pass
+    await _safe_edit_message_text(q, full_msg)
