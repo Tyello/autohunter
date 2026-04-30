@@ -28,6 +28,7 @@ from app.bot.handlers_wishlist_ui import (
     cmd_wishlist_track_alert_on,
     cmd_wishlist_track_list,
     cmd_wishlist_track_remove,
+    cb_track_add,
 )
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_remove", cmd_wishlist_track_remove))
     app.add_handler(CommandHandler("wishlist_track_alert_on", cmd_wishlist_track_alert_on))
     app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
+    app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^TRACK:ADD:[^:]+$"))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))

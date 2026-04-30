@@ -25,6 +25,8 @@ class _AdView:
         # Score fields are persisted on Notification (wishlist-specific)
         self.score_v2 = getattr(notification, 'score_v2', None) if notification is not None else None
         self.score_breakdown = getattr(notification, 'score_breakdown', None) if notification is not None else None
+        self.notification_id = str(getattr(notification, 'id', '') or '') if notification is not None else ''
+        self.reason = getattr(notification, 'reason', None) if notification is not None else None
 
         self.wishlist_query = None
         self.wishlist_filters = []

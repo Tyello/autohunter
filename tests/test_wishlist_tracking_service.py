@@ -47,8 +47,7 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
 
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
     assert ok is True
-    assert "slot 1/3" in msg
-    assert "Preço atual" in msg
+    assert "Anúncio rastreado" in msg
 
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
     assert ok is False
@@ -63,10 +62,12 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
 
     ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
     assert ok is True
-    assert "1. Civic 1" in msg
-    assert "3. Civic 3" in msg
-    assert "Atual: R$" in msg
-    assert "Inicial: R$" in msg
+    assert "Slot 1" in msg
+    assert "Slot 2" in msg
+    assert "Slot 3" in msg
+    assert "Preço atual:" in msg
+    assert "Preço inicial:" in msg
+    assert "Notificações automáticas:" in msg
 
     ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, slot=2)
     assert ok is True

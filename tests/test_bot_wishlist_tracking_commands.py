@@ -58,3 +58,24 @@ def test_track_remove_requires_slot(monkeypatch):
     asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_remove(update, context))
 
     assert update.message.sent[-1] == "Use: /wishlist_track_remove <n> <slot>"
+
+
+def test_track_alert_on_free_blocked(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers_wishlist_ui, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers_wishlist_ui, "user_has_tracking_automation", lambda *_args, **_kwargs: False)
+    update = _Update()
+    context = types.SimpleNamespace(args=["1", "1"])
+    asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_alert_on(update, context))
+    assert "Premium" in update.message.sent[-1]
+
+
+def test_track_alert_on_premium_ok(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers_wishlist_ui, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers_wishlist_ui, "user_has_tracking_automation", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(handlers_wishlist_ui, "set_price_drop_alert_enabled", lambda *_args, **_kwargs: (True, "ok"))
+    update = _Update()
+    context = types.SimpleNamespace(args=["1", "1"])
+    asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_alert_on(update, context))
+    assert update.message.sent[-1] == "ok"

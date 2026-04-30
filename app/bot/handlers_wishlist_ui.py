@@ -28,7 +28,11 @@ from app.services.wishlist_tracking_service import (
     list_tracked_listings,
     remove_tracked_listing,
     set_price_drop_alert_enabled,
+    user_has_tracking_automation,
 )
+from app.models.notification import Notification
+from app.models.wishlist import Wishlist
+from app.models.car_listing import CarListing
 
 
 # ---------- Wishlist Remove / Clear (UX simples e previsível) ----------
@@ -423,6 +427,9 @@ async def cmd_wishlist_track_alert_on(update: Update, context: ContextTypes.DEFA
         return
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        if not user_has_tracking_automation(db, user_id=user.id):
+            await reply_text(update, "Notificações automáticas de mudança são um recurso Premium.")
+            return
         _ok, msg = set_price_drop_alert_enabled(db, user_id=user.id, wishlist_index=n, slot=slot, enabled=True)
     await reply_text(update, msg)
 
@@ -440,3 +447,34 @@ async def cmd_wishlist_track_alert_off(update: Update, context: ContextTypes.DEF
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         _ok, msg = set_price_drop_alert_enabled(db, user_id=user.id, wishlist_index=n, slot=slot, enabled=False)
     await reply_text(update, msg)
+
+
+async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await _safe_answer_callback(q)
+    parts = (q.data or "").split(":")
+    if len(parts) != 3:
+        await q.edit_message_text("Callback inválido.")
+        return
+    notification_id = parts[2]
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        n = db.query(Notification).filter(Notification.id == notification_id).first()
+        if not n or not n.wishlist_id:
+            await q.edit_message_text("Notificação não encontrada para rastreamento.")
+            return
+        wl = db.query(Wishlist).filter(Wishlist.id == n.wishlist_id).first()
+        if not wl or wl.user_id != user.id:
+            await q.edit_message_text("Você não pode rastrear este anúncio nessa wishlist.")
+            return
+        listing = db.query(CarListing).filter(CarListing.id == n.car_listing_id).first()
+        if not listing:
+            await q.edit_message_text("Esse anúncio não está mais disponível para rastreamento.")
+            return
+        wishlists = list_wishlists(db, user.id)
+        widx = next((i + 1 for i, row in enumerate(wishlists) if row.id == wl.id), None)
+        if widx is None:
+            await q.edit_message_text("Wishlist não encontrada.")
+            return
+        _ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=widx, listing_ref=listing.external_id or listing.url)
+    await q.edit_message_text(msg)
