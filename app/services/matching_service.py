@@ -14,6 +14,7 @@ from app.models.wishlist import Wishlist
 from app.services.wishlist_semantic_rules import semantic_match
 from app.services.wishlist_query_parser import parse_wishlist_query
 from app.core.geo import STATE_NAME_TO_UF as _STATE_NAME_TO_UF
+from app.sources.normalize import normalize_seller_type_filter_value
 
 
 @dataclass(frozen=True)
@@ -379,6 +380,9 @@ def _field_match(listing: CarListing, field: str, op: str, val: str) -> bool:
     elif field == "color":
         current = _norm_color(getattr(listing, "color", None))
         target = _norm_color(val)
+    elif field == "seller_type":
+        current = normalize_seller_type_filter_value(getattr(listing, "seller_type", None) or "")
+        target = normalize_seller_type_filter_value(val)
     else:
         return True
 
@@ -464,7 +468,7 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
                     return False
             continue
 
-        if field in {"color", "city", "state"}:
+        if field in {"color", "city", "state", "seller_type"}:
             if not _field_match(listing, field, op, val):
                 return False
             continue
@@ -541,7 +545,7 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
                     return False
             continue
 
-        if field in {"color", "city", "state"}:
+        if field in {"color", "city", "state", "seller_type"}:
             if not _field_match(listing, field, op, val):
                 return False
             continue
@@ -705,7 +709,7 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
                     return "filter_mileage_km_cmp"
             continue
 
-        if field in {"color", "city", "state"}:
+        if field in {"color", "city", "state", "seller_type"}:
             if op not in {"eq", "neq"}:
                 return f"filter_{field}_bad_operator"
             if not _field_match(listing, field, op, val):
@@ -717,6 +721,11 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
                         return "filter_city_missing"
                     if field == "state" and not state:
                         return "filter_state_missing"
+                if field == "seller_type":
+                    seller_type = normalize_seller_type_filter_value(getattr(listing, "seller_type", None) or "")
+                    if not seller_type:
+                        return "filter_seller_type_missing"
+                    return "filter_seller_type_eq" if op == "eq" else "filter_seller_type_neq"
                 return f"filter_{field}_cmp"
             continue
 

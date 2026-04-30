@@ -59,3 +59,35 @@ def test_filter_list_formats_mileage_friendly(monkeypatch):
     assert "Quilometragem até 80.000 km" in txt
     assert "Quilometragem a partir de 30.000 km" in txt
     assert "Quilometragem entre 30.000 e 90.000 km" in txt
+
+
+def test_filter_list_formats_seller_type_friendly(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(
+        handlers_wishlist_ui,
+        "get_or_create_user_by_chat",
+        lambda _db, _chat_id, _username: types.SimpleNamespace(id="u1"),
+    )
+    monkeypatch.setattr(
+        handlers_wishlist_ui,
+        "list_wishlists",
+        lambda _db, _uid: [types.SimpleNamespace(id="w1", query="civic")],
+    )
+    monkeypatch.setattr(
+        handlers_wishlist_ui,
+        "list_filters",
+        lambda _db, _wid: [
+            types.SimpleNamespace(field="seller_type", operator="eq", value="private"),
+            types.SimpleNamespace(field="seller_type", operator="eq", value="dealer"),
+            types.SimpleNamespace(field="seller_type", operator="neq", value="dealer"),
+        ],
+    )
+
+    update = _Update()
+    context = types.SimpleNamespace(args=["1"])
+    asyncio.run(handlers_wishlist_ui.cmd_wishlist_filter_list(update, context))
+
+    txt = update.message.sent[-1]
+    assert "Vendedor: particular" in txt
+    assert "Vendedor: loja/revenda" in txt
+    assert "Excluir vendedor: loja/revenda" in txt

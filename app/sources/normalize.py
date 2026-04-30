@@ -143,6 +143,32 @@ def normalize_seller_type(value: Any) -> str:
     return "unknown"
 
 
+
+
+def normalize_seller_type_filter_value(value: Any) -> str | None:
+    token = _norm_token(_norm_str(value))
+    if not token:
+        return None
+
+    aliases = {
+        "particular": "private",
+        "pessoa fisica": "private",
+        "pessoa física": "private",
+        "dono": "private",
+        "private": "private",
+        "owner": "private",
+        "loja": "dealer",
+        "revenda": "dealer",
+        "lojista": "dealer",
+        "concessionaria": "dealer",
+        "concessionária": "dealer",
+        "dealership": "dealer",
+        "dealer": "dealer",
+    }
+    mapped = aliases.get(token, token)
+    normalized = normalize_seller_type(mapped)
+    return normalized if normalized in {"private", "dealer"} else None
+
 def normalize_listing_type(value: Any) -> str:
     token = _norm_token(_norm_str(value))
     return token if token in _CANONICAL_LISTING_TYPES else "marketplace"

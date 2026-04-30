@@ -22,6 +22,7 @@ from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
+from app.sources.normalize import normalize_seller_type_filter_value
 
 
 logger = logging.getLogger(__name__)
@@ -581,6 +582,17 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         "kilometragem": "mileage_km",
         "mileage": "mileage_km",
         "mileage_km": "mileage_km",
+        "seller": "seller_type",
+        "vendedor": "seller_type",
+        "tipo_vendedor": "seller_type",
+        "tipo_de_vendedor": "seller_type",
+        "anunciante": "seller_type",
+        "loja": "seller_type",
+        "particular": "seller_type",
+        "concessionaria": "seller_type",
+        "concessionária": "seller_type",
+        "revenda": "seller_type",
+        "seller_type": "seller_type",
     }
     field = field_aliases.get(field, field)
 
@@ -599,11 +611,18 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         "min": "gte",
         "between": "between",
         "entre": "between",
+        "igual": "eq",
+        "=": "eq",
+        "apenas": "eq",
+        "somente": "eq",
+        "excluir": "neq",
+        "diferente": "neq",
+        "!=": "neq",
     }
     operator = op_aliases.get(operator, operator)
 
-    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km"):
-        return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state"
+    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km", "seller_type"):
+        return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state | seller_type"
 
     if field in ("price", "year", "mileage_km") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq", "between"):
         return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq|between"
@@ -611,7 +630,7 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     if field == "source" and operator not in ("eq", "neq"):
         return False, "Operador inválido para source. Use: eq|neq"
 
-    if field in ("color", "city", "state") and operator not in ("eq", "neq"):
+    if field in ("color", "city", "state", "seller_type") and operator not in ("eq", "neq"):
         return False, f"Operador inválido para {field}. Use: eq|neq"
 
     if field == "source":
@@ -678,6 +697,12 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         if uf not in KNOWN_STATES:
             return False, "Valor inválido para state. Use UF (ex: SP) ou nome do estado."
         value = uf
+
+    if field == "seller_type":
+        normalized_seller = normalize_seller_type_filter_value(value)
+        if not normalized_seller:
+            return False, "Valor inválido para seller_type. Use: particular | loja | revenda | concessionária"
+        value = normalized_seller
 
     row = WishlistFilter(wishlist_id=wishlist_id, field=field, operator=operator, value=value)
     db.add(row)
