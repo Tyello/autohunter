@@ -7,7 +7,7 @@ from app.models.car_listing import CarListing
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
-from app.services.matching_service import match_listing_to_wishlist
+from app.services.matching_service import explain_match, match_listing_to_wishlist
 
 
 def _mk_user(db) -> User:
@@ -142,3 +142,27 @@ def test_filter_mileage_km_lte_blocks_higher_km(db):
 
     assert match_listing_to_wishlist(db, w, high_km) is False
     assert match_listing_to_wishlist(db, w, ok_km) is True
+
+
+def test_filter_mileage_km_between(db):
+    u = _mk_user(db)
+    w = _mk_wishlist(db, u, "civic", filters=[("mileage_km", "between", "30000,90000")])
+    in_range = CarListing(source="olx", external_id="8", title="Honda Civic 1994", url="https://www.olx.com.br/8", price=Decimal("45000"), currency="BRL", mileage_km=50000)
+    low = CarListing(source="olx", external_id="9", title="Honda Civic 1994", url="https://www.olx.com.br/9", price=Decimal("45000"), currency="BRL", mileage_km=20000)
+    high = CarListing(source="olx", external_id="10", title="Honda Civic 1994", url="https://www.olx.com.br/10", price=Decimal("45000"), currency="BRL", mileage_km=100000)
+    missing = CarListing(source="olx", external_id="11", title="Honda Civic 1994", url="https://www.olx.com.br/11", price=Decimal("45000"), currency="BRL", mileage_km=None)
+    assert match_listing_to_wishlist(db, w, in_range) is True
+    assert match_listing_to_wishlist(db, w, low) is False
+    assert match_listing_to_wishlist(db, w, high) is False
+    assert match_listing_to_wishlist(db, w, missing) is False
+    assert explain_match(w, low) == "filter_mileage_km_lt"
+    assert explain_match(w, high) == "filter_mileage_km_gt"
+    assert explain_match(w, missing) == "filter_mileage_km_missing"
+
+
+def test_filter_mileage_km_missing_reason_with_lte(db):
+    u = _mk_user(db)
+    w = _mk_wishlist(db, u, "civic", filters=[("mileage_km", "lte", "80000")])
+    missing = CarListing(source="olx", external_id="12", title="Honda Civic 1994", url="https://www.olx.com.br/12", price=Decimal("45000"), currency="BRL", mileage_km=None)
+    assert match_listing_to_wishlist(db, w, missing) is False
+    assert explain_match(w, missing) == "filter_mileage_km_missing"

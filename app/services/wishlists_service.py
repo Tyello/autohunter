@@ -597,14 +597,16 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         "mínimo": "gte",
         "minimo": "gte",
         "min": "gte",
+        "between": "between",
+        "entre": "between",
     }
     operator = op_aliases.get(operator, operator)
 
     if field not in ("price", "source", "year", "color", "city", "state", "mileage_km"):
         return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state"
 
-    if field in ("price", "year", "mileage_km") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq"):
-        return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq"
+    if field in ("price", "year", "mileage_km") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq", "between"):
+        return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq|between"
 
     if field == "source" and operator not in ("eq", "neq"):
         return False, "Operador inválido para source. Use: eq|neq"
@@ -628,14 +630,31 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         value = str(y)
 
     if field == "mileage_km":
-        raw = value.lower().replace("km", "").replace(".", "").replace(",", "").strip()
-        try:
-            km = int(raw)
-        except Exception:
-            return False, "Quilometragem inválida. Ex: mileage_km lte 90000"
-        if km < 0 or km > 1_500_000:
-            return False, "Quilometragem fora do intervalo (0-1500000)."
-        value = str(km)
+        if operator == "between":
+            parts = value.split()
+            if len(parts) != 2:
+                return False, "Quilometragem inválida. Ex: mileage_km between 30000 90000"
+            bounds: list[int] = []
+            for p in parts:
+                raw = p.lower().replace("km", "").replace(".", "").replace(",", "").strip()
+                try:
+                    km = int(raw)
+                except Exception:
+                    return False, "Quilometragem inválida. Ex: mileage_km between 30000 90000"
+                if km < 0 or km > 1_500_000:
+                    return False, "Quilometragem fora do intervalo (0-1500000)."
+                bounds.append(km)
+            lo, hi = sorted(bounds)
+            value = f"{lo},{hi}"
+        else:
+            raw = value.lower().replace("km", "").replace(".", "").replace(",", "").strip()
+            try:
+                km = int(raw)
+            except Exception:
+                return False, "Quilometragem inválida. Ex: mileage_km lte 90000"
+            if km < 0 or km > 1_500_000:
+                return False, "Quilometragem fora do intervalo (0-1500000)."
+            value = str(km)
 
     if field in ("color", "city"):
         if len(value.strip()) < 2:
