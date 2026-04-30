@@ -160,6 +160,8 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # vNext scoring+formatting (treat manual query as a temporary wishlist)
         pseudo_wishlist = SimpleNamespace(query=query, filters=[])
+        user_wishlists = list_wishlists(db, _user.id)
+        default_wishlist_id = str(user_wishlists[0].id) if user_wishlists else None
 
         stats_map = {}
         try:
@@ -179,12 +181,28 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sres = score_ad(item, pseudo_wishlist, ms)
             payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
 
+            keyboard_rows = [list(row) for row in (payload.inline_keyboard or [])]
+            listing_id = str(getattr(item, "id", "") or "").strip()
+            if default_wishlist_id and listing_id:
+                has_track = any(btn.get("callback_data", "").startswith("TRACK:ADD:") or btn.get("callback_data", "").startswith("TRACK:ADDWL:") for row in keyboard_rows for btn in row)
+                if not has_track:
+                    if keyboard_rows:
+                        keyboard_rows[0].append({"text": "⭐ Rastrear", "callback_data": f"TRACK:ADDWL:{default_wishlist_id}:{listing_id}"})
+                    else:
+                        keyboard_rows = [[{"text": "⭐ Rastrear", "callback_data": f"TRACK:ADDWL:{default_wishlist_id}:{listing_id}"}]]
+
             keyboard = None
-            if payload.inline_keyboard:
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton(btn.get("text", "Abrir anúncio"), url=btn.get("url")) for btn in row]
-                    for row in payload.inline_keyboard
-                ])
+            if keyboard_rows:
+                built_rows = []
+                for row in keyboard_rows:
+                    built = []
+                    for btn in row:
+                        if btn.get("callback_data"):
+                            built.append(InlineKeyboardButton(btn.get("text", "Botão"), callback_data=btn.get("callback_data")))
+                        else:
+                            built.append(InlineKeyboardButton(btn.get("text", "Abrir anúncio"), url=btn.get("url")))
+                    built_rows.append(built)
+                keyboard = InlineKeyboardMarkup(built_rows)
 
             await send_listing_message(
                 update,

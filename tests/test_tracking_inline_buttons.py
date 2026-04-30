@@ -168,3 +168,16 @@ def test_callback_uses_structured_status_not_message(monkeypatch):
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert "todos os slots" in q.edits[-1]
+
+
+def test_callback_addwl_success(monkeypatch):
+    _patch_common(monkeypatch, notification=None, wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot", slot=1), wishlists=[types.SimpleNamespace(id="w1")])
+    q = _CallbackQuery(data="TRACK:ADDWL:w1:c1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "Anúncio rastreado" in q.edits[-1]
+
+def test_callback_answered_on_exception(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    q = _CallbackQuery()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert q.answers

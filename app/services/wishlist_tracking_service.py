@@ -373,15 +373,12 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
         .all()
     )
 
-    if not rows:
-        return True, "Sem anúncios rastreados nessa wishlist. Para rastrear: clique em ⭐ Rastrear em uma notificação."
-
     lines: list[str] = [f"📌 Rastreados da wishlist {wishlist_index} — {wishlist.query}"]
     by_slot = {int(r.slot): (r, l) for r, l in rows}
     for slot in range(1, MAX_TRACKED_PER_WISHLIST + 1):
         pair = by_slot.get(slot)
         if pair is None:
-            lines.append(f"\nSlot {slot} — vazio\nPara rastrear: clique em ⭐ Rastrear em uma notificação.")
+            lines.append(f"\nSlot {slot} — vazio\nPara rastrear: clique em ⭐ Rastrear em um anúncio.")
             continue
         row, listing = pair
         refresh_tracked_listing_snapshot(db, row, listing)
