@@ -500,3 +500,30 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
 
     compact_lines = [_clip(line, _MAX_LINE) for line in lines if _clean(line)]
     return TelegramMessagePayload(text="\n".join(compact_lines).strip(), inline_keyboard=build_open_button(ad))
+
+
+def format_tracked_price_drop_message(notification: Any, ad: Any) -> TelegramMessagePayload:
+    meta = getattr(notification, "score_breakdown", None) or {}
+    title = _clip(build_title(ad) or "Anúncio rastreado", 90) or "Anúncio rastreado"
+    current_price = meta.get("current_price")
+    previous_price = meta.get("previous_price")
+    drop_amount = meta.get("drop_amount")
+    drop_pct = meta.get("drop_pct")
+    wishlist_query = _clean(meta.get("wishlist_query")) or "sua wishlist"
+    slot = meta.get("slot")
+
+    lines = ["📉 Queda de preço no anúncio rastreado", "", title]
+    if previous_price is not None:
+        lines.append(f"De {_format_price_brl(previous_price)} por {_format_price_brl(current_price)}")
+    else:
+        lines.append(f"Preço atual: {_format_price_brl(current_price)} (queda detectada)")
+    if drop_amount is not None:
+        pct_txt = f" (-{str(drop_pct).replace('.', ',')}%)" if drop_pct is not None else ""
+        lines.append(f"Caiu {_format_price_brl(drop_amount)}{pct_txt}")
+    lines.append("")
+    lines.append(f"Wishlist: {wishlist_query}")
+    lines.append(f"Slot: {slot if slot is not None else '-'}")
+    return TelegramMessagePayload(
+        text="\n".join([_clip(x, _MAX_LINE) for x in lines if x is not None]).strip(),
+        inline_keyboard=build_open_button(ad),
+    )

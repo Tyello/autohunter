@@ -230,3 +230,15 @@ Boas práticas para novas migrations:
 - rodar `alembic heads` antes de abrir PR com migration;
 - se aparecer mais de um head, criar merge revision explícita e documentar no PR;
 - só manter branch paralela intencional quando houver motivo operacional claro e documentado.
+
+## 12) Alertas de queda de preço (tracking)
+- Feature é opt-in por slot (`/wishlist_track_alert_on <n> <slot>` e `/wishlist_track_alert_off <n> <slot>`).
+- Somente quedas disparam alerta (`reason=tracked_price_drop`).
+- Defaults operacionais em `app.core.settings`:
+  - `tracking_price_alerts_enabled=false` (job desligado por padrão),
+  - `tracking_price_alerts_interval_minutes=60`,
+  - `tracking_price_alerts_batch_size=50`,
+  - `tracking_price_drop_alert_cooldown_hours=24`,
+  - `tracking_price_drop_alert_min_amount=500`,
+  - `tracking_price_drop_alert_min_pct=1.0`.
+- Para ativar em ambiente, ajustar settings/env e validar logs do `tracking_alerts_job`.

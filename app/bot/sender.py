@@ -6,7 +6,7 @@ from typing import Tuple
 from app.core.settings import settings
 from app.bot.media import download_image_bytes
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.notifications.telegram_formatter import format_ad_message
+from app.notifications.telegram_formatter import format_ad_message, format_tracked_price_drop_message
 from app.services.http_session import get_shared_session
 
 
@@ -175,7 +175,11 @@ def _score_from_text(text: str) -> int:
 def _build_text(listing, notification=None) -> str:
     """Build vNext message text (no URL in body; URL is in the button)."""
 
-    payload = format_ad_message(_AdView(listing, notification))
+    ad_view = _AdView(listing, notification)
+    if getattr(notification, "reason", None) == "tracked_price_drop":
+        payload = format_tracked_price_drop_message(notification, ad_view)
+    else:
+        payload = format_ad_message(ad_view)
     text = sanitize_for_telegram(payload.text)
     return _truncate(text, TELEGRAM_TEXT_MAX)
 
@@ -199,7 +203,11 @@ def telegram_sender(notification, listing, user):
 
     chat_id = user.telegram_chat_id
 
-    payload = format_ad_message(_AdView(listing, notification))
+    ad_view = _AdView(listing, notification)
+    if getattr(notification, "reason", None) == "tracked_price_drop":
+        payload = format_tracked_price_drop_message(notification, ad_view)
+    else:
+        payload = format_ad_message(ad_view)
     full_text = _truncate(sanitize_for_telegram(payload.text), TELEGRAM_TEXT_MAX)
     caption, remainder = _split(full_text, TELEGRAM_CAPTION_MAX)
     caption = _truncate(caption, TELEGRAM_CAPTION_MAX)

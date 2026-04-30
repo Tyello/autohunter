@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
@@ -36,3 +37,28 @@ def test_no_alert_on_increase_or_optout(db):
     t.price_drop_alert_enabled = True
     t.last_price_change_amount = Decimal('1000')
     assert evaluate_price_drop_alert(db, t, {'direction': 'increased'}) is False
+
+
+def test_dedupe_same_price_and_allow_new_lower_price_after_cooldown(db):
+    _u, _w, _l, t = _mk(db)
+    t.price_drop_alert_enabled = True
+    assert evaluate_price_drop_alert(db, t, {'direction': 'dropped'}) is True
+    assert evaluate_price_drop_alert(db, t, {'direction': 'dropped'}) is False
+
+    t.last_price_drop_alert_at = datetime.now(timezone.utc) - timedelta(hours=25)
+    t.last_observed_price = Decimal('85000')
+    t.last_price_change_amount = Decimal('-5000')
+    t.last_price_change_pct = Decimal('-0.055')
+    assert evaluate_price_drop_alert(db, t, {'direction': 'dropped'}) is True
+
+
+def test_queue_payload_contains_deterministic_fields(db):
+    _u, _w, _l, t = _mk(db)
+    t.price_drop_alert_enabled = True
+    assert evaluate_price_drop_alert(db, t, {'direction': 'dropped'}) is True
+    n = db.query(Notification).filter(Notification.reason == 'tracked_price_drop').first()
+    assert n is not None
+    assert n.score_breakdown["type"] == "tracked_price_drop"
+    assert n.score_breakdown["slot"] == 1
+    assert n.score_breakdown["current_price"] == 90000
+    assert n.score_breakdown["previous_price"] == 100000
