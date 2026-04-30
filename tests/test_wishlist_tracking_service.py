@@ -48,6 +48,7 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
     assert ok is True
     assert "slot 1/3" in msg
+    assert "Preço atual" in msg
 
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
     assert ok is False
@@ -64,6 +65,8 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     assert ok is True
     assert "1. Civic 1" in msg
     assert "3. Civic 3" in msg
+    assert "Atual: R$" in msg
+    assert "Inicial: R$" in msg
 
     ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, slot=2)
     assert ok is True
@@ -99,3 +102,17 @@ def test_tracking_list_handles_orphan_listing_row(db, monkeypatch):
     ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
     assert ok is True
     assert "indisponível" in msg.lower()
+
+
+def test_tracking_add_saves_initial_snapshot(db, monkeypatch):
+    user = _mk_user(db, 4001)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    ok, _ = add_wishlist(db, user.id, "civic")
+    assert ok is True
+    listing = _mk_listing(db, 10)
+
+    ok, _ = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listing.external_id)
+    assert ok is True
+    row = db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id.isnot(None)).one()
+    assert row.initial_price == listing.price
+    assert row.last_observed_price == listing.price
