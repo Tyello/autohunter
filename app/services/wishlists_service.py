@@ -574,10 +574,36 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     operator = (operator or "").strip().lower()
     value = (value or "").strip()
 
-    if field not in ("price", "source", "year", "color", "city", "state"):
-        return False, "Campo inválido. Use: price | year | source | color | city | state"
+    field_aliases = {
+        "km": "mileage_km",
+        "kms": "mileage_km",
+        "quilometragem": "mileage_km",
+        "kilometragem": "mileage_km",
+        "mileage": "mileage_km",
+        "mileage_km": "mileage_km",
+    }
+    field = field_aliases.get(field, field)
 
-    if field in ("price", "year") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq"):
+    op_aliases = {
+        "<=": "lte",
+        "=<": "lte",
+        "até": "lte",
+        "ate": "lte",
+        "max": "lte",
+        "máximo": "lte",
+        "maximo": "lte",
+        ">=": "gte",
+        "=>": "gte",
+        "mínimo": "gte",
+        "minimo": "gte",
+        "min": "gte",
+    }
+    operator = op_aliases.get(operator, operator)
+
+    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km"):
+        return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state"
+
+    if field in ("price", "year", "mileage_km") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq"):
         return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq"
 
     if field == "source" and operator not in ("eq", "neq"):
@@ -600,6 +626,16 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         if y < 1900 or y > 2100:
             return False, "Ano fora do intervalo (1900-2100)."
         value = str(y)
+
+    if field == "mileage_km":
+        raw = value.lower().replace("km", "").replace(".", "").replace(",", "").strip()
+        try:
+            km = int(raw)
+        except Exception:
+            return False, "Quilometragem inválida. Ex: mileage_km lte 90000"
+        if km < 0 or km > 1_500_000:
+            return False, "Quilometragem fora do intervalo (0-1500000)."
+        value = str(km)
 
     if field in ("color", "city"):
         if len(value.strip()) < 2:
