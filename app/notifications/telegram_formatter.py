@@ -442,7 +442,11 @@ def build_open_button(ad: Any) -> list[list[dict[str, str]]]:
     )
     if not url:
         return []
-    return [[{"text": "Abrir anúncio", "url": url}]]
+    row = [{"text": "Abrir anúncio", "url": url}]
+    nid = str(getattr(ad, "notification_id", "") or "").strip()
+    if nid and getattr(ad, "reason", None) != "tracked_price_drop":
+        row.append({"text": "⭐ Rastrear", "callback_data": f"TRACK:ADD:{nid}"})
+    return [row]
 
 
 def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessagePayload:

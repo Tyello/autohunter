@@ -26,3 +26,23 @@
 ### P3 — refactors grandes
 - Refactor de `handlers_admin`.
 - Mitigação do `settings` como god object.
+
+## Comandos guiados no Telegram
+
+O AutoHunter tem muitos comandos e opções. Para reduzir fricção, vamos evoluir comandos principais para modo guiado com botões/menus e perguntas passo a passo, mantendo comandos rápidos para usuários avançados.
+
+Escopo futuro:
+- criar wishlist guiada;
+- adicionar filtros guiados;
+- listar/editar filtros por botões;
+- rastrear anúncio por botão;
+- gerenciar slots rastreados por botões;
+- ativar/desativar notificações automáticas por botões;
+- menu principal com ações mais comuns.
+
+Diretriz:
+- manter comandos atuais por compatibilidade;
+- botões/guiado como caminho recomendado;
+- não mover regra de negócio para handlers;
+- handlers só orquestram serviços.
+

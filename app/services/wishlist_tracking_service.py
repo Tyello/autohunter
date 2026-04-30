@@ -15,8 +15,18 @@ from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.core.settings import settings
 from app.services.notifications_queue_service import queue_tracked_price_drop_alert
+from app.services.wishlists_service import get_user_plan_snapshot
 
 MAX_TRACKED_PER_WISHLIST = 3
+
+
+def user_has_tracking_automation(db: Session, *, user_id) -> bool:
+    try:
+        snap = get_user_plan_snapshot(db, user_id)
+    except Exception:
+        return False
+    plan_code = str((snap or {}).get("plan_code") or "free").strip().lower()
+    return plan_code != "free"
 
 
 def _short_label(text: Any, *, max_len: int = 70) -> str:
@@ -182,9 +192,12 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
         .all()
     )
 
+    automation_allowed = user_has_tracking_automation(db, user_id=user_id)
+
     for row in existing:
         if row.car_listing_id == listing.id:
-            return False, "Esse anúncio já está rastreado nessa wishlist. Use /wishlist_track_list para ver os slots."
+            auto_txt = "ativadas" if row.price_drop_alert_enabled else "Premium"
+            return False, f"Esse anúncio já está rastreado no slot {row.slot}. Notificações automáticas: {auto_txt}."
 
     if len(existing) >= MAX_TRACKED_PER_WISHLIST:
         return (
@@ -207,6 +220,7 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
             last_observed_price=listing.price,
             last_seen_at=listing.updated_at,
             listing_status=_listing_status(listing),
+            price_drop_alert_enabled=automation_allowed,
         )
     )
     try:
@@ -216,10 +230,12 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
         return False, "Esse anúncio já está rastreado nessa wishlist."
 
     title = (listing.title or "Anúncio").strip()
-    return (
-        True,
-        f"Rastreamento ativado (slot {slot}/{MAX_TRACKED_PER_WISHLIST}): {title[:80]}. "
-        f"Preço atual: {_fmt_price(listing.price)}.",
+    if automation_allowed:
+        return True, "✅ Anúncio rastreado.\nVou acompanhar preço/status e te avisar sobre mudanças importantes."
+    return True, (
+        "✅ Anúncio rastreado.\n"
+        f"Você pode acompanhar preço e status em:\n/wishlist_track_list {wishlist_index}\n\n"
+        "Notificações automáticas de mudança são um recurso Premium."
     )
 
 
@@ -237,13 +253,19 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
     )
 
     if not rows:
-        return True, "Sem anúncios rastreados nessa wishlist. Use /wishlist_track_add <n> <url|external_id>."
+        return True, "Sem anúncios rastreados nessa wishlist. Para rastrear: clique em ⭐ Rastrear em uma notificação."
 
-    lines: list[str] = [f"📌 Rastreados da wishlist {wishlist_index}: {wishlist.query}"]
-    for row, listing in rows:
+    lines: list[str] = [f"📌 Rastreados da wishlist {wishlist_index} — {wishlist.query}"]
+    by_slot = {int(r.slot): (r, l) for r, l in rows}
+    for slot in range(1, MAX_TRACKED_PER_WISHLIST + 1):
+        pair = by_slot.get(slot)
+        if pair is None:
+            lines.append(f"\nSlot {slot} — vazio\nPara rastrear: clique em ⭐ Rastrear em uma notificação.")
+            continue
+        row, listing = pair
         refresh_tracked_listing_snapshot(db, row, listing)
         if listing is None:
-            lines.append(f"{row.slot}. anúncio indisponível (registro removido)")
+            lines.append(f"\nSlot {slot} — anúncio indisponível (registro removido)")
             continue
         label = _short_label(listing.title or listing.external_id or "Anúncio", max_len=70)
         ref = listing.external_id or "-"
@@ -263,11 +285,15 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
                 var_txt = f"Subiu {_fmt_price(abs(delta))}{pct}"
         status_map = {"active": "ativo", "inactive": "inativo", "orphan": "inativo/removido"}
         status_txt = status_map.get(row.listing_status or "", "sem informação")
+        notif_txt = "ativadas" if row.price_drop_alert_enabled else "Premium"
         lines.append(
-            f"{row.slot}. {label} [id:{ref}]\n"
-            f"   Atual: {_fmt_price(row.last_observed_price)} | Inicial: {_fmt_price(row.initial_price)}\n"
-            f"   {var_txt} | Status: {status_txt} | Visto: {_fmt_dt(row.last_seen_at)}\n"
-            f"   Alerta de queda: {'ligado' if row.price_drop_alert_enabled else 'desligado'}"
+            f"\nSlot {slot} — {label}\n"
+            f"Preço atual: {_fmt_price(row.last_observed_price)}\n"
+            f"Preço inicial: {_fmt_price(row.initial_price)}\n"
+            f"Variação: {var_txt}\n"
+            f"Status: {status_txt}\n"
+            f"Última vez visto: {_fmt_dt(row.last_seen_at)}\n"
+            f"Notificações automáticas: {notif_txt}"
         )
 
     db.commit()
@@ -317,5 +343,5 @@ def set_price_drop_alert_enabled(db: Session, *, user_id, wishlist_index: int, s
         row.last_price_drop_alert_price = None
     db.commit()
     if enabled:
-        return True, f"Alerta de queda de preço ativado para o slot {slot}."
-    return True, f"Alerta de queda de preço desativado para o slot {slot}."
+        return True, f"Notificações automáticas ativadas para o slot {slot}."
+    return True, f"Notificações automáticas desativadas para o slot {slot}."
