@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from decimal import Decimal
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +35,65 @@ def _normalize_listing_ref(ref: str) -> str:
         return raw
     clean = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
     return clean
+
+
+def _fmt_price(price: Decimal | None) -> str:
+    if price is None:
+        return "sem informação"
+    return f"R$ {int(price):,}".replace(",", ".")
+
+
+def _fmt_dt(dt: datetime | None) -> str:
+    if not dt:
+        return "sem informação"
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _listing_status(listing: CarListing | None) -> str:
+    if listing is None:
+        return "orphan"
+    if getattr(listing, "is_sold", False):
+        return "inactive"
+    return "active"
+
+
+def refresh_tracked_listing_snapshot(
+    db: Session, tracked: WishlistTrackedListing, listing: CarListing | None = None
+) -> dict[str, Any]:
+    listing_row = listing
+    if listing_row is None and tracked.car_listing_id:
+        listing_row = db.query(CarListing).filter(CarListing.id == tracked.car_listing_id).first()
+
+    if listing_row is None:
+        tracked.listing_status = "orphan"
+        return {"status": "orphan", "direction": None}
+
+    current_price = listing_row.price
+    previous_price = tracked.last_observed_price
+
+    direction = "unchanged"
+    if current_price is not None and previous_price is not None:
+        if current_price < previous_price:
+            direction = "dropped"
+        elif current_price > previous_price:
+            direction = "increased"
+
+    if current_price is not None and previous_price is not None and current_price != previous_price:
+        delta = current_price - previous_price
+        tracked.last_price_change_amount = delta
+        if previous_price != 0:
+            tracked.last_price_change_pct = delta / previous_price
+        tracked.last_price_change_direction = direction
+        tracked.last_price_change_at = datetime.now(timezone.utc)
+
+    if current_price is not None:
+        tracked.last_observed_price = current_price
+    if tracked.initial_price is None and current_price is not None:
+        tracked.initial_price = current_price
+
+    tracked.last_seen_at = listing_row.updated_at or tracked.last_seen_at
+    tracked.listing_status = _listing_status(listing_row)
+    return {"status": tracked.listing_status, "direction": direction}
 
 
 def _wishlist_from_index(db: Session, *, user_id, wishlist_index: int) -> Wishlist | None:
@@ -104,6 +165,10 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
             wishlist_id=wishlist.id,
             car_listing_id=listing.id,
             slot=slot,
+            initial_price=listing.price,
+            last_observed_price=listing.price,
+            last_seen_at=listing.updated_at,
+            listing_status=_listing_status(listing),
         )
     )
     try:
@@ -113,7 +178,11 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
         return False, "Esse anúncio já está rastreado nessa wishlist."
 
     title = (listing.title or "Anúncio").strip()
-    return True, f"Rastreamento ativado (slot {slot}/{MAX_TRACKED_PER_WISHLIST}): {title[:80]}"
+    return (
+        True,
+        f"Rastreamento ativado (slot {slot}/{MAX_TRACKED_PER_WISHLIST}): {title[:80]}. "
+        f"Preço atual: {_fmt_price(listing.price)}.",
+    )
 
 
 def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple[bool, str]:
@@ -134,13 +203,35 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
 
     lines: list[str] = [f"📌 Rastreados da wishlist {wishlist_index}: {wishlist.query}"]
     for row, listing in rows:
+        refresh_tracked_listing_snapshot(db, row, listing)
         if listing is None:
             lines.append(f"{row.slot}. anúncio indisponível (registro removido)")
             continue
         label = _short_label(listing.title or listing.external_id or "Anúncio", max_len=70)
         ref = listing.external_id or "-"
-        lines.append(f"{row.slot}. {label} [id:{ref}]")
+        delta = None
+        if row.initial_price is not None and row.last_observed_price is not None:
+            delta = row.last_observed_price - row.initial_price
+        if delta is None or delta == 0:
+            var_txt = "Sem mudança de preço"
+        else:
+            pct = ""
+            if row.initial_price and row.initial_price != 0:
+                pct_val = (delta / row.initial_price) * Decimal("100")
+                pct = f" ({pct_val:+.1f}%)".replace(".", ",")
+            if delta < 0:
+                var_txt = f"Caiu {_fmt_price(abs(delta))}{pct}"
+            else:
+                var_txt = f"Subiu {_fmt_price(abs(delta))}{pct}"
+        status_map = {"active": "ativo", "inactive": "inativo", "orphan": "inativo/removido"}
+        status_txt = status_map.get(row.listing_status or "", "sem informação")
+        lines.append(
+            f"{row.slot}. {label} [id:{ref}]\n"
+            f"   Atual: {_fmt_price(row.last_observed_price)} | Inicial: {_fmt_price(row.initial_price)}\n"
+            f"   {var_txt} | Status: {status_txt} | Visto: {_fmt_dt(row.last_seen_at)}"
+        )
 
+    db.commit()
     lines.append("Use /wishlist_track_remove <n> <slot>")
     return True, "\n".join(lines)
 

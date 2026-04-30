@@ -91,6 +91,12 @@ O que é oficial e ativo: pipeline de monitoramento por wishlist, integração m
 
 Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) que exigem evolução incremental, sem remoções impulsivas.
 
+## 11) Tracking de anúncios por wishlist (estado atual)
+- Cada wishlist pode rastrear até 3 anúncios (`wishlist_tracked_listings`, slots 1..3).
+- O tracking agora mantém snapshot de preço/status por slot (preço inicial, último preço observado, direção da última mudança, última vez visto).
+- A listagem no Telegram (`/wishlist_track_list <n>`) faz refresh leve do snapshot e exibe preço atual/inicial, variação e status.
+- Nesta fase, **não** há alerta automático de queda/aumento de preço: o comportamento é somente registrar e exibir.
+
 ---
 
 ## Notas de incerteza explícitas

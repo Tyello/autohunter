@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from decimal import Decimal
 
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,3 +39,11 @@ class WishlistTrackedListing(TimestampMixin, Base):
     )
 
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    initial_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    last_observed_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    last_price_change_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    last_price_change_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 4), nullable=True)
+    last_price_change_direction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_price_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    listing_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
