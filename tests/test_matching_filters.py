@@ -114,3 +114,31 @@ def test_filter_price_accepts_ptbr_format(db):
     )
 
     assert match_listing_to_wishlist(db, w, listing) is True
+
+
+def test_filter_mileage_km_lte_blocks_higher_km(db):
+    u = _mk_user(db)
+    w = _mk_wishlist(db, u, "civic", filters=[("mileage_km", "lte", "90000")])
+
+    high_km = CarListing(
+        source="olx",
+        external_id="6",
+        title="Honda Civic 1994",
+        url="https://www.olx.com.br/6",
+        price=Decimal("45000"),
+        currency="BRL",
+        mileage_km=120000,
+    )
+
+    ok_km = CarListing(
+        source="olx",
+        external_id="7",
+        title="Honda Civic 1994",
+        url="https://www.olx.com.br/7",
+        price=Decimal("45000"),
+        currency="BRL",
+        mileage_km=80000,
+    )
+
+    assert match_listing_to_wishlist(db, w, high_km) is False
+    assert match_listing_to_wishlist(db, w, ok_km) is True

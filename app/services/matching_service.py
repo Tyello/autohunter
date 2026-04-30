@@ -441,6 +441,18 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
                 return False
             continue
 
+        if field == "mileage_km":
+            km = getattr(listing, "mileage_km", None)
+            if km is None:
+                return False
+            try:
+                tkm = int(val)
+            except Exception:
+                return False
+            if not _cmp_int(int(km), op, tkm):
+                return False
+            continue
+
         if field in {"color", "city", "state"}:
             if not _field_match(listing, field, op, val):
                 return False
@@ -492,6 +504,18 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
             except Exception:
                 return False
             if not _cmp_int(int(year), op, ty):
+                return False
+            continue
+
+        if field == "mileage_km":
+            km = getattr(listing, "mileage_km", None)
+            if km is None:
+                return False
+            try:
+                tkm = int(val)
+            except Exception:
+                return False
+            if not _cmp_int(int(km), op, tkm):
                 return False
             continue
 
@@ -632,6 +656,18 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
                 return "filter_year_bad_value"
             if not _cmp_int(int(year), op, ty):
                 return "filter_year_cmp"
+            continue
+
+        if field == "mileage_km":
+            km = getattr(listing, "mileage_km", None)
+            if km is None:
+                return "filter_mileage_km_missing"
+            try:
+                tkm = int(val)
+            except Exception:
+                return "filter_mileage_km_bad_value"
+            if not _cmp_int(int(km), op, tkm):
+                return "filter_mileage_km_cmp"
             continue
 
         if field in {"color", "city", "state"}:
