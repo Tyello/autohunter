@@ -445,12 +445,23 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
             km = getattr(listing, "mileage_km", None)
             if km is None:
                 return False
-            try:
-                tkm = int(val)
-            except Exception:
-                return False
-            if not _cmp_int(int(km), op, tkm):
-                return False
+            if op == "between":
+                try:
+                    lo_s, hi_s = [p.strip() for p in val.split(",", 1)]
+                    lo = int(lo_s)
+                    hi = int(hi_s)
+                except Exception:
+                    return False
+                km_i = int(km)
+                if km_i < lo or km_i > hi:
+                    return False
+            else:
+                try:
+                    tkm = int(val)
+                except Exception:
+                    return False
+                if not _cmp_int(int(km), op, tkm):
+                    return False
             continue
 
         if field in {"color", "city", "state"}:
@@ -511,12 +522,23 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
             km = getattr(listing, "mileage_km", None)
             if km is None:
                 return False
-            try:
-                tkm = int(val)
-            except Exception:
-                return False
-            if not _cmp_int(int(km), op, tkm):
-                return False
+            if op == "between":
+                try:
+                    lo_s, hi_s = [p.strip() for p in val.split(",", 1)]
+                    lo = int(lo_s)
+                    hi = int(hi_s)
+                except Exception:
+                    return False
+                km_i = int(km)
+                if km_i < lo or km_i > hi:
+                    return False
+            else:
+                try:
+                    tkm = int(val)
+                except Exception:
+                    return False
+                if not _cmp_int(int(km), op, tkm):
+                    return False
             continue
 
         if field in {"color", "city", "state"}:
@@ -662,12 +684,25 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
             km = getattr(listing, "mileage_km", None)
             if km is None:
                 return "filter_mileage_km_missing"
-            try:
-                tkm = int(val)
-            except Exception:
-                return "filter_mileage_km_bad_value"
-            if not _cmp_int(int(km), op, tkm):
-                return "filter_mileage_km_cmp"
+            if op == "between":
+                try:
+                    lo_s, hi_s = [p.strip() for p in val.split(",", 1)]
+                    lo = int(lo_s)
+                    hi = int(hi_s)
+                except Exception:
+                    return "filter_mileage_km_bad_value"
+                km_i = int(km)
+                if km_i < lo:
+                    return "filter_mileage_km_lt"
+                if km_i > hi:
+                    return "filter_mileage_km_gt"
+            else:
+                try:
+                    tkm = int(val)
+                except Exception:
+                    return "filter_mileage_km_bad_value"
+                if not _cmp_int(int(km), op, tkm):
+                    return "filter_mileage_km_cmp"
             continue
 
         if field in {"color", "city", "state"}:

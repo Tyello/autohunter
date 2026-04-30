@@ -246,7 +246,20 @@ async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT
         await reply_text(update, "(sem filtros)\nDica: /wishlist_filter_add <n> year lte 2005")
         return
 
-    lines = [f"{i+1}. {f.field} {f.operator} {f.value}" for i, f in enumerate(fs)]
+    def _fmt_filter(f) -> str:
+        if f.field == "mileage_km":
+            if f.operator == "lte":
+                return f"Quilometragem até {int(f.value):,} km".replace(",", ".")
+            if f.operator == "gte":
+                return f"Quilometragem a partir de {int(f.value):,} km".replace(",", ".")
+            if f.operator == "between":
+                lo_s, hi_s = [p.strip() for p in f.value.split(",", 1)]
+                lo = f"{int(lo_s):,}".replace(",", ".")
+                hi = f"{int(hi_s):,}".replace(",", ".")
+                return f"Quilometragem entre {lo} e {hi} km"
+        return f"{f.field} {f.operator} {f.value}"
+
+    lines = [f"{i+1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]
     await reply_text(
         update,
         "Filtros da wishlist:\n"
