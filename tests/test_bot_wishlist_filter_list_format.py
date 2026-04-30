@@ -91,3 +91,37 @@ def test_filter_list_formats_seller_type_friendly(monkeypatch):
     assert "Vendedor: particular" in txt
     assert "Vendedor: loja/revenda" in txt
     assert "Excluir vendedor: loja/revenda" in txt
+
+
+def test_filter_list_formats_body_type_friendly(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(
+        handlers_wishlist_ui,
+        "get_or_create_user_by_chat",
+        lambda _db, _chat_id, _username: types.SimpleNamespace(id="u1"),
+    )
+    monkeypatch.setattr(
+        handlers_wishlist_ui,
+        "list_wishlists",
+        lambda _db, _uid: [types.SimpleNamespace(id="w1", query="civic")],
+    )
+    monkeypatch.setattr(
+        handlers_wishlist_ui,
+        "list_filters",
+        lambda _db, _wid: [
+            types.SimpleNamespace(field="body_type", operator="eq", value="hatch"),
+            types.SimpleNamespace(field="body_type", operator="eq", value="suv"),
+            types.SimpleNamespace(field="body_type", operator="neq", value="pickup"),
+            types.SimpleNamespace(field="body_type", operator="eq", value="convertible"),
+        ],
+    )
+
+    update = _Update()
+    context = types.SimpleNamespace(args=["1"])
+    asyncio.run(handlers_wishlist_ui.cmd_wishlist_filter_list(update, context))
+
+    txt = update.message.sent[-1]
+    assert "Carroceria: hatch" in txt
+    assert "Carroceria: SUV" in txt
+    assert "Excluir carroceria: pickup" in txt
+    assert "Carroceria: conversível" in txt

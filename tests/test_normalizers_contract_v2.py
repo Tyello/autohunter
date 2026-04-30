@@ -2,6 +2,7 @@ from app.services.source_execution_service import _ad_to_listing
 from app.sources.contract import NormalizedAd
 from app.sources.ad_quality import enforce_ad_contract
 from app.sources.normalize import (
+    normalize_body_type,
     normalize_listing_type,
     normalize_seller_type,
     normalize_ad,
@@ -168,7 +169,17 @@ def test_normalize_ad_preserves_doors_and_tolerates_invalid_doors():
     assert ad_invalid.extras.get("doors") == "abc"
 
 
-def test_normalize_ad_preserves_body_type_raw_value():
-    for body in ["hatch", "sedan", "suv", "pickup", "coupe"]:
-        ad = normalize_ad("kavak", {"url": f"https://example.com/{body}", "title": "Car", "price": 1, "body_type": body})
-        assert ad.extras.get("body_type") == body
+def test_body_type_normalization_contract():
+    assert normalize_body_type("hatchback") == "hatch"
+    assert normalize_body_type("sedã") == "sedan"
+    assert normalize_body_type("utilitário esportivo") == "suv"
+    assert normalize_body_type("caminhonete") == "pickup"
+    assert normalize_body_type("coupé") == "coupe"
+    assert normalize_body_type("conversível") == "convertible"
+    assert normalize_body_type("station wagon") == "wagon"
+    assert normalize_body_type("desconhecido") is None
+
+
+def test_normalize_ad_normalizes_body_type_value():
+    ad = normalize_ad("kavak", {"url": "https://example.com/body", "title": "Car", "price": 1, "body_type": "hatchback"})
+    assert ad.extras.get("body_type") == "hatch"
