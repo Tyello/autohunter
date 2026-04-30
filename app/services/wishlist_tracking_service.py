@@ -13,6 +13,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
+from app.core.settings import settings
 from app.services.notifications_queue_service import queue_tracked_price_drop_alert
 
 MAX_TRACKED_PER_WISHLIST = 3
@@ -114,27 +115,16 @@ def evaluate_price_drop_alert(db: Session, tracked: WishlistTrackedListing, chan
         return False
     if tracked.last_price_drop_alert_price is not None and current_price >= tracked.last_price_drop_alert_price:
         return False
-    min_abs = Decimal("500")
-    min_pct = Decimal("0.01")
+    min_abs = Decimal(str(getattr(settings, "tracking_price_drop_alert_min_amount", 500) or 500))
+    min_pct = Decimal(str(getattr(settings, "tracking_price_drop_alert_min_pct", 1.0) or 1.0)) / Decimal("100")
     if abs(amount) < min_abs and (pct is None or abs(pct) < min_pct):
         return False
 
-    cooldown_h = 24
+    cooldown_h = int(getattr(settings, "tracking_price_drop_alert_cooldown_hours", 24) or 24)
     if tracked.last_price_drop_alert_at is not None:
         delta = datetime.now(timezone.utc) - tracked.last_price_drop_alert_at
         if delta.total_seconds() < cooldown_h * 3600:
             return False
-
-    already = (
-        db.query(Notification.id)
-        .filter(Notification.wishlist_id == tracked.wishlist_id)
-        .filter(Notification.car_listing_id == tracked.car_listing_id)
-        .filter(Notification.reason == "tracked_price_drop")
-        .filter(Notification.status.in_(["queued", "processing", "sent"]))
-        .first()
-    )
-    if already:
-        return False
 
     queued = queue_tracked_price_drop_alert(db, tracked=tracked)
     if not queued:

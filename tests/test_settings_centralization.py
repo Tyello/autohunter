@@ -63,6 +63,9 @@ def test_settings_parsing_and_defaults() -> None:
     assert cfg.log_stdout is True
     assert cfg.should_use_new_scraper_for("olx") is True
     assert cfg.should_use_new_scraper_for("mercadolivre") is False
+    assert cfg.tracking_price_drop_alert_cooldown_hours == 24
+    assert cfg.tracking_price_drop_alert_min_amount == 500
+    assert cfg.tracking_price_drop_alert_min_pct == 1.0
 
 
 def test_settings_requires_database_url(monkeypatch: pytest.MonkeyPatch) -> None:

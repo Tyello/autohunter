@@ -239,3 +239,27 @@ def test_formatter_caps_extreme_fields_and_prioritizes_core_content():
     assert lines[0].startswith("🔥 91/100")
     assert "Por que você recebeu (resumo):" in payload.text
     assert payload.text.count("• Critério:") <= 2
+
+
+def test_tracked_price_drop_formatter_full_payload():
+    from types import SimpleNamespace
+    from app.notifications.telegram_formatter import format_tracked_price_drop_message
+
+    ad = _base_ad(title="Honda Civic EXL 2020", price=86900)
+    n = SimpleNamespace(score_breakdown={"slot": 1, "previous_price": 89900, "current_price": 86900, "drop_amount": 3000, "drop_pct": 3.3, "wishlist_query": "civic"})
+    payload = format_tracked_price_drop_message(n, ad)
+    assert "📉 Queda de preço no anúncio rastreado" in payload.text
+    assert "De R$ 89.900,00 por R$ 86.900,00" in payload.text
+    assert "Caiu R$ 3.000,00 (-3,3%)" in payload.text
+    assert "Wishlist: civic" in payload.text
+
+
+def test_tracked_price_drop_formatter_partial_payload():
+    from types import SimpleNamespace
+    from app.notifications.telegram_formatter import format_tracked_price_drop_message
+
+    ad = _base_ad(title=None, url="")
+    n = SimpleNamespace(score_breakdown={"current_price": 50000})
+    payload = format_tracked_price_drop_message(n, ad)
+    assert "queda detectada" in payload.text
+    assert "Wishlist: sua wishlist" in payload.text

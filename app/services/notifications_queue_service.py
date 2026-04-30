@@ -209,11 +209,13 @@ def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
     wishlist_id = getattr(tracked, "wishlist_id", None)
     if not listing_id or not wishlist_id:
         return False
+    current_price = getattr(tracked, "last_observed_price", None)
     existing = (
         db.query(Notification.id)
         .filter(Notification.wishlist_id == wishlist_id)
         .filter(Notification.car_listing_id == listing_id)
         .filter(Notification.reason == "tracked_price_drop")
+        .filter(Notification.score_v2 == int(current_price) if current_price is not None else Notification.score_v2.is_(None))
         .filter(Notification.status.in_(["queued", "processing", "sent"]))
         .first()
     )
@@ -222,6 +224,14 @@ def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
     wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
     if not wishlist:
         return False
+    drop_amount = None
+    raw_amount = getattr(tracked, "last_price_change_amount", None)
+    if raw_amount is not None:
+        drop_amount = abs(int(raw_amount))
+    drop_pct = None
+    raw_pct = getattr(tracked, "last_price_change_pct", None)
+    if raw_pct is not None:
+        drop_pct = round(abs(float(raw_pct)) * 100, 2)
     db.add(
         Notification(
             user_id=wishlist.user_id,
@@ -229,6 +239,19 @@ def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
             car_listing_id=listing_id,
             status="queued",
             reason="tracked_price_drop",
+            # Keep deterministic payload in an existing JSON column (no migration).
+            score_breakdown={
+                "type": "tracked_price_drop",
+                "slot": getattr(tracked, "slot", None),
+                "previous_price": int(getattr(tracked, "last_observed_price", 0) - raw_amount) if (getattr(tracked, "last_observed_price", None) is not None and raw_amount is not None) else None,
+                "current_price": int(current_price) if current_price is not None else None,
+                "drop_amount": drop_amount,
+                "drop_pct": drop_pct,
+                "tracked_listing_id": str(getattr(tracked, "id", "")) or None,
+                "wishlist_query": getattr(wishlist, "query", None),
+            },
+            # Reuse score_v2 for exact-price dedupe (no schema change).
+            score_v2=int(current_price) if current_price is not None else None,
             next_attempt_at=datetime.now(timezone.utc),
             max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
         )

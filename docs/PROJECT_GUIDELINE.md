@@ -95,7 +95,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Cada wishlist pode rastrear até 3 anúncios (`wishlist_tracked_listings`, slots 1..3).
 - O tracking agora mantém snapshot de preço/status por slot (preço inicial, último preço observado, direção da última mudança, última vez visto).
 - A listagem no Telegram (`/wishlist_track_list <n>`) faz refresh leve do snapshot e exibe preço atual/inicial, variação e status.
-- Nesta fase, **não** há alerta automático de queda/aumento de preço: o comportamento é somente registrar e exibir.
+- Alerta de queda é **opt-in por slot** via `/wishlist_track_alert_on <n> <slot>` e desativação via `/wishlist_track_alert_off <n> <slot>`.
+- O alerta considera **somente queda** (não alerta aumento/não alteração), com thresholds default: **R$ 500** ou **1%**.
+- Cooldown anti-spam default: **24h** por slot/preço.
+- Execução do job `tracking_alerts_job` permanece **default off** via `tracking_price_alerts_enabled=false`.
 
 ---
 
