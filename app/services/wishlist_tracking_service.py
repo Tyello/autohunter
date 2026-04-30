@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import urlsplit, urlunsplit
@@ -18,6 +19,48 @@ from app.services.notifications_queue_service import queue_tracked_price_drop_al
 from app.services.wishlists_service import get_user_plan_snapshot
 
 MAX_TRACKED_PER_WISHLIST = 3
+
+@dataclass
+class TrackedListingResult:
+    ok: bool
+    status: str
+    message: str
+    wishlist_id: str | None = None
+    wishlist_index: int | None = None
+    tracked_listing_id: str | None = None
+    car_listing_id: str | None = None
+    slot: int | None = None
+    already_tracked: bool = False
+    automation_enabled: bool | None = None
+    price: Decimal | None = None
+
+
+def _build_tracked_result(
+    *,
+    ok: bool,
+    status: str,
+    message: str,
+    wishlist: Wishlist | None = None,
+    wishlist_index: int | None = None,
+    tracked: WishlistTrackedListing | None = None,
+    listing: CarListing | None = None,
+    slot: int | None = None,
+    already_tracked: bool = False,
+    automation_enabled: bool | None = None,
+) -> TrackedListingResult:
+    return TrackedListingResult(
+        ok=ok,
+        status=status,
+        message=message,
+        wishlist_id=str(wishlist.id) if wishlist and getattr(wishlist, "id", None) else None,
+        wishlist_index=wishlist_index,
+        tracked_listing_id=str(tracked.id) if tracked and getattr(tracked, "id", None) else None,
+        car_listing_id=str(listing.id) if listing and getattr(listing, "id", None) else None,
+        slot=(slot if slot is not None else (int(tracked.slot) if tracked and getattr(tracked, "slot", None) else None)),
+        already_tracked=already_tracked,
+        automation_enabled=automation_enabled,
+        price=(listing.price if listing else None),
+    )
 
 
 def user_has_tracking_automation(db: Session, *, user_id) -> bool:
@@ -176,14 +219,38 @@ def _find_listing(db: Session, listing_ref: str) -> CarListing | None:
     return None
 
 
-def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_ref: str) -> tuple[bool, str]:
+def add_tracked_listing_result(
+    db: Session, *, user_id, wishlist_index: int, listing_ref: str
+) -> TrackedListingResult:
     wishlist = _wishlist_from_index(db, user_id=user_id, wishlist_index=wishlist_index)
     if not wishlist:
-        return False, "Wishlist não encontrada para você. Use /wishlist para listar os índices válidos."
+        return _build_tracked_result(
+            ok=False,
+            status="wishlist_not_found",
+            message="Wishlist não encontrada para você. Use /wishlist para listar os índices válidos.",
+            wishlist_index=wishlist_index,
+        )
 
     listing = _find_listing(db, listing_ref)
     if not listing:
-        return False, "Não encontrei esse anúncio no AutoHunter. Tente external_id exato ou URL já ingerida."
+        return _build_tracked_result(
+            ok=False,
+            status="listing_not_found",
+            message="Não encontrei esse anúncio no AutoHunter. Tente external_id exato ou URL já ingerida.",
+            wishlist=wishlist,
+            wishlist_index=wishlist_index,
+        )
+
+    listing_status = _listing_status(listing)
+    if listing_status != "active":
+        return _build_tracked_result(
+            ok=False,
+            status="unavailable",
+            message="Não consegui rastrear esse anúncio porque ele não está mais disponível.",
+            wishlist=wishlist,
+            wishlist_index=wishlist_index,
+            listing=listing,
+        )
 
     existing = (
         db.query(WishlistTrackedListing)
@@ -197,13 +264,30 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
     for row in existing:
         if row.car_listing_id == listing.id:
             auto_txt = "ativadas" if row.price_drop_alert_enabled else "Premium"
-            return False, f"Esse anúncio já está rastreado no slot {row.slot}. Notificações automáticas: {auto_txt}."
+            return _build_tracked_result(
+                ok=False,
+                status="already_tracked",
+                message=f"Esse anúncio já está rastreado no slot {row.slot}. Notificações automáticas: {auto_txt}.",
+                wishlist=wishlist,
+                wishlist_index=wishlist_index,
+                tracked=row,
+                listing=listing,
+                already_tracked=True,
+                automation_enabled=bool(row.price_drop_alert_enabled),
+            )
 
     if len(existing) >= MAX_TRACKED_PER_WISHLIST:
-        return (
-            False,
-            f"Limite atingido ({MAX_TRACKED_PER_WISHLIST}/{MAX_TRACKED_PER_WISHLIST}). "
-            "Remova um slot com /wishlist_track_remove <n> <slot>.",
+        return _build_tracked_result(
+            ok=False,
+            status="slots_full",
+            message=(
+                f"Limite atingido ({MAX_TRACKED_PER_WISHLIST}/{MAX_TRACKED_PER_WISHLIST}). "
+                "Remova um slot com /wishlist_track_remove <n> <slot>."
+            ),
+            wishlist=wishlist,
+            wishlist_index=wishlist_index,
+            listing=listing,
+            automation_enabled=automation_allowed,
         )
 
     used_slots = {int(r.slot or 0) for r in existing}
@@ -211,32 +295,69 @@ def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_re
     while slot in used_slots and slot <= MAX_TRACKED_PER_WISHLIST:
         slot += 1
 
-    db.add(
-        WishlistTrackedListing(
-            wishlist_id=wishlist.id,
-            car_listing_id=listing.id,
-            slot=slot,
-            initial_price=listing.price,
-            last_observed_price=listing.price,
-            last_seen_at=listing.updated_at,
-            listing_status=_listing_status(listing),
-            price_drop_alert_enabled=automation_allowed,
-        )
+    tracked = WishlistTrackedListing(
+        wishlist_id=wishlist.id,
+        car_listing_id=listing.id,
+        slot=slot,
+        initial_price=listing.price,
+        last_observed_price=listing.price,
+        last_seen_at=listing.updated_at,
+        listing_status=listing_status,
+        price_drop_alert_enabled=automation_allowed,
     )
+    db.add(tracked)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        return False, "Esse anúncio já está rastreado nessa wishlist."
+        return _build_tracked_result(
+            ok=False,
+            status="already_tracked",
+            message="Esse anúncio já está rastreado nessa wishlist.",
+            wishlist=wishlist,
+            wishlist_index=wishlist_index,
+            listing=listing,
+            slot=slot,
+            already_tracked=True,
+            automation_enabled=automation_allowed,
+        )
+    except Exception:
+        db.rollback()
+        return _build_tracked_result(
+            ok=False,
+            status="error",
+            message="Não consegui rastrear este anúncio agora.",
+            wishlist=wishlist,
+            wishlist_index=wishlist_index,
+            listing=listing,
+            slot=slot,
+            automation_enabled=automation_allowed,
+        )
 
-    title = (listing.title or "Anúncio").strip()
     if automation_allowed:
-        return True, "✅ Anúncio rastreado.\nVou acompanhar preço/status e te avisar sobre mudanças importantes."
-    return True, (
-        "✅ Anúncio rastreado.\n"
-        f"Você pode acompanhar preço e status em:\n/wishlist_track_list {wishlist_index}\n\n"
-        "Notificações automáticas de mudança são um recurso Premium."
+        message = "✅ Anúncio rastreado.\nVou acompanhar preço/status e te avisar sobre mudanças importantes."
+    else:
+        message = (
+            "✅ Anúncio rastreado.\n"
+            f"Você pode acompanhar preço e status em:\n/wishlist_track_list {wishlist_index}\n\n"
+            "Notificações automáticas de mudança são um recurso Premium."
+        )
+    return _build_tracked_result(
+        ok=True,
+        status="added",
+        message=message,
+        wishlist=wishlist,
+        wishlist_index=wishlist_index,
+        tracked=tracked,
+        listing=listing,
+        slot=slot,
+        automation_enabled=automation_allowed,
     )
+
+
+def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_ref: str) -> tuple[bool, str]:
+    result = add_tracked_listing_result(db, user_id=user_id, wishlist_index=wishlist_index, listing_ref=listing_ref)
+    return result.ok, result.message
 
 
 def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple[bool, str]:

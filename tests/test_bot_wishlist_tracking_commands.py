@@ -39,8 +39,8 @@ def test_track_add_happy_path(monkeypatch):
     )
     monkeypatch.setattr(
         handlers_wishlist_ui,
-        "add_tracked_listing",
-        lambda _db, **_kwargs: (True, "Rastreamento ativado (slot 1/3)"),
+        "add_tracked_listing_result",
+        lambda _db, **_kwargs: handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="Rastreamento ativado (slot 1/3)"),
     )
 
     update = _Update()

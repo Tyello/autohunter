@@ -7,7 +7,7 @@ from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.wishlists_service import add_wishlist
-from app.services.wishlist_tracking_service import add_tracked_listing, list_tracked_listings, remove_tracked_listing
+from app.services.wishlist_tracking_service import add_tracked_listing, add_tracked_listing_result, list_tracked_listings, remove_tracked_listing
 
 
 def _mk_user(db, chat_id=1001):
@@ -117,3 +117,50 @@ def test_tracking_add_saves_initial_snapshot(db, monkeypatch):
     row = db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id.isnot(None)).one()
     assert row.initial_price == listing.price
     assert row.last_observed_price == listing.price
+
+
+def test_tracking_add_result_statuses(db, monkeypatch):
+    user = _mk_user(db, 5001)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    ok, _ = add_wishlist(db, user.id, "gol")
+    assert ok is True
+    l1 = _mk_listing(db, 21)
+    l2 = _mk_listing(db, 22)
+    l3 = _mk_listing(db, 23)
+    l4 = _mk_listing(db, 24)
+
+    r1 = add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
+    assert r1.status == "added"
+    assert r1.ok is True
+    assert r1.slot == 1
+
+    r2 = add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
+    assert r2.status == "already_tracked"
+
+    assert add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l2.external_id).status == "added"
+    assert add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l3.external_id).status == "added"
+    r3 = add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l4.external_id)
+    assert r3.status == "slots_full"
+
+    r4 = add_tracked_listing_result(db, user_id=user.id, wishlist_index=2, listing_ref=l4.external_id)
+    assert r4.status == "wishlist_not_found"
+
+    r5 = add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref="EXT404")
+    assert r5.status == "listing_not_found"
+
+
+def test_tracking_add_result_automation_enabled_free_and_premium(db, monkeypatch):
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    user_free = _mk_user(db, 6001)
+    user_premium = _mk_user(db, 6002)
+    add_wishlist(db, user_free.id, "uno")
+    add_wishlist(db, user_premium.id, "palio")
+    lf = _mk_listing(db, 31)
+    lp = _mk_listing(db, 32)
+
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda _db, uid: {"plan_code": "premium"} if str(uid) == str(user_premium.id) else {"plan_code": "free"})
+
+    rf = add_tracked_listing_result(db, user_id=user_free.id, wishlist_index=1, listing_ref=lf.external_id)
+    rp = add_tracked_listing_result(db, user_id=user_premium.id, wishlist_index=1, listing_ref=lp.external_id)
+    assert rf.automation_enabled is False
+    assert rp.automation_enabled is True
