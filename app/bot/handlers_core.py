@@ -54,6 +54,8 @@ def _wishlist_help_text() -> str:
         "• /wishlist_track_add <n> <url|external_id>\n"
         "• /wishlist_track_list <n>\n"
         "• /wishlist_track_remove <n> <slot>\n\n"
+        "• /wishlist_track_alert_on <n> <slot>\n"
+        "• /wishlist_track_alert_off <n> <slot>\n\n"
         "Dica: /wishlist mostra o número <n>.\n"
         "Obs: filtros de preço só dão match quando a fonte extrai preço (se vier None, não entra em range)."
     )
@@ -94,6 +96,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /wishlist_track_add <n> <url|external_id>\n"
         "• /wishlist_track_list <n>\n"
         "• /wishlist_track_remove <n> <slot>\n\n"
+        "• /wishlist_track_alert_on <n> <slot>\n"
+        "• /wishlist_track_alert_off <n> <slot>\n\n"
         "Campos: price | year | mileage_km | doors | source | color | city | state | seller_type | body_type (aliases body_type: carroceria, tipo_carroceria, categoria, estilo)\n"
         "Ops price/year/mileage_km/doors: lt lte gt gte eq neq between (alias: entre)\n"
         "Ops source/color/city/state/seller_type/body_type: eq neq (aliases: igual/=, apenas/somente, excluir/diferente/!=)\n"

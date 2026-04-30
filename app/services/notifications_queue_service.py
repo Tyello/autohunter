@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import settings
 from app.models.notification import Notification
+from app.models.wishlist import Wishlist
 from app.scoring.score_v2 import score_ad
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 
@@ -201,3 +202,36 @@ def queue_notifications_for_matches_diag(
         "invalid_listing": invalid_listing,
         "buckets": buckets,
     }
+
+
+def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
+    listing_id = getattr(tracked, "car_listing_id", None)
+    wishlist_id = getattr(tracked, "wishlist_id", None)
+    if not listing_id or not wishlist_id:
+        return False
+    existing = (
+        db.query(Notification.id)
+        .filter(Notification.wishlist_id == wishlist_id)
+        .filter(Notification.car_listing_id == listing_id)
+        .filter(Notification.reason == "tracked_price_drop")
+        .filter(Notification.status.in_(["queued", "processing", "sent"]))
+        .first()
+    )
+    if existing:
+        return False
+    wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
+    if not wishlist:
+        return False
+    db.add(
+        Notification(
+            user_id=wishlist.user_id,
+            wishlist_id=wishlist_id,
+            car_listing_id=listing_id,
+            status="queued",
+            reason="tracked_price_drop",
+            next_attempt_at=datetime.now(timezone.utc),
+            max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
+        )
+    )
+    db.flush()
+    return True

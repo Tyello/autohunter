@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,3 +47,6 @@ class WishlistTrackedListing(TimestampMixin, Base):
     last_price_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     listing_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    price_drop_alert_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_price_drop_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_price_drop_alert_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)

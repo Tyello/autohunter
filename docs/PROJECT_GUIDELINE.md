@@ -102,3 +102,5 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 ## Notas de incerteza explícitas
 - Sem acesso ao banco de produção neste escopo, não é possível afirmar “quais sources estão ligadas agora”; apenas o que está implementado e como é controlado.
 - Fluxos auxiliares (ex.: Facebook Agent/admin deploy) estão presentes no runtime, mas a criticidade operacional de cada um pode variar por ambiente.
+
+- Tracking de wishlist: alerta de queda de preço é opt-in por slot (/wishlist_track_alert_on|off), com cooldown anti-spam e limite de 3 slots preservado.

@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     match_candidates_per_run: int = 250
     match_max_queue_per_wishlist: int = 10
     listing_inactive_missing_runs_threshold: int = 3
+    tracking_price_alerts_enabled: bool = False
+    tracking_price_alerts_interval_minutes: int = 60
+    tracking_price_alerts_batch_size: int = 50
 
     # Logging
     log_level: str = "info"

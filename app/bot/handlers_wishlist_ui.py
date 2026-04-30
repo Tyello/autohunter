@@ -27,6 +27,7 @@ from app.services.wishlist_tracking_service import (
     add_tracked_listing,
     list_tracked_listings,
     remove_tracked_listing,
+    set_price_drop_alert_enabled,
 )
 
 
@@ -408,4 +409,34 @@ async def cmd_wishlist_track_remove(update: Update, context: ContextTypes.DEFAUL
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         _ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=n, slot=slot)
 
+    await reply_text(update, msg)
+
+
+async def cmd_wishlist_track_alert_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args or []) < 2:
+        await reply_text(update, "Use: /wishlist_track_alert_on <n> <slot>")
+        return
+    n = parse_int(context.args[0])
+    slot = parse_int(context.args[1])
+    if n is None or slot is None:
+        await reply_text(update, "Use: /wishlist_track_alert_on <n> <slot>")
+        return
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        _ok, msg = set_price_drop_alert_enabled(db, user_id=user.id, wishlist_index=n, slot=slot, enabled=True)
+    await reply_text(update, msg)
+
+
+async def cmd_wishlist_track_alert_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args or []) < 2:
+        await reply_text(update, "Use: /wishlist_track_alert_off <n> <slot>")
+        return
+    n = parse_int(context.args[0])
+    slot = parse_int(context.args[1])
+    if n is None or slot is None:
+        await reply_text(update, "Use: /wishlist_track_alert_off <n> <slot>")
+        return
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        _ok, msg = set_price_drop_alert_enabled(db, user_id=user.id, wishlist_index=n, slot=slot, enabled=False)
     await reply_text(update, msg)
