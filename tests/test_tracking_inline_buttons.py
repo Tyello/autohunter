@@ -72,7 +72,7 @@ class _Update:
         self._user_id = user_id
 
 
-def _patch_common(monkeypatch, *, notification, wishlist, listing, automation=False, add_result=(True, "ok slot 1"), wishlists=None):
+def _patch_common(monkeypatch, *, notification, wishlist, listing, automation=False, add_result=None, wishlists=None):
     db = _DB({
         handlers_wishlist_ui.Notification: notification,
         handlers_wishlist_ui.Wishlist: wishlist,
@@ -81,7 +81,9 @@ def _patch_common(monkeypatch, *, notification, wishlist, listing, automation=Fa
     monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session(db))
     monkeypatch.setattr(handlers_wishlist_ui, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
     monkeypatch.setattr(handlers_wishlist_ui, "user_has_tracking_automation", lambda *_args, **_kwargs: automation)
-    monkeypatch.setattr(handlers_wishlist_ui, "add_tracked_listing", lambda *_args, **_kwargs: add_result)
+    if add_result is None:
+        add_result = handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="ok", slot=1, automation_enabled=automation)
+    monkeypatch.setattr(handlers_wishlist_ui, "add_tracked_listing_result", lambda *_args, **_kwargs: add_result)
     monkeypatch.setattr(handlers_wishlist_ui, "list_wishlists", lambda *_: wishlists if wishlists is not None else [types.SimpleNamespace(id="w1")])
 
 
@@ -98,7 +100,7 @@ def test_callback_owner_free_slot_free_plan(monkeypatch):
         wishlist=types.SimpleNamespace(id="w1", user_id="u1"),
         listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"),
         automation=False,
-        add_result=(True, "slot 1"),
+        add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot 1", slot=1, automation_enabled=False),
     )
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
@@ -107,21 +109,21 @@ def test_callback_owner_free_slot_free_plan(monkeypatch):
 
 
 def test_callback_owner_premium(monkeypatch):
-    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), automation=True, add_result=(True, "slot 1"))
+    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), automation=True, add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot 1", slot=1, automation_enabled=True))
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert "automaticamente" in q.edits[-1]
 
 
 def test_callback_already_tracked(monkeypatch):
-    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=(False, "Esse anúncio já está rastreado no slot 2."))
+    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=False, status="already_tracked", message="Esse anúncio já está rastreado no slot 2.", slot=2, already_tracked=True))
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert "já está rastreado" in q.edits[-1]
 
 
 def test_callback_slots_full(monkeypatch):
-    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=(False, "Limite atingido"))
+    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=False, status="slots_full", message="Limite atingido"))
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert "todos os slots" in q.edits[-1]
@@ -149,7 +151,20 @@ def test_callback_listing_missing(monkeypatch):
 
 
 def test_callback_edit_failure_does_not_raise(monkeypatch):
-    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=(True, "slot 1"))
+    _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot 1", slot=1, automation_enabled=False))
     q = _CallbackQuery(fail_edit=True)
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert q.answers
+
+
+def test_callback_uses_structured_status_not_message(monkeypatch):
+    _patch_common(
+        monkeypatch,
+        notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"),
+        wishlist=types.SimpleNamespace(id="w1", user_id="u1"),
+        listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"),
+        add_result=handlers_wishlist_ui.TrackedListingResult(ok=False, status="slots_full", message="mensagem sem palavra-chave"),
+    )
+    q = _CallbackQuery()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "todos os slots" in q.edits[-1]

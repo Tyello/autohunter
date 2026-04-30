@@ -25,6 +25,8 @@ from app.services.wishlists_service import (
 )
 from app.services.wishlist_tracking_service import (
     add_tracked_listing,
+    add_tracked_listing_result,
+    TrackedListingResult,
     list_tracked_listings,
     remove_tracked_listing,
     set_price_drop_alert_enabled,
@@ -374,9 +376,9 @@ async def cmd_wishlist_track_add(update: Update, context: ContextTypes.DEFAULT_T
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        _ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=n, listing_ref=listing_ref)
+        result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=n, listing_ref=listing_ref)
 
-    await reply_text(update, msg)
+    await reply_text(update, result.message)
 
 
 async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -503,33 +505,41 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         short_msg = "Notificação inválida"
                         full_msg = "Não encontrei essa notificação. Tente rastrear a partir de uma notificação mais recente."
                     else:
-                        ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=widx, listing_ref=listing.external_id or listing.url)
-                        slot = _extract_slot_from_message(msg)
-                        if ok:
-                            if user_has_tracking_automation(db, user_id=user.id):
-                                short_msg = f"Rastreado no slot {slot or 1}"
+                        result = add_tracked_listing_result(
+                            db,
+                            user_id=user.id,
+                            wishlist_index=widx,
+                            listing_ref=listing.external_id or listing.url,
+                        )
+                        slot = result.slot
+                        if result.status == "added":
+                            short_msg = f"Rastreado no slot {slot or 1}"
+                            if bool(result.automation_enabled):
                                 full_msg = (
                                     f"✅ Anúncio rastreado no slot {slot or 1}.\n"
                                     "Vou acompanhar preço e status automaticamente."
                                 )
                             else:
-                                short_msg = f"Rastreado no slot {slot or 1}"
                                 full_msg = (
                                     f"✅ Anúncio rastreado no slot {slot or 1}.\n"
                                     f"Veja em: /wishlist_track_list {widx}\n"
                                     "Notificações automáticas são Premium."
                                 )
+                        elif result.status == "already_tracked":
+                            short_msg = "Já rastreado"
+                            full_msg = f"Esse anúncio já está rastreado no slot {slot or 1}.\nVeja em: /wishlist_track_list {widx}"
+                        elif result.status == "slots_full":
+                            short_msg = "Slots cheios"
+                            full_msg = f"Você já usa todos os slots dessa wishlist.\nVeja: /wishlist_track_list {widx}"
+                        elif result.status in {"listing_not_found", "unavailable"}:
+                            short_msg = "Anúncio indisponível"
+                            full_msg = result.message or "Não consegui rastrear esse anúncio porque ele não está mais disponível."
+                        elif result.status in {"wishlist_not_found", "invalid_slot"}:
+                            short_msg = "Wishlist inválida"
+                            full_msg = result.message
                         else:
-                            low = (msg or "").lower()
-                            if "já está rastreado" in low:
-                                short_msg = "Já rastreado"
-                                full_msg = f"Esse anúncio já está rastreado no slot {slot or 1}.\nVeja em: /wishlist_track_list {widx}"
-                            elif "limite" in low:
-                                short_msg = "Slots cheios"
-                                full_msg = f"Você já usa todos os slots dessa wishlist.\nVeja: /wishlist_track_list {widx}"
-                            else:
-                                short_msg = "Não foi possível rastrear"
-                                full_msg = msg or "Não consegui rastrear este anúncio agora."
+                            short_msg = "Não foi possível rastrear"
+                            full_msg = result.message or "Não consegui rastrear este anúncio agora."
 
     try:
         await q.answer(short_msg[:180] or "OK", show_alert=False)
