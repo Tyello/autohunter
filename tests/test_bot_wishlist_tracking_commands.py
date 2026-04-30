@@ -79,3 +79,13 @@ def test_track_alert_on_premium_ok(monkeypatch):
     context = types.SimpleNamespace(args=["1", "1"])
     asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_alert_on(update, context))
     assert update.message.sent[-1] == "ok"
+
+
+def test_track_list_without_args_lists_all(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers_wishlist_ui, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers_wishlist_ui, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1"), types.SimpleNamespace(id="w2")])
+    monkeypatch.setattr(handlers_wishlist_ui, "list_tracked_listings", lambda _db, **kwargs: (True, f"📌 Rastreados da wishlist {kwargs['wishlist_index']} — q"))
+    update = _Update()
+    asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_list(update, types.SimpleNamespace(args=[])))
+    assert "Seus anúncios rastreados" in update.message.sent[-1]
