@@ -272,6 +272,18 @@ async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT
                 return f"Carroceria: {label}"
             if f.operator == "neq":
                 return f"Excluir carroceria: {label}"
+        if f.field == "doors":
+            if f.operator == "eq":
+                return f"Portas: {int(f.value)}"
+            if f.operator == "neq":
+                return f"Excluir portas: {int(f.value)}"
+            if f.operator == "lte":
+                return f"Portas até {int(f.value)}"
+            if f.operator == "gte":
+                return f"Portas a partir de {int(f.value)}"
+            if f.operator == "between":
+                lo_s, hi_s = [p.strip() for p in f.value.split(",", 1)]
+                return f"Portas entre {int(lo_s)} e {int(hi_s)}"
         return f"{f.field} {f.operator} {f.value}"
 
     lines = [f"{i+1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]

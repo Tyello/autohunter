@@ -471,6 +471,29 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
                     return False
             continue
 
+        if field == "doors":
+            doors = getattr(listing, "doors", None)
+            if doors is None:
+                return False
+            if op == "between":
+                try:
+                    lo_s, hi_s = [p.strip() for p in val.split(",", 1)]
+                    lo = int(lo_s)
+                    hi = int(hi_s)
+                except Exception:
+                    return False
+                doors_i = int(doors)
+                if doors_i < lo or doors_i > hi:
+                    return False
+            else:
+                try:
+                    td = int(val)
+                except Exception:
+                    return False
+                if not _cmp_int(int(doors), op, td):
+                    return False
+            continue
+
         if field in {"color", "city", "state", "seller_type", "body_type"}:
             if not _field_match(listing, field, op, val):
                 return False
@@ -545,6 +568,29 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
                 except Exception:
                     return False
                 if not _cmp_int(int(km), op, tkm):
+                    return False
+            continue
+
+        if field == "doors":
+            doors = getattr(listing, "doors", None)
+            if doors is None:
+                return False
+            if op == "between":
+                try:
+                    lo_s, hi_s = [p.strip() for p in val.split(",", 1)]
+                    lo = int(lo_s)
+                    hi = int(hi_s)
+                except Exception:
+                    return False
+                doors_i = int(doors)
+                if doors_i < lo or doors_i > hi:
+                    return False
+            else:
+                try:
+                    td = int(val)
+                except Exception:
+                    return False
+                if not _cmp_int(int(doors), op, td):
                     return False
             continue
 
@@ -710,6 +756,31 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
                     return "filter_mileage_km_bad_value"
                 if not _cmp_int(int(km), op, tkm):
                     return "filter_mileage_km_cmp"
+            continue
+
+        if field == "doors":
+            doors = getattr(listing, "doors", None)
+            if doors is None:
+                return "filter_doors_missing"
+            if op == "between":
+                try:
+                    lo_s, hi_s = [p.strip() for p in val.split(",", 1)]
+                    lo = int(lo_s)
+                    hi = int(hi_s)
+                except Exception:
+                    return "filter_doors_bad_value"
+                doors_i = int(doors)
+                if doors_i < lo:
+                    return "filter_doors_lt"
+                if doors_i > hi:
+                    return "filter_doors_gt"
+            else:
+                try:
+                    td = int(val)
+                except Exception:
+                    return "filter_doors_bad_value"
+                if not _cmp_int(int(doors), op, td):
+                    return f"filter_doors_{op}"
             continue
 
         if field in {"color", "city", "state", "seller_type", "body_type"}:
