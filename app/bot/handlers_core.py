@@ -4,8 +4,10 @@ from telegram.ext import ContextTypes
 
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
+from app.bot.renderers import render_all_tracked_listings, render_help_text, render_user_wishlists
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot
+from app.services.wishlist_tracking_service import list_tracked_listings
 
 
 def _wishlist_help_text() -> str:
@@ -82,60 +84,8 @@ async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await reply_text(
-        update,
-        "📌 Comandos do AutoHunter\n\n"
-        "Wishlist:\n"
-        "• /wishlist — listar\n"
-        "• /wishlist_add — criar (assistente)\n"
-        "• /wishlist_remove — remover\n"
-        "• /wishlist_clear — limpar tudo\n\n"
-        "Filtros (por wishlist):\n"
-        "• /wishlist_filter_list <n>\n"
-        "• /wishlist_filter_add <n> <campo> <op> <valor>\n"
-        "• /wishlist_filter_remove <n> <k>\n\n"
-        "Rastreamento por wishlist:\n"
-        "• /wishlist_track_add <n> <url|external_id>\n"
-        "• /wishlist_track_list <n>\n"
-        "• /wishlist_track_remove <n> <slot>\n\n"
-        "Quando receber um anúncio de uma wishlist, clique em ⭐ Rastrear para acompanhar preço e status.\n"
-        "Veja seus rastreados com:\n"
-        "/wishlist_track_list\n\n"
-        "Campos: price | year | mileage_km | doors | source | color | city | state | seller_type | body_type (aliases body_type: carroceria, tipo_carroceria, categoria, estilo)\n"
-        "Ops price/year/mileage_km/doors: lt lte gt gte eq neq between (alias: entre)\n"
-        "Ops source/color/city/state/seller_type/body_type: eq neq (aliases: igual/=, apenas/somente, excluir/diferente/!=)\n"
-        "Fontes (source): mercadolivre | olx | webmotors | chavesnamao | gogarage | icarros | mobiauto | kavak | facebook_marketplace\n\n"
-        "Exemplos:\n"
-        "• /wishlist_filter_add 1 year lte 2005\n"
-        "• /wishlist_filter_add 1 price lte 90000\n"
-        "• /wishlist_filter_add 1 km <= 80000\n"
-        "• /wishlist_filter_add 1 km entre 30000 90000\n"
-        "• /wishlist_filter_add 1 source eq olx\n"
-        "• /wishlist_filter_add 1 color eq preto\n"
-        "• /wishlist_filter_add 1 state eq SP\n"
-        "• /wishlist_filter_add 1 vendedor = particular\n"
-        "• /wishlist_filter_add 1 vendedor excluir loja\n\n"
-        "• /wishlist_filter_add 1 carroceria = suv\n"
-        "• /wishlist_filter_add 1 carroceria excluir pickup\n\n"
-        "• /wishlist_filter_add 1 portas = 4\n"
-        "• /wishlist_filter_add 1 portas >= 4\n"
-        "• /wishlist_filter_add 1 portas entre 2 4\n\n"
-        "Dica (atalho no /wishlist_add):\n"
-        "• \"daihatsu cuore até 2005\" (cria filtro year lte 2005 automaticamente)\n\n"
-        "Busca manual:\n"
-        "• /buscar civic 2019 até 90000 sp\n\n"
-        "Menu guiado:\n"
-        "• /menu\n\n"
-        "Alertas:\n"
-        "• /alertas\n\n"
-        "Planos:\n"
-        "• /plan\n"
-        "• /upgrade\n\n"
-        "Sistema:\n"
-        "• /status\n"
-        "• /version\n"
-        "• /me"
-    )
+    await reply_text(update, render_help_text())
+
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text(
@@ -155,10 +105,20 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _safe_edit_or_send(update, "Para buscar agora, use:\n/buscar civic si")
         return
     if data == "MENU:WISHLISTS":
-        await _safe_edit_or_send(update, "Veja suas wishlists com:\n/wishlist")
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            w = list_wishlists(db, user.id)
+        await _safe_edit_or_send(update, render_user_wishlists(w))
         return
     if data == "MENU:TRACKED":
-        await _safe_edit_or_send(update, "Veja seus rastreados com:\n/wishlist_track_list")
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+            tracked_messages = []
+            for i, _wl in enumerate(wishlists, start=1):
+                _ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=i)
+                tracked_messages.append(msg)
+        await _safe_edit_or_send(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
         return
     if data == "MENU:FILTERS":
         await _safe_edit_or_send(
@@ -166,11 +126,12 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Para ver filtros de uma wishlist:\n"
             "/wishlist_filter_list <n>\n\n"
             "Para adicionar filtro:\n"
-            "/wishlist_filter_add <n> <campo> <operador> <valor>",
+            "/wishlist_filter_add <n> <campo> <operador> <valor>\n\n"
+            "Dica: use /wishlist para ver o número <n> da wishlist.",
         )
         return
     if data == "MENU:HELP":
-        await _safe_edit_or_send(update, "Use /help para ver os comandos e exemplos.")
+        await _safe_edit_or_send(update, render_help_text())
         return
 
     await _safe_edit_or_send(update, "Opção inválida. Use /menu novamente.")
