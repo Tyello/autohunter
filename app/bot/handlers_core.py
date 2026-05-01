@@ -1,4 +1,5 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from app.bot.utils import reply_text
@@ -123,6 +124,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• \"daihatsu cuore até 2005\" (cria filtro year lte 2005 automaticamente)\n\n"
         "Busca manual:\n"
         "• /buscar civic 2019 até 90000 sp\n\n"
+        "Menu guiado:\n"
+        "• /menu\n\n"
         "Alertas:\n"
         "• /alertas\n\n"
         "Planos:\n"
@@ -133,6 +136,44 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /version\n"
         "• /me"
     )
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await reply_text(
+        update,
+        "🚗 AutoHunter\n\n"
+        "O que você quer fazer?",
+        reply_markup=_menu_keyboard(),
+    )
+
+
+async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await _safe_answer_callback(q)
+
+    data = (q.data or "").strip()
+    if data == "MENU:SEARCH":
+        await _safe_edit_or_send(update, "Para buscar agora, use:\n/buscar civic si")
+        return
+    if data == "MENU:WISHLISTS":
+        await _safe_edit_or_send(update, "Veja suas wishlists com:\n/wishlist")
+        return
+    if data == "MENU:TRACKED":
+        await _safe_edit_or_send(update, "Veja seus rastreados com:\n/wishlist_track_list")
+        return
+    if data == "MENU:FILTERS":
+        await _safe_edit_or_send(
+            update,
+            "Para ver filtros de uma wishlist:\n"
+            "/wishlist_filter_list <n>\n\n"
+            "Para adicionar filtro:\n"
+            "/wishlist_filter_add <n> <campo> <operador> <valor>",
+        )
+        return
+    if data == "MENU:HELP":
+        await _safe_edit_or_send(update, "Use /help para ver os comandos e exemplos.")
+        return
+
+    await _safe_edit_or_send(update, "Opção inválida. Use /menu novamente.")
 
 
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,3 +201,29 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Monitoramento: fontes via scheduler\n\n"
         "Use /wishlist para ver suas buscas monitoradas."
     )
+def _menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
+        [InlineKeyboardButton("🎯 Minhas wishlists", callback_data="MENU:WISHLISTS")],
+        [InlineKeyboardButton("📌 Rastreados", callback_data="MENU:TRACKED")],
+        [InlineKeyboardButton("⚙️ Filtros", callback_data="MENU:FILTERS")],
+        [InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")],
+    ])
+
+
+async def _safe_answer_callback(q) -> None:
+    try:
+        await q.answer()
+    except BadRequest as exc:
+        msg = str(exc).lower()
+        if "query is too old" in msg or "query id is invalid" in msg:
+            return
+        raise
+
+
+async def _safe_edit_or_send(update: Update, text: str) -> None:
+    q = update.callback_query
+    try:
+        await q.edit_message_text(text)
+    except Exception:
+        await q.message.reply_text(text)
