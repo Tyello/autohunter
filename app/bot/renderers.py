@@ -30,6 +30,7 @@ def render_help_text() -> str:
         "Wishlist:\n"
         "• /wishlist — listar\n"
         "• /wishlist_add — criar (assistente)\n"
+        "• /menu → ➕ Criar wishlist — criar passo a passo\n"
         "• /wishlist_remove — remover\n"
         "• /wishlist_clear — limpar tudo\n\n"
         "Filtros (por wishlist):\n"

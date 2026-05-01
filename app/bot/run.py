@@ -8,7 +8,10 @@ from telegram.ext import ContextTypes, Application, CommandHandler, CallbackQuer
 from app.core.settings import settings
 
 from app.bot.commands import setup_bot_commands
-from app.bot.handlers_core import cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu
+from app.bot.handlers_core import (
+    cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu,
+    menu_create_wishlist_conversation,
+)
 from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit
 from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_admin import cmd_admin
@@ -106,6 +109,7 @@ def main():
     # search + wishlist (modo antigo continua)
     app.add_handler(CommandHandler("buscar", cmd_buscar))
     app.add_handler(CommandHandler("wishlist", cmd_wishlist))
+    app.add_handler(menu_create_wishlist_conversation())
 
     # wishlist (UX nova)
     app.add_handler(wishlist_add_conversation())
@@ -125,7 +129,7 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_alert_on", cmd_wishlist_track_alert_on))
     app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
     app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^(TRACK:ADD:[^:]+|TRACK:ADDWL:[^:]+:[^:]+|TRACK:ADDT:[^:]+|TRACK:CHOOSE:[^:]+)$"))
-    app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^MENU:[A-Z]+$"))
+    app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^MENU:[A-Z_]+$"))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))

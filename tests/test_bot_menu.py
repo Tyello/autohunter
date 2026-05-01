@@ -63,9 +63,10 @@ def test_cmd_menu_renders_buttons():
     markup = payload["reply_markup"]
     callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
     assert callback_data == [
-        "MENU:SEARCH",
+        "MENU:CREATE_WISHLIST",
         "MENU:WISHLISTS",
         "MENU:TRACKED",
+        "MENU:SEARCH",
         "MENU:FILTERS",
         "MENU:HELP",
     ]
