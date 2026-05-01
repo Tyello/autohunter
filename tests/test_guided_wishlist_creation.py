@@ -76,6 +76,47 @@ def test_menu_create_wishlist_creates_on_text(monkeypatch):
     assert state == ConversationHandler.END
     assert created["query"] == "civic si"
     assert "✅ Wishlist criada: civic si" in msg.sent[-1]["text"]
+    assert "Para filtros: /menu → ⚙️ Filtros" in msg.sent[-1]["text"]
+
+
+def test_menu_create_wishlist_service_error_keeps_flow_and_shows_service_message(monkeypatch):
+    _patch_user(monkeypatch)
+
+    def _add(_db, _uid, _query):
+        return False, "Limite atingido: 3 wishlists no seu plano."
+
+    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+    msg = _Message("civic si")
+    state = asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), types.SimpleNamespace()))
+
+    assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert "✅ Wishlist criada" not in msg.sent[-1]["text"]
+    assert "Não consegui criar a wishlist:" in msg.sent[-1]["text"]
+    assert "Limite atingido: 3 wishlists no seu plano." in msg.sent[-1]["text"]
+    assert "Envie outro texto ou use /cancelar." in msg.sent[-1]["text"]
+
+
+def test_menu_create_wishlist_retry_after_error_then_success(monkeypatch):
+    _patch_user(monkeypatch)
+    calls = {"n": 0}
+
+    def _add(_db, _uid, query):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return False, "Query inválida. Ex: /wishlist_add audi a6 entre 2014 e 2020"
+        return True, "Wishlist criada."
+
+    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+
+    msg_err = _Message("x")
+    state_err = asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg_err), types.SimpleNamespace()))
+    assert state_err == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert "Não consegui criar a wishlist:" in msg_err.sent[-1]["text"]
+
+    msg_ok = _Message("civic si")
+    state_ok = asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg_ok), types.SimpleNamespace()))
+    assert state_ok == ConversationHandler.END
+    assert "✅ Wishlist criada: civic si" in msg_ok.sent[-1]["text"]
 
 
 def test_menu_create_wishlist_empty_text_does_not_create(monkeypatch):

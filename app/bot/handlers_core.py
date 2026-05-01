@@ -215,15 +215,21 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         _ok, _msg = add_wishlist(db, user.id, query)
 
+    if not _ok:
+        await reply_text(
+            update,
+            "Não consegui criar a wishlist:\n"
+            f"{_msg}\n\n"
+            "Envie outro texto ou use /cancelar.",
+        )
+        return MENU_CREATE_WISHLIST_QUERY
+
     await reply_text(
         update,
         f"✅ Wishlist criada: {query}\n\n"
         "Vou monitorar anúncios compatíveis.\n"
-        "Você pode adicionar filtros depois em:\n"
-        "⚙️ Filtros no /menu\n"
-        "ou\n"
-        "/wishlist_filter_add <n> <campo> <operador> <valor>\n\n"
-        "Veja suas wishlists: /wishlist",
+        "Veja suas wishlists: /wishlist\n"
+        "Para filtros: /menu → ⚙️ Filtros",
     )
     return ConversationHandler.END
 
