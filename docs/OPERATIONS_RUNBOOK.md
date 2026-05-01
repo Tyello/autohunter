@@ -242,3 +242,8 @@ Boas práticas para novas migrations:
   - `tracking_price_drop_alert_min_amount=500`,
   - `tracking_price_drop_alert_min_pct=1.0`.
 - Para ativar em ambiente, ajustar settings/env e validar logs do `tracking_alerts_job`.
+
+## 13) Estratégia de testes de banco
+- SQLite é para testes rápidos/unitários/serviço e deve ser isolado por teste (`tmp_path`/fixture equivalente) quando houver `drop_all/create_all`.
+- Não usar arquivo SQLite compartilhado para testes que manipulam schema.
+- PostgreSQL (via `TEST_DATABASE_URL`) é para integração real de banco, constraints e migrations Alembic.
