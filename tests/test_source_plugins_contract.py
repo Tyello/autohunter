@@ -3,8 +3,10 @@ from __future__ import annotations
 import pytest
 
 from app.services.source_operational_policy import (
+    ALLOWED_SOURCE_QUEUES,
     ALLOWED_OPERATIONAL_ROLES,
     classify_source_operational_role,
+    resolve_source_queue,
     should_include_in_critical_stale,
 )
 from app.sources.registry import list_sources
@@ -52,6 +54,11 @@ def _assert_plugin_contract(plugin: SourcePlugin) -> None:
         assert role in ALLOWED_OPERATIONAL_ROLES, f"{plugin.name} has invalid operational_role={role}"
     if not plugin.supports_wishlist_monitoring:
         assert role != "primary", f"{plugin.name} without wishlist monitoring cannot be primary"
+    else:
+        assert resolve_source_queue(plugin) in ALLOWED_SOURCE_QUEUES
+
+    if isinstance(plugin.default_extra, dict) and "queue" in plugin.default_extra:
+        assert plugin.default_extra["queue"] in ALLOWED_SOURCE_QUEUES
 
 
 def test_registered_plugins_contract():

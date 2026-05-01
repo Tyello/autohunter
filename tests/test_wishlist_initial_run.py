@@ -10,6 +10,7 @@ from app.models.user import User
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlists_service import add_wishlist
 from app.sources.types import ScrapeContext
+from app.sources.types import SourcePlugin
 
 
 def _make_user(db):
@@ -48,6 +49,80 @@ def test_add_wishlist_triggers_initial_run_and_feedback(db, monkeypatch):
     assert "primeira busca em segundo plano" in msg
     assert len(calls) == 1
     assert calls[0]["source"] == "olx"
+    assert calls[0]["queue"] == "http"
+
+
+def test_add_wishlist_browser_source_uses_browser_queue(db, monkeypatch):
+    user = _make_user(db)
+    calls: list[dict] = []
+    browser_plugin = SourcePlugin(
+        name="olx",
+        build_url=lambda _q: "https://example.com",
+        scrape=lambda _u, _ctx: [],
+        supports_manual_search=True,
+        supports_wishlist_monitoring=True,
+        fetch_mode="browser",
+        default_extra={"operational_role": "primary"},
+    )
+
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda _db, wishlists: {wishlists[0].id: {"olx"}})
+    monkeypatch.setattr("app.services.wishlists_service.get_source", lambda _src: browser_plugin)
+    monkeypatch.setattr("app.services.wishlists_service.enqueue_job", lambda _db, **kwargs: calls.append(kwargs) or True)
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    ok, _msg = add_wishlist(db, user.id, "jetta gli")
+
+    assert ok is True
+    assert len(calls) == 1
+    assert calls[0]["queue"] == "browser"
+
+
+def test_add_wishlist_queue_override_uses_default_extra_queue(db, monkeypatch):
+    user = _make_user(db)
+    calls: list[dict] = []
+    plugin = SourcePlugin(
+        name="olx",
+        build_url=lambda _q: "https://example.com",
+        scrape=lambda _u, _ctx: [],
+        supports_manual_search=True,
+        supports_wishlist_monitoring=True,
+        fetch_mode="http",
+        default_extra={"operational_role": "primary", "queue": "browser"},
+    )
+
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda _db, wishlists: {wishlists[0].id: {"olx"}})
+    monkeypatch.setattr("app.services.wishlists_service.get_source", lambda _src: plugin)
+    monkeypatch.setattr("app.services.wishlists_service.enqueue_job", lambda _db, **kwargs: calls.append(kwargs) or True)
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    ok, _msg = add_wishlist(db, user.id, "compass")
+
+    assert ok is True
+    assert len(calls) == 1
+    assert calls[0]["queue"] == "browser"
+
+
+def test_add_wishlist_non_monitoring_source_is_not_enqueued(db, monkeypatch):
+    user = _make_user(db)
+    plugin = SourcePlugin(
+        name="olx",
+        build_url=lambda _q: "https://example.com",
+        scrape=lambda _u, _ctx: [],
+        supports_manual_search=True,
+        supports_wishlist_monitoring=False,
+        fetch_mode="http",
+        default_extra={"operational_role": "auxiliary"},
+    )
+
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda _db, wishlists: {wishlists[0].id: {"olx"}})
+    monkeypatch.setattr("app.services.wishlists_service.get_source", lambda _src: plugin)
+    monkeypatch.setattr("app.services.wishlists_service.enqueue_job", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not enqueue")))
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    ok, msg = add_wishlist(db, user.id, "fusca")
+
+    assert ok is True
+    assert "Wishlist criada" in msg
 
 
 def test_add_wishlist_creation_failure_does_not_trigger_initial_run(db, monkeypatch):
@@ -197,3 +272,28 @@ def test_add_wishlist_enqueue_failure_does_not_block_creation(db, monkeypatch):
 
     assert ok is True
     assert "Não consegui agendar" in msg
+
+
+def test_add_wishlist_enqueue_failure_in_one_source_does_not_block_others(db, monkeypatch):
+    user = _make_user(db)
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "app.services.wishlists_service.allowed_sources_for_wishlists",
+        lambda _db, wishlists: {wishlists[0].id: {"olx", "webmotors"}},
+    )
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    def _fake_enqueue(_db, **kwargs):
+        calls.append((kwargs["source"], kwargs["queue"]))
+        if kwargs["source"] == "olx":
+            raise RuntimeError("boom")
+        return True
+
+    monkeypatch.setattr("app.services.wishlists_service.enqueue_job", _fake_enqueue)
+
+    ok, msg = add_wishlist(db, user.id, "civic touring")
+
+    assert ok is True
+    assert "primeira busca em segundo plano" in msg
+    assert {src for src, _queue in calls} == {"olx", "webmotors"}
