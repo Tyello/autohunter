@@ -1,13 +1,16 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler, filters
 
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_user_wishlists
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot
+from app.services.wishlists_service import add_wishlist
 from app.services.wishlist_tracking_service import list_tracked_listings
+
+MENU_CREATE_WISHLIST_QUERY = 1
 
 
 def _wishlist_help_text() -> str:
@@ -104,6 +107,17 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "MENU:SEARCH":
         await _safe_edit_or_send(update, "Para buscar agora, use:\n/buscar civic si")
         return
+    if data == "MENU:CREATE_WISHLIST":
+        await _safe_edit_or_send(
+            update,
+            "Qual carro você quer monitorar?\n"
+            "Exemplos:\n"
+            "- civic si\n"
+            "- miata\n"
+            "- corolla 2018\n\n"
+            "Envie o texto ou use /cancelar.",
+        )
+        return MENU_CREATE_WISHLIST_QUERY
     if data == "MENU:WISHLISTS":
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
@@ -164,9 +178,10 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 def _menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
+        [InlineKeyboardButton("➕ Criar wishlist", callback_data="MENU:CREATE_WISHLIST")],
         [InlineKeyboardButton("🎯 Minhas wishlists", callback_data="MENU:WISHLISTS")],
         [InlineKeyboardButton("📌 Rastreados", callback_data="MENU:TRACKED")],
+        [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
         [InlineKeyboardButton("⚙️ Filtros", callback_data="MENU:FILTERS")],
         [InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")],
     ])
@@ -188,3 +203,52 @@ async def _safe_edit_or_send(update: Update, text: str) -> None:
         await q.edit_message_text(text)
     except Exception:
         await q.message.reply_text(text)
+
+
+async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = (update.message.text or "").strip()
+    if not query:
+        await reply_text(update, "Texto inválido. Envie o carro/busca ou use /cancelar.")
+        return MENU_CREATE_WISHLIST_QUERY
+
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        _ok, _msg = add_wishlist(db, user.id, query)
+
+    await reply_text(
+        update,
+        f"✅ Wishlist criada: {query}\n\n"
+        "Vou monitorar anúncios compatíveis.\n"
+        "Você pode adicionar filtros depois em:\n"
+        "⚙️ Filtros no /menu\n"
+        "ou\n"
+        "/wishlist_filter_add <n> <campo> <operador> <valor>\n\n"
+        "Veja suas wishlists: /wishlist",
+    )
+    return ConversationHandler.END
+
+
+async def menu_create_wishlist_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await reply_text(update, "Criação de wishlist cancelada.")
+    return ConversationHandler.END
+
+
+def menu_create_wishlist_conversation() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:CREATE_WISHLIST$")],
+        states={
+            MENU_CREATE_WISHLIST_QUERY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, menu_create_wishlist_on_text),
+                MessageHandler(filters.COMMAND, menu_create_wishlist_cancel),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancelar", menu_create_wishlist_cancel),
+            CommandHandler("cancel", menu_create_wishlist_cancel),
+        ],
+        name="menu_create_wishlist",
+        persistent=False,
+        per_chat=True,
+        per_user=True,
+        per_message=False,
+    )
