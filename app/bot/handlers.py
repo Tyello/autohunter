@@ -8,6 +8,7 @@ from app.notifications.telegram_formatter import format_ad_message
 from app.scoring.score_v2 import score_ad
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 from app.bot.utils import normalize_args, parse_int, reply_text
+from app.bot.renderers import render_user_wishlists
 from app.db.session import SessionLocal
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
@@ -211,17 +212,7 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # /wishlist listar
         if sub in ("listar",):
             w = list_wishlists(db, user.id)
-            if not w:
-                await reply_text(
-                    update,
-                    "Você não tem wishlists.\n"
-                    "Opções:\n"
-                    "• /wishlist_add (fluxo oficial)\n"
-                    "• /wishlist add <termos> (compatibilidade legado)"
-                )
-                return
-            lines = [f"{i+1}. {x.query}" for i, x in enumerate(w)]
-            await reply_text(update, "Wishlists:\n" + "\n".join(lines))
+            await reply_text(update, render_user_wishlists(w))
             return
 
         # /wishlist add <termos>

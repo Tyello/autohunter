@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from app.db.session import SessionLocal
 from app.bot.utils import normalize_args, parse_int, reply_text
+from app.bot.renderers import render_all_tracked_listings
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import (
     list_wishlists,
@@ -391,15 +392,11 @@ async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_
         wishlists = list_wishlists(db, user.id)
 
         if len(context.args or []) < 1:
-            if not wishlists:
-                await reply_text(update, "Você não tem wishlists. Use /wishlist_add para criar a primeira.")
-                return
-            lines = ["📌 Seus anúncios rastreados"]
-            for i, wl in enumerate(wishlists, start=1):
+            tracked_messages = []
+            for i, _wl in enumerate(wishlists, start=1):
                 _ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=i)
-                lines.append("")
-                lines.append(msg)
-            await reply_text(update, "\n".join(lines)[:3900])
+                tracked_messages.append(msg)
+            await reply_text(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
             return
 
         n = parse_int(context.args[0])
