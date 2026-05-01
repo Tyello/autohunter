@@ -6,11 +6,21 @@ from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_user_wishlists
 from app.services.users_service import get_or_create_user_by_chat
-from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot
-from app.services.wishlists_service import add_wishlist
+from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter
 from app.services.wishlist_tracking_service import list_tracked_listings
 
 MENU_CREATE_WISHLIST_QUERY = 1
+MENU_FILTER_SELECT_VALUE = 2
+
+MENU_FILTER_USER_DATA_KEYS = ("menu_filter_wishlist_index", "menu_filter_wishlist_id", "menu_filter_type")
+
+FILTER_TYPE_TO_SPEC = {
+    "price_max": ("price", "lte", "Qual preço máximo?\nExemplo: 90000 ou 90.000"),
+    "year_min": ("year", "gte", "Qual ano mínimo?\nExemplo: 2015"),
+    "km_max": ("mileage_km", "lte", "Qual KM máximo?\nExemplo: 80000 ou 80.000"),
+    "city": ("city", "eq", "Qual cidade?\nExemplo: São Paulo"),
+    "state": ("state", "eq", "Qual estado/UF?\nExemplo: SP"),
+}
 
 
 def _wishlist_help_text() -> str:
@@ -135,14 +145,17 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _safe_edit_or_send(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
         return
     if data == "MENU:FILTERS":
-        await _safe_edit_or_send(
-            update,
-            "Para ver filtros de uma wishlist:\n"
-            "/wishlist_filter_list <n>\n\n"
-            "Para adicionar filtro:\n"
-            "/wishlist_filter_add <n> <campo> <operador> <valor>\n\n"
-            "Dica: use /wishlist para ver o número <n> da wishlist.",
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+        if not wishlists:
+            await _safe_edit_or_send(update, "Você ainda não tem wishlists.\nCrie uma pelo /menu → ➕ Criar wishlist.")
+            return
+        kb = InlineKeyboardMarkup(
+            [[InlineKeyboardButton(f"{i} — {wl.query}", callback_data=f"FILTER:WL:{i}")] for i, wl in enumerate(wishlists, start=1)]
+            + [[InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")]]
         )
+        await _safe_edit_or_send(update, "Escolha a wishlist para adicionar filtro:", reply_markup=kb)
         return
     if data == "MENU:HELP":
         await _safe_edit_or_send(update, render_help_text())
@@ -197,12 +210,97 @@ async def _safe_answer_callback(q) -> None:
         raise
 
 
-async def _safe_edit_or_send(update: Update, text: str) -> None:
+async def _safe_edit_or_send(update: Update, text: str, reply_markup=None) -> None:
     q = update.callback_query
     try:
-        await q.edit_message_text(text)
+        await q.edit_message_text(text, reply_markup=reply_markup)
     except Exception:
-        await q.message.reply_text(text)
+        await q.message.reply_text(text, reply_markup=reply_markup)
+
+
+def _clear_menu_filter_context(context: ContextTypes.DEFAULT_TYPE) -> None:
+    for key in MENU_FILTER_USER_DATA_KEYS:
+        context.user_data.pop(key, None)
+
+
+async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await _safe_answer_callback(q)
+    data = (q.data or "").strip()
+
+    if data == "FILTER:CANCEL":
+        _clear_menu_filter_context(context)
+        await _safe_edit_or_send(update, "Configuração de filtro cancelada.")
+        return ConversationHandler.END
+
+    if data.startswith("FILTER:WL:"):
+        try:
+            wishlist_index = int(data.split(":")[-1])
+        except ValueError:
+            await _safe_edit_or_send(update, "Wishlist inválida. Use /menu → ⚙️ Filtros novamente.")
+            return ConversationHandler.END
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+        if wishlist_index < 1 or wishlist_index > len(wishlists):
+            await _safe_edit_or_send(update, "Wishlist inválida. Use /menu → ⚙️ Filtros novamente.")
+            return ConversationHandler.END
+        wl = wishlists[wishlist_index - 1]
+        context.user_data["menu_filter_wishlist_index"] = wishlist_index
+        context.user_data["menu_filter_wishlist_id"] = wl.id
+
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 Preço máximo", callback_data="FILTER:TYPE:price_max")],
+            [InlineKeyboardButton("📅 Ano mínimo", callback_data="FILTER:TYPE:year_min")],
+            [InlineKeyboardButton("🛣️ KM máximo", callback_data="FILTER:TYPE:km_max")],
+            [InlineKeyboardButton("📍 Cidade", callback_data="FILTER:TYPE:city")],
+            [InlineKeyboardButton("🗺️ Estado", callback_data="FILTER:TYPE:state")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")],
+        ])
+        await _safe_edit_or_send(update, "Escolha o tipo de filtro:", reply_markup=kb)
+        return MENU_FILTER_SELECT_VALUE
+
+    if data.startswith("FILTER:TYPE:"):
+        filter_type = data.split(":")[-1]
+        spec = FILTER_TYPE_TO_SPEC.get(filter_type)
+        if not spec:
+            await _safe_edit_or_send(update, "Tipo de filtro inválido. Use /menu → ⚙️ Filtros novamente.")
+            return ConversationHandler.END
+        context.user_data["menu_filter_type"] = filter_type
+        await _safe_edit_or_send(update, spec[2])
+        return MENU_FILTER_SELECT_VALUE
+
+    await _safe_edit_or_send(update, "Ação inválida. Use /menu → ⚙️ Filtros novamente.")
+    return ConversationHandler.END
+
+
+async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    value = (update.message.text or "").strip()
+    if not value:
+        await reply_text(update, "Valor inválido. Envie novamente ou /cancelar.")
+        return MENU_FILTER_SELECT_VALUE
+
+    wishlist_id = context.user_data.get("menu_filter_wishlist_id")
+    wishlist_index = context.user_data.get("menu_filter_wishlist_index")
+    spec = FILTER_TYPE_TO_SPEC.get(context.user_data.get("menu_filter_type"))
+    if not wishlist_id or not wishlist_index or not spec:
+        _clear_menu_filter_context(context)
+        await reply_text(update, "Sessão expirada. Use /menu → ⚙️ Filtros novamente.")
+        return ConversationHandler.END
+
+    with SessionLocal() as db:
+        ok, msg = add_filter(db, wishlist_id, spec[0], spec[1], value)
+
+    if not ok:
+        await reply_text(update, f"{msg}\n\nEnvie outro valor ou /cancelar.")
+        return MENU_FILTER_SELECT_VALUE
+
+    _clear_menu_filter_context(context)
+    await reply_text(
+        update,
+        f"{msg}\n\nVer filtros: /wishlist_filter_list {wishlist_index}\nAdicionar outro filtro: /menu → ⚙️ Filtros",
+    )
+    return ConversationHandler.END
 
 
 async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,6 +337,12 @@ async def menu_create_wishlist_cancel(update: Update, context: ContextTypes.DEFA
     return ConversationHandler.END
 
 
+async def menu_filter_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_menu_filter_context(context)
+    await reply_text(update, "Configuração de filtro cancelada.")
+    return ConversationHandler.END
+
+
 def menu_create_wishlist_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:CREATE_WISHLIST$")],
@@ -253,6 +357,28 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
             CommandHandler("cancel", menu_create_wishlist_cancel),
         ],
         name="menu_create_wishlist",
+        persistent=False,
+        per_chat=True,
+        per_user=True,
+        per_message=False,
+    )
+
+
+def menu_filter_conversation() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:FILTERS$")],
+        states={
+            MENU_FILTER_SELECT_VALUE: [
+                CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|CANCEL)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, menu_filter_on_value),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancelar", menu_filter_cancel),
+            CommandHandler("cancel", menu_filter_cancel),
+            CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:CANCEL$"),
+        ],
+        name="menu_filter_add",
         persistent=False,
         per_chat=True,
         per_user=True,

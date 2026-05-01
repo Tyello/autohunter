@@ -34,6 +34,7 @@ def render_help_text() -> str:
         "• /wishlist_remove — remover\n"
         "• /wishlist_clear — limpar tudo\n\n"
         "Filtros (por wishlist):\n"
+        "• /menu → ⚙️ Filtros — adicionar passo a passo\n"
         "• /wishlist_filter_list <n>\n"
         "• /wishlist_filter_add <n> <campo> <op> <valor>\n"
         "• /wishlist_filter_remove <n> <k>\n\n"

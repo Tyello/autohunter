@@ -10,7 +10,7 @@ from app.core.settings import settings
 from app.bot.commands import setup_bot_commands
 from app.bot.handlers_core import (
     cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu,
-    menu_create_wishlist_conversation,
+    menu_create_wishlist_conversation, menu_filter_conversation,
 )
 from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit
 from app.bot.handlers_debug import cmd_debug
@@ -110,6 +110,7 @@ def main():
     app.add_handler(CommandHandler("buscar", cmd_buscar))
     app.add_handler(CommandHandler("wishlist", cmd_wishlist))
     app.add_handler(menu_create_wishlist_conversation())
+    app.add_handler(menu_filter_conversation())
 
     # wishlist (UX nova)
     app.add_handler(wishlist_add_conversation())

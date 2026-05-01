@@ -27,7 +27,7 @@ class _CallbackQuery:
     async def answer(self):
         self.answers += 1
 
-    async def edit_message_text(self, text):
+    async def edit_message_text(self, text, reply_markup=None):
         self.edits.append(text)
 
 
