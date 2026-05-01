@@ -181,3 +181,39 @@ def test_callback_answered_on_exception(monkeypatch):
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert q.answers
+
+
+def test_callback_addwl_uses_selected_wishlist(monkeypatch):
+    called = {}
+
+    def _add(_db, **kwargs):
+        called.update(kwargs)
+        return handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot", slot=1)
+
+    _patch_common(
+        monkeypatch,
+        notification=None,
+        wishlist=types.SimpleNamespace(id="w2", user_id="u1"),
+        listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"),
+        add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot", slot=1),
+        wishlists=[types.SimpleNamespace(id="w1"), types.SimpleNamespace(id="w2")],
+    )
+    monkeypatch.setattr(handlers_wishlist_ui, "add_tracked_listing_result", _add)
+    q = _CallbackQuery(data="TRACK:ADDWL:w2:c1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert called["wishlist_index"] == 2
+
+
+def test_callback_choose_wishlist_shows_commands(monkeypatch):
+    _patch_common(
+        monkeypatch,
+        notification=None,
+        wishlist=None,
+        listing=None,
+        wishlists=[types.SimpleNamespace(id="w1"), types.SimpleNamespace(id="w2"), types.SimpleNamespace(id="w3"), types.SimpleNamespace(id="w4")],
+    )
+    q = _CallbackQuery(data="TRACK:CHOOSE:c1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    text = q.edits[-1]
+    assert "/wishlist_track_add 1 c1" in text
+    assert "/wishlist_track_add 2 c1" in text

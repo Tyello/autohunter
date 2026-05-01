@@ -517,6 +517,35 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         else:
                             result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
                             short_msg, full_msg = _format_track_result_message(result, widx)
+            elif data.startswith("TRACK:CHOOSE:"):
+                listing_id = data.split(":", 2)[2].strip()
+                if not listing_id:
+                    short_msg, full_msg = "Inválido", "Não consegui rastrear agora. Tente novamente."
+                elif not wishlists:
+                    short_msg, full_msg = "Sem wishlist", "Você não tem wishlists. Use /wishlist_add para criar a primeira."
+                else:
+                    lines = ["Escolha uma wishlist para rastrear este anúncio:"]
+                    for i, _wl in enumerate(wishlists[:3], start=1):
+                        lines.append(f"/wishlist_track_add {i} {listing_id}")
+                    if len(wishlists) > 3:
+                        lines.append("Dica: use /wishlist para ver todos os índices disponíveis.")
+                    short_msg, full_msg = "Escolha wishlist", "\n".join(lines)
+            elif data.startswith("TRACK:ADDWI:"):
+                parts = data.split(":")
+                if len(parts) != 4:
+                    short_msg, full_msg = "Inválido", "Não consegui rastrear agora. Tente novamente."
+                else:
+                    widx = parse_int(parts[2])
+                    listing_id = parts[3]
+                    listing = db.query(CarListing).filter(CarListing.id == listing_id).first()
+                    listing_ref = (listing.external_id or listing.url) if listing else None
+                    if widx is None or widx < 1 or widx > len(wishlists):
+                        short_msg, full_msg = "Wishlist inválida", "Wishlist não encontrada para sua conta."
+                    elif not listing_ref:
+                        short_msg, full_msg = "Anúncio indisponível", "Não consegui rastrear esse anúncio porque ele não está mais disponível."
+                    else:
+                        result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
+                        short_msg, full_msg = _format_track_result_message(result, widx)
             elif data.startswith("TRACK:ADDWL:"):
                 parts = data.split(":")
                 if len(parts) != 4:
