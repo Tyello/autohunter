@@ -5,6 +5,7 @@ from telegram import BotCommand, BotCommandScopeDefault
 COMMANDS = [
     BotCommand("start", "Iniciar / registrar"),
     BotCommand("help", "Ver comandos e exemplos"),
+    BotCommand("menu", "Menu guiado de ações"),
     BotCommand("status", "Status e limites"),
     BotCommand("version", "Versão do bot"),
 
