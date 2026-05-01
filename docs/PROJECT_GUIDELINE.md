@@ -111,3 +111,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Fluxos auxiliares (ex.: Facebook Agent/admin deploy) estão presentes no runtime, mas a criticidade operacional de cada um pode variar por ambiente.
 
 - Tracking de wishlist: alerta de queda de preço é opt-in por slot (/wishlist_track_alert_on|off), com cooldown anti-spam e limite de 3 slots preservado.
+
+## 13) UX operacional de comandos e criação de wishlist
+- O autocomplete de `/` é intencionalmente enxuto para reduzir ruído operacional: foco em `/menu`, `/help` e `/cancelar`.
+- Comandos rápidos/legados continuam suportados por handlers para compatibilidade (ex.: `/wishlist_add`, `/buscar`, `/wishlist_track_list`), mesmo quando não aparecem no escopo público.
+- Comandos administrativos ficam fora do escopo default e devem ser registrados apenas em escopo admin/chat específico.
+- Ao criar wishlist, a primeira busca não roda inline no handler: o sistema agenda job inicial em `scrape_jobs` e retorna confirmação imediata no Telegram.
+- A execução efetiva da primeira varredura acontece depois pelo scheduler/workers do pipeline oficial.

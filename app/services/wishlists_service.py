@@ -17,7 +17,7 @@ from app.models.wishlist_filter import WishlistFilter
 from app.models.wishlist_listing_activity import WishlistListingActivity
 from app.models.wishlist_token import WishlistToken
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
-from app.services.source_execution_service import run_source_for_all_wishlists
+from app.services.scrape_jobs_service import enqueue_job
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
@@ -445,20 +445,17 @@ def add_wishlist(db: Session, user_id, query: str):
 
     run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
 
-    if run_summary.get("triggered", 0) > 0:
-        return True, "Wishlist criada com sucesso e executada agora."
-    return True, "Wishlist criada."
+    if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
+        return True, f"✅ Wishlist criada: {cleaned_query}\n\nNão consegui agendar a primeira busca agora. O monitoramento contínuo segue ativo."
+    return True, (
+        f"✅ Wishlist criada: {cleaned_query}\n\n"
+        "Vou fazer a primeira busca em segundo plano.\n"
+        "Você será avisado se encontrar bons anúncios."
+    )
 
 
 def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_reason: str = "wishlist_created") -> Dict[str, Any]:
-    """Dispara a primeira execução de uma wishlist recém-criada no pipeline oficial.
-
-    Estratégia:
-    - reaproveita `run_source_for_all_wishlists` (mesmo executor do scheduler)
-    - roda apenas fontes permitidas para a wishlist
-    - força execução para evitar esperar o ciclo normal (`force=True`)
-    - mantém anti-spam pelo dedupe de notifications + atualização de source_state
-    """
+    """Agenda a primeira execução de uma wishlist recém-criada no pipeline oficial."""
     if not wishlist:
         return {"triggered": 0, "ok": 0, "skipped": 0, "failed": 0, "sources": []}
 
@@ -480,22 +477,20 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
         db.commit()
         return {"triggered": 0, "ok": 0, "skipped": 1, "failed": 0, "sources": []}
 
-    out = {"triggered": len(sources), "ok": 0, "skipped": 0, "failed": 0, "sources": []}
+    out = {"triggered": 0, "ok": 0, "skipped": 0, "failed": 0, "sources": []}
     for src in sources:
-        res = run_source_for_all_wishlists(
-            db,
-            src,
-            kind="wishlist_created",
-            force=True,
-            ignore_backoff=False,
-            run_reason=run_reason,
-        )
-        status = str((res or {}).get("status") or "unknown")
+        queue = "browser" if src in {"olx", "webmotors", "icarros"} else "http"
+        try:
+            inserted = enqueue_job(db, source=src, queue=queue, priority=1, max_attempts=3)
+            status = "queued" if inserted else "already_queued"
+        except Exception as exc:
+            status = "enqueue_failed"
+            logger.warning("initial wishlist enqueue failed source=%s wishlist_id=%s err=%s", src, wishlist.id, exc)
         out["sources"].append({"source": src, "status": status})
-
-        if bool((res or {}).get("ok", False)) and status not in {"error", "blocked"}:
+        if status == "queued":
+            out["triggered"] += 1
             out["ok"] += 1
-        elif status in {"skipped", "not_due"}:
+        elif status == "already_queued":
             out["skipped"] += 1
         else:
             out["failed"] += 1

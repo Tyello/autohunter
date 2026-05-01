@@ -29,9 +29,9 @@ def test_add_wishlist_triggers_initial_run_and_feedback(db, monkeypatch):
     user = _make_user(db)
     calls: list[dict] = []
 
-    def _fake_run(db_sess, source_name, **kwargs):
-        calls.append({"source": source_name, **kwargs})
-        return {"ok": True, "status": "success"}
+    def _fake_enqueue(db_sess, **kwargs):
+        calls.append(kwargs)
+        return True
 
 
     # precisamos do map com a wishlist recém-criada: resolve dinamicamente
@@ -39,17 +39,15 @@ def test_add_wishlist_triggers_initial_run_and_feedback(db, monkeypatch):
         return {wishlists[0].id: {"olx"}}
 
     monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", _allowed)
-    monkeypatch.setattr("app.services.wishlists_service.run_source_for_all_wishlists", _fake_run)
+    monkeypatch.setattr("app.services.wishlists_service.enqueue_job", _fake_enqueue)
     monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
 
     ok, msg = add_wishlist(db, user.id, "civic si")
 
     assert ok is True
-    assert "executada agora" in msg
+    assert "primeira busca em segundo plano" in msg
     assert len(calls) == 1
-    assert calls[0]["kind"] == "wishlist_created"
-    assert calls[0]["force"] is True
-    assert calls[0]["run_reason"] == "wishlist_created"
+    assert calls[0]["source"] == "olx"
 
 
 def test_add_wishlist_creation_failure_does_not_trigger_initial_run(db, monkeypatch):
@@ -69,7 +67,7 @@ def test_add_wishlist_creation_failure_does_not_trigger_initial_run(db, monkeypa
     assert called["v"] is False
 
 
-def test_add_wishlist_when_no_source_keeps_legacy_feedback(db, monkeypatch):
+def test_add_wishlist_when_no_source_still_succeeds(db, monkeypatch):
     user = _make_user(db)
 
     monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda *_: {})
@@ -78,7 +76,7 @@ def test_add_wishlist_when_no_source_keeps_legacy_feedback(db, monkeypatch):
     ok, msg = add_wishlist(db, user.id, "fusca")
 
     assert ok is True
-    assert msg == "Wishlist criada."
+    assert "Wishlist criada" in msg
 
 
 def test_scheduler_not_due_after_recent_effective_run(db, monkeypatch):
@@ -184,3 +182,18 @@ def test_scrape_context_allows_runtime_metadata_slots():
     assert ctx._last_adapter_meta == {"impl": "v1"}
     assert ctx._matching_stats == {"matched_wishlists": 2}
     assert ctx._hybrid_browser_used is True
+
+def test_add_wishlist_enqueue_failure_does_not_block_creation(db, monkeypatch):
+    user = _make_user(db)
+
+    def _allowed(_db, wishlists):
+        return {wishlists[0].id: {"olx"}}
+
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", _allowed)
+    monkeypatch.setattr("app.services.wishlists_service.enqueue_job", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    ok, msg = add_wishlist(db, user.id, "civic")
+
+    assert ok is True
+    assert "Não consegui agendar" in msg

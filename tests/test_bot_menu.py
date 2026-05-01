@@ -4,7 +4,7 @@ import asyncio
 import types
 
 from app.bot import handlers_core
-from app.bot.commands import COMMANDS
+from app.bot.commands import ADVANCED_USER_COMMANDS, COMMANDS
 
 
 class _Message:
@@ -155,6 +155,6 @@ def test_callback_menu_fallback_when_edit_fails():
 
 
 def test_quick_commands_still_registered():
-    names = {c.command for c in COMMANDS}
+    names = {c.command for c in ADVANCED_USER_COMMANDS}
     assert "buscar" in names
     assert "wishlist" in names
