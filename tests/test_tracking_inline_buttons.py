@@ -217,3 +217,35 @@ def test_callback_choose_wishlist_shows_commands(monkeypatch):
     text = q.edits[-1]
     assert "/wishlist_track_add 1 c1" in text
     assert "/wishlist_track_add 2 c1" in text
+
+
+def test_callback_addt_valid(monkeypatch):
+    _patch_common(monkeypatch, notification=None, wishlist=types.SimpleNamespace(id="w2", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), wishlists=[types.SimpleNamespace(id="w1"), types.SimpleNamespace(id="w2")])
+    monkeypatch.setattr("app.services.tracking_callback_token_service.resolve_tracking_callback_token", lambda _t: ({"u": "u1", "w": "w2", "l": "c1"}, None))
+    q = _CallbackQuery(data="TRACK:ADDT:t1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "Anúncio rastreado" in q.edits[-1]
+
+
+def test_callback_addt_expired(monkeypatch):
+    _patch_common(monkeypatch, notification=None, wishlist=None, listing=None)
+    monkeypatch.setattr("app.services.tracking_callback_token_service.resolve_tracking_callback_token", lambda _t: (None, "expired"))
+    q = _CallbackQuery(data="TRACK:ADDT:t1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "expirou" in q.edits[-1].lower()
+
+
+def test_callback_addt_other_user(monkeypatch):
+    _patch_common(monkeypatch, notification=None, wishlist=None, listing=None)
+    monkeypatch.setattr("app.services.tracking_callback_token_service.resolve_tracking_callback_token", lambda _t: ({"u": "other", "w": "w1", "l": "c1"}, None))
+    q = _CallbackQuery(data="TRACK:ADDT:t1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "sua conta" in q.edits[-1].lower()
+
+
+def test_callback_addt_invalid(monkeypatch):
+    _patch_common(monkeypatch, notification=None, wishlist=None, listing=None)
+    monkeypatch.setattr("app.services.tracking_callback_token_service.resolve_tracking_callback_token", lambda _t: (None, "invalid"))
+    q = _CallbackQuery(data="TRACK:ADDT:t1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "não encontrei essa ação" in q.edits[-1].lower()

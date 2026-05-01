@@ -143,11 +143,14 @@ async def _ensure_admin(update: Update) -> bool:
 
 
 
-def _build_track_addwl_callback(*, wishlist_id: str, wishlist_index: int, listing_id: str) -> str:
+def _build_track_addwl_callback(*, user_id: str, wishlist_id: str, listing_id: str) -> str:
+    from app.services.tracking_callback_token_service import issue_tracking_callback_token
+
     callback = f"TRACK:ADDWL:{wishlist_id}:{listing_id}"
     if len(callback.encode("utf-8")) <= 64:
         return callback
-    return f"TRACK:ADDWI:{wishlist_index}:{listing_id}"
+    token = issue_tracking_callback_token(user_id=user_id, wishlist_id=wishlist_id, listing_id=listing_id)
+    return f"TRACK:ADDT:{token}"
 
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,13 +194,13 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             keyboard_rows = [list(row) for row in (payload.inline_keyboard or [])]
             listing_id = str(getattr(item, "id", "") or "").strip()
-            has_track = any(btn.get("callback_data", "").startswith("TRACK:ADD:") or btn.get("callback_data", "").startswith("TRACK:ADDWL:") for row in keyboard_rows for btn in row)
+            has_track = any(btn.get("callback_data", "").startswith("TRACK:ADD:") or btn.get("callback_data", "").startswith("TRACK:ADDWL:") or btn.get("callback_data", "").startswith("TRACK:ADDT:") for row in keyboard_rows for btn in row)
             if listing_id and not has_track:
                 wishlist_buttons: list[dict[str, str]] = []
                 total_wishlists = len(user_wishlists)
                 if total_wishlists == 1:
                     wishlist_id = str(user_wishlists[0].id)
-                    wishlist_buttons.append({"text": "⭐ Rastrear", "callback_data": _build_track_addwl_callback(wishlist_id=wishlist_id, wishlist_index=1, listing_id=listing_id)})
+                    wishlist_buttons.append({"text": "⭐ Rastrear", "callback_data": _build_track_addwl_callback(user_id=str(_user.id), wishlist_id=wishlist_id, listing_id=listing_id)})
                 elif 2 <= total_wishlists <= 3:
                     for idx, wl in enumerate(user_wishlists, start=1):
                         wishlist_id = str(wl.id)
@@ -205,7 +208,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         wl_name = " ".join(wl_name.split())
                         if len(wl_name) > 28:
                             wl_name = wl_name[:27].rstrip() + "…"
-                        wishlist_buttons.append({"text": f"⭐ Rastrear em {wl_name}", "callback_data": _build_track_addwl_callback(wishlist_id=wishlist_id, wishlist_index=idx, listing_id=listing_id)})
+                        wishlist_buttons.append({"text": f"⭐ Rastrear em {wl_name}", "callback_data": _build_track_addwl_callback(user_id=str(_user.id), wishlist_id=wishlist_id, listing_id=listing_id)})
                 elif total_wishlists > 3:
                     wishlist_buttons.append({"text": "⭐ Escolher wishlist", "callback_data": f"TRACK:CHOOSE:{listing_id}"})
 

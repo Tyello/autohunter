@@ -530,22 +530,34 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if len(wishlists) > 3:
                         lines.append("Dica: use /wishlist para ver todos os índices disponíveis.")
                     short_msg, full_msg = "Escolha wishlist", "\n".join(lines)
-            elif data.startswith("TRACK:ADDWI:"):
-                parts = data.split(":")
-                if len(parts) != 4:
-                    short_msg, full_msg = "Inválido", "Não consegui rastrear agora. Tente novamente."
+            elif data.startswith("TRACK:ADDT:"):
+                from app.services.tracking_callback_token_service import resolve_tracking_callback_token
+
+                token = data.split(":", 2)[2].strip()
+                payload, err = resolve_tracking_callback_token(token)
+                if err == "expired":
+                    short_msg, full_msg = "Expirado", "Essa ação expirou. Abra /buscar novamente e toque em ⭐ Rastrear."
+                elif err or not payload:
+                    short_msg, full_msg = "Inválido", "Não encontrei essa ação para sua conta. Tente novamente no /buscar."
+                elif str(payload.get("u")) != str(user.id):
+                    short_msg, full_msg = "Sem permissão", "Não encontrei essa ação para sua conta."
                 else:
-                    widx = parse_int(parts[2])
-                    listing_id = parts[3]
-                    listing = db.query(CarListing).filter(CarListing.id == listing_id).first()
-                    listing_ref = (listing.external_id or listing.url) if listing else None
-                    if widx is None or widx < 1 or widx > len(wishlists):
-                        short_msg, full_msg = "Wishlist inválida", "Wishlist não encontrada para sua conta."
-                    elif not listing_ref:
-                        short_msg, full_msg = "Anúncio indisponível", "Não consegui rastrear esse anúncio porque ele não está mais disponível."
+                    wishlist_id = str(payload.get("w") or "")
+                    listing_id = str(payload.get("l") or "")
+                    wl = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
+                    if not wl or wl.user_id != user.id:
+                        short_msg, full_msg = "Sem permissão", "Wishlist não encontrada para sua conta."
                     else:
-                        result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
-                        short_msg, full_msg = _format_track_result_message(result, widx)
+                        listing = db.query(CarListing).filter(CarListing.id == listing_id).first()
+                        listing_ref = (listing.external_id or listing.url) if listing else None
+                        widx = wishlist_idx_by_id.get(wishlist_id)
+                        if not listing_ref:
+                            short_msg, full_msg = "Anúncio indisponível", "Não consegui rastrear esse anúncio porque ele não está mais disponível."
+                        elif widx is None:
+                            short_msg, full_msg = "Wishlist inválida", "Wishlist não encontrada para sua conta."
+                        else:
+                            result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
+                            short_msg, full_msg = _format_track_result_message(result, widx)
             elif data.startswith("TRACK:ADDWL:"):
                 parts = data.split(":")
                 if len(parts) != 4:
