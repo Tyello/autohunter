@@ -123,7 +123,7 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_remove", cmd_wishlist_track_remove))
     app.add_handler(CommandHandler("wishlist_track_alert_on", cmd_wishlist_track_alert_on))
     app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
-    app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^(TRACK:ADD:[^:]+|TRACK:ADDWL:[^:]+:[^:]+|TRACK:ADDWI:[^:]+:[^:]+|TRACK:CHOOSE:[^:]+)$"))
+    app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^(TRACK:ADD:[^:]+|TRACK:ADDWL:[^:]+:[^:]+|TRACK:ADDT:[^:]+|TRACK:CHOOSE:[^:]+)$"))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))
