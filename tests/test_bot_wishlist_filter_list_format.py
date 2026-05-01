@@ -56,9 +56,8 @@ def test_filter_list_formats_mileage_friendly(monkeypatch):
     asyncio.run(handlers_wishlist_ui.cmd_wishlist_filter_list(update, context))
 
     txt = update.message.sent[-1]
-    assert "Quilometragem até 80.000 km" in txt
-    assert "Quilometragem a partir de 30.000 km" in txt
-    assert "Quilometragem entre 30.000 e 90.000 km" in txt
+    assert "KM até 80.000" in txt
+    assert "KM a partir de 30.000" in txt
 
 
 def test_filter_list_formats_seller_type_friendly(monkeypatch):

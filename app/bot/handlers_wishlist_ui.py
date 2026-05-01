@@ -13,7 +13,7 @@ from telegram.ext import (
 
 from app.db.session import SessionLocal
 from app.bot.utils import normalize_args, parse_int, reply_text
-from app.bot.renderers import render_all_tracked_listings
+from app.bot.renderers import render_all_tracked_listings, render_wishlist_filters
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import (
     list_wishlists,
@@ -257,53 +257,7 @@ async def cmd_wishlist_filter_list(update: Update, context: ContextTypes.DEFAULT
         await reply_text(update, "(sem filtros)\nDica: /wishlist_filter_add <n> year lte 2005")
         return
 
-    def _fmt_filter(f) -> str:
-        if f.field == "mileage_km":
-            if f.operator == "lte":
-                return f"Quilometragem até {int(f.value):,} km".replace(",", ".")
-            if f.operator == "gte":
-                return f"Quilometragem a partir de {int(f.value):,} km".replace(",", ".")
-            if f.operator == "between":
-                lo_s, hi_s = [p.strip() for p in f.value.split(",", 1)]
-                lo = f"{int(lo_s):,}".replace(",", ".")
-                hi = f"{int(hi_s):,}".replace(",", ".")
-                return f"Quilometragem entre {lo} e {hi} km"
-        if f.field == "seller_type":
-            label = {"private": "particular", "dealer": "loja/revenda"}.get((f.value or "").lower(), f.value)
-            if f.operator == "eq":
-                return f"Vendedor: {label}"
-            if f.operator == "neq":
-                return f"Excluir vendedor: {label}"
-        if f.field == "body_type":
-            label = {
-                "suv": "SUV",
-                "convertible": "conversível",
-            }.get((f.value or "").lower(), f.value)
-            if f.operator == "eq":
-                return f"Carroceria: {label}"
-            if f.operator == "neq":
-                return f"Excluir carroceria: {label}"
-        if f.field == "doors":
-            if f.operator == "eq":
-                return f"Portas: {int(f.value)}"
-            if f.operator == "neq":
-                return f"Excluir portas: {int(f.value)}"
-            if f.operator == "lte":
-                return f"Portas até {int(f.value)}"
-            if f.operator == "gte":
-                return f"Portas a partir de {int(f.value)}"
-            if f.operator == "between":
-                lo_s, hi_s = [p.strip() for p in f.value.split(",", 1)]
-                return f"Portas entre {int(lo_s)} e {int(hi_s)}"
-        return f"{f.field} {f.operator} {f.value}"
-
-    lines = [f"{i+1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]
-    await reply_text(
-        update,
-        "Filtros da wishlist:\n"
-        f"🔎 {wl.query}\n\n"
-        + "\n".join(lines)
-    )
+    await reply_text(update, render_wishlist_filters(fs, wishlist_query=wl.query))
 
 
 async def cmd_wishlist_filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):

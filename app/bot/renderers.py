@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Iterable
+
 
 def render_user_wishlists(wishlists) -> str:
     if not wishlists:
@@ -24,6 +26,66 @@ def render_all_tracked_listings(wishlists, tracked_messages: list[str]) -> str:
     return "\n".join(lines)
 
 
+def render_wishlist_filters(filters: Iterable, wishlist_query: str | None = None) -> str:
+    def _to_int_str(v: str) -> str:
+        return f"{int(v):,}".replace(",", ".")
+
+    def _fmt_filter(f) -> str:
+        if f.field == "price" and f.operator == "lte":
+            return f"Preço até R$ {_to_int_str(f.value)}"
+        if f.field == "price" and f.operator == "gte":
+            return f"Preço a partir de R$ {_to_int_str(f.value)}"
+        if f.field == "year" and f.operator == "lte":
+            return f"Ano até {int(f.value)}"
+        if f.field == "year" and f.operator == "gte":
+            return f"Ano a partir de {int(f.value)}"
+        if f.field == "mileage_km":
+            if f.operator == "lte":
+                return f"KM até {_to_int_str(f.value)}"
+            if f.operator == "gte":
+                return f"KM a partir de {_to_int_str(f.value)}"
+        if f.field == "city" and f.operator == "eq":
+            return f"Cidade: {f.value}"
+        if f.field == "state" and f.operator == "eq":
+            return f"Estado: {f.value}"
+        if f.field == "source" and f.operator == "eq":
+            return f"Fonte: {f.value}"
+        if f.field == "color" and f.operator == "eq":
+            return f"Cor: {f.value}"
+        if f.field == "seller_type":
+            label = {"private": "particular", "dealer": "loja/revenda"}.get((f.value or "").lower(), f.value)
+            if f.operator == "eq":
+                return f"Vendedor: {label}"
+            if f.operator == "neq":
+                return f"Excluir vendedor: {label}"
+        if f.field == "body_type":
+            label = {"suv": "SUV", "convertible": "conversível"}.get((f.value or "").lower(), f.value)
+            if f.operator == "eq":
+                return f"Carroceria: {label}"
+            if f.operator == "neq":
+                return f"Excluir carroceria: {label}"
+        if f.field == "doors":
+            if f.operator == "eq":
+                return f"Portas: {int(f.value)}"
+            if f.operator == "neq":
+                return f"Excluir portas: {int(f.value)}"
+            if f.operator == "lte":
+                return f"Portas até {int(f.value)}"
+            if f.operator == "gte":
+                return f"Portas a partir de {int(f.value)}"
+            if f.operator == "between":
+                lo_s, hi_s = [p.strip() for p in str(f.value).split(",", 1)]
+                return f"Portas entre {int(lo_s)} e {int(hi_s)}"
+        return f"{f.field} {f.operator} {f.value}"
+
+    fs = list(filters)
+    header = "Filtros da wishlist:"
+    if wishlist_query:
+        header += f"\n🔎 {wishlist_query}"
+    lines = [f"{i + 1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]
+    return f"{header}\n\n" + "\n".join(lines)
+
+
 def render_help_text() -> str:
     return (
         "📌 Comandos do AutoHunter\n\n"
@@ -34,7 +96,7 @@ def render_help_text() -> str:
         "• /wishlist_remove — remover\n"
         "• /wishlist_clear — limpar tudo\n\n"
         "Filtros (por wishlist):\n"
-        "• /menu → ⚙️ Filtros — adicionar passo a passo\n"
+        "• /menu → ⚙️ Filtros — adicionar, ver e remover filtros por botões\n"
         "• /wishlist_filter_list <n>\n"
         "• /wishlist_filter_add <n> <campo> <op> <valor>\n"
         "• /wishlist_filter_remove <n> <k>\n\n"
