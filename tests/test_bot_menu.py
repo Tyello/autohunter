@@ -26,7 +26,7 @@ class _CallbackQuery:
     async def answer(self):
         self.answers += 1
 
-    async def edit_message_text(self, text):
+    async def edit_message_text(self, text, reply_markup=None):
         if self.fail_edit:
             raise RuntimeError("cannot edit")
         self.edits.append(text)
@@ -123,12 +123,13 @@ def test_callback_menu_tracked_empty_slots(monkeypatch):
     assert "(vazio)" in q.edits[-1]
 
 
-def test_callback_menu_filters():
+def test_callback_menu_filters(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl1", query="civic si")])
     q = _CallbackQuery("MENU:FILTERS")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "/wishlist_filter_list <n>" in q.edits[-1]
-    assert "use /wishlist" in q.edits[-1]
+    assert "Escolha a wishlist" in q.edits[-1]
 
 
 def test_callback_menu_help_real():
