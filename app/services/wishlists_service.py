@@ -18,11 +18,16 @@ from app.models.wishlist_listing_activity import WishlistListingActivity
 from app.models.wishlist_token import WishlistToken
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.scrape_jobs_service import enqueue_job
+from app.services.source_operational_policy import (
+    classify_source_operational_role,
+    resolve_source_queue,
+)
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
 from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type, normalize_doors
+from app.sources.registry import get_source
 
 
 logger = logging.getLogger(__name__)
@@ -479,14 +484,33 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
 
     out = {"triggered": 0, "ok": 0, "skipped": 0, "failed": 0, "sources": []}
     for src in sources:
-        queue = "browser" if src in {"olx", "webmotors", "icarros"} else "http"
+        plugin = get_source(src)
+        if plugin is None:
+            out["sources"].append({"source": src, "status": "source_not_registered"})
+            out["skipped"] += 1
+            continue
+
+        op = classify_source_operational_role(plugin)
+        if op.role in {"disabled", "auxiliary", "not_implemented"}:
+            out["sources"].append({"source": src, "status": "source_not_eligible"})
+            out["skipped"] += 1
+            continue
+
+        queue = resolve_source_queue(plugin)
         try:
             inserted = enqueue_job(db, source=src, queue=queue, priority=1, max_attempts=3)
             status = "queued" if inserted else "already_queued"
+            logger.info(
+                "initial wishlist enqueue source=%s queue=%s wishlist_id=%s status=%s",
+                src,
+                queue,
+                wishlist.id,
+                status,
+            )
         except Exception as exc:
             status = "enqueue_failed"
             logger.warning("initial wishlist enqueue failed source=%s wishlist_id=%s err=%s", src, wishlist.id, exc)
-        out["sources"].append({"source": src, "status": status})
+        out["sources"].append({"source": src, "queue": queue, "status": status})
         if status == "queued":
             out["triggered"] += 1
             out["ok"] += 1

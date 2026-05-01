@@ -15,6 +15,7 @@ ALLOWED_OPERATIONAL_ROLES = {
 }
 
 CRITICAL_ROLES = {"primary", "fragile"}
+ALLOWED_SOURCE_QUEUES = {"http", "browser"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,3 +90,33 @@ def source_operational_hint(plugin: SourcePlugin, state: Any = None) -> Optional
     if last_status == "blocked" or next_allowed_at is not None:
         return "source frágil/anti-bot recorrente"
     return None
+
+
+def resolve_source_queue(plugin: SourcePlugin, *, fallback_queue: str = "http") -> str:
+    """Resolve queue from source metadata/policy.
+
+    Priority:
+    1) explicit `default_extra["queue"]` when valid
+    2) `fetch_mode` ("http" or "browser")
+    3) fallback queue (sanitized)
+    """
+    queue_override: Optional[str] = None
+    extra = getattr(plugin, "default_extra", None)
+    if isinstance(extra, dict):
+        raw = extra.get("queue")
+        if isinstance(raw, str):
+            candidate = raw.strip().lower()
+            if candidate in ALLOWED_SOURCE_QUEUES:
+                queue_override = candidate
+
+    if queue_override:
+        return queue_override
+
+    fetch_mode = str(getattr(plugin, "fetch_mode", "") or "").strip().lower()
+    if fetch_mode in ALLOWED_SOURCE_QUEUES:
+        return fetch_mode
+
+    normalized_fallback = str(fallback_queue or "http").strip().lower()
+    if normalized_fallback in ALLOWED_SOURCE_QUEUES:
+        return normalized_fallback
+    return "http"
