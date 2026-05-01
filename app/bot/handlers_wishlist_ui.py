@@ -516,7 +516,7 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             short_msg, full_msg = "Wishlist inválida", "Wishlist não encontrada para sua conta."
                         else:
                             result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
-                            short_msg, full_msg = _format_track_result_message(result, widx)
+                            short_msg, full_msg = _format_track_result_message(result, str(getattr(wl, "query", "") or "wishlist"))
             elif data.startswith("TRACK:CHOOSE:"):
                 listing_id = data.split(":", 2)[2].strip()
                 if not listing_id:
@@ -557,7 +557,7 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             short_msg, full_msg = "Wishlist inválida", "Wishlist não encontrada para sua conta."
                         else:
                             result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
-                            short_msg, full_msg = _format_track_result_message(result, widx)
+                            short_msg, full_msg = _format_track_result_message(result, str(getattr(wl, "query", "") or "wishlist"))
             elif data.startswith("TRACK:ADDWL:"):
                 parts = data.split(":")
                 if len(parts) != 4:
@@ -577,7 +577,7 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             short_msg, full_msg = "Wishlist inválida", "Wishlist não encontrada para sua conta."
                         else:
                             result = add_tracked_listing_result(db, user_id=user.id, wishlist_index=widx, listing_ref=listing_ref)
-                            short_msg, full_msg = _format_track_result_message(result, widx)
+                            short_msg, full_msg = _format_track_result_message(result, str(getattr(wl, "query", "") or "wishlist"))
             else:
                 short_msg, full_msg = "Inválido", "Não consegui rastrear agora. Tente novamente."
     except Exception as exc:
@@ -588,21 +588,27 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer(short_msg[:180] or "OK", show_alert=False)
     except BadRequest:
         pass
+    bot = getattr(context, "bot", None)
+    if bot is not None:
+        try:
+            await bot.send_message(chat_id=update.effective_chat.id, text=full_msg)
+        except Exception:
+            logger.warning("track_callback_visible_confirmation_failed", exc_info=True)
     await _safe_edit_message_text(q, full_msg)
 
 
-def _format_track_result_message(result: TrackedListingResult, widx: int) -> tuple[str, str]:
+def _format_track_result_message(result: TrackedListingResult, wishlist_name: str) -> tuple[str, str]:
     slot = result.slot or 1
+    wl_label = (wishlist_name or "wishlist").strip() or "wishlist"
     if result.status == "added":
-        
         if bool(result.automation_enabled):
-            return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot}.\nVou acompanhar preço e status automaticamente."
-        return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot}.\nVeja em: /wishlist_track_list {widx}\nNotificações automáticas são Premium."
+            return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot} da wishlist {wl_label}.\n\nVou acompanhar preço e status automaticamente.\nVeja seus rastreados:\n/wishlist_track_list"
+        return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot} da wishlist {wl_label}.\n\nVocê pode acompanhar preço e status em:\n/wishlist_track_list\n\nNotificações automáticas são Premium."
 
     if result.status == "already_tracked":
-        return "Já rastreado", f"Esse anúncio já está rastreado no slot {slot}.\nVeja em: /wishlist_track_list {widx}"
+        return "Já rastreado", f"Esse anúncio já está rastreado no slot {slot} da wishlist {wl_label}.\n\nVeja em:\n/wishlist_track_list"
     if result.status == "slots_full":
-        return "Slots cheios", f"Você já usa todos os slots dessa wishlist.\nVeja: /wishlist_track_list {widx}"
+        return "Slots cheios", f"Você já usa todos os slots da wishlist {wl_label}.\n\nVeja e remova algum slot em:\n/wishlist_track_list"
     if result.status in {"listing_not_found", "unavailable"}:
         return "Anúncio indisponível", "Não consegui rastrear esse anúncio porque ele não está mais disponível."
     if result.status in {"wishlist_not_found", "invalid_slot"}:

@@ -100,6 +100,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Cooldown anti-spam default: **24h** por slot/preço.
 - Execução do job `tracking_alerts_job` permanece **default off** via `tracking_price_alerts_enabled=false`.
 
+## 12) Roadmap (próximo passo de UX)
+- **Salvar resultado de `/buscar` em wishlist via fluxo guiado**.
+- Descrição: no futuro, o `/buscar` poderá oferecer um fluxo guiado para salvar um resultado em uma wishlist específica. Por enquanto, para evitar rastrear na wishlist errada e reduzir confusão, o tracking inline fica restrito às notificações automáticas de wishlist.
+
 ---
 
 ## Notas de incerteza explícitas

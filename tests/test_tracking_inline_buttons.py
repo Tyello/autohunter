@@ -53,6 +53,7 @@ class _CallbackQuery:
         self.answers = []
         self.edits = []
         self.fail_edit = fail_edit
+        self.message = types.SimpleNamespace(chat=types.SimpleNamespace(id=111))
 
     async def answer(self, text=None, show_alert=False):
         self.answers.append({"text": text, "show_alert": show_alert})
@@ -87,6 +88,14 @@ def _patch_common(monkeypatch, *, notification, wishlist, listing, automation=Fa
     monkeypatch.setattr(handlers_wishlist_ui, "list_wishlists", lambda *_: wishlists if wishlists is not None else [types.SimpleNamespace(id="w1")])
 
 
+class _Bot:
+    def __init__(self):
+        self.messages = []
+
+    async def send_message(self, chat_id, text):
+        self.messages.append({"chat_id": chat_id, "text": text})
+
+
 def test_notification_has_track_button():
     payload = format_ad_message(_Ad())
     labels = [b["text"] for b in payload.inline_keyboard[0]]
@@ -103,30 +112,38 @@ def test_callback_owner_free_slot_free_plan(monkeypatch):
         add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot 1", slot=1, automation_enabled=False),
     )
     q = _CallbackQuery()
-    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    bot = _Bot()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert q.answers
     assert "Premium" in q.edits[-1]
+    assert "Premium" in bot.messages[-1]["text"]
 
 
 def test_callback_owner_premium(monkeypatch):
     _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), automation=True, add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot 1", slot=1, automation_enabled=True))
     q = _CallbackQuery()
-    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    bot = _Bot()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert "automaticamente" in q.edits[-1]
+    assert "wishlist" in bot.messages[-1]["text"]
 
 
 def test_callback_already_tracked(monkeypatch):
     _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=False, status="already_tracked", message="Esse anúncio já está rastreado no slot 2.", slot=2, already_tracked=True))
     q = _CallbackQuery()
-    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    bot = _Bot()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert "já está rastreado" in q.edits[-1]
+    assert bot.messages
 
 
 def test_callback_slots_full(monkeypatch):
     _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=False, status="slots_full", message="Limite atingido"))
     q = _CallbackQuery()
-    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    bot = _Bot()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert "todos os slots" in q.edits[-1]
+    assert bot.messages
 
 
 def test_callback_other_user_blocked(monkeypatch):
@@ -153,8 +170,10 @@ def test_callback_listing_missing(monkeypatch):
 def test_callback_edit_failure_does_not_raise(monkeypatch):
     _patch_common(monkeypatch, notification=types.SimpleNamespace(id="n1", wishlist_id="w1", car_listing_id="c1"), wishlist=types.SimpleNamespace(id="w1", user_id="u1"), listing=types.SimpleNamespace(id="c1", external_id="e1", url="u"), add_result=handlers_wishlist_ui.TrackedListingResult(ok=True, status="added", message="slot 1", slot=1, automation_enabled=False))
     q = _CallbackQuery(fail_edit=True)
-    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    bot = _Bot()
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert q.answers
+    assert bot.messages
 
 
 def test_callback_uses_structured_status_not_message(monkeypatch):

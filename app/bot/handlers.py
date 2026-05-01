@@ -13,7 +13,7 @@ from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
 from app.sources import list_sources
 from app.services.wishlists_service import (
-    list_wishlists, add_wishlist, remove_wishlist,
+    add_wishlist, remove_wishlist,
     add_filter, list_filters, remove_filter,
 )
 from app.services.limits_service import get_daily_limit_for_user, count_sent_today
@@ -140,19 +140,6 @@ async def _ensure_admin(update: Update) -> bool:
     await reply_text(update, "Sem permissão.")
     return False
 
-
-
-
-def _build_track_addwl_callback(*, user_id: str, wishlist_id: str, listing_id: str) -> str:
-    from app.services.tracking_callback_token_service import issue_tracking_callback_token
-
-    callback = f"TRACK:ADDWL:{wishlist_id}:{listing_id}"
-    if len(callback.encode("utf-8")) <= 64:
-        return callback
-    token = issue_tracking_callback_token(user_id=user_id, wishlist_id=wishlist_id, listing_id=listing_id)
-    return f"TRACK:ADDT:{token}"
-
-
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query, sources = _parse_query_and_sources(context.args)
     if not query:
@@ -172,8 +159,6 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # vNext scoring+formatting (treat manual query as a temporary wishlist)
         pseudo_wishlist = SimpleNamespace(query=query, filters=[])
-        user_wishlists = list_wishlists(db, _user.id)
-
         stats_map = {}
         try:
             stats_map = batch_get_market_stats(db, results)
@@ -193,28 +178,6 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
 
             keyboard_rows = [list(row) for row in (payload.inline_keyboard or [])]
-            listing_id = str(getattr(item, "id", "") or "").strip()
-            has_track = any(btn.get("callback_data", "").startswith("TRACK:ADD:") or btn.get("callback_data", "").startswith("TRACK:ADDWL:") or btn.get("callback_data", "").startswith("TRACK:ADDT:") for row in keyboard_rows for btn in row)
-            if listing_id and not has_track:
-                wishlist_buttons: list[dict[str, str]] = []
-                total_wishlists = len(user_wishlists)
-                if total_wishlists == 1:
-                    wishlist_id = str(user_wishlists[0].id)
-                    wishlist_buttons.append({"text": "⭐ Rastrear", "callback_data": _build_track_addwl_callback(user_id=str(_user.id), wishlist_id=wishlist_id, listing_id=listing_id)})
-                elif 2 <= total_wishlists <= 3:
-                    for idx, wl in enumerate(user_wishlists, start=1):
-                        wishlist_id = str(wl.id)
-                        wl_name = (str(getattr(wl, "query", "") or "wishlist").strip() or "wishlist")
-                        wl_name = " ".join(wl_name.split())
-                        if len(wl_name) > 28:
-                            wl_name = wl_name[:27].rstrip() + "…"
-                        wishlist_buttons.append({"text": f"⭐ Rastrear em {wl_name}", "callback_data": _build_track_addwl_callback(user_id=str(_user.id), wishlist_id=wishlist_id, listing_id=listing_id)})
-                elif total_wishlists > 3:
-                    wishlist_buttons.append({"text": "⭐ Escolher wishlist", "callback_data": f"TRACK:CHOOSE:{listing_id}"})
-
-                if wishlist_buttons:
-                    keyboard_rows.append(wishlist_buttons)
-
             keyboard = None
             if keyboard_rows:
                 built_rows = []
