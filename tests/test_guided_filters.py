@@ -88,7 +88,26 @@ def test_escolher_wishlist_mostra_tipos(monkeypatch):
     q = _CallbackQuery("FILTER:WL:1")
     state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
     assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "Escolha uma ação" in q.edits[-1]["text"]
+
+
+def test_escolher_acao_adicionar_mostra_tipos(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    q = _CallbackQuery("FILTER:ACTION:add")
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
     assert "Escolha o tipo" in q.edits[-1]["text"]
+
+
+def test_ver_filtros_sem_filtros(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    q = _CallbackQuery("FILTER:ACTION:list")
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "ainda não tem filtros" in q.edits[-1]["text"]
 
 
 def test_filter_mapping_calls_add_filter(monkeypatch):
@@ -154,6 +173,26 @@ def test_erro_retry_e_cancelamentos(monkeypatch):
     state4 = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), bctx))
     assert state4 == ConversationHandler.END
     assert bctx.user_data == {}
+
+
+def test_ver_filtros_com_remover(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    monkeypatch.setattr(
+        handlers_core,
+        "list_filters",
+        lambda *_: [types.SimpleNamespace(field="price", operator="lte", value="90000")],
+    )
+    qlist = _CallbackQuery("FILTER:ACTION:list")
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=qlist), ctx))
+    assert "Preço até R$ 90.000" in qlist.edits[-1]["text"]
+    assert qlist.edits[-1]["reply_markup"].inline_keyboard[0][0].callback_data == "FILTER:RM:1:1"
+
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "Filtro removido."))
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    qrm = _CallbackQuery("FILTER:RM:1:1")
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=qrm), ctx))
+    assert "Filtro removido" in qrm.edits[-1]["text"]
 
 
 def test_wishlist_filter_add_continua_funcionando(monkeypatch):
