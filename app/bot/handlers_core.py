@@ -385,23 +385,31 @@ async def _menu_filter_remove_from_callback(update: Update, context: ContextType
         wishlist_index = int(parts[2])
         filter_index = int(parts[3])
     except ValueError:
-        await _safe_edit_or_send(update, "Índice inválido para remoção.")
+        await _safe_edit_or_send(update, "Filtro não encontrado. Atualize a lista de filtros.")
         return MENU_FILTER_SELECT_VALUE
 
+    if not context.user_data.get("menu_filter_wishlist_index"):
+        await _safe_edit_or_send(update, "Sessão expirada. Abra novamente /menu → ⚙️ Filtros.")
+        return ConversationHandler.END
+
     if wishlist_index != context.user_data.get("menu_filter_wishlist_index"):
-        await _safe_edit_or_send(update, "Sessão inválida para essa wishlist. Use /menu → ⚙️ Filtros novamente.")
+        await _safe_edit_or_send(update, "Wishlist não encontrada para sua conta.")
         return ConversationHandler.END
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
         if wishlist_index < 1 or wishlist_index > len(wishlists):
-            await _safe_edit_or_send(update, "Wishlist inválida. Use /menu → ⚙️ Filtros novamente.")
+            await _safe_edit_or_send(update, "Wishlist não encontrada para sua conta.")
             return ConversationHandler.END
         wl = wishlists[wishlist_index - 1]
+        fs = list_filters(db, wl.id)
+        if filter_index < 1 or filter_index > len(fs):
+            await _safe_edit_or_send(update, "Filtro não encontrado. Atualize a lista de filtros.")
+            return MENU_FILTER_SELECT_VALUE
         ok, msg = remove_filter(db, wl.id, filter_index)
 
-    feedback = f"✅ {msg}" if ok else f"⚠️ {msg}"
+    feedback = f"✅ {msg}" if ok else "Não consegui remover o filtro agora. Tente novamente."
     return await _show_menu_filter_list(update, context, feedback=feedback)
 
 
