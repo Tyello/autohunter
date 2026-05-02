@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 import logging
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
 
@@ -16,6 +17,7 @@ from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
 from app.models.wishlist_listing_activity import WishlistListingActivity
+from app.models.notification import Notification
 from app.models.wishlist_token import WishlistToken
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.scrape_jobs_service import enqueue_job
@@ -397,7 +399,7 @@ def list_wishlists(db: Session, user_id):
 def get_wishlist_summaries(db: Session, user_id):
     """Return lightweight operational summary for each user wishlist.
 
-    v1 intentionally keeps low-cost signals only (filters + tracked slots + active flag).
+    v2 keeps low-cost signals only (filters + tracked slots + active flag + notifications sent 24h).
     """
     wishlists = list_wishlists(db, user_id)
     if not wishlists:
@@ -425,6 +427,20 @@ def get_wishlist_summaries(db: Session, user_id):
         )
     }
 
+    window_start = datetime.now(timezone.utc) - timedelta(hours=24)
+    notifications_24h_counts = {
+        wishlist_id: count
+        for wishlist_id, count in (
+            db.query(Notification.wishlist_id, func.count(Notification.id))
+            .filter(Notification.wishlist_id.in_(wishlist_ids))
+            .filter(Notification.status == "sent")
+            .filter(Notification.sent_at.isnot(None))
+            .filter(Notification.sent_at >= window_start)
+            .group_by(Notification.wishlist_id)
+            .all()
+        )
+    }
+
     out = []
     for i, wl in enumerate(wishlists, start=1):
         out.append({
@@ -435,6 +451,7 @@ def get_wishlist_summaries(db: Session, user_id):
             "filters_count": int(filter_counts.get(wl.id, 0) or 0),
             "tracked_count": int(tracked_counts.get(wl.id, 0) or 0),
             "tracked_limit": 3,
+            "notifications_24h_count": int(notifications_24h_counts.get(wl.id, 0) or 0),
         })
     return out
 
