@@ -119,3 +119,9 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Ao criar wishlist, a primeira busca não roda inline no handler: o sistema agenda job inicial em `scrape_jobs` e retorna confirmação imediata no Telegram.
 - A queue da primeira busca é resolvida por metadata/policy da source plugin (override opcional em `default_extra.queue`, senão `fetch_mode`), evitando listas hardcoded por nome de source.
 - A execução efetiva da primeira varredura acontece depois pelo scheduler/workers do pipeline oficial.
+
+
+## 14) Métrica notifications_24h_count (wishlist summary)
+- O resumo de wishlists agrega `notifications_24h_count` contando registros em `notifications` com `status='sent'` e `sent_at` nas últimas 24h por wishlist.
+- Há índice operacional para suportar essa consulta por wishlist/status/sent_at (parcial em PostgreSQL para `status='sent'`; composto de fallback em SQLite para testes rápidos).
+- A validação completa da migration de índice deve ser feita na lane PostgreSQL (`pytest -m postgres` com `TEST_DATABASE_URL`).
