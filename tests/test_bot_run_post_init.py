@@ -28,3 +28,37 @@ def test_post_init_ignores_timeout_from_setup_bot_commands(monkeypatch):
 
     assert called["setup"] == 1
     assert called["jobs"] == 0
+
+
+def test_main_registers_menu_and_start_handlers(monkeypatch):
+    called_commands = []
+
+    class _FakeApp:
+        def add_handler(self, handler):
+            if hasattr(handler, "commands"):
+                called_commands.extend(list(handler.commands))
+
+        def add_error_handler(self, _handler):
+            return None
+
+        def run_polling(self, **_kwargs):
+            return None
+
+    class _Builder:
+        def token(self, _token):
+            return self
+
+        def post_init(self, _post_init):
+            return self
+
+        def build(self):
+            return _FakeApp()
+
+    monkeypatch.setattr(run.settings, "telegram_bot_token", "token")
+    monkeypatch.setattr(run.settings, "playwright_smoke_on_boot", False)
+    monkeypatch.setattr(run.Application, "builder", lambda: _Builder())
+
+    run.main()
+
+    assert "start" in called_commands
+    assert "menu" in called_commands

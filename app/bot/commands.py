@@ -1,6 +1,9 @@
+import logging
+
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 
 from app.core.settings import settings
+logger = logging.getLogger(__name__)
 
 
 def _parse_admin_chat_ids() -> set[int]:
@@ -9,11 +12,15 @@ def _parse_admin_chat_ids() -> set[int]:
 
 
 # Comandos públicos enxutos no menu do Telegram (autopreenchimento)
-COMMANDS = [
+PUBLIC_COMMANDS = [
+    BotCommand("start", "Iniciar / registrar"),
     BotCommand("menu", "Menu guiado de ações"),
     BotCommand("help", "Ver ajuda"),
     BotCommand("cancelar", "Cancelar fluxo guiado"),
 ]
+
+# Compat: testes/código legado ainda referenciam COMMANDS
+COMMANDS = PUBLIC_COMMANDS
 
 
 ADMIN_COMMANDS = [
@@ -25,7 +32,6 @@ ADMIN_COMMANDS = [
 
 
 ADVANCED_USER_COMMANDS = [
-    BotCommand("start", "Iniciar / registrar"),
     BotCommand("status", "Status e limites"),
     BotCommand("version", "Versão do bot"),
     BotCommand("buscar", "Busca manual (não salva)"),
@@ -46,8 +52,14 @@ ADVANCED_USER_COMMANDS = [
 ]
 
 
+ADMIN_SCOPED_COMMANDS = [*PUBLIC_COMMANDS, *ADMIN_COMMANDS]
+
+
 async def setup_bot_commands(bot):
     # escopo default: aplica para todos os usuários
-    await bot.set_my_commands(COMMANDS, scope=BotCommandScopeDefault())
+    await bot.set_my_commands(PUBLIC_COMMANDS, scope=BotCommandScopeDefault())
     for chat_id in _parse_admin_chat_ids():
-        await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=chat_id))
+        try:
+            await bot.set_my_commands(ADMIN_SCOPED_COMMANDS, scope=BotCommandScopeChat(chat_id=chat_id))
+        except Exception:
+            logger.warning("failed to register admin scoped Telegram commands for chat_id=%s", chat_id, exc_info=True)
