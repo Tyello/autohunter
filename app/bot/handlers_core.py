@@ -6,7 +6,7 @@ from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_user_wishlists, render_wishlist_filters
 from app.services.users_service import get_or_create_user_by_chat
-from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter
+from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries
 from app.services.wishlist_tracking_service import list_tracked_listings
 
 MENU_CREATE_WISHLIST_QUERY = 1
@@ -131,8 +131,8 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "MENU:WISHLISTS":
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-            w = list_wishlists(db, user.id)
-        await _safe_edit_or_send(update, render_user_wishlists(w))
+            summaries = get_wishlist_summaries(db, user.id)
+        await _safe_edit_or_send(update, render_user_wishlists(summaries))
         return
     if data == "MENU:TRACKED":
         with SessionLocal() as db:

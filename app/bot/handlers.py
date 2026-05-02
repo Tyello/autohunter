@@ -15,7 +15,7 @@ from app.services.users_service import get_or_create_user_by_chat
 from app.sources import list_sources
 from app.services.wishlists_service import (
     add_wishlist, remove_wishlist,
-    add_filter, list_filters, remove_filter,
+    add_filter, list_filters, remove_filter, get_wishlist_summaries,
 )
 from app.services.limits_service import get_daily_limit_for_user, count_sent_today
 from app.models.user import User
@@ -211,8 +211,8 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # /wishlist listar
         if sub in ("listar",):
-            w = list_wishlists(db, user.id)
-            await reply_text(update, render_user_wishlists(w))
+            summaries = get_wishlist_summaries(db, user.id)
+            await reply_text(update, render_user_wishlists(summaries))
             return
 
         # /wishlist add <termos>

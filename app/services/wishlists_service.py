@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 import logging
+from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import delete, func
@@ -390,6 +391,52 @@ def list_wishlists(db: Session, user_id):
         .all()
     )
 
+
+
+
+def get_wishlist_summaries(db: Session, user_id):
+    """Return lightweight operational summary for each user wishlist.
+
+    v1 intentionally keeps low-cost signals only (filters + tracked slots + active flag).
+    """
+    wishlists = list_wishlists(db, user_id)
+    if not wishlists:
+        return []
+
+    wishlist_ids = [w.id for w in wishlists]
+
+    filter_counts = {
+        wishlist_id: count
+        for wishlist_id, count in (
+            db.query(WishlistFilter.wishlist_id, func.count(WishlistFilter.id))
+            .filter(WishlistFilter.wishlist_id.in_(wishlist_ids))
+            .group_by(WishlistFilter.wishlist_id)
+            .all()
+        )
+    }
+
+    tracked_counts = {
+        wishlist_id: count
+        for wishlist_id, count in (
+            db.query(WishlistTrackedListing.wishlist_id, func.count(WishlistTrackedListing.id))
+            .filter(WishlistTrackedListing.wishlist_id.in_(wishlist_ids))
+            .group_by(WishlistTrackedListing.wishlist_id)
+            .all()
+        )
+    }
+
+    out = []
+    for i, wl in enumerate(wishlists, start=1):
+        out.append({
+            "index": i,
+            "wishlist_id": wl.id,
+            "query": wl.query,
+            "is_active": bool(getattr(wl, "is_active", True)),
+            "filters_count": int(filter_counts.get(wl.id, 0) or 0),
+            "tracked_count": int(tracked_counts.get(wl.id, 0) or 0),
+            "tracked_limit": 3,
+        })
+    return out
 
 def add_wishlist(db: Session, user_id, query: str):
     """Cria wishlist e opcionalmente cria filtros de ano/preço se diretivas existirem."""

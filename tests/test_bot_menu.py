@@ -81,17 +81,19 @@ def test_callback_menu_search():
 
 def test_callback_menu_wishlists_real(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(query="civic si")])
+    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [{"index": 1, "query": "civic si", "filters_count": 0, "tracked_count": 0, "tracked_limit": 3, "is_active": True}])
     q = _CallbackQuery("MENU:WISHLISTS")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "Wishlists:" in q.edits[-1]
+    assert "🎯 Suas wishlists" in q.edits[-1]
     assert "1. civic si" in q.edits[-1]
+    assert "Filtros: 0" in q.edits[-1]
+    assert "Rastreados: 0/3" in q.edits[-1]
 
 
 def test_callback_menu_wishlists_empty_guides_create(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [])
+    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [])
     q = _CallbackQuery("MENU:WISHLISTS")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
