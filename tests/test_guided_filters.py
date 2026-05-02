@@ -189,10 +189,81 @@ def test_ver_filtros_com_remover(monkeypatch):
     assert qlist.edits[-1]["reply_markup"].inline_keyboard[0][0].callback_data == "FILTER:RM:1:1"
 
     monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "Filtro removido."))
-    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    seq = {"n": 0}
+    def _list_filters_after_remove(*_args):
+        seq["n"] += 1
+        if seq["n"] == 1:
+            return [types.SimpleNamespace(field="price", operator="lte", value="90000")]
+        return []
+    monkeypatch.setattr(handlers_core, "list_filters", _list_filters_after_remove)
     qrm = _CallbackQuery("FILTER:RM:1:1")
     asyncio.run(handlers_core.cb_menu_filter(_Update(q=qrm), ctx))
     assert "Filtro removido" in qrm.edits[-1]["text"]
+    assert qrm.answers == 1
+
+
+def test_filter_rm_sessao_expirada(monkeypatch):
+    _patch_user(monkeypatch)
+    q = _CallbackQuery("FILTER:RM:1:1")
+    ctx = _ctx()
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == ConversationHandler.END
+    assert q.answers == 1
+    assert q.edits[-1]["text"] == "Sessão expirada. Abra novamente /menu → ⚙️ Filtros."
+
+
+def test_filter_rm_wishlist_index_invalido(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    q = _CallbackQuery("FILTER:RM:2:1")
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == ConversationHandler.END
+    assert q.answers == 1
+    assert q.edits[-1]["text"] == "Wishlist não encontrada para sua conta."
+
+
+def test_filter_rm_filter_index_invalido(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    monkeypatch.setattr(
+        handlers_core,
+        "list_filters",
+        lambda *_: [types.SimpleNamespace(field="price", operator="lte", value="90000")],
+    )
+    q = _CallbackQuery("FILTER:RM:1:2")
+    calls = {"n": 0}
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: calls.update(n=calls["n"] + 1))
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert q.answers == 1
+    assert q.edits[-1]["text"] == "Filtro não encontrado. Atualize a lista de filtros."
+    assert calls["n"] == 0
+
+
+def test_filter_rm_ownership_mismatch_nao_remove(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    q = _CallbackQuery("FILTER:RM:2:1")
+    called = {"n": 0}
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: called.update(n=called["n"] + 1))
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert q.answers == 1
+    assert q.edits[-1]["text"] == "Wishlist não encontrada para sua conta."
+    assert called["n"] == 0
+
+
+def test_filter_rm_lista_mudou_entre_render_e_clique(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    q = _CallbackQuery("FILTER:RM:1:1")
+    called = {"n": 0}
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: called.update(n=called["n"] + 1))
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert q.answers == 1
+    assert "Filtro não encontrado. Atualize a lista de filtros." in q.edits[-1]["text"]
+    assert called["n"] == 0
 
 
 def test_wishlist_filter_add_continua_funcionando(monkeypatch):
