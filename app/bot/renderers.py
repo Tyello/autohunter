@@ -20,6 +20,7 @@ def render_user_wishlists(wishlists) -> str:
                 f"{item['index']}. {item['query']}",
                 f"Filtros: {item.get('filters_count', 0)}",
                 f"Rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
+                f"Notificações: {item.get('notifications_24h_count', 0)} nas últimas 24h",
                 f"Status: {status}",
                 "",
             ])
