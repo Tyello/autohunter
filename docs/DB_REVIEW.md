@@ -165,3 +165,29 @@
 - `TEST_DATABASE_URL` ausente nesta execução: não foi possível rodar lane postgres nem `EXPLAIN ANALYZE` real.
 - `pg_stat_statements` não avaliado neste ambiente.
 - Conclusões de prioridade de índice são hipóteses técnicas a validar em staging/prod.
+
+## Evidência real coletada nesta execução (2026-05-03)
+- Comando executado: `pytest -q -m postgres -rs`.
+- Resultado: **1 teste pulado** (`tests/test_alembic_postgres.py`) por ausência de `TEST_DATABASE_URL`.
+- Evidência textual do pytest: `requires TEST_DATABASE_URL for PostgreSQL integration tests`.
+- `TEST_DATABASE_URL` no ambiente: **não definido** (`<unset>`).
+- `psql` client: não encontrado no PATH deste runner (não foi possível abrir sessão SQL manual).
+
+### Impacto na coleta solicitada
+Sem `TEST_DATABASE_URL` real apontando para staging/prod (e sem cliente `psql`), **não foi possível** coletar nesta execução:
+- maiores tabelas;
+- inventário real de índices;
+- índices pouco usados (`pg_stat_user_indexes`);
+- top queries reais via `pg_stat_statements`;
+- `EXPLAIN ANALYZE` dos fluxos críticos (notifications 24h, sender queue, scrape_jobs dequeue, admin health, wishlist summaries, tracking list).
+
+### Reclassificação de candidatos (com evidência atual)
+Como não há telemetria/planos reais nesta execução, a classificação precisa permanecer conservadora:
+- **P0 aplicar agora:** nenhum.
+- **P1 provável:** `system_logs(component, message, created_at desc)` e `car_listings(url)` **continuam hipóteses**, aguardando `EXPLAIN ANALYZE` + `pg_stat_statements`.
+- **P2 observar:** `source_runs(source, status, created_at desc)` (potencial redundância com índices existentes).
+- **Não fazer (por ora):** novos índices em `wishlist_filters(field)` compostos e `wishlists(is_active)` isolado sem evidência de workload real.
+
+### Recomendação objetiva
+**Nenhuma migration agora.** Próximo passo obrigatório é repetir esta fase em ambiente com `TEST_DATABASE_URL` PostgreSQL real (staging/prod) e executar integralmente o roteiro de `docs/DB_REVIEW_SQL.md` antes de propor índice/migration.
+
