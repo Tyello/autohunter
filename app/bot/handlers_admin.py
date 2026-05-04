@@ -29,6 +29,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
+from app.services.operational_alerts_service import collect_operational_alerts
 from app.services.source_operational_policy import (
     classify_source_operational_role,
     should_include_in_critical_stale,
@@ -1603,5 +1604,30 @@ async def _admin_audit(update: Update, raw_args: Optional[List[str]] = None):
         q = {(a, b): c for a, b, c in db.query(ScrapeJob.queue, ScrapeJob.status, func.count(ScrapeJob.id)).group_by(ScrapeJob.queue, ScrapeJob.status).all()}
         n = {a: b for a, b in db.query(Notification.status, func.count(Notification.id)).group_by(Notification.status).all()}
         sent24 = db.query(func.count(Notification.id)).filter(Notification.status == "sent", Notification.sent_at >= now - timedelta(hours=24)).scalar() or 0
-        lines = ["🧭 Admin — Audit", f"UTC: {now.strftime('%Y-%m-%d %H:%M:%SZ')}", f"Status geral: {'CRÍTICO' if (hb_age is None or hb_age > 180) else 'ATENÇÃO'}", "", "Scheduler:", f"heartbeat age={hb_age if hb_age is not None else '-'}m", f"última execução global age={run_age if run_age is not None else '-'}m", "", "Filas:", f"http queued={q.get(('http','queued'),0)} running={q.get(('http','running'),0)} failed={q.get(('http','failed'),0)}", f"browser queued={q.get(('browser','queued'),0)} running={q.get(('browser','running'),0)} failed={q.get(('browser','failed'),0)}", "", "Notifications:", f"queued={n.get('queued',0)} processing={n.get('processing',0)} sent_24h={sent24} failed_24h={n.get('failed',0)}", "", "Sources com atenção:", "- use /admin health para detalhe por source", "", "Próximo passo:", "Use /admin health para detalhes ou /admin sources para visão por source."]
+        alerts_preview = collect_operational_alerts(db, now=now, consume_cooldown=False)
+        source_attention = [a for a in alerts_preview if a.key.startswith(("source_stale:", "source_backoff:", "source_error:"))]
+        attention_lines = [f"- {a.key}: {a.message}" for a in source_attention[:5]]
+        if not attention_lines:
+            attention_lines = ["- Sources com atenção: nenhuma"]
+
+        queued_total = q.get(("http", "queued"), 0) + q.get(("browser", "queued"), 0)
+        running_old_total = (
+            db.query(func.count(ScrapeJob.id))
+            .filter(ScrapeJob.status == "running", ScrapeJob.started_at < now - timedelta(minutes=45))
+            .scalar()
+            or 0
+        )
+        notif_old = (
+            db.query(func.count(Notification.id))
+            .filter(Notification.status.in_(["queued", "processing"]), Notification.created_at < now - timedelta(minutes=45))
+            .scalar()
+            or 0
+        )
+        critical = (hb_age is None or hb_age > 180) or (run_age is not None and run_age > 180) or running_old_total > 0
+        warning = bool(source_attention) or queued_total > 0 or notif_old > 0
+        status_geral = "CRÍTICO" if critical else ("ATENÇÃO" if warning else "OK")
+
+        lines = ["🧭 Admin — Audit", f"UTC: {now.strftime('%Y-%m-%d %H:%M:%SZ')}", f"Status geral: {status_geral}", "", "Scheduler:", f"heartbeat age={hb_age if hb_age is not None else '-'}m", f"última execução global age={run_age if run_age is not None else '-'}m", "", "Filas:", f"http queued={q.get(('http','queued'),0)} running={q.get(('http','running'),0)} failed={q.get(('http','failed'),0)}", f"browser queued={q.get(('browser','queued'),0)} running={q.get(('browser','running'),0)} failed={q.get(('browser','failed'),0)}", "", "Notifications:", f"queued={n.get('queued',0)} processing={n.get('processing',0)} sent_24h={sent24} failed_24h={n.get('failed',0)}", "", "Sources com atenção:"]
+        lines.extend(attention_lines)
+        lines.extend(["", "Próximo passo:", "Use /admin health para detalhes ou /admin sources para visão por source."])
         await _reply_chunked(update, sanitize_for_telegram("\n".join(lines)[:3800]))
