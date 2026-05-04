@@ -15,7 +15,10 @@ from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.models.system_log import SystemLog
 from app.services.app_kv_service import get_kv, set_kv
-from app.services.source_operational_policy import should_include_in_critical_stale
+from app.services.source_operational_policy import (
+    classify_source_operational_role,
+    should_include_in_critical_stale,
+)
 from app.services.source_staleness_service import evaluate_source_staleness
 from app.sources.registry import get_source
 
@@ -70,7 +73,12 @@ def _mark_sent(db: Session, key: str, now: datetime) -> None:
     set_kv(db, f"ops_alert:{key}", {"last_sent_at": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
 
 
-def collect_operational_alerts(db: Session, now: Optional[datetime] = None) -> List[OperationalAlert]:
+def collect_operational_alerts(
+    db: Session,
+    now: Optional[datetime] = None,
+    *,
+    consume_cooldown: bool = True,
+) -> List[OperationalAlert]:
     now = _now(now)
     alerts: List[OperationalAlert] = []
 
@@ -102,6 +110,11 @@ def collect_operational_alerts(db: Session, now: Optional[datetime] = None) -> L
         by_source_bucket[k] = by_source_bucket.get(k, 0) + 1
     for (src, b), n in by_source_bucket.items():
         if n >= 3 and src in configs:
+            plugin = get_source(src)
+            cfg = configs.get(src)
+            op_class = classify_source_operational_role(plugin, cfg=cfg)
+            if not op_class.include_in_critical_stale:
+                continue
             alerts.append(OperationalAlert(f"source_error:{src}:{b}", f"⚠️ Source {src} com recorrência {b} ({n}x/90m). Próximo passo: /admin audit e revisar source {src}.", 60))
 
     for queue in ("http", "browser"):
@@ -115,6 +128,7 @@ def collect_operational_alerts(db: Session, now: Optional[datetime] = None) -> L
         alerts.append(OperationalAlert("notifications_stuck", f"⚠️ Sender possivelmente parado: notifications antigas={notif_old}. Próximo passo: /admin health e /admin audit.", 30))
 
     due = [a for a in alerts if _is_cooldown_open(db, a.key, a.cooldown_minutes, now)]
-    for a in due:
-        _mark_sent(db, a.key, now)
+    if consume_cooldown:
+        for a in due:
+            _mark_sent(db, a.key, now)
     return due

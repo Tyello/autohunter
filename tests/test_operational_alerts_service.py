@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from app.models.source_run import SourceRun
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.models.system_log import SystemLog
@@ -36,3 +37,17 @@ def test_primary_stale_alerts_but_experimental_not(db):
     keys = {a.key for a in collect_operational_alerts(db, now=now)}
     assert "source_stale:olx" in keys
     assert "source_stale:kavak" not in keys
+
+
+def test_recurring_error_does_not_alert_for_experimental_or_deprioritized(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(SourceConfig(source="kavak", is_enabled=True, sched_minutes=30))
+    db.add(SourceConfig(source="webmotors", is_enabled=True, sched_minutes=30))
+    for _ in range(3):
+        db.add(SourceRun(source="kavak", kind="scheduled", status="error", error="timeout", created_at=now - timedelta(minutes=10)))
+        db.add(SourceRun(source="webmotors", kind="scheduled", status="error", error="timeout", created_at=now - timedelta(minutes=10)))
+    db.commit()
+    keys = {a.key for a in collect_operational_alerts(db, now=now)}
+    assert "source_error:kavak:NET" not in keys
+    assert "source_error:webmotors:NET" not in keys
