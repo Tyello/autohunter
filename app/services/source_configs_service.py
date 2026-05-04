@@ -13,8 +13,8 @@ from app.sources.registry import list_sources, get_source
 from app.sources.types import ScrapeContext
 from app.sources.flags import read_source_impl_flags
 
-_CACHE_BY_SOURCE: dict[str, tuple[datetime, Optional[SourceConfig]]] = {}
-_CACHE_LIST: tuple[datetime, List[SourceConfig]] | None = None
+_CACHE_BY_SOURCE: dict[str, tuple[datetime, "SourceConfigSnapshot | None"]] = {}
+_CACHE_LIST: tuple[datetime, List["SourceConfigSnapshot"]] | None = None
 
 
 def _cache_ttl_seconds() -> int:
@@ -51,6 +51,58 @@ def _normalize_proxy_server(v: Any) -> Optional[str]:
     if "://" not in s:
         s = "http://" + s
     return s
+
+
+@dataclass(frozen=True)
+class SourceConfigSnapshot:
+    source: str
+    is_enabled: bool
+    sched_minutes: int
+    cooldown_minutes: int
+    rate_limit_seconds: int
+    proxy_server: str | None
+    browser_fallback_enabled: bool
+    force_browser: bool
+    extra: dict | None
+
+
+def _to_snapshot(row: SourceConfig | None) -> SourceConfigSnapshot | None:
+    if row is None:
+        return None
+    return SourceConfigSnapshot(
+        source=row.source,
+        is_enabled=bool(row.is_enabled),
+        sched_minutes=int(row.sched_minutes),
+        cooldown_minutes=int(row.cooldown_minutes),
+        rate_limit_seconds=int(row.rate_limit_seconds),
+        proxy_server=row.proxy_server,
+        browser_fallback_enabled=bool(row.browser_fallback_enabled),
+        force_browser=bool(row.force_browser),
+        extra=dict(row.extra) if isinstance(row.extra, dict) else row.extra,
+    )
+
+
+def get_source_config_snapshot(db: Session, source: str) -> SourceConfigSnapshot | None:
+    src = source.strip().lower()
+    now = _cache_now()
+    cached = _CACHE_BY_SOURCE.get(src)
+    if cached and now <= cached[0]:
+        return cached[1]
+    row = db.execute(select(SourceConfig).where(SourceConfig.source == src)).scalar_one_or_none()
+    snap = _to_snapshot(row)
+    _CACHE_BY_SOURCE[src] = (now + timedelta(seconds=_cache_ttl_seconds()), snap)
+    return snap
+
+
+def list_source_config_snapshots(db: Session) -> List[SourceConfigSnapshot]:
+    global _CACHE_LIST
+    now = _cache_now()
+    if _CACHE_LIST and now <= _CACHE_LIST[0]:
+        return list(_CACHE_LIST[1])
+    rows = list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
+    snapshots = [_to_snapshot(r) for r in rows if r is not None]
+    _CACHE_LIST = (now + timedelta(seconds=_cache_ttl_seconds()), snapshots)
+    return snapshots
 
 
 @dataclass
@@ -99,25 +151,11 @@ def _coerce_int(value: str) -> Optional[int]:
 
 def get_source_config(db: Session, source: str) -> Optional[SourceConfig]:
     src = source.strip().lower()
-    now = _cache_now()
-    cached = _CACHE_BY_SOURCE.get(src)
-    if cached and now <= cached[0]:
-        return cached[1]
-    row = db.execute(
-        select(SourceConfig).where(SourceConfig.source == source.strip().lower())
-    ).scalar_one_or_none()
-    _CACHE_BY_SOURCE[src] = (now + timedelta(seconds=_cache_ttl_seconds()), row)
-    return row
+    return db.execute(select(SourceConfig).where(SourceConfig.source == src)).scalar_one_or_none()
 
 
 def list_source_configs(db: Session) -> List[SourceConfig]:
-    global _CACHE_LIST
-    now = _cache_now()
-    if _CACHE_LIST and now <= _CACHE_LIST[0]:
-        return list(_CACHE_LIST[1])
-    rows = list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
-    _CACHE_LIST = (now + timedelta(seconds=_cache_ttl_seconds()), rows)
-    return rows
+    return list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
 
 
 def ensure_source_configs(db: Session) -> int:
@@ -260,10 +298,10 @@ def reset_source_config(db: Session, source: str) -> SourceConfig:
 def build_scrape_context(db: Session, source: str) -> ScrapeContext:
     """Build ScrapeContext using DB config (source_configs)."""
     src = source.strip().lower()
-    cfg = get_source_config(db, src)
+    cfg = get_source_config_snapshot(db, src)
     if not cfg:
         ensure_source_configs(db)
-        cfg = get_source_config(db, src)
+        cfg = get_source_config_snapshot(db, src)
 
     # If still missing, fallback to plugin defaults
     if not cfg:
