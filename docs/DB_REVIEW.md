@@ -197,3 +197,57 @@ Como não há telemetria/planos reais nesta execução, a classificação precis
 - Índices operacionais P0 adicionados via migration `a1b2c3d4e5f6_operational_io_indexes.py` para `system_logs` e `source_runs` com estratégia `CONCURRENTLY` no PostgreSQL.
 - Cache TTL curto para `source_configs` implementado em `app/services/source_configs_service.py` (default 60s), com invalidação explícita em mutações admin.
 - Script operacional `scripts/cleanup_operational_data.py` criado com dry-run padrão e `--apply` explícito para retenção de logs/eventos/jobs/runs/notificações/activity.
+- Diagnóstico de hot paths no código:
+  - `/admin health` agrega `scrape_jobs` e `notifications` e faz leituras recentes de `source_runs`/`source_states`.
+  - Detector de burst do autopilot consulta `system_logs` por janela temporal.
+  - Scheduler/workers usam `source_configs` repetidamente; cache TTL curto reduz SELECTs redundantes no período.
+  - Workers de fila consomem `scrape_jobs` em batches de 1 job por tick (sem `SELECT *` em loop aberto contínuo dentro do worker).
+
+### SQLs de validação pós-deploy (obrigatório)
+1. Validar queda de custo/tempo das queries quentes:
+   ```sql
+   select query, calls, total_exec_time, mean_exec_time, rows
+   from pg_stat_statements
+   where query ilike '%system_logs%'
+      or query ilike '%source_runs%'
+      or query ilike '%source_configs%'
+      or query ilike '%scrape_jobs%'
+   order by total_exec_time desc
+   limit 20;
+   ```
+2. Validar uso dos novos índices:
+   ```sql
+   select relname as table_name, indexrelname as index_name, idx_scan, idx_tup_read, idx_tup_fetch
+   from pg_stat_user_indexes
+   where indexrelname in (
+     'ix_system_logs_created_level_event_type',
+     'ix_system_logs_created_source_fingerprint',
+     'ix_source_runs_source_created_status'
+   )
+   order by idx_scan desc;
+   ```
+3. Validar redução de varredura sequencial:
+   ```sql
+   select relname, seq_scan, seq_tup_read, idx_scan, n_live_tup
+   from pg_stat_user_tables
+   where relname in ('system_logs','source_runs','source_configs','scrape_jobs')
+   order by seq_tup_read desc;
+   ```
+4. EXPLAIN da agregação de logs (sem GROUP BY message):
+   ```sql
+   explain (analyze, buffers)
+   select
+     component,
+     coalesce(event_type,'') as event_type,
+     coalesce(source,'') as source,
+     coalesce(level,'') as level,
+     coalesce(fingerprint,'') as fingerprint,
+     max(message) as sample_message,
+     count(id) as cnt
+   from system_logs
+   where created_at >= now() - interval '24 hours'
+     and level in ('warn','error')
+   group by component, coalesce(event_type,''), coalesce(source,''), coalesce(level,''), coalesce(fingerprint,'')
+   order by count(id) desc
+   limit 25;
+   ```
