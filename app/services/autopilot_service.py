@@ -327,13 +327,23 @@ def _candidate_system_log_errors(db: Session, now: datetime) -> List[FindingCand
     rows = (
         db.query(
             SystemLog.component.label("component"),
-            SystemLog.message.label("message"),
+            SystemLog.event_type.label("event_type"),
+            SystemLog.source.label("source"),
+            SystemLog.level.label("level"),
+            SystemLog.fingerprint.label("fingerprint"),
+            func.max(SystemLog.message).label("sample_message"),
             func.count(SystemLog.id).label("cnt"),
         )
         .filter(SystemLog.created_at >= start)
         .filter(SystemLog.created_at < end)
         .filter(SystemLog.level.in_(["warn", "error"]))
-        .group_by(SystemLog.component, SystemLog.message)
+        .group_by(
+            SystemLog.component,
+            SystemLog.event_type,
+            SystemLog.source,
+            SystemLog.level,
+            SystemLog.fingerprint,
+        )
         .order_by(func.count(SystemLog.id).desc())
         .limit(25)
         .all()
@@ -345,15 +355,18 @@ def _candidate_system_log_errors(db: Session, now: datetime) -> List[FindingCand
         if cnt < min_hits:
             continue
         comp = r.component
-        msg = (r.message or "")[:200]
-        fp = _sha1(f"log_burst|{comp}|{msg}")
+        msg = (r.sample_message or "")[:200]
+        fp = _sha1(f"log_burst|{comp}|{r.event_type}|{r.source}|{r.level}|{r.fingerprint or msg}")
         samples = (
             db.query(SystemLog)
             .filter(SystemLog.created_at >= start)
             .filter(SystemLog.created_at < end)
             .filter(SystemLog.level.in_(["warn", "error"]))
             .filter(SystemLog.component == comp)
-            .filter(SystemLog.message == r.message)
+            .filter(SystemLog.event_type == r.event_type)
+            .filter(SystemLog.source == r.source)
+            .filter(SystemLog.level == r.level)
+            .filter(SystemLog.fingerprint == r.fingerprint)
             .order_by(SystemLog.created_at.desc())
             .limit(5)
             .all()
@@ -369,7 +382,11 @@ def _candidate_system_log_errors(db: Session, now: datetime) -> List[FindingCand
                     "window": {"start": start.isoformat(), "end": end.isoformat()},
                     "count": cnt,
                     "component": comp,
-                    "message": msg,
+                    "event_type": r.event_type,
+                    "source": r.source,
+                    "level": r.level,
+                    "fingerprint": r.fingerprint,
+                    "sample_message": msg,
                     "sample_log_ids": [str(s.id) for s in samples],
                 },
                 suggested_actions="Ações sugeridas: abrir stacktrace (payload.tb) nos logs e corrigir o fluxo.",

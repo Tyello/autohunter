@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict, List
 
 from sqlalchemy.orm import Session
@@ -10,6 +11,23 @@ from app.models.source_config import SourceConfig
 from app.sources.registry import list_sources, get_source
 from app.sources.types import ScrapeContext
 from app.sources.flags import read_source_impl_flags
+from app.core.settings import settings
+
+_SOURCE_CONFIG_CACHE: dict[str, tuple[datetime, Optional[SourceConfig]]] = {}
+_SOURCE_CONFIGS_LIST_CACHE: tuple[datetime, List[SourceConfig]] | None = None
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def invalidate_source_config_cache(source: Optional[str] = None) -> None:
+    global _SOURCE_CONFIGS_LIST_CACHE
+    if source:
+        _SOURCE_CONFIG_CACHE.pop(source.strip().lower(), None)
+    else:
+        _SOURCE_CONFIG_CACHE.clear()
+    _SOURCE_CONFIGS_LIST_CACHE = None
 
 
 def _normalize_proxy_server(v: Any) -> Optional[str]:
@@ -76,13 +94,29 @@ def _coerce_int(value: str) -> Optional[int]:
 
 
 def get_source_config(db: Session, source: str) -> Optional[SourceConfig]:
-    return db.execute(
-        select(SourceConfig).where(SourceConfig.source == source.strip().lower())
-    ).scalar_one_or_none()
+    src = source.strip().lower()
+    ttl_seconds = int(getattr(settings, "source_configs_cache_ttl_seconds", 60) or 60)
+    now = _utcnow()
+    if ttl_seconds > 0:
+        hit = _SOURCE_CONFIG_CACHE.get(src)
+        if hit and hit[0] > now:
+            return hit[1]
+    row = db.execute(select(SourceConfig).where(SourceConfig.source == src)).scalar_one_or_none()
+    if ttl_seconds > 0:
+        _SOURCE_CONFIG_CACHE[src] = (now + timedelta(seconds=ttl_seconds), row)
+    return row
 
 
 def list_source_configs(db: Session) -> List[SourceConfig]:
-    return list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
+    global _SOURCE_CONFIGS_LIST_CACHE
+    ttl_seconds = int(getattr(settings, "source_configs_cache_ttl_seconds", 60) or 60)
+    now = _utcnow()
+    if ttl_seconds > 0 and _SOURCE_CONFIGS_LIST_CACHE and _SOURCE_CONFIGS_LIST_CACHE[0] > now:
+        return _SOURCE_CONFIGS_LIST_CACHE[1]
+    rows = list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
+    if ttl_seconds > 0:
+        _SOURCE_CONFIGS_LIST_CACHE = (now + timedelta(seconds=ttl_seconds), rows)
+    return rows
 
 
 def ensure_source_configs(db: Session) -> int:
@@ -141,6 +175,7 @@ def ensure_source_configs(db: Session) -> int:
     # that subsequent SELECTs in the same transaction can "see" freshly added
     # rows (e.g. /admin sources enable <source>). Commit is handled by callers.
     if created or updated:
+        invalidate_source_config_cache()
         try:
             db.flush()
         except Exception:
@@ -174,6 +209,7 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Source
         if b is None:
             raise ValueError(f"valor boolean inválido: {value}")
         setattr(row, key, b)
+        invalidate_source_config_cache(src)
         return row
 
     if key in ("sched_minutes", "cooldown_minutes", "rate_limit_seconds"):
@@ -181,11 +217,13 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Source
         if i is None or i < 0:
             raise ValueError(f"valor int inválido: {value}")
         setattr(row, key, i)
+        invalidate_source_config_cache(src)
         return row
 
     if key == "proxy_server":
         v = (value or "").strip()
         setattr(row, key, v if v else None)
+        invalidate_source_config_cache(src)
         return row
 
     raise ValueError(f"campo não suportado: {field}")
@@ -213,6 +251,7 @@ def reset_source_config(db: Session, source: str) -> SourceConfig:
     cfg.browser_fallback_enabled = bool(getattr(plugin, "default_browser_fallback_enabled", False))
     cfg.force_browser = bool(getattr(plugin, "default_force_browser", False))
     cfg.extra = getattr(plugin, "default_extra", None)
+    invalidate_source_config_cache(src)
     return cfg
 
 

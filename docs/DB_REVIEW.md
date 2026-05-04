@@ -191,3 +191,17 @@ Como não há telemetria/planos reais nesta execução, a classificação precis
 ### Recomendação objetiva
 **Nenhuma migration agora.** Próximo passo obrigatório é repetir esta fase em ambiente com `TEST_DATABASE_URL` PostgreSQL real (staging/prod) e executar integralmente o roteiro de `docs/DB_REVIEW_SQL.md` antes de propor índice/migration.
 
+
+
+## 2026-05-04 — Disk IO mitigation (P0)
+
+- `system_logs` hot aggregation in autopilot was changed to group by low-cardinality dimensions (`component`, `event_type`, `source`, `level`, `fingerprint`) and use `max(message)` only as sample.
+- Added Alembic migration `20260504_01_operational_indexes.py` with production-safe PostgreSQL `CREATE INDEX CONCURRENTLY` for `system_logs` and `source_runs` access patterns used by admin/autopilot windows.
+- Added `scripts/cleanup_operational_data.py` with dry-run default and `--apply` explicit mode for retention cleanup:
+  - `system_logs` 7d
+  - `telemetry_events` 7d
+  - `scrape_jobs` done/failed 7d
+  - `source_runs` 30d
+  - `notifications` sent/failed/cancelled 90d
+  - `wishlist_listing_activity` 90d
+- Added short TTL cache for `source_configs` reads (`source_configs_cache_ttl_seconds`, default 60s) with explicit invalidation on config updates/reset.

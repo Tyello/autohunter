@@ -239,6 +239,14 @@ class Settings(BaseSettings):
     # digest diário para admins (UTC hour, ex: 12 = 09:00 America/Sao_Paulo)
     autopilot_daily_digest_enabled: bool = True
     autopilot_daily_digest_hour_utc: int = 12
+    source_configs_cache_ttl_seconds: int = 60
+    operational_cleanup_batch_size: int = 500
+    retention_system_logs_days: int = 7
+    retention_telemetry_events_days: int = 7
+    retention_scrape_jobs_days: int = 7
+    retention_source_runs_days: int = 30
+    retention_notifications_days: int = 90
+    retention_wishlist_activity_days: int = 90
     telegram_text_max: int = 4000
     safe_chunk: int = 3800
 
