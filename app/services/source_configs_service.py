@@ -1,15 +1,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict, List
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from app.core.settings import settings
 from app.models.source_config import SourceConfig
 from app.sources.registry import list_sources, get_source
 from app.sources.types import ScrapeContext
 from app.sources.flags import read_source_impl_flags
+
+_CACHE_BY_SOURCE: dict[str, tuple[datetime, Optional[SourceConfig]]] = {}
+_CACHE_LIST: tuple[datetime, List[SourceConfig]] | None = None
+
+
+def _cache_ttl_seconds() -> int:
+    return max(1, int(getattr(settings, "source_config_cache_ttl_seconds", 60) or 60))
+
+
+def _cache_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def invalidate_source_config_cache(source: Optional[str] = None) -> None:
+    global _CACHE_LIST
+    _CACHE_LIST = None
+    if source:
+        _CACHE_BY_SOURCE.pop(source.strip().lower(), None)
+        return
+    _CACHE_BY_SOURCE.clear()
 
 
 def _normalize_proxy_server(v: Any) -> Optional[str]:
@@ -76,13 +98,26 @@ def _coerce_int(value: str) -> Optional[int]:
 
 
 def get_source_config(db: Session, source: str) -> Optional[SourceConfig]:
-    return db.execute(
+    src = source.strip().lower()
+    now = _cache_now()
+    cached = _CACHE_BY_SOURCE.get(src)
+    if cached and now <= cached[0]:
+        return cached[1]
+    row = db.execute(
         select(SourceConfig).where(SourceConfig.source == source.strip().lower())
     ).scalar_one_or_none()
+    _CACHE_BY_SOURCE[src] = (now + timedelta(seconds=_cache_ttl_seconds()), row)
+    return row
 
 
 def list_source_configs(db: Session) -> List[SourceConfig]:
-    return list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
+    global _CACHE_LIST
+    now = _cache_now()
+    if _CACHE_LIST and now <= _CACHE_LIST[0]:
+        return list(_CACHE_LIST[1])
+    rows = list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
+    _CACHE_LIST = (now + timedelta(seconds=_cache_ttl_seconds()), rows)
+    return rows
 
 
 def ensure_source_configs(db: Session) -> int:
@@ -141,6 +176,7 @@ def ensure_source_configs(db: Session) -> int:
     # that subsequent SELECTs in the same transaction can "see" freshly added
     # rows (e.g. /admin sources enable <source>). Commit is handled by callers.
     if created or updated:
+        invalidate_source_config_cache()
         try:
             db.flush()
         except Exception:
@@ -174,6 +210,7 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Source
         if b is None:
             raise ValueError(f"valor boolean inválido: {value}")
         setattr(row, key, b)
+        invalidate_source_config_cache(src)
         return row
 
     if key in ("sched_minutes", "cooldown_minutes", "rate_limit_seconds"):
@@ -181,11 +218,13 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Source
         if i is None or i < 0:
             raise ValueError(f"valor int inválido: {value}")
         setattr(row, key, i)
+        invalidate_source_config_cache(src)
         return row
 
     if key == "proxy_server":
         v = (value or "").strip()
         setattr(row, key, v if v else None)
+        invalidate_source_config_cache(src)
         return row
 
     raise ValueError(f"campo não suportado: {field}")
@@ -213,6 +252,7 @@ def reset_source_config(db: Session, source: str) -> SourceConfig:
     cfg.browser_fallback_enabled = bool(getattr(plugin, "default_browser_fallback_enabled", False))
     cfg.force_browser = bool(getattr(plugin, "default_force_browser", False))
     cfg.extra = getattr(plugin, "default_extra", None)
+    invalidate_source_config_cache(src)
     return cfg
 
 

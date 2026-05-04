@@ -191,3 +191,9 @@ Como não há telemetria/planos reais nesta execução, a classificação precis
 ### Recomendação objetiva
 **Nenhuma migration agora.** Próximo passo obrigatório é repetir esta fase em ambiente com `TEST_DATABASE_URL` PostgreSQL real (staging/prod) e executar integralmente o roteiro de `docs/DB_REVIEW_SQL.md` antes de propor índice/migration.
 
+
+## Update 2026-05-04 — Supabase Disk IO Budget (P0)
+- Hot query ajustada em `app/services/autopilot_service.py`: removido `GROUP BY component, message`; agregado por `component,event_type,source,level,fingerprint` com `max(message)` como amostra.
+- Índices operacionais P0 adicionados via migration `a1b2c3d4e5f6_operational_io_indexes.py` para `system_logs` e `source_runs` com estratégia `CONCURRENTLY` no PostgreSQL.
+- Cache TTL curto para `source_configs` implementado em `app/services/source_configs_service.py` (default 60s), com invalidação explícita em mutações admin.
+- Script operacional `scripts/cleanup_operational_data.py` criado com dry-run padrão e `--apply` explícito para retenção de logs/eventos/jobs/runs/notificações/activity.

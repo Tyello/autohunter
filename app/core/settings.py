@@ -241,6 +241,13 @@ class Settings(BaseSettings):
     autopilot_daily_digest_hour_utc: int = 12
     telegram_text_max: int = 4000
     safe_chunk: int = 3800
+    source_config_cache_ttl_seconds: int = 60
+    operational_retention_system_logs_days: int = 7
+    operational_retention_telemetry_events_days: int = 7
+    operational_retention_scrape_jobs_days: int = 7
+    operational_retention_source_runs_days: int = 30
+    operational_retention_notifications_days: int = 90
+    operational_retention_wishlist_activity_days: int = 90
 
     def model_post_init(self, __context) -> None:
         self._per_source_scraper_flags: dict[str, bool] = {}
