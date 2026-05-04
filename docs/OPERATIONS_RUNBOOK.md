@@ -247,3 +247,11 @@ Boas práticas para novas migrations:
 - SQLite é para testes rápidos/unitários/serviço e deve ser isolado por teste (`tmp_path`/fixture equivalente) quando houver `drop_all/create_all`.
 - Não usar arquivo SQLite compartilhado para testes que manipulam schema.
 - PostgreSQL (via `TEST_DATABASE_URL`) é para integração real de banco, constraints e migrations Alembic.
+
+## P0 Operacional (2026-05)
+- `/admin audit`: resumo compacto de plantão (scheduler, fontes críticas, filas e notifications).
+- Alertas operacionais automáticos são **admin-only** via monitor periódico, com cooldown anti-spam por chave.
+- Critérios P0: scheduler stale global, source crítica stale/backoff/erro recorrente, filas travadas e sender possivelmente parado.
+- Fontes `experimental/deprioritized/auxiliary` não disparam incidente crítico de stale por padrão.
+- Operação recomendada: use `/admin audit` para triagem rápida e `/admin health` para detalhe.
+

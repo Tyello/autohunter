@@ -224,7 +224,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin deploy")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy")
         return
 
     action = args[0].lower()
@@ -233,6 +233,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if action == "health":
         await _admin_health(update, args[1:])
+        return
+    if action == "audit":
+        await _admin_audit(update, args[1:])
         return
     if action == "users":
         await _admin_users(update, args[1:])
@@ -267,7 +270,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin users | /admin errors | /admin deploy | /admin fb_sessions")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     return await _admin_sources_dispatch_impl(
@@ -1583,3 +1586,22 @@ async def _admin_fb_sessions(update: Update):
 
 async def _admin_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE, args: list[str]):
     return await _admin_deploy_impl(update, args, fmt_dt=_fmt_dt)
+
+async def _admin_audit(update: Update, raw_args: Optional[List[str]] = None):
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
+        await update.message.reply_text("Sem permissão.")
+        return
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        hb = db.query(SystemLog).filter(SystemLog.component == "scheduler", SystemLog.message == "heartbeat").order_by(SystemLog.created_at.desc()).first()
+        hb_dt = _as_utc(getattr(hb, "created_at", None))
+        hb_age = int((now - hb_dt).total_seconds() // 60) if hb_dt else None
+        last_run = db.query(SourceRun).order_by(SourceRun.created_at.desc()).first()
+        run_dt = _as_utc(getattr(last_run, "created_at", None))
+        run_age = int((now - run_dt).total_seconds() // 60) if run_dt else None
+        q = {(a, b): c for a, b, c in db.query(ScrapeJob.queue, ScrapeJob.status, func.count(ScrapeJob.id)).group_by(ScrapeJob.queue, ScrapeJob.status).all()}
+        n = {a: b for a, b in db.query(Notification.status, func.count(Notification.id)).group_by(Notification.status).all()}
+        sent24 = db.query(func.count(Notification.id)).filter(Notification.status == "sent", Notification.sent_at >= now - timedelta(hours=24)).scalar() or 0
+        lines = ["🧭 Admin — Audit", f"UTC: {now.strftime('%Y-%m-%d %H:%M:%SZ')}", f"Status geral: {'CRÍTICO' if (hb_age is None or hb_age > 180) else 'ATENÇÃO'}", "", "Scheduler:", f"heartbeat age={hb_age if hb_age is not None else '-'}m", f"última execução global age={run_age if run_age is not None else '-'}m", "", "Filas:", f"http queued={q.get(('http','queued'),0)} running={q.get(('http','running'),0)} failed={q.get(('http','failed'),0)}", f"browser queued={q.get(('browser','queued'),0)} running={q.get(('browser','running'),0)} failed={q.get(('browser','failed'),0)}", "", "Notifications:", f"queued={n.get('queued',0)} processing={n.get('processing',0)} sent_24h={sent24} failed_24h={n.get('failed',0)}", "", "Sources com atenção:", "- use /admin health para detalhe por source", "", "Próximo passo:", "Use /admin health para detalhes ou /admin sources para visão por source."]
+        await _reply_chunked(update, sanitize_for_telegram("\n".join(lines)[:3800]))
