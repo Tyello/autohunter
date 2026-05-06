@@ -469,6 +469,14 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
         context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
         return await _show_draft_filters_screen(update, context, feedback="✅ Filtro adicionado.")
 
+    if "menu_create_wishlist_draft_filters" in context.user_data:
+        await reply_text(
+            update,
+            "Use os botões para adicionar filtros, concluir ou cancelar. "
+            "Para informar um valor, primeiro escolha o tipo de filtro.",
+        )
+        return MENU_CREATE_WISHLIST_QUERY
+
     query = (update.message.text or "").strip()
     if not query:
         await reply_text(update, "Texto inválido. Envie o carro/busca ou use /cancelar.")
@@ -555,6 +563,10 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
     if data == "CWLF:DONE":
         query = context.user_data.get("menu_create_wishlist_query")
         filters_draft = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        if not query:
+            _clear_menu_create_wishlist_draft_context(context)
+            await _safe_edit_or_send(update, "Sessão expirada. Abra novamente /menu → Criar wishlist.")
+            return ConversationHandler.END
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             ok, msg, _wid = create_wishlist_with_filters(db, user.id, query, filters_draft)

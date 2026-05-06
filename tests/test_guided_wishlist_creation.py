@@ -99,6 +99,16 @@ def test_draft_filter_add_and_remove(monkeypatch):
     assert ctx.user_data["menu_create_wishlist_draft_filters"] == []
 
 
+def test_draft_mode_free_text_does_not_override_query():
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_draft_filters": []})
+    msg = _Message("SP")
+    state = asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
+    assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert ctx.user_data["menu_create_wishlist_query"] == "civic si"
+    assert ctx.user_data["menu_create_wishlist_draft_filters"] == []
+    assert "Use os botões para adicionar filtros" in msg.sent[-1]["text"]
+
+
 def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     _patch_user(monkeypatch)
     called = {}
@@ -119,6 +129,15 @@ def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     assert called["query"] == "civic si"
     assert len(called["filters"]) == 1
     assert ctx.user_data == {}
+
+
+def test_draft_done_without_query_expires_session():
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_draft_filters": []})
+    q = _CallbackQuery("CWLF:DONE")
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
+    assert state == ConversationHandler.END
+    assert ctx.user_data == {}
+    assert "Sessão expirada" in q.edits[-1]["text"]
 
 
 def test_draft_cancel_clears_context_and_does_not_create(monkeypatch):
