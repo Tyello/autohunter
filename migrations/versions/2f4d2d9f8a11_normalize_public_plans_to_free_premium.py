@@ -21,24 +21,30 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute(
         """
-        insert into plans (id, code, name, daily_alert_limit, max_wishlists, is_active)
-        values (gen_random_uuid(), 'free', 'Free', 5, 2, true)
+        insert into plans (
+          id, code, name, daily_alert_limit, max_wishlists, is_active, created_at, updated_at
+        )
+        values (gen_random_uuid(), 'free', 'Free', 5, 2, true, now(), now())
         on conflict (code) do update set
           name = excluded.name,
           daily_alert_limit = excluded.daily_alert_limit,
           max_wishlists = excluded.max_wishlists,
-          is_active = true;
+          is_active = true,
+          updated_at = now();
         """
     )
     op.execute(
         """
-        insert into plans (id, code, name, daily_alert_limit, max_wishlists, is_active)
-        values (gen_random_uuid(), 'premium', 'Premium', 15, 10, true)
+        insert into plans (
+          id, code, name, daily_alert_limit, max_wishlists, is_active, created_at, updated_at
+        )
+        values (gen_random_uuid(), 'premium', 'Premium', 15, 10, true, now(), now())
         on conflict (code) do update set
           name = excluded.name,
           daily_alert_limit = excluded.daily_alert_limit,
           max_wishlists = excluded.max_wishlists,
-          is_active = true;
+          is_active = true,
+          updated_at = now();
         """
     )
 
@@ -54,9 +60,9 @@ def upgrade() -> None:
         """
     )
 
-    op.execute("update plans set is_active = false where code in ('pro', 'ultra', 'paid')")
+    op.execute("update plans set is_active = false, updated_at = now() where code in ('pro', 'ultra', 'paid')")
 
 
 def downgrade() -> None:
     # Downgrade parcial: reativa planos legados sem reverter subscriptions migradas.
-    op.execute("update plans set is_active = true where code in ('pro', 'ultra', 'paid')")
+    op.execute("update plans set is_active = true, updated_at = now() where code in ('pro', 'ultra', 'paid')")
