@@ -10,8 +10,8 @@ from app.models.plan import PLAN_CODE_FREE, PLAN_CODE_PREMIUM, PLAN_CODE_PRO, PL
 BASE_PLANS: Final[dict[str, dict[str, int | str | bool]]] = {
     PLAN_CODE_FREE: {
         "name": "Free",
-        "daily_alert_limit": 10,
-        "max_wishlists": 3,
+        "daily_alert_limit": 5,
+        "max_wishlists": 2,
         "is_active": True,
     },
     PLAN_CODE_PREMIUM: {
@@ -54,17 +54,21 @@ def ensure_base_plans(db: Session) -> dict[str, Plan]:
 
         for code, attrs in BASE_PLANS.items():
             if code in plans_by_code:
-                continue
-
-            plan = Plan(
-                code=code,
-                name=str(attrs["name"]),
-                daily_alert_limit=int(attrs["daily_alert_limit"]),
-                max_wishlists=int(attrs["max_wishlists"]),
-                is_active=bool(attrs["is_active"]),
-            )
-            db.add(plan)
-            plans_by_code[code] = plan
+                plan = plans_by_code[code]
+                plan.name = str(attrs["name"])
+                plan.daily_alert_limit = int(attrs["daily_alert_limit"])
+                plan.max_wishlists = int(attrs["max_wishlists"])
+                plan.is_active = bool(attrs["is_active"])
+            else:
+                plan = Plan(
+                    code=code,
+                    name=str(attrs["name"]),
+                    daily_alert_limit=int(attrs["daily_alert_limit"]),
+                    max_wishlists=int(attrs["max_wishlists"]),
+                    is_active=bool(attrs["is_active"]),
+                )
+                db.add(plan)
+                plans_by_code[code] = plan
 
         db.flush()
         return plans_by_code

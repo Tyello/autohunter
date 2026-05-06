@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = "2f4d2d9f8a11"
@@ -23,9 +22,11 @@ def upgrade() -> None:
     op.execute(
         """
         insert into plans (id, code, name, daily_alert_limit, max_wishlists, is_active)
-        values (gen_random_uuid(), 'free', 'Free', 10, 3, true)
+        values (gen_random_uuid(), 'free', 'Free', 5, 2, true)
         on conflict (code) do update set
           name = excluded.name,
+          daily_alert_limit = excluded.daily_alert_limit,
+          max_wishlists = excluded.max_wishlists,
           is_active = true;
         """
     )
@@ -35,6 +36,8 @@ def upgrade() -> None:
         values (gen_random_uuid(), 'premium', 'Premium', 15, 10, true)
         on conflict (code) do update set
           name = excluded.name,
+          daily_alert_limit = excluded.daily_alert_limit,
+          max_wishlists = excluded.max_wishlists,
           is_active = true;
         """
     )
