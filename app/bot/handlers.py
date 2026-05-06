@@ -22,6 +22,8 @@ from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.services.plan_capabilities import get_plan_capabilities
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
+from app.models.wishlist import Wishlist
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
@@ -324,11 +326,13 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
 
-        limit = get_daily_limit_for_user(db, user.id)
-        sent_today = count_sent_today(db, user.id)
-        remaining = max(0, limit - sent_today)
-
         sub, plan = _get_active_subscription_and_plan(db, user)
+        total_tracked = (
+            db.query(WishlistTrackedListing)
+            .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
+            .filter(Wishlist.user_id == user.id)
+            .count()
+        )
 
     plan_code = plan.code if plan else "free"
     caps = get_plan_capabilities(plan_code)
@@ -342,11 +346,10 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📦 Seu plano no AutoHunter\n"
         f"- Plano: {plan_label}\n"
         f"- Wishlists ativas: até {caps.max_active_wishlists}\n"
-        f"- Rastreados por wishlist: até {caps.max_tracked_per_wishlist}\n"
+        f"- Rastreados: {total_tracked}/{caps.max_tracked_total} no total\n"
+        f"- Slots por wishlist: até {caps.max_tracked_slots_per_wishlist}\n"
         f"- Alertas automáticos de tracking: {'sim' if caps.tracking_auto_alerts else 'não'}\n"
-        f"- Limite diário: {limit}/dia\n"
-        f"- Enviados hoje: {sent_today}\n"
-        f"- Restantes hoje: {remaining}\n"
+        f"- Notificações por dia por wishlist: {caps.daily_notifications_per_wishlist}\n"
     )
     if override is not None:
         text += f"- Override: {override}\n"
@@ -358,17 +361,17 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "🚀 Plano Premium — R$ 19,90/mês\n\n"
+        "🚀 Premium — lançamento por R$ 5,99/mês\n"
+        "Preço futuro: R$ 9,99/mês\n\n"
         "Benefícios:\n"
         "- até 10 wishlists\n"
-        "- até 3 anúncios rastreados por wishlist\n"
+        "- até 5 anúncios rastreados no total\n"
         "- alertas automáticos de queda de preço\n"
         "- alertas quando anúncio sair do ar, quando disponível\n"
-        "- mais notificações por dia\n"
+        "- 15 notificações por dia por wishlist\n"
         "- prioridade em novas funcionalidades\n\n"
-        "Como ativar:\n"
-        "- cobrança inicial manual (sem pagamento integrado nesta fase);\n"
-        "- fale com o admin/suporte do bot para ativação."
+        "Pagamento:\n"
+        "Pagamento integrado será exibido aqui quando configurado."
     )
     await reply_text(update, text)
 

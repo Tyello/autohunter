@@ -34,6 +34,9 @@ from app.services.wishlist_tracking_service import (
     set_price_drop_alert_enabled,
     user_has_tracking_automation,
 )
+from app.services.plan_capabilities import get_plan_capabilities
+from app.services.wishlists_service import get_user_plan_snapshot
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
@@ -348,7 +351,18 @@ async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_
             for i, _wl in enumerate(wishlists, start=1):
                 _ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=i)
                 tracked_messages.append(msg)
-            await reply_text(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
+            plan_caps = get_plan_capabilities((get_user_plan_snapshot(db, user.id) or {}).get("plan_code"))
+            try:
+                total_tracked = (
+                    db.query(WishlistTrackedListing)
+                    .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
+                    .filter(Wishlist.user_id == user.id)
+                    .count()
+                )
+            except Exception:
+                total_tracked = 0
+            header = f"Uso do plano: {total_tracked}/{plan_caps.max_tracked_total} rastreados"
+            await reply_text(update, render_all_tracked_listings(wishlists, tracked_messages, plan_usage=header)[:3900])
             return
 
         n = parse_int(context.args[0])
