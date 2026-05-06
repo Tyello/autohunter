@@ -226,18 +226,17 @@ def _clear_menu_create_wishlist_context(context: ContextTypes.DEFAULT_TYPE) -> N
     context.user_data.pop(MENU_CREATE_WISHLIST_CREATED_KEY, None)
 
 
-async def _show_menu_filter_actions(update: Update, wishlist_index: int, wishlist_query: str):
+async def _show_menu_filter_actions(update: Update, wishlist_index: int, wishlist_query: str, prefix_text: str | None = None):
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Adicionar filtro", callback_data="FILTER:ACTION:add")],
         [InlineKeyboardButton("📋 Ver filtros", callback_data="FILTER:ACTION:list")],
         [InlineKeyboardButton("✅ Concluir", callback_data="FILTER:DONE")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")],
     ])
-    await _safe_edit_or_send(
-        update,
-        f"Filtros da wishlist {wishlist_index} — {wishlist_query}",
-        reply_markup=kb,
-    )
+    text = f"Filtros da wishlist {wishlist_index} — {wishlist_query}"
+    if prefix_text:
+        text = f"{prefix_text}\n\n{text}"
+    await _safe_edit_or_send(update, text, reply_markup=kb)
 
 
 async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,6 +454,7 @@ async def cb_menu_create_wishlist_confirm(update: Update, context: ContextTypes.
 
     if data == "CWL:CANCEL":
         _clear_menu_create_wishlist_context(context)
+        _clear_menu_filter_context(context)
         await _safe_edit_or_send(update, "Criação de wishlist cancelada.")
         return ConversationHandler.END
 
@@ -479,6 +479,7 @@ async def cb_menu_create_wishlist_confirm(update: Update, context: ContextTypes.
     context.user_data[MENU_CREATE_WISHLIST_CREATED_KEY] = True
     if data == "CWL:CREATE":
         _clear_menu_create_wishlist_context(context)
+        _clear_menu_filter_context(context)
         await _safe_edit_or_send(update, f"{msg}\n\nUse /menu para ver suas buscas ou adicionar filtros.")
         return ConversationHandler.END
 
@@ -492,15 +493,18 @@ async def cb_menu_create_wishlist_confirm(update: Update, context: ContextTypes.
     context.user_data["menu_filter_wishlist_id"] = created.id
     context.user_data.pop("menu_filter_type", None)
     _clear_menu_create_wishlist_context(context)
-    await _safe_edit_or_send(
+    await _show_menu_filter_actions(
         update,
-        f"Wishlist criada: {created.query}\n\nAgora vamos melhorar essa busca com filtros.",
+        len(wishlists),
+        created.query,
+        prefix_text=f"Wishlist criada: {created.query}\n\nAgora vamos melhorar essa busca com filtros.",
     )
-    await _show_menu_filter_actions(update, len(wishlists), created.query)
     return MENU_FILTER_SELECT_VALUE
 
 
 async def menu_create_wishlist_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_menu_create_wishlist_context(context)
+    _clear_menu_filter_context(context)
     await reply_text(update, "Criação de wishlist cancelada.")
     return ConversationHandler.END
 
@@ -521,6 +525,10 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
             ],
             MENU_CREATE_WISHLIST_CONFIRM: [
                 CallbackQueryHandler(cb_menu_create_wishlist_confirm, pattern=r"^CWL:(CREATE|CREATE_FILTERS|CANCEL)$"),
+            ],
+            MENU_FILTER_SELECT_VALUE: [
+                CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|ACTION:(?:add|list)|RM:\d+:\d+|BACK|DONE|CANCEL)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, menu_filter_on_value),
             ],
         },
         fallbacks=[

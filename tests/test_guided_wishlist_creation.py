@@ -55,7 +55,7 @@ def _patch_user(monkeypatch):
 
 def test_menu_create_wishlist_starts_flow():
     q = _CallbackQuery("MENU:CREATE_WISHLIST")
-    state = asyncio.run(handlers_core.cb_menu(_Update(q=q), types.SimpleNamespace()))
+    state = asyncio.run(handlers_core.cb_menu(_Update(q=q), types.SimpleNamespace(user_data={})))
     assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
     assert "Qual carro você quer monitorar?" in q.edits[-1]
 
@@ -129,7 +129,7 @@ def test_menu_create_wishlist_empty_text_does_not_create(monkeypatch):
 
 def test_menu_create_wishlist_cancel():
     msg = _Message()
-    state = asyncio.run(handlers_core.menu_create_wishlist_cancel(_Update(message=msg), types.SimpleNamespace()))
+    state = asyncio.run(handlers_core.menu_create_wishlist_cancel(_Update(message=msg), types.SimpleNamespace(user_data={})))
     assert state == ConversationHandler.END
     assert "cancelada" in msg.sent[-1]["text"]
 
@@ -157,3 +157,48 @@ def test_menu_create_wishlist_confirm_create(monkeypatch):
     assert state == ConversationHandler.END
     assert q.answers == 1
     assert "Use /menu para ver suas buscas" in q.edits[-1]
+
+
+def test_menu_create_wishlist_create_filters_routes_to_filter_callbacks(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (True, "Wishlist criada: civic si"))
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic si")])
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
+
+    q_create = _CallbackQuery("CWL:CREATE_FILTERS")
+    state_create = asyncio.run(handlers_core.cb_menu_create_wishlist_confirm(_Update(q=q_create), ctx))
+    assert state_create == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert q_create.answers == 1
+    assert "Agora vamos melhorar essa busca com filtros." in q_create.edits[-1]
+
+    q_add = _CallbackQuery("FILTER:ACTION:add")
+    state_add = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q_add), ctx))
+    assert state_add == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert q_add.answers == 1
+    assert "Escolha o tipo de filtro:" in q_add.edits[-1]
+
+    q_done = _CallbackQuery("FILTER:DONE")
+    state_done = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q_done), ctx))
+    assert state_done == ConversationHandler.END
+    assert q_done.answers == 1
+    assert "Tudo certo. Use /menu para acompanhar suas buscas." in q_done.edits[-1]
+
+
+def test_menu_create_wishlist_create_filters_cancel(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (True, "Wishlist criada: civic si"))
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic si")])
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
+
+    q_create = _CallbackQuery("CWL:CREATE_FILTERS")
+    asyncio.run(handlers_core.cb_menu_create_wishlist_confirm(_Update(q=q_create), ctx))
+    q_cancel = _CallbackQuery("FILTER:CANCEL")
+    state_cancel = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q_cancel), ctx))
+    assert state_cancel == ConversationHandler.END
+    assert q_cancel.answers == 1
+    assert "Configuração de filtro cancelada." in q_cancel.edits[-1]
+
+
+def test_menu_create_wishlist_conversation_has_filter_state():
+    conv = handlers_core.menu_create_wishlist_conversation()
+    assert handlers_core.MENU_FILTER_SELECT_VALUE in conv.states
