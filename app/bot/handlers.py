@@ -21,6 +21,7 @@ from app.services.limits_service import get_daily_limit_for_user, count_sent_tod
 from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
+from app.services.plan_capabilities import get_plan_capabilities
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
@@ -329,9 +330,9 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         sub, plan = _get_active_subscription_and_plan(db, user)
 
-    plan_label = "free"
-    if plan:
-        plan_label = f"{plan.code} ({plan.name})"
+    plan_code = plan.code if plan else "free"
+    caps = get_plan_capabilities(plan_code)
+    plan_label = caps.plan_code
 
     override = None
     if sub and sub.daily_alert_limit_override is not None:
@@ -340,6 +341,9 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📦 Seu plano no AutoHunter\n"
         f"- Plano: {plan_label}\n"
+        f"- Wishlists ativas: até {caps.max_active_wishlists}\n"
+        f"- Rastreados por wishlist: até {caps.max_tracked_per_wishlist}\n"
+        f"- Alertas automáticos de tracking: {'sim' if caps.tracking_auto_alerts else 'não'}\n"
         f"- Limite diário: {limit}/dia\n"
         f"- Enviados hoje: {sent_today}\n"
         f"- Restantes hoje: {remaining}\n"
@@ -347,28 +351,26 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if override is not None:
         text += f"- Override: {override}\n"
 
-    text += "\nUse /upgrade para ver opções de aumento."
+    if not caps.premium:
+        text += "\nUse /upgrade para ver os benefícios do Premium."
     await reply_text(update, text)
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with SessionLocal() as db:
-        plans = (
-            db.query(Plan)
-            .filter(Plan.is_active == True)  # noqa
-            .order_by(Plan.daily_alert_limit.asc())
-            .all()
-        )
-
-    if not plans:
-        await reply_text(update, "Sem planos disponíveis no momento.")
-        return
-
-    lines = ["🚀 Upgrade AutoHunter", ""]
-    for p in plans:
-        lines.append(f"- {p.code}: {p.daily_alert_limit} alertas/dia | até {p.max_wishlists} wishlists")
-    lines += ["", "Para upgrade, fale com o admin do bot.", "Dica: use /plan para ver seu consumo hoje."]
-    await reply_text(update, "\n".join(lines))
+    text = (
+        "🚀 Plano Premium — R$ 19,90/mês\n\n"
+        "Benefícios:\n"
+        "- até 10 wishlists\n"
+        "- até 3 anúncios rastreados por wishlist\n"
+        "- alertas automáticos de queda de preço\n"
+        "- alertas quando anúncio sair do ar, quando disponível\n"
+        "- mais notificações por dia\n"
+        "- prioridade em novas funcionalidades\n\n"
+        "Como ativar:\n"
+        "- cobrança inicial manual (sem pagamento integrado nesta fase);\n"
+        "- fale com o admin/suporte do bot para ativação."
+    )
+    await reply_text(update, text)
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,7 +379,7 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = normalize_args(context.args)
     if not args:
-        await reply_text(update, "Use: /setplan <free|pro|ultra> [telegram_chat_id]")
+        await reply_text(update, "Use: /setplan <free|premium|pro|ultra> [telegram_chat_id]")
         return
 
     plan_code = args[0].lower()
@@ -398,7 +400,7 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         plan = db.query(Plan).filter(Plan.code == plan_code).first()
         if not plan:
-            await reply_text(update, "Plano inválido. Use: free|pro|ultra")
+            await reply_text(update, "Plano inválido. Use: free|premium|pro|ultra")
             return
 
         # cancela subscription ativa (se existir)

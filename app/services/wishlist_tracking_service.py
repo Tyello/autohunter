@@ -17,6 +17,7 @@ from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.core.settings import settings
 from app.services.notifications_queue_service import queue_tracked_price_drop_alert
 from app.services.wishlists_service import get_user_plan_snapshot
+from app.services.plan_capabilities import get_plan_capabilities, tracking_limit_message
 
 MAX_TRACKED_PER_WISHLIST = 3
 
@@ -69,7 +70,7 @@ def user_has_tracking_automation(db: Session, *, user_id) -> bool:
     except Exception:
         return False
     plan_code = str((snap or {}).get("plan_code") or "free").strip().lower()
-    return plan_code != "free"
+    return get_plan_capabilities(plan_code).tracking_auto_alerts
 
 
 def _short_label(text: Any, *, max_len: int = 70) -> str:
@@ -276,14 +277,14 @@ def add_tracked_listing_result(
                 automation_enabled=bool(row.price_drop_alert_enabled),
             )
 
-    if len(existing) >= MAX_TRACKED_PER_WISHLIST:
+    plan_caps = get_plan_capabilities((get_user_plan_snapshot(db, user_id) or {}).get("plan_code"))
+    allowed_slots = min(MAX_TRACKED_PER_WISHLIST, plan_caps.max_tracked_per_wishlist)
+
+    if len(existing) >= allowed_slots:
         return _build_tracked_result(
             ok=False,
             status="slots_full",
-            message=(
-                f"Limite atingido ({MAX_TRACKED_PER_WISHLIST}/{MAX_TRACKED_PER_WISHLIST}). "
-                "Remova um slot com /wishlist_track_remove <n> <slot>."
-            ),
+            message=tracking_limit_message(allowed_slots),
             wishlist=wishlist,
             wishlist_index=wishlist_index,
             listing=listing,

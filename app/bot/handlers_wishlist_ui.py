@@ -37,6 +37,7 @@ from app.services.wishlist_tracking_service import (
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
+from app.services.plan_capabilities import wishlist_limit_message, automation_unavailable_message
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +145,7 @@ async def cmd_wishlist_add_start(update: Update, context: ContextTypes.DEFAULT_T
         max_w = get_max_wishlists_for_user(db, user.id)
 
         if len(wishlists) >= max_w:
-            await reply_text(
-                update,
-                f"Limite atingido: {max_w} wishlists no seu plano. Use /wishlist_remove."
-            )
+            await reply_text(update, wishlist_limit_message(max_w))
             return ConversationHandler.END
 
     context.user_data.pop("wadd_query", None)
@@ -394,7 +392,7 @@ async def cmd_wishlist_track_alert_on(update: Update, context: ContextTypes.DEFA
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         if not user_has_tracking_automation(db, user_id=user.id):
-            await reply_text(update, "Notificações automáticas de mudança são um recurso Premium.")
+            await reply_text(update, automation_unavailable_message())
             return
         _ok, msg = set_price_drop_alert_enabled(db, user_id=user.id, wishlist_index=n, slot=slot, enabled=True)
     await reply_text(update, msg)

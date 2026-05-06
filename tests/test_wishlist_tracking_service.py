@@ -37,6 +37,7 @@ def _mk_listing(db, i: int):
 def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     user = _mk_user(db)
     monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "premium"})
     ok, _ = add_wishlist(db, user.id, "civic")
     assert ok is True
 
@@ -122,6 +123,7 @@ def test_tracking_add_saves_initial_snapshot(db, monkeypatch):
 def test_tracking_add_result_statuses(db, monkeypatch):
     user = _mk_user(db, 5001)
     monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "premium"})
     ok, _ = add_wishlist(db, user.id, "gol")
     assert ok is True
     l1 = _mk_listing(db, 21)
