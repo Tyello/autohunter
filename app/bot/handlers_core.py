@@ -6,13 +6,14 @@ from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters
 from app.services.users_service import get_or_create_user_by_chat
-from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries
+from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters
 from app.services.wishlist_tracking_service import list_tracked_listings
 
 MENU_CREATE_WISHLIST_QUERY = 1
 MENU_FILTER_SELECT_VALUE = 2
 
 MENU_FILTER_USER_DATA_KEYS = ("menu_filter_wishlist_index", "menu_filter_wishlist_id", "menu_filter_type")
+MENU_CREATE_WISHLIST_DRAFT_KEYS = ("menu_create_wishlist_query", "menu_create_wishlist_draft_filters", "menu_create_wishlist_draft_filter_type")
 
 FILTER_TYPE_TO_SPEC = {
     "price_max": ("price", "lte", "Qual preço máximo?\nExemplo: 90000 ou 90.000"),
@@ -22,6 +23,46 @@ FILTER_TYPE_TO_SPEC = {
     "state": ("state", "eq", "Qual estado/UF?\nExemplo: SP"),
 }
 
+
+
+
+def _clear_menu_create_wishlist_draft_context(context: ContextTypes.DEFAULT_TYPE) -> None:
+    for key in MENU_CREATE_WISHLIST_DRAFT_KEYS:
+        context.user_data.pop(key, None)
+
+
+def _render_draft_filters(filters_draft: list[dict]) -> str:
+    if not filters_draft:
+        return "Nenhum filtro adicionado ainda."
+    lines = [f"{i}. {f.get('field')} {f.get('operator')} {f.get('value')}" for i, f in enumerate(filters_draft, start=1)]
+    return "\n".join(lines)
+
+
+def _draft_filters_menu_markup(filters_draft: list[dict]) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("➕ Adicionar filtro", callback_data="CWLF:ACTION:add")],
+        [InlineKeyboardButton("📋 Ver filtros", callback_data="CWLF:ACTION:list")],
+    ]
+    if filters_draft:
+        buttons.extend([[InlineKeyboardButton(f"🗑️ Remover {i}", callback_data=f"CWLF:RM:{i}")] for i in range(1, len(filters_draft) + 1)])
+    buttons.extend([
+        [InlineKeyboardButton("✅ Concluir e criar", callback_data="CWLF:DONE")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="CWLF:CANCEL")],
+    ])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _show_draft_filters_screen(update: Update, context: ContextTypes.DEFAULT_TYPE, feedback: str | None = None):
+    query = context.user_data.get("menu_create_wishlist_query") or "(sem busca)"
+    filters_draft = context.user_data.get("menu_create_wishlist_draft_filters") or []
+    text = f"Filtros para: {query}\n\n{_render_draft_filters(filters_draft)}"
+    if feedback:
+        text = f"{feedback}\n\n{text}"
+    if update.callback_query:
+        await _safe_edit_or_send(update, text, reply_markup=_draft_filters_menu_markup(filters_draft))
+    else:
+        await reply_text(update, text, reply_markup=_draft_filters_menu_markup(filters_draft))
+    return MENU_CREATE_WISHLIST_QUERY
 
 def _wishlist_help_text() -> str:
     return (
@@ -409,35 +450,142 @@ async def _menu_filter_remove_from_callback(update: Update, context: ContextType
 
 
 async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    value_input_mode = context.user_data.get("menu_create_wishlist_draft_filter_type")
+    if value_input_mode:
+        field, operator, _prompt = FILTER_TYPE_TO_SPEC[value_input_mode]
+        raw_value = (update.message.text or "").strip()
+        try:
+            normalized = normalize_wishlist_filter_input(field, operator, raw_value)
+        except ValueError as exc:
+            await reply_text(update, f"Valor inválido: {exc}\nEnvie outro valor ou use /cancelar.")
+            return MENU_CREATE_WISHLIST_QUERY
+
+        draft_filters = context.user_data.setdefault("menu_create_wishlist_draft_filters", [])
+        candidate = {"field": normalized.field, "operator": normalized.operator, "value": normalized.value}
+        if candidate in draft_filters:
+            await reply_text(update, "Esse filtro já foi adicionado. Escolha outro valor.")
+            return MENU_CREATE_WISHLIST_QUERY
+        draft_filters.append(candidate)
+        context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
+        return await _show_draft_filters_screen(update, context, feedback="✅ Filtro adicionado.")
+
+    if "menu_create_wishlist_draft_filters" in context.user_data:
+        await reply_text(
+            update,
+            "Use os botões para adicionar filtros, concluir ou cancelar. "
+            "Para informar um valor, primeiro escolha o tipo de filtro.",
+        )
+        return MENU_CREATE_WISHLIST_QUERY
+
     query = (update.message.text or "").strip()
     if not query:
         await reply_text(update, "Texto inválido. Envie o carro/busca ou use /cancelar.")
         return MENU_CREATE_WISHLIST_QUERY
 
-    with SessionLocal() as db:
-        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        _ok, _msg = add_wishlist(db, user.id, query)
+    context.user_data["menu_create_wishlist_query"] = query
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Criar agora", callback_data="CWL:CREATE")],
+        [InlineKeyboardButton("⚙️ Adicionar filtros antes de criar", callback_data="CWL:CREATE_FILTERS")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
+    ])
+    await reply_text(update, f"Busca:\n{query}\n\nComo deseja continuar?", reply_markup=kb)
+    return MENU_CREATE_WISHLIST_QUERY
 
-    if not _ok:
-        await reply_text(
-            update,
-            "Não consegui criar a wishlist:\n"
-            f"{_msg}\n\n"
-            "Envie outro texto ou use /cancelar.",
-        )
+
+
+
+async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await _safe_answer_callback(q)
+    data = (q.data or "").strip()
+
+    if data == "CWL:CANCEL" or data == "CWLF:CANCEL":
+        _clear_menu_create_wishlist_draft_context(context)
+        await _safe_edit_or_send(update, "Criação de wishlist cancelada.")
+        return ConversationHandler.END
+
+    if data == "CWL:CREATE":
+        query = context.user_data.get("menu_create_wishlist_query")
+        if not query:
+            await _safe_edit_or_send(update, "Sessão expirada. Use /menu novamente.")
+            return ConversationHandler.END
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            ok, msg = add_wishlist(db, user.id, query)
+        if not ok:
+            await _safe_edit_or_send(update, f"Não consegui criar a wishlist:\n{msg}")
+            return MENU_CREATE_WISHLIST_QUERY
+        _clear_menu_create_wishlist_draft_context(context)
+        await _safe_edit_or_send(update, f"✅ Wishlist criada: {query}\n\nUse /menu para acompanhar.")
+        return ConversationHandler.END
+
+    if data == "CWL:CREATE_FILTERS":
+        context.user_data["menu_create_wishlist_draft_filters"] = []
+        context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
+        return await _show_draft_filters_screen(update, context)
+
+    if data == "CWLF:ACTION:add":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 Preço máximo", callback_data="CWLF:TYPE:price_max")],
+            [InlineKeyboardButton("📅 Ano mínimo", callback_data="CWLF:TYPE:year_min")],
+            [InlineKeyboardButton("🛣️ KM máximo", callback_data="CWLF:TYPE:km_max")],
+            [InlineKeyboardButton("📍 Cidade", callback_data="CWLF:TYPE:city")],
+            [InlineKeyboardButton("🗺️ Estado", callback_data="CWLF:TYPE:state")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="CWLF:CANCEL")],
+        ])
+        await _safe_edit_or_send(update, "Escolha o tipo de filtro draft:", reply_markup=kb)
         return MENU_CREATE_WISHLIST_QUERY
 
-    await reply_text(
-        update,
-        f"✅ Wishlist criada: {query}\n\n"
-        "Vou monitorar anúncios compatíveis.\n"
-        "Veja suas wishlists: /wishlist\n"
-        "Para filtros: /menu → ⚙️ Filtros",
-    )
-    return ConversationHandler.END
+    if data.startswith("CWLF:TYPE:"):
+        ftype = data.split(":", 2)[2]
+        if ftype not in FILTER_TYPE_TO_SPEC:
+            await _safe_edit_or_send(update, "Tipo de filtro inválido.")
+            return MENU_CREATE_WISHLIST_QUERY
+        context.user_data["menu_create_wishlist_draft_filter_type"] = ftype
+        await _safe_edit_or_send(update, FILTER_TYPE_TO_SPEC[ftype][2])
+        return MENU_CREATE_WISHLIST_QUERY
+
+    if data == "CWLF:ACTION:list":
+        return await _show_draft_filters_screen(update, context)
+
+    if data.startswith("CWLF:RM:"):
+        try:
+            idx = int(data.split(":", 2)[2])
+        except ValueError:
+            return await _show_draft_filters_screen(update, context, feedback="Índice inválido.")
+        draft_filters = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        if idx < 1 or idx > len(draft_filters):
+            return await _show_draft_filters_screen(update, context, feedback="Índice inválido.")
+        draft_filters.pop(idx - 1)
+        context.user_data["menu_create_wishlist_draft_filters"] = draft_filters
+        return await _show_draft_filters_screen(update, context, feedback="✅ Filtro removido.")
+
+    if data == "CWLF:DONE":
+        query = context.user_data.get("menu_create_wishlist_query")
+        filters_draft = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        if not query:
+            _clear_menu_create_wishlist_draft_context(context)
+            await _safe_edit_or_send(update, "Sessão expirada. Abra novamente /menu → Criar wishlist.")
+            return ConversationHandler.END
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            ok, msg, _wid = create_wishlist_with_filters(db, user.id, query, filters_draft)
+        if not ok:
+            await _safe_edit_or_send(update, f"Não consegui criar a wishlist:\n{msg}")
+            return MENU_CREATE_WISHLIST_QUERY
+        _clear_menu_create_wishlist_draft_context(context)
+        if filters_draft:
+            await _safe_edit_or_send(update, f"✅ Wishlist criada com filtros.\n\nBusca: {query}\nFiltros: {len(filters_draft)}\n\nA primeira busca foi agendada com os filtros aplicados.\nUse /menu para acompanhar.")
+        else:
+            await _safe_edit_or_send(update, f"✅ Wishlist criada sem filtros. Você pode adicionar filtros depois pelo /menu.\n\nBusca: {query}\nUse /menu para acompanhar.")
+        return ConversationHandler.END
+
+    await _safe_edit_or_send(update, "Ação inválida. Use /menu novamente.")
+    return MENU_CREATE_WISHLIST_QUERY
 
 
 async def menu_create_wishlist_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_menu_create_wishlist_draft_context(context)
     await reply_text(update, "Criação de wishlist cancelada.")
     return ConversationHandler.END
 
@@ -453,6 +601,7 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
         entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:CREATE_WISHLIST$")],
         states={
             MENU_CREATE_WISHLIST_QUERY: [
+                CallbackQueryHandler(cb_menu_create_wishlist, pattern=r"^(CWL:(?:CREATE|CREATE_FILTERS|CANCEL)|CWLF:(?:ACTION:(?:add|list)|TYPE:[a-z_]+|RM:\d+|DONE|CANCEL))$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_create_wishlist_on_text),
                 MessageHandler(filters.COMMAND, menu_create_wishlist_cancel),
             ],
