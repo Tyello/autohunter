@@ -538,6 +538,79 @@ class NormalizedWishlistFilter:
     operator: str
     value: str
 
+@dataclass(frozen=True)
+class ParsedWishlistDraft:
+    cleaned_query: str
+    filters: list[NormalizedWishlistFilter]
+
+
+def parse_wishlist_filter_expression(field: str, raw_text: str) -> list[NormalizedWishlistFilter]:
+    canonical_field = {
+        "km": "mileage_km",
+        "kms": "mileage_km",
+        "quilometragem": "mileage_km",
+        "mileage": "mileage_km",
+        "mileage_km": "mileage_km",
+    }.get((field or "").strip().lower(), (field or "").strip().lower())
+    text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("Valor inválido.")
+
+    if canonical_field in {"price", "year", "mileage_km"}:
+        lowered = text.lower()
+        range_match = re.search(r"\bentre\s+([0-9\.\,]+)\s+e\s+([0-9\.\,]+)", lowered)
+        if range_match:
+            lo = normalize_wishlist_filter_input(canonical_field, "gte", range_match.group(1)).value
+            hi = normalize_wishlist_filter_input(canonical_field, "lte", range_match.group(2)).value
+            lo_i, hi_i = sorted((int(lo), int(hi)))
+            return [
+                normalize_wishlist_filter_input(canonical_field, "gte", str(lo_i)),
+                normalize_wishlist_filter_input(canonical_field, "lte", str(hi_i)),
+            ]
+        if "a partir de" in lowered or "desde" in lowered:
+            num = re.search(r"([0-9\.\,]+)", lowered)
+            if not num:
+                raise ValueError("Valor inválido.")
+            return [normalize_wishlist_filter_input(canonical_field, "gte", num.group(1))]
+        if "maior que" in lowered:
+            num = re.search(r"([0-9\.\,]+)", lowered)
+            if not num:
+                raise ValueError("Valor inválido.")
+            return [normalize_wishlist_filter_input(canonical_field, "gt", num.group(1))]
+        if "menor que" in lowered:
+            num = re.search(r"([0-9\.\,]+)", lowered)
+            if not num:
+                raise ValueError("Valor inválido.")
+            return [normalize_wishlist_filter_input(canonical_field, "lt", num.group(1))]
+        if "até" in lowered or "ate" in lowered:
+            num = re.search(r"([0-9\.\,]+)", lowered)
+            if not num:
+                raise ValueError("Valor inválido.")
+            return [normalize_wishlist_filter_input(canonical_field, "lte", num.group(1))]
+        num = re.search(r"([0-9\.\,]+)", lowered)
+        if not num:
+            raise ValueError("Valor inválido.")
+        default_op = "gte" if canonical_field == "year" else "lte"
+        return [normalize_wishlist_filter_input(canonical_field, default_op, num.group(1))]
+
+    return [normalize_wishlist_filter_input(canonical_field, "eq", text)]
+
+
+def parse_wishlist_query_with_implicit_filters(query: str) -> ParsedWishlistDraft:
+    original = (query or "").strip()
+    cleaned, year_min, year_max = _extract_year_directives(original)
+    cleaned, price_min, price_max = _extract_price_directives(cleaned)
+    filters: list[NormalizedWishlistFilter] = []
+    if year_min is not None:
+        filters.append(NormalizedWishlistFilter("year", "gte", str(year_min)))
+    if year_max is not None:
+        filters.append(NormalizedWishlistFilter("year", "lte", str(year_max)))
+    if price_min is not None:
+        filters.append(NormalizedWishlistFilter("price", "gte", str(price_min)))
+    if price_max is not None:
+        filters.append(NormalizedWishlistFilter("price", "lte", str(price_max)))
+    cleaned_query = (cleaned or "").strip()
+    return ParsedWishlistDraft(cleaned_query=cleaned_query or original, filters=filters)
 
 def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> NormalizedWishlistFilter:
     field = (field or "").strip().lower()
@@ -610,6 +683,13 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
             if km < 0 or km > 1_500_000:
                 raise ValueError("Quilometragem fora do intervalo (0-1500000).")
             value = str(km)
+    if field == "price":
+        raw = value.lower().replace("r$", "").replace("km", "").strip()
+        raw = re.sub(r"^(até|ate|menor que|maior que|a partir de)\s+", "", raw).strip()
+        parsed = _parse_human_money_to_int(raw)
+        if parsed is None:
+            raise ValueError("Preço inválido. Ex: 150000 ou 150.000")
+        value = str(parsed)
     if field == "doors":
         if operator == "between":
             parts = value.split()
