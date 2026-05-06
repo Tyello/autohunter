@@ -3,6 +3,25 @@ from __future__ import annotations
 from typing import Iterable
 
 
+def render_start_text(active_wishlists_count: int) -> str:
+    base = (
+        "👋 Bem-vindo ao AutoHunter\n\n"
+        "Eu monitoro anúncios de carros usados para você e aviso no Telegram quando aparecer algo compatível com o que você procura.\n\n"
+    )
+    if active_wishlists_count > 0:
+        return (
+            base
+            + f"Você já tem {active_wishlists_count} wishlist(s) ativa(s).\n\n"
+            "Use /menu para ver suas buscas, filtros e anúncios rastreados."
+        )
+
+    return (
+        base
+        + "Você pode criar buscas, aplicar filtros, rastrear anúncios específicos e acompanhar mudanças de preço/status.\n\n"
+        "Use /menu para começar pelo fluxo guiado."
+    )
+
+
 def render_user_wishlists(wishlists) -> str:
     if not wishlists:
         return (

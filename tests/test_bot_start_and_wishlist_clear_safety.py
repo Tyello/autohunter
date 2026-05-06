@@ -75,7 +75,12 @@ def test_start_creates_or_loads_user_without_deleting_wishlist(monkeypatch):
     assert called["list_wishlists"] == 1
     assert called["remove"] == 0
     assert update.message.sent
-    assert "Você tem 1 wishlist(s) ativa(s)." in update.message.sent[0][0]
+    msg = update.message.sent[0][0]
+    assert "👋 Bem-vindo ao AutoHunter" in msg
+    assert "Você já tem 1 wishlist(s) ativa(s)." in msg
+    assert "Use /menu para ver suas buscas, filtros e anúncios rastreados." in msg
+    assert "/wishlist_add" not in msg
+    assert "/wishlist_help" not in msg
 
 
 def test_wishlist_clear_requires_fresh_arm_before_delete(monkeypatch):
@@ -112,3 +117,25 @@ def test_wishlist_clear_requires_fresh_arm_before_delete(monkeypatch):
     asyncio.run(handlers_wishlist_ui.cb_wishlist_clear(update_yes, context2))
     assert remove_called["n"] == 1
     assert update_yes.callback_query.edits[-1] == "🔥 Todas as wishlists foram removidas."
+
+
+def test_start_without_wishlist_points_to_guided_menu(monkeypatch):
+    monkeypatch.setattr(handlers_core, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(
+        handlers_core,
+        "get_or_create_user_by_chat",
+        lambda _db, _chat_id, _username: types.SimpleNamespace(id="u1"),
+    )
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda _db, _user_id: [])
+
+    update = _Update()
+    context = types.SimpleNamespace(args=[])
+
+    asyncio.run(handlers_core.cmd_start(update, context))
+
+    msg = update.message.sent[0][0]
+    assert "👋 Bem-vindo ao AutoHunter" in msg
+    assert "Eu monitoro anúncios de carros usados" in msg
+    assert "Use /menu para começar pelo fluxo guiado." in msg
+    assert "/wishlist_add" not in msg
+    assert "/wishlist_help" not in msg

@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, Con
 
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
-from app.bot.renderers import render_all_tracked_listings, render_help_text, render_user_wishlists, render_wishlist_filters
+from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries
 from app.services.wishlist_tracking_service import list_tracked_listings
@@ -85,12 +85,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         w = list_wishlists(db, user.id)
 
-    await reply_text(
-        update,
-        "👋 Bem-vindo ao AutoHunter!\n\n"
-        f"Você tem {len(w)} wishlist(s) ativa(s).\n"
-        "Use /wishlist para listar, /wishlist_add para criar e /wishlist_help para ajuda."
-    )
+    await reply_text(update, render_start_text(len(w)))
 
 async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text(update, _wishlist_help_text())
