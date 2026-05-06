@@ -21,6 +21,9 @@ from app.services.limits_service import get_daily_limit_for_user, count_sent_tod
 from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
+from app.services.plan_capabilities import get_plan_capabilities
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
+from app.models.wishlist import Wishlist
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
@@ -323,15 +326,17 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
 
-        limit = get_daily_limit_for_user(db, user.id)
-        sent_today = count_sent_today(db, user.id)
-        remaining = max(0, limit - sent_today)
-
         sub, plan = _get_active_subscription_and_plan(db, user)
+        total_tracked = (
+            db.query(WishlistTrackedListing)
+            .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
+            .filter(Wishlist.user_id == user.id)
+            .count()
+        )
 
-    plan_label = "free"
-    if plan:
-        plan_label = f"{plan.code} ({plan.name})"
+    plan_code = plan.code if plan else "free"
+    caps = get_plan_capabilities(plan_code)
+    plan_label = caps.plan_code
 
     override = None
     if sub and sub.daily_alert_limit_override is not None:
@@ -340,35 +345,35 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📦 Seu plano no AutoHunter\n"
         f"- Plano: {plan_label}\n"
-        f"- Limite diário: {limit}/dia\n"
-        f"- Enviados hoje: {sent_today}\n"
-        f"- Restantes hoje: {remaining}\n"
+        f"- Wishlists ativas: até {caps.max_active_wishlists}\n"
+        f"- Rastreados: {total_tracked}/{caps.max_tracked_total} no total\n"
+        f"- Slots por wishlist: até {caps.max_tracked_slots_per_wishlist}\n"
+        f"- Alertas automáticos de tracking: {'sim' if caps.tracking_auto_alerts else 'não'}\n"
+        f"- Notificações por dia por wishlist: {caps.daily_notifications_per_wishlist}\n"
     )
     if override is not None:
         text += f"- Override: {override}\n"
 
-    text += "\nUse /upgrade para ver opções de aumento."
+    if not caps.premium:
+        text += "\nUse /upgrade para ver os benefícios do Premium."
     await reply_text(update, text)
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with SessionLocal() as db:
-        plans = (
-            db.query(Plan)
-            .filter(Plan.is_active == True)  # noqa
-            .order_by(Plan.daily_alert_limit.asc())
-            .all()
-        )
-
-    if not plans:
-        await reply_text(update, "Sem planos disponíveis no momento.")
-        return
-
-    lines = ["🚀 Upgrade AutoHunter", ""]
-    for p in plans:
-        lines.append(f"- {p.code}: {p.daily_alert_limit} alertas/dia | até {p.max_wishlists} wishlists")
-    lines += ["", "Para upgrade, fale com o admin do bot.", "Dica: use /plan para ver seu consumo hoje."]
-    await reply_text(update, "\n".join(lines))
+    text = (
+        "🚀 Premium — lançamento por R$ 5,99/mês\n"
+        "Preço futuro: R$ 9,99/mês\n\n"
+        "Benefícios:\n"
+        "- até 10 wishlists\n"
+        "- até 5 anúncios rastreados no total\n"
+        "- alertas automáticos de queda de preço\n"
+        "- alertas quando anúncio sair do ar, quando disponível\n"
+        "- 15 notificações por dia por wishlist\n"
+        "- prioridade em novas funcionalidades\n\n"
+        "Pagamento:\n"
+        "Pagamento integrado será exibido aqui quando configurado."
+    )
+    await reply_text(update, text)
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,10 +382,10 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = normalize_args(context.args)
     if not args:
-        await reply_text(update, "Use: /setplan <free|pro|ultra> [telegram_chat_id]")
+        await reply_text(update, "Use: /setplan <free|premium|pro|ultra> [telegram_chat_id]")
         return
 
-    plan_code = args[0].lower()
+    requested_plan_code = args[0].lower()
 
     chat_id, error = _resolve_target_chat_id(args, int(update.effective_chat.id))
     if error:
@@ -396,9 +401,19 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await reply_text(update, "Usuário sem account_id (verifique users_service).")
             return
 
-        plan = db.query(Plan).filter(Plan.code == plan_code).first()
+        resolved_code = requested_plan_code
+        fallback_from = None
+        plan = db.query(Plan).filter(Plan.code == resolved_code).first()
+        if requested_plan_code == "premium" and not plan:
+            for candidate in ("pro", "ultra", "paid"):
+                candidate_plan = db.query(Plan).filter(Plan.code == candidate).first()
+                if candidate_plan:
+                    plan = candidate_plan
+                    resolved_code = candidate
+                    fallback_from = "premium"
+                    break
         if not plan:
-            await reply_text(update, "Plano inválido. Use: free|pro|ultra")
+            await reply_text(update, "Plano inválido. Use: free|premium|pro|ultra")
             return
 
         # cancela subscription ativa (se existir)
@@ -425,7 +440,13 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         db.commit()
 
-    await reply_text(update, f"✅ Plano atualizado para {plan_code} (chat_id={chat_id}).")
+    if fallback_from:
+        await reply_text(
+            update,
+            f"✅ Plano premium aplicado usando plano legado {resolved_code} (chat_id={chat_id}).",
+        )
+    else:
+        await reply_text(update, f"✅ Plano atualizado para {resolved_code} (chat_id={chat_id}).")
 
 
 async def cmd_setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -36,11 +36,13 @@ def render_user_wishlists(wishlists) -> str:
 
 
 
-def render_all_tracked_listings(wishlists, tracked_messages: list[str]) -> str:
+def render_all_tracked_listings(wishlists, tracked_messages: list[str], plan_usage: str | None = None) -> str:
     if not wishlists:
         return "Você não tem wishlists. Use /wishlist_add para criar a primeira."
 
     lines = ["📌 Seus anúncios rastreados"]
+    if plan_usage:
+        lines.append(plan_usage)
     for msg in tracked_messages:
         lines.append("")
         lines.append(msg)

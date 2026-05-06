@@ -31,12 +31,13 @@ from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
 from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type, normalize_doors
 from app.sources.registry import get_source
+from app.services.plan_capabilities import get_plan_capabilities, wishlist_limit_message
 
 
 logger = logging.getLogger(__name__)
 
 # Fallback (quando não existir plano/assinatura no banco ainda)
-DEFAULT_MAX_WISHLISTS_PER_USER = 3
+DEFAULT_MAX_WISHLISTS_PER_USER = 2
 
 # Fontes conhecidas hoje (expanda sem medo)
 # Aceita:
@@ -324,10 +325,12 @@ def year_in_directive_range(year: Optional[int], year_min: Optional[int], year_m
 
 
 def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
+    free_caps = get_plan_capabilities("free")
     snap: Dict[str, Any] = {
-        "plan_code": "free",
-        "max_wishlists": DEFAULT_MAX_WISHLISTS_PER_USER,
-        "daily_alert_limit": None,
+        "plan_code": free_caps.plan_code,
+        "max_wishlists": free_caps.max_active_wishlists,
+        "daily_alert_limit": free_caps.daily_notifications_per_wishlist,
+        "daily_notifications_per_wishlist": free_caps.daily_notifications_per_wishlist,
     }
 
     try:
@@ -363,12 +366,11 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
             return snap
 
         snap["plan_code"] = getattr(plan, "code", "free") or "free"
-        mw = getattr(plan, "max_wishlists", None)
-        if mw is not None:
-            snap["max_wishlists"] = int(mw)
-        dal = getattr(plan, "daily_alert_limit", None)
-        if dal is not None:
-            snap["daily_alert_limit"] = int(dal)
+        caps = get_plan_capabilities(snap["plan_code"])
+        snap["plan_code"] = caps.plan_code
+        snap["max_wishlists"] = caps.max_active_wishlists
+        snap["daily_notifications_per_wishlist"] = caps.daily_notifications_per_wishlist
+        snap["daily_alert_limit"] = caps.daily_notifications_per_wishlist
 
         return snap
 
@@ -465,7 +467,7 @@ def add_wishlist(db: Session, user_id, query: str):
     max_wishlists = get_max_wishlists_for_user(db, user_id)
     count = db.query(func.count(Wishlist.id)).filter(Wishlist.user_id == user_id).scalar() or 0
     if count >= max_wishlists:
-        return False, f"Limite atingido: {max_wishlists} wishlists no seu plano."
+        return False, wishlist_limit_message(max_wishlists)
 
     cleaned_query, year_min, year_max = _extract_year_directives(query)
     cleaned_query, price_min, price_max = _extract_price_directives(cleaned_query)

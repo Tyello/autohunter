@@ -34,9 +34,13 @@ from app.services.wishlist_tracking_service import (
     set_price_drop_alert_enabled,
     user_has_tracking_automation,
 )
+from app.services.plan_capabilities import get_plan_capabilities
+from app.services.wishlists_service import get_user_plan_snapshot
+from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
+from app.services.plan_capabilities import wishlist_limit_message, automation_unavailable_message
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +148,7 @@ async def cmd_wishlist_add_start(update: Update, context: ContextTypes.DEFAULT_T
         max_w = get_max_wishlists_for_user(db, user.id)
 
         if len(wishlists) >= max_w:
-            await reply_text(
-                update,
-                f"Limite atingido: {max_w} wishlists no seu plano. Use /wishlist_remove."
-            )
+            await reply_text(update, wishlist_limit_message(max_w))
             return ConversationHandler.END
 
     context.user_data.pop("wadd_query", None)
@@ -350,7 +351,18 @@ async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_
             for i, _wl in enumerate(wishlists, start=1):
                 _ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=i)
                 tracked_messages.append(msg)
-            await reply_text(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
+            plan_caps = get_plan_capabilities((get_user_plan_snapshot(db, user.id) or {}).get("plan_code"))
+            try:
+                total_tracked = (
+                    db.query(WishlistTrackedListing)
+                    .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
+                    .filter(Wishlist.user_id == user.id)
+                    .count()
+                )
+            except Exception:
+                total_tracked = 0
+            header = f"Uso do plano: {total_tracked}/{plan_caps.max_tracked_total} rastreados"
+            await reply_text(update, render_all_tracked_listings(wishlists, tracked_messages, plan_usage=header)[:3900])
             return
 
         n = parse_int(context.args[0])
@@ -394,7 +406,7 @@ async def cmd_wishlist_track_alert_on(update: Update, context: ContextTypes.DEFA
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         if not user_has_tracking_automation(db, user_id=user.id):
-            await reply_text(update, "Notificações automáticas de mudança são um recurso Premium.")
+            await reply_text(update, automation_unavailable_message())
             return
         _ok, msg = set_price_drop_alert_enabled(db, user_id=user.id, wishlist_index=n, slot=slot, enabled=True)
     await reply_text(update, msg)

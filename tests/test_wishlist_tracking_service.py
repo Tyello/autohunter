@@ -37,6 +37,7 @@ def _mk_listing(db, i: int):
 def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     user = _mk_user(db)
     monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "premium"})
     ok, _ = add_wishlist(db, user.id, "civic")
     assert ok is True
 
@@ -58,7 +59,7 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
 
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l4.external_id)
     assert ok is False
-    assert "Limite atingido" in msg
+    assert "limite por wishlist" in msg.lower()
 
     ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
     assert ok is True
@@ -122,6 +123,7 @@ def test_tracking_add_saves_initial_snapshot(db, monkeypatch):
 def test_tracking_add_result_statuses(db, monkeypatch):
     user = _mk_user(db, 5001)
     monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "premium"})
     ok, _ = add_wishlist(db, user.id, "gol")
     assert ok is True
     l1 = _mk_listing(db, 21)
@@ -164,3 +166,36 @@ def test_tracking_add_result_automation_enabled_free_and_premium(db, monkeypatch
     rp = add_tracked_listing_result(db, user_id=user_premium.id, wishlist_index=1, listing_ref=lp.external_id)
     assert rf.automation_enabled is False
     assert rp.automation_enabled is True
+
+
+def test_free_limit_is_total_across_wishlists(db, monkeypatch):
+    user = _mk_user(db, 7001)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "free"})
+    add_wishlist(db, user.id, "civic")
+    add_wishlist(db, user.id, "miata")
+    l1 = _mk_listing(db, 41)
+    l2 = _mk_listing(db, 42)
+    assert add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)[0] is True
+    ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=l2.external_id)
+    assert ok is False
+    assert "R$ 5,99" in msg
+
+
+def test_premium_limit_total_5_and_slots_3_per_wishlist(db, monkeypatch):
+    user = _mk_user(db, 7002)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "premium"})
+    add_wishlist(db, user.id, "civic")
+    add_wishlist(db, user.id, "miata")
+    listings = [_mk_listing(db, 50 + i) for i in range(1, 8)]
+    for i in range(3):
+        assert add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listings[i].external_id)[0] is True
+    ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listings[3].external_id)
+    assert ok is False
+    assert "limite por wishlist" in msg.lower()
+    assert add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=listings[3].external_id)[0] is True
+    assert add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=listings[4].external_id)[0] is True
+    ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=listings[5].external_id)
+    assert ok is False
+    assert "5 anúncios no total" in msg

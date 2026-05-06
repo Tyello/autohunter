@@ -126,3 +126,11 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - O resumo de wishlists agrega `notifications_24h_count` contando registros em `notifications` com `status='sent'` e `sent_at` nas últimas 24h por wishlist.
 - Há índice operacional para suportar essa consulta por wishlist/status/sent_at (parcial em PostgreSQL para `status='sent'`; composto de fallback em SQLite para testes rápidos).
 - A validação completa da migration de índice deve ser feita na lane PostgreSQL (`pytest -m postgres` com `TEST_DATABASE_URL`).
+
+## 15) Modelo comercial mínimo (Free vs Premium)
+- Planos oficiais para UX: **Free** e **Premium** (mantendo compatibilidade com códigos legados `pro/ultra/paid` mapeados para Premium).
+- **Free**: até 2 wishlists ativas, até 1 anúncio rastreado no total, sem alertas automáticos de tracking, acompanhamento manual por `/wishlist_track_list`, referência comercial de 5 notificações/dia por wishlist.
+- **Premium**: até 10 wishlists ativas, até 5 anúncios rastreados no total, limite técnico de 3 slots por wishlist preservado, alertas automáticos de queda de preço, suporte a alertas de anúncio inativo quando disponível no pipeline, referência comercial de 15 notificações/dia por wishlist.
+- Preço comunicado no upgrade: lançamento **R$ 5,99/mês** e preço futuro **R$ 9,99/mês**.
+- Billing integrado fica para PR separada; enquanto não estiver disponível, `/upgrade` deve apenas preparar o usuário para esse fluxo sem prometer link.
+- Fora de escopo desta tranche: gateway de pagamento, dashboard de billing, alteração de frequência de busca por plano.
