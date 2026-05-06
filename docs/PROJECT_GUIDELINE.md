@@ -120,6 +120,9 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Ao criar wishlist, a primeira busca não roda inline no handler: o sistema agenda job inicial em `scrape_jobs` e retorna confirmação imediata no Telegram.
 - A queue da primeira busca é resolvida por metadata/policy da source plugin (override opcional em `default_extra.queue`, senão `fetch_mode`), evitando listas hardcoded por nome de source.
 - A execução efetiva da primeira varredura acontece depois pelo scheduler/workers do pipeline oficial.
+- Fluxo guiado oficial de criação: `/menu` → `➕ Criar wishlist` → informar carro → escolher entre **Criar agora** ou **Criar e adicionar filtros**.
+- Filtros são recomendados para evitar buscas genéricas; o usuário pode concluir sem filtro quando preferir.
+- Comandos rápidos para usuários avançados continuam válidos (ex.: `/wishlist_add`, `/wishlist_filter_add`).
 
 
 ## 14) Métrica notifications_24h_count (wishlist summary)

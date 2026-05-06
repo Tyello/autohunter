@@ -88,7 +88,7 @@ def test_escolher_wishlist_mostra_tipos(monkeypatch):
     q = _CallbackQuery("FILTER:WL:1")
     state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
     assert state == handlers_core.MENU_FILTER_SELECT_VALUE
-    assert "Escolha uma ação" in q.edits[-1]["text"]
+    assert "Filtros da wishlist 1 — civic si" in q.edits[-1]["text"]
 
 
 def test_escolher_acao_adicionar_mostra_tipos(monkeypatch):
@@ -264,6 +264,16 @@ def test_filter_rm_lista_mudou_entre_render_e_clique(monkeypatch):
     assert q.answers == 1
     assert "Filtro não encontrado. Atualize a lista de filtros." in q.edits[-1]["text"]
     assert called["n"] == 0
+
+
+def test_filter_done_responde_e_encerra(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
+    q = _CallbackQuery("FILTER:DONE")
+    state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
+    assert state == ConversationHandler.END
+    assert q.answers == 1
+    assert "Tudo certo. Use /menu para acompanhar suas buscas." in q.edits[-1]["text"]
 
 
 def test_wishlist_filter_add_continua_funcionando(monkeypatch):
