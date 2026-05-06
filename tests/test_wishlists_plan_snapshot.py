@@ -1,0 +1,34 @@
+from __future__ import annotations
+
+import uuid
+
+from app.models.account import Account
+from app.models.plan import Plan
+from app.models.subscription import Subscription
+from app.models.user import User
+from app.services.wishlists_service import get_user_plan_snapshot
+
+
+def test_get_user_plan_snapshot_with_active_premium_subscription(db):
+    acc = Account(id=uuid.uuid4(), type="personal", name="acc", is_active=True)
+    user = User(
+        id=uuid.uuid4(),
+        telegram_chat_id=990001,
+        username="premium_user",
+        is_active=True,
+        account_id=acc.id,
+    )
+    free = Plan(code="free", name="Free", daily_alert_limit=5, max_wishlists=2, is_active=True)
+    premium = Plan(code="premium", name="Premium", daily_alert_limit=999, max_wishlists=999, is_active=True)
+    db.add_all([acc, user, free, premium])
+    db.commit()
+
+    sub = Subscription(account_id=acc.id, plan_id=premium.id, status="active", source="seed")
+    db.add(sub)
+    db.commit()
+
+    snap = get_user_plan_snapshot(db, user.id)
+    assert snap["plan_code"] == "premium"
+    assert snap["max_wishlists"] == 10
+    assert snap["daily_notifications_per_wishlist"] == 15
+    assert snap["daily_alert_limit"] == 15

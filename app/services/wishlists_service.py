@@ -329,6 +329,7 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         "plan_code": "free",
         "max_wishlists": DEFAULT_MAX_WISHLISTS_PER_USER,
         "daily_alert_limit": None,
+        "daily_notifications_per_wishlist": None,
     }
 
     try:
@@ -367,7 +368,8 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         caps = get_plan_capabilities(snap["plan_code"])
         snap["plan_code"] = caps.plan_code
         snap["max_wishlists"] = caps.max_active_wishlists
-        snap["daily_alert_limit"] = caps.daily_notification_limit
+        snap["daily_notifications_per_wishlist"] = caps.daily_notifications_per_wishlist
+        snap["daily_alert_limit"] = caps.daily_notifications_per_wishlist
 
         return snap
 
