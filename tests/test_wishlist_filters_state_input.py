@@ -4,7 +4,7 @@ import uuid
 
 from app.models.user import User
 from app.models.wishlist import Wishlist
-from app.services.wishlists_service import add_filter, add_wishlist, list_filters
+from app.services.wishlists_service import add_filter, add_wishlist, list_filters, normalize_wishlist_filter_input
 
 
 def test_add_filter_state_accepts_state_name(db, monkeypatch):
@@ -23,3 +23,10 @@ def test_add_filter_state_accepts_state_name(db, monkeypatch):
 
     fs = list_filters(db, wl.id)
     assert any(f.field == "state" and f.value == "SP" for f in fs)
+
+
+def test_normalize_wishlist_filter_input_state_alias_without_db():
+    normalized = normalize_wishlist_filter_input("state", "igual", "São Paulo")
+    assert normalized.field == "state"
+    assert normalized.operator == "eq"
+    assert normalized.value == "SP"

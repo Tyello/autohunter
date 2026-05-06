@@ -5,6 +5,7 @@ import uuid
 import logging
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import delete, func
@@ -457,7 +458,7 @@ def get_wishlist_summaries(db: Session, user_id):
         })
     return out
 
-def add_wishlist(db: Session, user_id, query: str):
+def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = True):
     """Cria wishlist e opcionalmente cria filtros de ano/preço se diretivas existirem."""
     try:
         db.rollback()
@@ -514,6 +515,12 @@ def add_wishlist(db: Session, user_id, query: str):
     except Exception:
         db.rollback()
 
+    if not enqueue_initial_run:
+        return True, (
+            f"✅ Wishlist criada: {cleaned_query}\n\n"
+            "Monitoramento salvo. A primeira busca será disparada quando o fluxo guiado concluir os filtros."
+        )
+
     run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
 
     if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
@@ -523,6 +530,128 @@ def add_wishlist(db: Session, user_id, query: str):
         "Vou fazer a primeira busca em segundo plano.\n"
         "Você será avisado se encontrar bons anúncios."
     )
+
+
+@dataclass(frozen=True)
+class NormalizedWishlistFilter:
+    field: str
+    operator: str
+    value: str
+
+
+def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> NormalizedWishlistFilter:
+    field = (field or "").strip().lower()
+    operator = (operator or "").strip().lower()
+    value = (value or "").strip()
+
+    field_aliases = {
+        "km": "mileage_km", "kms": "mileage_km", "quilometragem": "mileage_km", "kilometragem": "mileage_km",
+        "mileage": "mileage_km", "mileage_km": "mileage_km", "seller": "seller_type", "vendedor": "seller_type",
+        "tipo_vendedor": "seller_type", "tipo_de_vendedor": "seller_type", "anunciante": "seller_type", "loja": "seller_type",
+        "particular": "seller_type", "concessionaria": "seller_type", "concessionária": "seller_type", "revenda": "seller_type",
+        "seller_type": "seller_type", "carroceria": "body_type", "tipo_carroceria": "body_type",
+        "tipo_de_carroceria": "body_type", "categoria": "body_type", "tipo": "body_type", "body": "body_type",
+        "body_type": "body_type", "estilo": "body_type", "porta": "doors", "portas": "doors", "qtd_portas": "doors",
+        "quantidade_portas": "doors", "quantidade_de_portas": "doors", "doors": "doors",
+    }
+    field = field_aliases.get(field, field)
+
+    op_aliases = {"<=": "lte", "=<": "lte", "até": "lte", "ate": "lte", "max": "lte", "máximo": "lte", "maximo": "lte",
+                  ">=": "gte", "=>": "gte", "mínimo": "gte", "minimo": "gte", "min": "gte", "between": "between",
+                  "entre": "between", "igual": "eq", "=": "eq", "apenas": "eq", "somente": "eq", "excluir": "neq",
+                  "diferente": "neq", "!=": "neq"}
+    operator = op_aliases.get(operator, operator)
+
+    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km", "seller_type", "body_type", "doors"):
+        raise ValueError("Campo inválido. Use: price | year | mileage_km | source | color | city | state | seller_type | body_type | doors")
+    if field in ("price", "year", "mileage_km", "doors") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq", "between"):
+        raise ValueError(f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq|between")
+    if field == "source" and operator not in ("eq", "neq"):
+        raise ValueError("Operador inválido para source. Use: eq|neq")
+    if field in ("color", "city", "state", "seller_type", "body_type") and operator not in ("eq", "neq"):
+        raise ValueError(f"Operador inválido para {field}. Use: eq|neq")
+
+    if field == "source":
+        v = value.strip().lower()
+        if v not in _known_sources():
+            raise ValueError("Valor inválido para source. Use: " + " | ".join(sorted(_known_sources())))
+        value = v
+    if field == "year":
+        try:
+            y = int(value)
+        except Exception:
+            raise ValueError("Ano inválido. Ex: year lte 2005")
+        if y < 1900 or y > 2100:
+            raise ValueError("Ano fora do intervalo (1900-2100).")
+        value = str(y)
+    if field == "mileage_km":
+        if operator == "between":
+            parts = value.split()
+            if len(parts) != 2:
+                raise ValueError("Quilometragem inválida. Ex: mileage_km between 30000 90000")
+            bounds: list[int] = []
+            for p in parts:
+                raw = p.lower().replace("km", "").replace(".", "").replace(",", "").strip()
+                try:
+                    km = int(raw)
+                except Exception:
+                    raise ValueError("Quilometragem inválida. Ex: mileage_km between 30000 90000")
+                if km < 0 or km > 1_500_000:
+                    raise ValueError("Quilometragem fora do intervalo (0-1500000).")
+                bounds.append(km)
+            lo, hi = sorted(bounds)
+            value = f"{lo},{hi}"
+        else:
+            raw = value.lower().replace("km", "").replace(".", "").replace(",", "").strip()
+            try:
+                km = int(raw)
+            except Exception:
+                raise ValueError("Quilometragem inválida. Ex: mileage_km lte 90000")
+            if km < 0 or km > 1_500_000:
+                raise ValueError("Quilometragem fora do intervalo (0-1500000).")
+            value = str(km)
+    if field == "doors":
+        if operator == "between":
+            parts = value.split()
+            if len(parts) != 2:
+                raise ValueError("Portas inválido. Ex: doors between 2 4")
+            bounds: list[int] = []
+            for p in parts:
+                d = normalize_doors(p)
+                if d is None:
+                    raise ValueError("Portas inválido. Use um número inteiro entre 1 e 6.")
+                bounds.append(d)
+            lo, hi = sorted(bounds)
+            value = f"{lo},{hi}"
+        else:
+            doors = normalize_doors(value)
+            if doors is None:
+                raise ValueError("Portas inválido. Use um número inteiro entre 1 e 6.")
+            value = str(doors)
+    if field in ("color", "city"):
+        if len(value.strip()) < 2:
+            raise ValueError(f"Valor inválido para {field}.")
+        value = value.strip()
+    if field == "state":
+        raw_state = value.strip()
+        uf = raw_state.upper()
+        if uf not in KNOWN_STATES:
+            normalized = raw_state.lower().replace("á", "a").replace("à", "a").replace("â", "a").replace("ã", "a").replace("é", "e").replace("ê", "e").replace("í", "i").replace("ó", "o").replace("ô", "o").replace("õ", "o").replace("ú", "u").replace("ç", "c")
+            uf = STATE_NAME_TO_UF.get(normalized, "")
+        if uf not in KNOWN_STATES:
+            raise ValueError("Valor inválido para state. Use UF (ex: SP) ou nome do estado.")
+        value = uf
+    if field == "seller_type":
+        normalized_seller = normalize_seller_type_filter_value(value)
+        if not normalized_seller:
+            raise ValueError("Valor inválido para seller_type. Use: particular | loja | revenda | concessionária")
+        value = normalized_seller
+    if field == "body_type":
+        normalized_body_type = normalize_body_type(value)
+        if not normalized_body_type:
+            raise ValueError("Valor inválido para body_type. Use: hatch | sedan | suv | pickup | coupe | convertible | wagon | minivan | van")
+        value = normalized_body_type
+    return NormalizedWishlistFilter(field=field, operator=operator, value=value)
 
 
 def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_reason: str = "wishlist_created") -> Dict[str, Any]:
@@ -656,179 +785,17 @@ def remove_all_wishlists(db: Session, user_id):
     return True, f"{len(wishlists)} wishlists removidas."
 
 def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
-    field = (field or "").strip().lower()
-    operator = (operator or "").strip().lower()
-    value = (value or "").strip()
+    try:
+        normalized = normalize_wishlist_filter_input(field, operator, value)
+    except ValueError as exc:
+        return False, str(exc)
 
-    field_aliases = {
-        "km": "mileage_km",
-        "kms": "mileage_km",
-        "quilometragem": "mileage_km",
-        "kilometragem": "mileage_km",
-        "mileage": "mileage_km",
-        "mileage_km": "mileage_km",
-        "seller": "seller_type",
-        "vendedor": "seller_type",
-        "tipo_vendedor": "seller_type",
-        "tipo_de_vendedor": "seller_type",
-        "anunciante": "seller_type",
-        "loja": "seller_type",
-        "particular": "seller_type",
-        "concessionaria": "seller_type",
-        "concessionária": "seller_type",
-        "revenda": "seller_type",
-        "seller_type": "seller_type",
-        "carroceria": "body_type",
-        "tipo_carroceria": "body_type",
-        "tipo_de_carroceria": "body_type",
-        "categoria": "body_type",
-        "tipo": "body_type",
-        "body": "body_type",
-        "body_type": "body_type",
-        "estilo": "body_type",
-        "porta": "doors",
-        "portas": "doors",
-        "qtd_portas": "doors",
-        "quantidade_portas": "doors",
-        "quantidade_de_portas": "doors",
-        "doors": "doors",
-    }
-    field = field_aliases.get(field, field)
-
-    op_aliases = {
-        "<=": "lte",
-        "=<": "lte",
-        "até": "lte",
-        "ate": "lte",
-        "max": "lte",
-        "máximo": "lte",
-        "maximo": "lte",
-        ">=": "gte",
-        "=>": "gte",
-        "mínimo": "gte",
-        "minimo": "gte",
-        "min": "gte",
-        "between": "between",
-        "entre": "between",
-        "igual": "eq",
-        "=": "eq",
-        "apenas": "eq",
-        "somente": "eq",
-        "excluir": "neq",
-        "diferente": "neq",
-        "!=": "neq",
-    }
-    operator = op_aliases.get(operator, operator)
-
-    if field not in ("price", "source", "year", "color", "city", "state", "mileage_km", "seller_type", "body_type", "doors"):
-        return False, "Campo inválido. Use: price | year | mileage_km | source | color | city | state | seller_type | body_type | doors"
-
-    if field in ("price", "year", "mileage_km", "doors") and operator not in ("lt", "lte", "gt", "gte", "eq", "neq", "between"):
-        return False, f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq|between"
-
-    if field == "source" and operator not in ("eq", "neq"):
-        return False, "Operador inválido para source. Use: eq|neq"
-
-    if field in ("color", "city", "state", "seller_type", "body_type") and operator not in ("eq", "neq"):
-        return False, f"Operador inválido para {field}. Use: eq|neq"
-
-    if field == "source":
-        v = value.strip().lower()
-        if v not in _known_sources():
-            return False, "Valor inválido para source. Use: " + " | ".join(sorted(_known_sources()))
-        value = v
-
-    if field == "year":
-        try:
-            y = int(value)
-        except Exception:
-            return False, "Ano inválido. Ex: year lte 2005"
-        if y < 1900 or y > 2100:
-            return False, "Ano fora do intervalo (1900-2100)."
-        value = str(y)
-
-    if field == "mileage_km":
-        if operator == "between":
-            parts = value.split()
-            if len(parts) != 2:
-                return False, "Quilometragem inválida. Ex: mileage_km between 30000 90000"
-            bounds: list[int] = []
-            for p in parts:
-                raw = p.lower().replace("km", "").replace(".", "").replace(",", "").strip()
-                try:
-                    km = int(raw)
-                except Exception:
-                    return False, "Quilometragem inválida. Ex: mileage_km between 30000 90000"
-                if km < 0 or km > 1_500_000:
-                    return False, "Quilometragem fora do intervalo (0-1500000)."
-                bounds.append(km)
-            lo, hi = sorted(bounds)
-            value = f"{lo},{hi}"
-        else:
-            raw = value.lower().replace("km", "").replace(".", "").replace(",", "").strip()
-            try:
-                km = int(raw)
-            except Exception:
-                return False, "Quilometragem inválida. Ex: mileage_km lte 90000"
-            if km < 0 or km > 1_500_000:
-                return False, "Quilometragem fora do intervalo (0-1500000)."
-            value = str(km)
-
-    if field == "doors":
-        if operator == "between":
-            parts = value.split()
-            if len(parts) != 2:
-                return False, "Portas inválido. Ex: doors between 2 4"
-            bounds: list[int] = []
-            for p in parts:
-                d = normalize_doors(p)
-                if d is None:
-                    return False, "Portas inválido. Use um número inteiro entre 1 e 6."
-                bounds.append(d)
-            lo, hi = sorted(bounds)
-            value = f"{lo},{hi}"
-        else:
-            doors = normalize_doors(value)
-            if doors is None:
-                return False, "Portas inválido. Use um número inteiro entre 1 e 6."
-            value = str(doors)
-
-    if field in ("color", "city"):
-        if len(value.strip()) < 2:
-            return False, f"Valor inválido para {field}."
-        value = value.strip()
-
-    if field == "state":
-        raw_state = value.strip()
-        uf = raw_state.upper()
-        if uf not in KNOWN_STATES:
-            normalized = (
-                raw_state.lower()
-                .replace("á", "a").replace("à", "a").replace("â", "a").replace("ã", "a")
-                .replace("é", "e").replace("ê", "e")
-                .replace("í", "i")
-                .replace("ó", "o").replace("ô", "o").replace("õ", "o")
-                .replace("ú", "u")
-                .replace("ç", "c")
-            )
-            uf = STATE_NAME_TO_UF.get(normalized, "")
-        if uf not in KNOWN_STATES:
-            return False, "Valor inválido para state. Use UF (ex: SP) ou nome do estado."
-        value = uf
-
-    if field == "seller_type":
-        normalized_seller = normalize_seller_type_filter_value(value)
-        if not normalized_seller:
-            return False, "Valor inválido para seller_type. Use: particular | loja | revenda | concessionária"
-        value = normalized_seller
-
-    if field == "body_type":
-        normalized_body_type = normalize_body_type(value)
-        if not normalized_body_type:
-            return False, "Valor inválido para body_type. Use: hatch | sedan | suv | pickup | coupe | convertible | wagon | minivan | van"
-        value = normalized_body_type
-
-    row = WishlistFilter(wishlist_id=wishlist_id, field=field, operator=operator, value=value)
+    row = WishlistFilter(
+        wishlist_id=wishlist_id,
+        field=normalized.field,
+        operator=normalized.operator,
+        value=normalized.value,
+    )
     db.add(row)
     try:
         db.commit()
@@ -836,6 +803,42 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     except Exception:
         db.rollback()
         return False, "Filtro já existe (duplicado) ou erro ao salvar."
+
+
+def create_wishlist_with_filters(db: Session, user_id, query: str, filters: list[dict | tuple]) -> tuple[bool, str, Optional[uuid.UUID]]:
+    ok, msg = add_wishlist(db, user_id, query, enqueue_initial_run=False)
+    if not ok:
+        return False, msg, None
+
+    wishlist = (
+        db.query(Wishlist)
+        .filter(Wishlist.user_id == user_id)
+        .order_by(Wishlist.created_at.desc())
+        .first()
+    )
+    if not wishlist:
+        return False, "Erro ao localizar wishlist criada.", None
+
+    seen: set[tuple[str, str, str]] = set()
+    for item in filters or []:
+        if isinstance(item, dict):
+            raw_field, raw_op, raw_value = item.get("field"), item.get("operator"), item.get("value")
+        else:
+            raw_field, raw_op, raw_value = item
+        try:
+            n = normalize_wishlist_filter_input(str(raw_field), str(raw_op), str(raw_value))
+        except ValueError as exc:
+            return False, str(exc), None
+        key = (n.field, n.operator, n.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        f_ok, f_msg = add_filter(db, wishlist.id, n.field, n.operator, n.value)
+        if not f_ok and "duplicado" not in f_msg.lower():
+            return False, f_msg, None
+
+    trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
+    return True, "Wishlist e filtros criados com sucesso.", wishlist.id
 
 
 def list_filters(db: Session, wishlist_id):
