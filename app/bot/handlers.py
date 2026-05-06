@@ -382,10 +382,13 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = normalize_args(context.args)
     if not args:
-        await reply_text(update, "Use: /setplan <free|premium|pro|ultra> [telegram_chat_id]")
+        await reply_text(update, "Use: /setplan <free|premium> [telegram_chat_id]")
         return
 
     requested_plan_code = args[0].lower()
+    if requested_plan_code not in {"free", "premium"}:
+        await reply_text(update, "Plano inválido. Use: free|premium")
+        return
 
     chat_id, error = _resolve_target_chat_id(args, int(update.effective_chat.id))
     if error:
@@ -402,18 +405,9 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         resolved_code = requested_plan_code
-        fallback_from = None
         plan = db.query(Plan).filter(Plan.code == resolved_code).first()
-        if requested_plan_code == "premium" and not plan:
-            for candidate in ("pro", "ultra", "paid"):
-                candidate_plan = db.query(Plan).filter(Plan.code == candidate).first()
-                if candidate_plan:
-                    plan = candidate_plan
-                    resolved_code = candidate
-                    fallback_from = "premium"
-                    break
         if not plan:
-            await reply_text(update, "Plano inválido. Use: free|premium|pro|ultra")
+            await reply_text(update, f"Plano {resolved_code} não encontrado no banco. Rode migrations/seed de planos.")
             return
 
         # cancela subscription ativa (se existir)
@@ -440,13 +434,7 @@ async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         db.commit()
 
-    if fallback_from:
-        await reply_text(
-            update,
-            f"✅ Plano premium aplicado usando plano legado {resolved_code} (chat_id={chat_id}).",
-        )
-    else:
-        await reply_text(update, f"✅ Plano atualizado para {resolved_code} (chat_id={chat_id}).")
+    await reply_text(update, f"✅ Plano atualizado para {resolved_code} (chat_id={chat_id}).")
 
 
 async def cmd_setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):

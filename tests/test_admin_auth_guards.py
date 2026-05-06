@@ -29,7 +29,7 @@ class _Update:
 
 def test_cmd_setplan_blocks_non_admin_without_side_effects(monkeypatch):
     update = _Update(chat_id=123)
-    context = types.SimpleNamespace(args=["pro", "456"])
+    context = types.SimpleNamespace(args=["premium", "456"])
 
     async def _deny(_update):
         return False
@@ -143,39 +143,32 @@ def test_cmd_setplan_premium_uses_premium_plan_when_exists(monkeypatch, db):
     assert sub is not None and sub.plan_id == premium.id
 
 
-def test_cmd_setplan_premium_falls_back_to_pro(monkeypatch, db):
-    _mk_admin_target_user(db, 457)
-    pro = Plan(code="pro", name="Pro", daily_alert_limit=15, max_wishlists=10, is_active=True)
-    db.add(pro)
-    db.commit()
-    monkeypatch.setattr(handlers, "_ensure_admin", _allow_admin)
-    monkeypatch.setattr(handlers, "SessionLocal", lambda: _SessionWrap(db))
-    update = _Update(chat_id=123)
-    context = types.SimpleNamespace(args=["premium", "457"])
-    asyncio.run(handlers.cmd_setplan(update, context))
-    assert "usando plano legado pro" in update.message.sent[-1]
-
-
-def test_cmd_setplan_premium_without_equivalent_plan_returns_clear_error(monkeypatch, db):
+def test_cmd_setplan_premium_without_plan_returns_clear_error(monkeypatch, db):
     _mk_admin_target_user(db, 458)
     monkeypatch.setattr(handlers, "_ensure_admin", _allow_admin)
     monkeypatch.setattr(handlers, "SessionLocal", lambda: _SessionWrap(db))
     update = _Update(chat_id=123)
     context = types.SimpleNamespace(args=["premium", "458"])
     asyncio.run(handlers.cmd_setplan(update, context))
-    assert "Plano inválido" in update.message.sent[-1]
+    assert "Plano premium não encontrado no banco" in update.message.sent[-1]
 
 
-def test_cmd_setplan_pro_and_ultra_still_work(monkeypatch, db):
+def test_cmd_setplan_free_works(monkeypatch, db):
     _mk_admin_target_user(db, 459)
-    pro = Plan(code="pro", name="Pro", daily_alert_limit=15, max_wishlists=10, is_active=True)
-    ultra = Plan(code="ultra", name="Ultra", daily_alert_limit=20, max_wishlists=10, is_active=True)
-    db.add_all([pro, ultra])
+    free = Plan(code="free", name="Free", daily_alert_limit=5, max_wishlists=2, is_active=True)
+    db.add(free)
     db.commit()
     monkeypatch.setattr(handlers, "_ensure_admin", _allow_admin)
     monkeypatch.setattr(handlers, "SessionLocal", lambda: _SessionWrap(db))
     update = _Update(chat_id=123)
+    asyncio.run(handlers.cmd_setplan(update, types.SimpleNamespace(args=["free", "459"])))
+    assert "Plano atualizado para free" in update.message.sent[-1]
+
+
+def test_cmd_setplan_rejects_legacy_codes(monkeypatch):
+    monkeypatch.setattr(handlers, "_ensure_admin", _allow_admin)
+    update = _Update(chat_id=123)
     asyncio.run(handlers.cmd_setplan(update, types.SimpleNamespace(args=["pro", "459"])))
-    assert "Plano atualizado para pro" in update.message.sent[-1]
+    assert "Plano inválido. Use: free|premium" in update.message.sent[-1]
     asyncio.run(handlers.cmd_setplan(update, types.SimpleNamespace(args=["ultra", "459"])))
-    assert "Plano atualizado para ultra" in update.message.sent[-1]
+    assert "Plano inválido. Use: free|premium" in update.message.sent[-1]

@@ -29,6 +29,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.fb_session import FBSession
 from app.sources.registry import list_sources
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
+from app.services.plan_capabilities import normalize_plan_code
 from app.services.operational_alerts_service import collect_operational_alerts
 from app.services.source_operational_policy import (
     classify_source_operational_role,
@@ -1397,8 +1398,8 @@ async def _admin_users(update: Update, raw_args: List[str]):
             wl_total, wl_active = wl_counts.get(u.id, (0, 0))
 
             sub = sub_map.get(u.account_id) if u.account_id else None
-            plan = (sub.get("plan_code") if sub else None) or (u.plan or "free")
-            plan = (plan or "free").lower()
+            raw_plan = (sub.get("plan_code") if sub else None) or (u.plan or "free")
+            plan = normalize_plan_code(raw_plan)
 
             override = None
             if sub and sub.get("override") is not None:
@@ -1415,7 +1416,7 @@ async def _admin_users(update: Update, raw_args: List[str]):
             )
 
     out.append("")
-    out.append("Dica: /setplan <free|pro|ultra> <chat_id>  |  /setlimit <n|none> <chat_id>")
+    out.append("Dica: /setplan <free|premium> <chat_id>  |  /setlimit <n|none> <chat_id>")
 
     msg = sanitize_for_telegram("\n".join(out))
     if len(msg) > 3800:
