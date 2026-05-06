@@ -32,3 +32,22 @@ def test_get_user_plan_snapshot_with_active_premium_subscription(db):
     assert snap["max_wishlists"] == 10
     assert snap["daily_notifications_per_wishlist"] == 15
     assert snap["daily_alert_limit"] == 15
+
+
+def test_get_user_plan_snapshot_without_active_subscription_uses_free_capabilities(db):
+    acc = Account(id=uuid.uuid4(), type="personal", name="acc-free", is_active=True)
+    user = User(
+        id=uuid.uuid4(),
+        telegram_chat_id=990002,
+        username="free_user",
+        is_active=True,
+        account_id=acc.id,
+    )
+    db.add_all([acc, user])
+    db.commit()
+
+    snap = get_user_plan_snapshot(db, user.id)
+    assert snap["plan_code"] == "free"
+    assert snap["max_wishlists"] == 2
+    assert snap["daily_notifications_per_wishlist"] == 5
+    assert snap["daily_alert_limit"] == 5

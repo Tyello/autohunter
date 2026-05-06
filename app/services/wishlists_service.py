@@ -325,11 +325,12 @@ def year_in_directive_range(year: Optional[int], year_min: Optional[int], year_m
 
 
 def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
+    free_caps = get_plan_capabilities("free")
     snap: Dict[str, Any] = {
-        "plan_code": "free",
-        "max_wishlists": DEFAULT_MAX_WISHLISTS_PER_USER,
-        "daily_alert_limit": None,
-        "daily_notifications_per_wishlist": None,
+        "plan_code": free_caps.plan_code,
+        "max_wishlists": free_caps.max_active_wishlists,
+        "daily_alert_limit": free_caps.daily_notifications_per_wishlist,
+        "daily_notifications_per_wishlist": free_caps.daily_notifications_per_wishlist,
     }
 
     try:
