@@ -806,19 +806,7 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
 
 
 def create_wishlist_with_filters(db: Session, user_id, query: str, filters: list[dict | tuple]) -> tuple[bool, str, Optional[uuid.UUID]]:
-    ok, msg = add_wishlist(db, user_id, query, enqueue_initial_run=False)
-    if not ok:
-        return False, msg, None
-
-    wishlist = (
-        db.query(Wishlist)
-        .filter(Wishlist.user_id == user_id)
-        .order_by(Wishlist.created_at.desc())
-        .first()
-    )
-    if not wishlist:
-        return False, "Erro ao localizar wishlist criada.", None
-
+    normalized_filters: list[NormalizedWishlistFilter] = []
     seen: set[tuple[str, str, str]] = set()
     for item in filters or []:
         if isinstance(item, dict):
@@ -833,6 +821,23 @@ def create_wishlist_with_filters(db: Session, user_id, query: str, filters: list
         if key in seen:
             continue
         seen.add(key)
+        normalized_filters.append(n)
+
+    ok, msg = add_wishlist(db, user_id, query, enqueue_initial_run=False)
+    if not ok:
+        return False, msg, None
+
+    # TODO: idealmente add_wishlist retornaria wishlist_id para remover dependência da ordenação por created_at.
+    wishlist = (
+        db.query(Wishlist)
+        .filter(Wishlist.user_id == user_id)
+        .order_by(Wishlist.created_at.desc())
+        .first()
+    )
+    if not wishlist:
+        return False, "Erro ao localizar wishlist criada.", None
+
+    for n in normalized_filters:
         f_ok, f_msg = add_filter(db, wishlist.id, n.field, n.operator, n.value)
         if not f_ok and "duplicado" not in f_msg.lower():
             return False, f_msg, None

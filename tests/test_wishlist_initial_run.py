@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.models.user import User
+from app.models.wishlist import Wishlist
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlists_service import add_wishlist, create_wishlist_with_filters, list_filters
 from app.sources.types import ScrapeContext
@@ -207,6 +208,7 @@ def test_create_wishlist_with_invalid_filter_does_not_enqueue(db, monkeypatch):
     assert "Valor inválido para state" in msg
     assert wishlist_id is None
     assert calls["n"] == 0
+    assert db.query(Wishlist).filter(Wishlist.user_id == user.id).count() == 0
 
 
 def test_scheduler_not_due_after_recent_effective_run(db, monkeypatch):
