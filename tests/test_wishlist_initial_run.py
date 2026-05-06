@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.models.user import User
+from app.models.wishlist import Wishlist
 from app.services.source_execution_service import run_source_for_all_wishlists
-from app.services.wishlists_service import add_wishlist
+from app.services.wishlists_service import add_wishlist, create_wishlist_with_filters, list_filters
 from app.sources.types import ScrapeContext
 from app.sources.types import SourcePlugin
 
@@ -152,6 +153,62 @@ def test_add_wishlist_when_no_source_still_succeeds(db, monkeypatch):
 
     assert ok is True
     assert "Wishlist criada" in msg
+
+
+def test_add_wishlist_can_skip_initial_run_when_disabled(db, monkeypatch):
+    user = _make_user(db)
+    called = {"n": 0}
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda *_args, **_kwargs: called.update(n=called["n"] + 1),
+    )
+    ok, _msg = add_wishlist(db, user.id, "fusca", enqueue_initial_run=False)
+    assert ok is True
+    assert called["n"] == 0
+
+
+def test_create_wishlist_with_filters_enqueues_after_persisting_filters(db, monkeypatch):
+    user = _make_user(db)
+    calls = []
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda _db, _w, **_kwargs: calls.append("run") or {"triggered": 1, "failed": 0},
+    )
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda *_: {})
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+    ok, _msg, wishlist_id = create_wishlist_with_filters(
+        db,
+        user.id,
+        "civic si",
+        [{"field": "state", "operator": "eq", "value": "São Paulo"}, {"field": "state", "operator": "eq", "value": "SP"}],
+    )
+    assert ok is True
+    assert wishlist_id is not None
+    rows = list_filters(db, wishlist_id)
+    assert len(rows) == 1
+    assert rows[0].field == "state"
+    assert rows[0].value == "SP"
+    assert calls == ["run"]
+
+
+def test_create_wishlist_with_invalid_filter_does_not_enqueue(db, monkeypatch):
+    user = _make_user(db)
+    calls = {"n": 0}
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda *_args, **_kwargs: calls.update(n=calls["n"] + 1),
+    )
+    ok, msg, wishlist_id = create_wishlist_with_filters(
+        db,
+        user.id,
+        "civic si",
+        [{"field": "state", "operator": "eq", "value": "estado inexistente"}],
+    )
+    assert ok is False
+    assert "Valor inválido para state" in msg
+    assert wishlist_id is None
+    assert calls["n"] == 0
+    assert db.query(Wishlist).filter(Wishlist.user_id == user.id).count() == 0
 
 
 def test_scheduler_not_due_after_recent_effective_run(db, monkeypatch):
