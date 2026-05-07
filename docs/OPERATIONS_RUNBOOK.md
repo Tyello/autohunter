@@ -255,3 +255,11 @@ Boas práticas para novas migrations:
 - Fontes `experimental/deprioritized/auxiliary` não disparam incidente crítico de stale por padrão.
 - Operação recomendada: use `/admin audit` para triagem rápida e `/admin health` para detalhe.
 
+
+
+## 14) Graceful shutdown do scheduler (deploy/restart seguro)
+- O scheduler deve receber `SIGTERM` e encerrar em modo gracioso: pausa novos disparos e espera jobs em execução finalizarem.
+- No service `autohunter-scheduler`, manter: `KillSignal=SIGTERM`, `TimeoutStopSec=180`, `KillMode=mixed`.
+- O script de boot do scheduler deve usar `exec python -m app.cli.run_scheduler` para o PID principal receber sinais diretamente.
+- Durante shutdown, workers HTTP/browser não fazem novo dequeue; jobs `queued` ficam para a próxima subida.
+- Erros de desligamento do interpretador (ex.: `cannot schedule new futures after interpreter shutdown`) não devem ser tratados como falha operacional de source.

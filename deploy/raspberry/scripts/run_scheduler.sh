@@ -10,4 +10,4 @@ fi
 
 export PYTHONUNBUFFERED=1
 
-python -m app.cli.run_scheduler
+exec python -m app.cli.run_scheduler

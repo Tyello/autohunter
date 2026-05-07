@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.core.settings import settings
+from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
 from app.services.system_logs_service import log
 from app.services.source_execution_service import run_source_for_all_wishlists
@@ -20,6 +21,9 @@ def job_browser_queue_worker():
     ORDER BY run_at ASC, priority DESC, created_at ASC
     """
     if not bool(getattr(settings, "enable_playwright", False)):
+        return
+
+    if is_shutdown_requested():
         return
 
     with SessionLocal() as db:
@@ -57,15 +61,20 @@ def job_browser_queue_worker():
 
             db.commit()
         except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
+            shutdown_exc = is_shutdown_requested() or "cannot schedule new futures after interpreter shutdown" in str(e).lower()
             try:
-                if job is not None:
-                    mark_failed(job, error=f"{type(e).__name__}: {e}", retry_in_seconds=60)
+                if job is not None and not shutdown_exc:
+                    mark_failed(job, error=err_text, retry_in_seconds=60)
                     db.commit()
             except Exception as mark_exc:
                 log(db, "warn", "browser_queue_worker", "suppressed_exception", {"stage": "worker.mark_failed", "exc_type": type(mark_exc).__name__, "message": str(mark_exc)[:240], "impact": "job_status_may_stay_running", "fallback": "worker_continues"})
                 db.commit()
             try:
-                log(db, "error", "browser_queue_worker", "job_failed", {"err": f"{type(e).__name__}: {e}"})
+                if shutdown_exc:
+                    log(db, "info", "browser_queue_worker", "shutdown_suppressed", {"err": err_text})
+                else:
+                    log(db, "error", "browser_queue_worker", "job_failed", {"err": err_text})
                 db.commit()
             except Exception as log_exc:
                 try:

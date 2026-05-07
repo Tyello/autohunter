@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.core.settings import settings
+from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
 from app.services.app_kv_service import get_kv, set_kv
 from app.services.admin_alerts_service import send_admin_text, iter_admin_chat_ids
@@ -26,6 +27,8 @@ def _should_log_missing_admin_chat(db) -> bool:
 
 
 def job_admin_monitor() -> None:
+    if is_shutdown_requested():
+        return
     if not getattr(settings, "admin_monitor_enabled", True):
         return
 
