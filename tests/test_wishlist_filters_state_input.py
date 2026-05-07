@@ -4,7 +4,7 @@ import uuid
 
 from app.models.user import User
 from app.models.wishlist import Wishlist
-from app.services.wishlists_service import add_filter, add_wishlist, list_filters, normalize_wishlist_filter_input
+from app.services.wishlists_service import add_filter, add_wishlist, list_filters, normalize_wishlist_filter_input, parse_wishlist_filter_expression, parse_wishlist_query_with_implicit_filters
 
 
 def test_add_filter_state_accepts_state_name(db, monkeypatch):
@@ -30,3 +30,32 @@ def test_normalize_wishlist_filter_input_state_alias_without_db():
     assert normalized.field == "state"
     assert normalized.operator == "eq"
     assert normalized.value == "SP"
+
+
+def test_parse_filter_expression_and_price_canonicalization():
+    price = parse_wishlist_filter_expression("price", "até 150.000")
+    assert price[0].operator == "lte"
+    assert price[0].value == "150000"
+    year = parse_wishlist_filter_expression("year", "entre 2017 e 2021")
+    assert [(y.operator, y.value) for y in year] == [("gte", "2017"), ("lte", "2021")]
+    mileage = parse_wishlist_filter_expression("mileage_km", "até 90.000 km")
+    assert mileage[0].value == "90000"
+    state = parse_wishlist_filter_expression("state", "São Paulo")
+    assert state[0].value == "SP"
+
+
+def test_parse_query_with_implicit_filters():
+    parsed = parse_wishlist_query_with_implicit_filters("a5 entre 2017 e 2021")
+    assert parsed.cleaned_query == "a5"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("year", "gte", "2017"), ("year", "lte", "2021")]
+
+
+def test_parse_query_price_range_implicit():
+    parsed = parse_wishlist_query_with_implicit_filters("civic entre 70000 e 90000")
+    assert parsed.cleaned_query == "civic"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("price", "gte", "70000"), ("price", "lte", "90000")]
+
+
+def test_normalize_price_between_canonical():
+    normalized = normalize_wishlist_filter_input("price", "between", "70.000 90.000")
+    assert normalized.value == "70000,90000"

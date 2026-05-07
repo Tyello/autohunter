@@ -6,7 +6,7 @@ from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters
 from app.services.users_service import get_or_create_user_by_chat
-from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters
+from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression
 from app.services.wishlist_tracking_service import list_tracked_listings
 
 MENU_CREATE_WISHLIST_QUERY = 1
@@ -22,6 +22,54 @@ FILTER_TYPE_TO_SPEC = {
     "city": ("city", "eq", "Qual cidade?\nExemplo: São Paulo"),
     "state": ("state", "eq", "Qual estado/UF?\nExemplo: SP"),
 }
+DRAFT_FILTER_TYPE_TO_FIELD = {"price": "price", "year": "year", "mileage": "mileage_km", "city": "city", "state": "state"}
+DRAFT_FILTER_PROMPTS = {
+    "price": "Qual preço?\nExemplos:\n- até 150000\n- entre 70000 e 90000\n- a partir de 50000",
+    "year": "Qual ano?\nExemplos:\n- 2018\n- até 2021\n- a partir de 2017\n- entre 2017 e 2021",
+    "mileage": "Qual quilometragem?\nExemplos:\n- até 90000\n- menor que 80000\n- entre 30000 e 100000",
+    "city": "Qual cidade?\nExemplo: São Paulo",
+    "state": "Qual estado?\nExemplo: SP ou São Paulo",
+}
+
+def _format_brl(value: str) -> str:
+    return f"R$ {int(value):,}".replace(",", ".")
+
+
+def _build_draft_group_label(group: str, filters_payload: list[dict]) -> str:
+    op_map = {f["operator"]: f["value"] for f in filters_payload}
+    if group == "year":
+        if "gte" in op_map and "lte" in op_map:
+            return f"Ano entre {op_map['gte']} e {op_map['lte']}"
+        if "gte" in op_map:
+            return f"Ano a partir de {op_map['gte']}"
+        if "lte" in op_map:
+            return f"Ano até {op_map['lte']}"
+    if group == "price":
+        if "gte" in op_map and "lte" in op_map:
+            return f"Preço entre {_format_brl(op_map['gte'])} e {_format_brl(op_map['lte'])}"
+        if "gte" in op_map:
+            return f"Preço a partir de {_format_brl(op_map['gte'])}"
+        if "lte" in op_map:
+            return f"Preço até {_format_brl(op_map['lte'])}"
+    if group == "mileage_km":
+        if "lte" in op_map:
+            return f"KM até {int(op_map['lte']):,}".replace(",", ".")
+    if group == "state" and "eq" in op_map:
+        return f"Estado: {op_map['eq']}"
+    if group == "city" and "eq" in op_map:
+        return f"Cidade: {op_map['eq']}"
+    return f"{group}: " + ", ".join(f"{f['operator']} {f['value']}" for f in filters_payload)
+
+
+def build_draft_filter_groups(filters: list) -> list[dict]:
+    by_group: dict[str, list[dict]] = {}
+    for f in filters or []:
+        payload = {"field": f.field, "operator": f.operator, "value": f.value}
+        by_group.setdefault(f.field, []).append(payload)
+    groups: list[dict] = []
+    for group, payloads in by_group.items():
+        groups.append({"group": group, "label": _build_draft_group_label(group, payloads), "filters": payloads})
+    return groups
 
 
 
@@ -34,7 +82,7 @@ def _clear_menu_create_wishlist_draft_context(context: ContextTypes.DEFAULT_TYPE
 def _render_draft_filters(filters_draft: list[dict]) -> str:
     if not filters_draft:
         return "Nenhum filtro adicionado ainda."
-    lines = [f"{i}. {f.get('field')} {f.get('operator')} {f.get('value')}" for i, f in enumerate(filters_draft, start=1)]
+    lines = [f"{i}. {f.get('label')}" for i, f in enumerate(filters_draft, start=1)]
     return "\n".join(lines)
 
 
@@ -452,22 +500,22 @@ async def _menu_filter_remove_from_callback(update: Update, context: ContextType
 async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value_input_mode = context.user_data.get("menu_create_wishlist_draft_filter_type")
     if value_input_mode:
-        field, operator, _prompt = FILTER_TYPE_TO_SPEC[value_input_mode]
+        field = DRAFT_FILTER_TYPE_TO_FIELD[value_input_mode]
         raw_value = (update.message.text or "").strip()
         try:
-            normalized = normalize_wishlist_filter_input(field, operator, raw_value)
+            parsed = parse_wishlist_filter_expression(field, raw_value)
         except ValueError as exc:
             await reply_text(update, f"Valor inválido: {exc}\nEnvie outro valor ou use /cancelar.")
             return MENU_CREATE_WISHLIST_QUERY
 
         draft_filters = context.user_data.setdefault("menu_create_wishlist_draft_filters", [])
-        candidate = {"field": normalized.field, "operator": normalized.operator, "value": normalized.value}
-        if candidate in draft_filters:
-            await reply_text(update, "Esse filtro já foi adicionado. Escolha outro valor.")
-            return MENU_CREATE_WISHLIST_QUERY
-        draft_filters.append(candidate)
+        filters_payload = [{"field": n.field, "operator": n.operator, "value": n.value} for n in parsed]
+        label = _build_draft_group_label(field, filters_payload)
+        draft_filters = [g for g in draft_filters if g.get("group") != field]
+        draft_filters.append({"group": field, "label": label, "filters": filters_payload})
+        context.user_data["menu_create_wishlist_draft_filters"] = draft_filters
         context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
-        return await _show_draft_filters_screen(update, context, feedback="✅ Filtro adicionado.")
+        return await _show_draft_filters_screen(update, context, feedback="✅ Filtro adicionado/atualizado.")
 
     if "menu_create_wishlist_draft_filters" in context.user_data:
         await reply_text(
@@ -482,13 +530,15 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
         await reply_text(update, "Texto inválido. Envie o carro/busca ou use /cancelar.")
         return MENU_CREATE_WISHLIST_QUERY
 
-    context.user_data["menu_create_wishlist_query"] = query
+    parsed = parse_wishlist_query_with_implicit_filters(query)
+    context.user_data["menu_create_wishlist_query"] = parsed.cleaned_query
+    context.user_data["menu_create_wishlist_draft_filters"] = build_draft_filter_groups(parsed.filters)
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Criar agora", callback_data="CWL:CREATE")],
         [InlineKeyboardButton("⚙️ Adicionar filtros antes de criar", callback_data="CWL:CREATE_FILTERS")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
     ])
-    await reply_text(update, f"Busca:\n{query}\n\nComo deseja continuar?", reply_markup=kb)
+    await reply_text(update, f"Busca:\n{parsed.cleaned_query}\n\n{_render_draft_filters(context.user_data['menu_create_wishlist_draft_filters'])}\n\nComo deseja continuar?", reply_markup=kb)
     return MENU_CREATE_WISHLIST_QUERY
 
 
@@ -511,7 +561,12 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             return ConversationHandler.END
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-            ok, msg = add_wishlist(db, user.id, query)
+            draft_groups = context.user_data.get("menu_create_wishlist_draft_filters") or []
+            if draft_groups:
+                flat = [flt for g in draft_groups for flt in g.get("filters", [])]
+                ok, msg, _ = create_wishlist_with_filters(db, user.id, query, flat)
+            else:
+                ok, msg = add_wishlist(db, user.id, query)
         if not ok:
             await _safe_edit_or_send(update, f"Não consegui criar a wishlist:\n{msg}")
             return MENU_CREATE_WISHLIST_QUERY
@@ -520,30 +575,33 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     if data == "CWL:CREATE_FILTERS":
-        context.user_data["menu_create_wishlist_draft_filters"] = []
+        context.user_data["menu_create_wishlist_draft_filters"] = context.user_data.get("menu_create_wishlist_draft_filters") or []
         context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
         return await _show_draft_filters_screen(update, context)
 
     if data == "CWLF:ACTION:add":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 Preço máximo", callback_data="CWLF:TYPE:price_max")],
-            [InlineKeyboardButton("📅 Ano mínimo", callback_data="CWLF:TYPE:year_min")],
-            [InlineKeyboardButton("🛣️ KM máximo", callback_data="CWLF:TYPE:km_max")],
+            [InlineKeyboardButton("💰 Preço", callback_data="CWLF:TYPE:price")],
+            [InlineKeyboardButton("📅 Ano", callback_data="CWLF:TYPE:year")],
+            [InlineKeyboardButton("🛣️ KM", callback_data="CWLF:TYPE:mileage")],
             [InlineKeyboardButton("📍 Cidade", callback_data="CWLF:TYPE:city")],
             [InlineKeyboardButton("🗺️ Estado", callback_data="CWLF:TYPE:state")],
-            [InlineKeyboardButton("❌ Cancelar", callback_data="CWLF:CANCEL")],
+            [InlineKeyboardButton("↩️ Voltar aos filtros", callback_data="CWLF:BACK")],
         ])
         await _safe_edit_or_send(update, "Escolha o tipo de filtro draft:", reply_markup=kb)
         return MENU_CREATE_WISHLIST_QUERY
 
     if data.startswith("CWLF:TYPE:"):
         ftype = data.split(":", 2)[2]
-        if ftype not in FILTER_TYPE_TO_SPEC:
+        if ftype not in DRAFT_FILTER_TYPE_TO_FIELD:
             await _safe_edit_or_send(update, "Tipo de filtro inválido.")
             return MENU_CREATE_WISHLIST_QUERY
         context.user_data["menu_create_wishlist_draft_filter_type"] = ftype
-        await _safe_edit_or_send(update, FILTER_TYPE_TO_SPEC[ftype][2])
+        await _safe_edit_or_send(update, DRAFT_FILTER_PROMPTS[ftype])
         return MENU_CREATE_WISHLIST_QUERY
+    if data == "CWLF:BACK":
+        context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
+        return await _show_draft_filters_screen(update, context)
 
     if data == "CWLF:ACTION:list":
         return await _show_draft_filters_screen(update, context)
@@ -553,16 +611,22 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             idx = int(data.split(":", 2)[2])
         except ValueError:
             return await _show_draft_filters_screen(update, context, feedback="Índice inválido.")
-        draft_filters = context.user_data.get("menu_create_wishlist_draft_filters") or []
-        if idx < 1 or idx > len(draft_filters):
+        draft_groups = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        if idx < 1 or idx > len(draft_groups):
             return await _show_draft_filters_screen(update, context, feedback="Índice inválido.")
-        draft_filters.pop(idx - 1)
-        context.user_data["menu_create_wishlist_draft_filters"] = draft_filters
+        draft_groups.pop(idx - 1)
+        context.user_data["menu_create_wishlist_draft_filters"] = draft_groups
         return await _show_draft_filters_screen(update, context, feedback="✅ Filtro removido.")
 
     if data == "CWLF:DONE":
         query = context.user_data.get("menu_create_wishlist_query")
-        filters_draft = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        draft_groups = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        filters_draft = []
+        for g in draft_groups:
+            if isinstance(g, dict) and "filters" in g:
+                filters_draft.extend(g.get("filters", []))
+            elif isinstance(g, dict) and {"field", "operator", "value"}.issubset(g.keys()):
+                filters_draft.append({"field": g["field"], "operator": g["operator"], "value": g["value"]})
         if not query:
             _clear_menu_create_wishlist_draft_context(context)
             await _safe_edit_or_send(update, "Sessão expirada. Abra novamente /menu → Criar wishlist.")
@@ -574,8 +638,9 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             await _safe_edit_or_send(update, f"Não consegui criar a wishlist:\n{msg}")
             return MENU_CREATE_WISHLIST_QUERY
         _clear_menu_create_wishlist_draft_context(context)
-        if filters_draft:
-            await _safe_edit_or_send(update, f"✅ Wishlist criada com filtros.\n\nBusca: {query}\nFiltros: {len(filters_draft)}\n\nA primeira busca foi agendada com os filtros aplicados.\nUse /menu para acompanhar.")
+        if draft_groups:
+            labels = "\n".join(f"- {g.get('label')}" for g in draft_groups)
+            await _safe_edit_or_send(update, f"✅ Wishlist criada com filtros.\n\nBusca: {query}\nFiltros:\n{labels}\n\nA primeira busca foi agendada com os filtros aplicados.\nUse /menu para acompanhar.")
         else:
             await _safe_edit_or_send(update, f"✅ Wishlist criada sem filtros. Você pode adicionar filtros depois pelo /menu.\n\nBusca: {query}\nUse /menu para acompanhar.")
         return ConversationHandler.END
@@ -601,7 +666,7 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
         entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:CREATE_WISHLIST$")],
         states={
             MENU_CREATE_WISHLIST_QUERY: [
-                CallbackQueryHandler(cb_menu_create_wishlist, pattern=r"^(CWL:(?:CREATE|CREATE_FILTERS|CANCEL)|CWLF:(?:ACTION:(?:add|list)|TYPE:[a-z_]+|RM:\d+|DONE|CANCEL))$"),
+                CallbackQueryHandler(cb_menu_create_wishlist, pattern=r"^(CWL:(?:CREATE|CREATE_FILTERS|CANCEL)|CWLF:(?:ACTION:(?:add|list)|TYPE:[a-z_]+|RM:\d+|DONE|CANCEL|BACK))$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_create_wishlist_on_text),
                 MessageHandler(filters.COMMAND, menu_create_wishlist_cancel),
             ],

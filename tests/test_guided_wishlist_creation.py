@@ -54,11 +54,23 @@ def _patch_user(monkeypatch):
 
 
 def test_create_flow_query_text_shows_create_options():
-    msg = _Message("civic si")
+    msg = _Message("a5 entre 2017 e 2021")
     ctx = types.SimpleNamespace(user_data={})
     state = asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
     assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
-    assert "Como deseja continuar?" in msg.sent[-1]["text"]
+    assert "Busca:\na5" in msg.sent[-1]["text"]
+    assert "Ano entre 2017 e 2021" in msg.sent[-1]["text"]
+
+
+def test_create_flow_query_text_groups_mixed_implicit_filters():
+    msg = _Message("corolla a partir de 2018 até 120000")
+    ctx = types.SimpleNamespace(user_data={})
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
+    text = msg.sent[-1]["text"]
+    assert "Busca:\ncorolla" in text
+    assert "Ano a partir de 2018" in text
+    assert "Preço até R$ 120.000" in text
+    assert "Ano entre 2018 e 120000" not in text
 
 
 def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
@@ -91,7 +103,7 @@ def test_draft_filter_add_and_remove(monkeypatch):
     asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q_type), ctx))
     msg = _Message("SP")
     asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
-    assert ctx.user_data["menu_create_wishlist_draft_filters"][0]["field"] == "state"
+    assert ctx.user_data["menu_create_wishlist_draft_filters"][0]["group"] == "state"
     q_list = _CallbackQuery("CWLF:ACTION:list")
     asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q_list), ctx))
     q_rm = _CallbackQuery("CWLF:RM:1")
@@ -121,7 +133,7 @@ def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", _create)
     ctx = types.SimpleNamespace(user_data={
         "menu_create_wishlist_query": "civic si",
-        "menu_create_wishlist_draft_filters": [{"field": "state", "operator": "eq", "value": "SP"}],
+        "menu_create_wishlist_draft_filters": [{"group": "state", "label": "Estado SP", "filters": [{"field": "state", "operator": "eq", "value": "SP"}]}],
     })
     q = _CallbackQuery("CWLF:DONE")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -148,3 +160,37 @@ def test_draft_cancel_clears_context_and_does_not_create(monkeypatch):
     assert state == ConversationHandler.END
     assert ctx.user_data == {}
     assert "cancelada" in q.edits[-1]["text"]
+
+
+def test_cwlf_back_keeps_query_and_filters():
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic", "menu_create_wishlist_draft_filters": [{"group": "state", "label": "Estado SP", "filters": [{"field": "state", "operator": "eq", "value": "SP"}]}], "menu_create_wishlist_draft_filter_type": "state"})
+    q = _CallbackQuery("CWLF:BACK")
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert ctx.user_data["menu_create_wishlist_query"] == "civic"
+    assert len(ctx.user_data["menu_create_wishlist_draft_filters"]) == 1
+
+
+def test_draft_price_replaces_previous_group():
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic", "menu_create_wishlist_draft_filters": []})
+    asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWLF:TYPE:price")), ctx))
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("até 150.000")), ctx))
+    asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWLF:TYPE:price")), ctx))
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("até 56.000")), ctx))
+    groups = ctx.user_data["menu_create_wishlist_draft_filters"]
+    assert len(groups) == 1
+    assert groups[0]["filters"][0]["value"] == "56000"
+
+
+def test_cwl_create_with_mixed_implicit_filters_calls_create_with_filters(monkeypatch):
+    _patch_user(monkeypatch)
+    called = {}
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", lambda _db, _uid, q, fs: (called.setdefault("query", q) or True, called.setdefault("filters", fs) or "ok", "wid"))
+    ctx = types.SimpleNamespace(user_data={})
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("corolla a partir de 2018 até 120000")), ctx))
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
+    assert state == ConversationHandler.END
+    assert called["query"] == "corolla"
+    assert {"field": "year", "operator": "gte", "value": "2018"} in called["filters"]
+    assert {"field": "price", "operator": "lte", "value": "120000"} in called["filters"]
