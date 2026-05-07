@@ -15,7 +15,7 @@ from app.services.users_service import get_or_create_user_by_chat
 from app.sources import list_sources
 from app.services.wishlists_service import (
     add_wishlist, remove_wishlist,
-    add_filter, list_filters, remove_filter, get_wishlist_summaries,
+    add_filter, list_filters, remove_filter, get_wishlist_summaries, list_wishlists,
 )
 from app.services.limits_service import get_daily_limit_for_user, count_sent_today
 from app.models.user import User
@@ -361,14 +361,13 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "🚀 Premium — lançamento por R$ 5,99/mês\n"
-        "Preço futuro: R$ 9,99/mês\n\n"
+        "🚀 Premium — De R$ 9,99/mês por R$ 5,99/mês\n\n"
         "Benefícios:\n"
-        "- até 10 wishlists\n"
+        "- até 15 wishlists\n"
         "- até 5 anúncios rastreados no total\n"
         "- alertas automáticos de queda de preço\n"
         "- alertas quando anúncio sair do ar, quando disponível\n"
-        "- 15 notificações por dia por wishlist\n"
+        "- 200 notificações por dia por wishlist\n"
         "- prioridade em novas funcionalidades\n\n"
         "Pagamento:\n"
         "Pagamento integrado será exibido aqui quando configurado."
