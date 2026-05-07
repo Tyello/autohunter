@@ -32,7 +32,7 @@ from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
 from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type, normalize_doors
 from app.sources.registry import get_source
-from app.services.plan_capabilities import get_plan_capabilities, wishlist_limit_message
+from app.services.plan_capabilities import get_plan_capabilities, resolve_plan_capabilities, wishlist_limit_message
 
 
 logger = logging.getLogger(__name__)
@@ -367,7 +367,7 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
             return snap
 
         snap["plan_code"] = getattr(plan, "code", "free") or "free"
-        caps = get_plan_capabilities(snap["plan_code"])
+        caps = resolve_plan_capabilities(db, snap["plan_code"])
         snap["plan_code"] = caps.plan_code
         snap["max_wishlists"] = caps.max_active_wishlists
         snap["daily_notifications_per_wishlist"] = caps.daily_notifications_per_wishlist
