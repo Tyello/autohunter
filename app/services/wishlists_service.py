@@ -325,6 +325,14 @@ def year_in_directive_range(year: Optional[int], year_min: Optional[int], year_m
     return True
 
 
+def _as_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
     free_caps = get_plan_capabilities("free")
     snap: Dict[str, Any] = {
@@ -362,8 +370,8 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         if not sub:
             return snap
         now = datetime.now(timezone.utc)
-        current_period_end = getattr(sub, "current_period_end", None)
-        ends_at = getattr(sub, "ends_at", None)
+        current_period_end = _as_utc_datetime(getattr(sub, "current_period_end", None))
+        ends_at = _as_utc_datetime(getattr(sub, "ends_at", None))
         effective_end = current_period_end or ends_at
         if effective_end and effective_end <= now:
             return snap
@@ -378,8 +386,8 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         snap["max_wishlists"] = caps.max_active_wishlists
         snap["daily_notifications_per_wishlist"] = caps.daily_notifications_per_wishlist
         snap["daily_alert_limit"] = caps.daily_notifications_per_wishlist
-        if current_period_end:
-            snap["current_period_end"] = current_period_end
+        if effective_end:
+            snap["current_period_end"] = effective_end
 
         return snap
 
