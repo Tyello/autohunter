@@ -285,3 +285,16 @@ def send_daily_limit_notice_http(user, limit: int):
         return False
 
     return True
+
+
+def send_plain_text_to_user(chat_id: int, text: str) -> bool:
+    token = settings.telegram_bot_token
+    if not token:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    resp = get_shared_session("telegram").post(
+        url,
+        data={"chat_id": int(chat_id), "text": _truncate(sanitize_for_telegram(text), TELEGRAM_TEXT_MAX), "disable_web_page_preview": True},
+        timeout=15,
+    )
+    return resp.status_code < 400

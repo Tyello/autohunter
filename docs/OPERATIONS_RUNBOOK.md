@@ -263,3 +263,19 @@ Boas práticas para novas migrations:
 - O script de boot do scheduler deve usar `exec python -m app.cli.run_scheduler` para o PID principal receber sinais diretamente.
 - Durante shutdown, workers HTTP/browser não fazem novo dequeue; jobs `queued` ficam para a próxima subida.
 - Erros de desligamento do interpretador (ex.: `cannot schedule new futures after interpreter shutdown`) não devem ser tratados como falha operacional de source.
+
+## 15) Premium manual (Mercado Pago com validação humana)
+- Configurar links de pagamento em settings:
+  - `MERCADO_PAGO_MONTHLY_PAYMENT_LINK`
+  - `MERCADO_PAGO_ANNUAL_PAYMENT_LINK`
+- Fluxo operacional: usuário envia comprovante no Telegram -> admin valida -> ativa manualmente.
+- Ativação mensal:
+  - `/admin premium activate <chat_id> monthly` (ou `30d`)
+- Ativação anual:
+  - `/admin premium activate <chat_id> annual` (ou `365d`)
+- Status operacional:
+  - `/admin premium status <chat_id>`
+- A ativação grava `current_period_start`/`current_period_end` e mantém compatibilidade com `starts_at`/`ends_at`.
+- Job diário `premium_expiration_daily` roda em UTC (12:00) e expira subscriptions premium vencidas.
+- Usuário recebe notificação de ativação e, no vencimento, de retorno para Free.
+- Para validar pós-ativação: pedir para o usuário rodar `/plan` (deve mostrar Premium + validade).
