@@ -67,7 +67,6 @@ def test_cmd_menu_renders_buttons():
         "MENU:WISHLISTS",
         "MENU:TRACKED",
         "MENU:SEARCH",
-        "MENU:FILTERS",
         "MENU:HELP",
     ]
 
@@ -126,13 +125,12 @@ def test_callback_menu_tracked_empty_slots(monkeypatch):
     assert "(vazio)" in q.edits[-1]
 
 
-def test_callback_menu_filters(monkeypatch):
+def test_callback_menu_filters_legacy_redirect(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl1", query="civic si")])
     q = _CallbackQuery("MENU:FILTERS")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "Escolha a wishlist" in q.edits[-1]
+    assert "filtros guiados agora" in q.edits[-1]
 
 
 def test_callback_menu_help_real():

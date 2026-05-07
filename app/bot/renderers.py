@@ -34,20 +34,14 @@ def render_user_wishlists(wishlists) -> str:
     if isinstance(wishlists[0], dict):
         lines = ["🎯 Suas wishlists", ""]
         for item in wishlists:
-            status = "ativa" if item.get("is_active", True) else "inativa"
             lines.extend([
                 f"{item['index']}. {item['query']}",
                 f"Filtros: {item.get('filters_count', 0)}",
                 f"Rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
                 f"Notificações: {item.get('notifications_24h_count', 0)} nas últimas 24h",
-                f"Status: {status}",
                 "",
             ])
-        lines.extend([
-            "Comandos:",
-            "Use /menu → ⚙️ Filtros para ajustar.",
-            "Use /wishlist_track_list para ver rastreados.",
-        ])
+        lines.append("Escolha uma ação:")
         return "\n".join(lines).strip()
 
     lines = [f"{i + 1}. {x.query}" for i, x in enumerate(wishlists)]

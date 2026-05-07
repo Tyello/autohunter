@@ -6,7 +6,7 @@ from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters
 from app.services.users_service import get_or_create_user_by_chat
-from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression
+from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist
 from app.services.wishlist_tracking_service import list_tracked_listings
 
 MENU_CREATE_WISHLIST_QUERY = 1
@@ -216,7 +216,56 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             summaries = get_wishlist_summaries(db, user.id)
-        await _safe_edit_or_send(update, render_user_wishlists(summaries))
+        await _safe_edit_or_send(update, render_user_wishlists(summaries), reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗑️ Remover wishlist", callback_data="WL:REMOVE_MENU")],
+            [InlineKeyboardButton("⭐ Rastreados", callback_data="WL:TRACKED")],
+            [InlineKeyboardButton("↩️ Voltar", callback_data="WL:BACK")],
+        ]))
+        return
+    if data == "WL:BACK":
+        await _safe_edit_or_send(update, "🚗 AutoHunter\n\nO que você quer fazer?", reply_markup=_menu_keyboard())
+        return
+    if data == "WL:TRACKED":
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+            tracked_messages = []
+            for i, _wl in enumerate(wishlists, start=1):
+                _ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=i)
+                tracked_messages.append(msg)
+        await _safe_edit_or_send(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")]]))
+        return
+    if data == "WL:REMOVE_MENU":
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+        if not wishlists:
+            await _safe_edit_or_send(update, "Você ainda não tem wishlists para remover.")
+            return
+        kb = [[InlineKeyboardButton(f"🗑️ Remover {i} — {wl.query}", callback_data=f"WL:REMOVE:{i}")] for i, wl in enumerate(wishlists, start=1)]
+        kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")])
+        await _safe_edit_or_send(update, "Escolha a wishlist para remover:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+    if data.startswith("WL:REMOVE:"):
+        idx = int(data.split(":")[-1])
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+        if idx < 1 or idx > len(wishlists):
+            await _safe_edit_or_send(update, "Wishlist não encontrada para sua conta.")
+            return
+        wl = wishlists[idx - 1]
+        await _safe_edit_or_send(update, f"Remover wishlist {idx} — {wl.query}?\n\nIsso também remove filtros e rastreados vinculados, quando aplicável.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar remoção", callback_data=f"WL:REMOVE_CONFIRM:{idx}")],
+            [InlineKeyboardButton("↩️ Voltar", callback_data="WL:REMOVE_MENU")],
+        ]))
+        return
+    if data.startswith("WL:REMOVE_CONFIRM:"):
+        idx = int(data.split(":")[-1])
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            ok, _msg = remove_wishlist(db, user.id, idx)
+        await _safe_edit_or_send(update, "Wishlist removida." if ok else "Wishlist não encontrada para sua conta.")
         return
     if data == "MENU:TRACKED":
         with SessionLocal() as db:
@@ -229,17 +278,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _safe_edit_or_send(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
         return
     if data == "MENU:FILTERS":
-        with SessionLocal() as db:
-            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-            wishlists = list_wishlists(db, user.id)
-        if not wishlists:
-            await _safe_edit_or_send(update, "Você ainda não tem wishlists.\nCrie uma pelo /menu → ➕ Criar wishlist.")
-            return
-        kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(f"{i} — {wl.query}", callback_data=f"FILTER:WL:{i}")] for i, wl in enumerate(wishlists, start=1)]
-            + [[InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")]]
-        )
-        await _safe_edit_or_send(update, "Escolha a wishlist para adicionar filtro:", reply_markup=kb)
+        await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar wishlist.")
         return
     if data == "MENU:HELP":
         await _safe_edit_or_send(update, render_help_text())
@@ -279,7 +318,6 @@ def _menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎯 Minhas wishlists", callback_data="MENU:WISHLISTS")],
         [InlineKeyboardButton("📌 Rastreados", callback_data="MENU:TRACKED")],
         [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
-        [InlineKeyboardButton("⚙️ Filtros", callback_data="MENU:FILTERS")],
         [InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")],
     ])
 
@@ -314,7 +352,7 @@ async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "FILTER:CANCEL":
         _clear_menu_filter_context(context)
-        await _safe_edit_or_send(update, "Configuração de filtro cancelada.")
+        await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar wishlist.")
         return ConversationHandler.END
 
     if data.startswith("FILTER:WL:"):

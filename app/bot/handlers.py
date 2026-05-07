@@ -1,4 +1,5 @@
 import re
+import asyncio
 from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -153,56 +154,38 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    with SessionLocal() as db:
-        _user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        results = manual_search(db, query=query, limit=5, sources=sources, force_scrape=bool(sources))
+    chat_id = update.effective_chat.id
+    user_name = update.effective_user.username
+    await reply_text(update, "Busca recebida. Vou processar em segundo plano e te aviso quando encontrar resultados.")
 
-        if not results:
-            await reply_text(update, "Nada encontrado agora.")
-            return
-
-        # vNext scoring+formatting (treat manual query as a temporary wishlist)
-        pseudo_wishlist = SimpleNamespace(query=query, filters=[])
-        stats_map = {}
-        try:
-            stats_map = batch_get_market_stats(db, results)
-        except Exception:
+    async def _run_background_search():
+        with SessionLocal() as db:
+            _user = get_or_create_user_by_chat(db, chat_id, user_name)
+            results = await asyncio.to_thread(manual_search, db, query, 5, sources, force_scrape=bool(sources))
+            if not results:
+                await context.bot.send_message(chat_id=chat_id, text="Nada encontrado agora.")
+                return
+            pseudo_wishlist = SimpleNamespace(query=query, filters=[])
             stats_map = {}
-
-        for item in results:
-            ms = None
             try:
-                k = cohort_key_for_listing(item)
-                if k:
-                    ms = stats_map.get(k)
+                stats_map = batch_get_market_stats(db, results)
             except Exception:
+                stats_map = {}
+            for item in results:
                 ms = None
+                try:
+                    k = cohort_key_for_listing(item)
+                    if k:
+                        ms = stats_map.get(k)
+                except Exception:
+                    ms = None
 
-            sres = score_ad(item, pseudo_wishlist, ms)
-            payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
+                sres = score_ad(item, pseudo_wishlist, ms)
+                payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
+                await context.bot.send_message(chat_id=chat_id, text=payload.text, disable_web_page_preview=True)
 
-            keyboard_rows = [list(row) for row in (payload.inline_keyboard or [])]
-            keyboard = None
-            if keyboard_rows:
-                built_rows = []
-                for row in keyboard_rows:
-                    built = []
-                    for btn in row:
-                        if btn.get("callback_data"):
-                            built.append(InlineKeyboardButton(btn.get("text", "Botão"), callback_data=btn.get("callback_data")))
-                        else:
-                            built.append(InlineKeyboardButton(btn.get("text", "Abrir anúncio"), url=btn.get("url")))
-                    built_rows.append(built)
-                keyboard = InlineKeyboardMarkup(built_rows)
-
-            await send_listing_message(
-                update,
-                text=payload.text,
-                thumbnail_url=getattr(item, "thumbnail_url", None),
-                referer_url=getattr(item, "url", None),
-                reply_markup=keyboard,
-                disable_web_page_preview=True,
-            )
+    asyncio.create_task(_run_background_search())
+    return
 
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):

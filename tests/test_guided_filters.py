@@ -71,7 +71,7 @@ def test_menu_filters_sem_wishlist(monkeypatch):
     monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [])
     q = _CallbackQuery("MENU:FILTERS")
     asyncio.run(handlers_core.cb_menu(_Update(q=q), _ctx()))
-    assert "ainda não tem wishlists" in q.edits[-1]["text"]
+    assert "filtros guiados agora" in q.edits[-1]["text"]
 
 
 def test_menu_filters_com_wishlist_mostra_selecao(monkeypatch):
@@ -79,8 +79,7 @@ def test_menu_filters_com_wishlist_mostra_selecao(monkeypatch):
     monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="1", query="miata")])
     q = _CallbackQuery("MENU:FILTERS")
     asyncio.run(handlers_core.cb_menu(_Update(q=q), _ctx()))
-    assert "Escolha a wishlist" in q.edits[-1]["text"]
-    assert q.edits[-1]["reply_markup"].inline_keyboard[0][0].callback_data == "FILTER:WL:1"
+    assert "filtros guiados agora" in q.edits[-1]["text"]
 
 
 def test_escolher_wishlist_mostra_tipos(monkeypatch):

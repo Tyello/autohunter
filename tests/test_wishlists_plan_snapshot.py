@@ -29,9 +29,9 @@ def test_get_user_plan_snapshot_with_active_premium_subscription(db):
 
     snap = get_user_plan_snapshot(db, user.id)
     assert snap["plan_code"] == "premium"
-    assert snap["max_wishlists"] == 10
-    assert snap["daily_notifications_per_wishlist"] == 15
-    assert snap["daily_alert_limit"] == 15
+    assert snap["max_wishlists"] == 999
+    assert snap["daily_notifications_per_wishlist"] == 999
+    assert snap["daily_alert_limit"] == 999
 
 
 def test_get_user_plan_snapshot_without_active_subscription_uses_free_capabilities(db):

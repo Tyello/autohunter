@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from sqlalchemy.orm import Session
+
+from app.models.plan import Plan
 
 
 @dataclass(frozen=True)
@@ -17,7 +20,7 @@ class PlanCapabilities:
 
 
 _FREE = PlanCapabilities("free", 2, 1, 3, False, 5, False, None, None)
-_PREMIUM = PlanCapabilities("premium", 15, 5, 3, True, 200, True, 5.99, 9.99)
+_PREMIUM = PlanCapabilities("premium", 10, 5, 3, True, 15, True, 5.99, 9.99)
 
 
 def normalize_plan_code(plan_code: str | None) -> str:
@@ -32,6 +35,25 @@ def normalize_plan_code(plan_code: str | None) -> str:
 def get_plan_capabilities(plan_code: str | None) -> PlanCapabilities:
     normalized = normalize_plan_code(plan_code)
     return _PREMIUM if normalized == "premium" else _FREE
+
+
+def resolve_plan_capabilities(db: Session, plan_code: str | None) -> PlanCapabilities:
+    normalized = normalize_plan_code(plan_code)
+    fallback = get_plan_capabilities(normalized)
+    plan = db.query(Plan).filter(Plan.code == normalized).first()
+    if not plan:
+        return fallback
+    return PlanCapabilities(
+        plan_code=normalized,
+        max_active_wishlists=int(getattr(plan, "max_wishlists", fallback.max_active_wishlists) or fallback.max_active_wishlists),
+        max_tracked_total=fallback.max_tracked_total,
+        max_tracked_slots_per_wishlist=fallback.max_tracked_slots_per_wishlist,
+        tracking_auto_alerts=fallback.tracking_auto_alerts,
+        daily_notifications_per_wishlist=int(getattr(plan, "daily_alert_limit", fallback.daily_notifications_per_wishlist) or fallback.daily_notifications_per_wishlist),
+        premium=fallback.premium,
+        launch_price_brl=fallback.launch_price_brl,
+        future_price_brl=fallback.future_price_brl,
+    )
 
 
 def premium_upgrade_cta() -> str:

@@ -21,7 +21,8 @@ def test_render_user_wishlists_summary_counts_filters_and_tracked():
     assert "Filtros: 2" in text
     assert "Rastreados: 1/3" in text
     assert "Notificações: 0 nas últimas 24h" in text
-    assert "Status: ativa" in text
+    assert "Status:" not in text
+    assert "Escolha uma ação:" in text
 
 
 def test_render_user_wishlists_summary_shows_notifications_24h_count():
