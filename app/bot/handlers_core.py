@@ -588,7 +588,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("🗺️ Estado", callback_data="CWLF:TYPE:state")],
             [InlineKeyboardButton("↩️ Voltar aos filtros", callback_data="CWLF:BACK")],
         ])
-        await _safe_edit_or_send(update, "Escolha o tipo de filtro draft:", reply_markup=kb)
+        await _safe_edit_or_send(update, "Escolha o tipo de filtro:", reply_markup=kb)
         return MENU_CREATE_WISHLIST_QUERY
 
     if data.startswith("CWLF:TYPE:"):
