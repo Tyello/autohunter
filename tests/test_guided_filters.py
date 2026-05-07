@@ -218,7 +218,7 @@ def test_filter_rm_wishlist_index_invalido(monkeypatch):
     state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
     assert state == ConversationHandler.END
     assert q.answers == 1
-    assert q.edits[-1]["text"] == "Wishlist não encontrada para sua conta."
+    assert q.edits[-1]["text"] == "Busca não encontrada para sua conta."
 
 
 def test_filter_rm_filter_index_invalido(monkeypatch):
@@ -247,7 +247,7 @@ def test_filter_rm_ownership_mismatch_nao_remove(monkeypatch):
     monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: called.update(n=called["n"] + 1))
     asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
     assert q.answers == 1
-    assert q.edits[-1]["text"] == "Wishlist não encontrada para sua conta."
+    assert q.edits[-1]["text"] == "Busca não encontrada para sua conta."
     assert called["n"] == 0
 
 

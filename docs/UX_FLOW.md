@@ -6,7 +6,7 @@ AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar ca
 - **Público principal**: comprador pessoa física, normalmente comparando opções de carro por faixa de preço/ano/KM.
 - **Canal principal**: Telegram (comandos + teclado inline).
 - **Objetivo do usuário**: cadastrar buscas persistentes (buscas), receber anúncios e notificações, e opcionalmente rastrear anúncios específicos.
-- **Wishlist (busca persistente)**: intenção de compra salva que roda continuamente no backend.
+- **Busca salva**: termo público para o usuário; internamente o sistema ainda usa `wishlist` como nome técnico.
 - **Busca manual (`/buscar`)**: consulta pontual “agora”, sem persistência.
 - **Filtro**: regra de refinamento (preço, ano, KM, cidade, estado etc.) aplicada à busca.
 - **Rastreado**: anúncio específico marcado para acompanhamento (preço/status).
@@ -212,13 +212,13 @@ Para cada filtro, o bot mostra:
 
 ## 12. /plan
 ### Free
-- Exibe plano Free, uso real (`buscas salvas X/2`, `rastreados Y/1`, `5 notificações`).
+- Exibe plano Free, uso real (`buscas salvas X/2`, `rastreados Y/1`, `5 alertas por dia por busca`).
 - Mostra CTA para `/upgrade`.
 
 ### Premium vigente
 - Exibe “Plano atual: Premium”.
 - Exibe validade (`Válido até: DD/MM/YYYY`) quando houver.
-- Exibe uso real (`X/10`, `Y/5`, `200 notificações`).
+- Exibe uso real (`X/15`, `Y/5`, `200 alertas por dia por busca`).
 - Exibe “Renovação: manual”.
 
 ### Premium vencido
@@ -270,7 +270,7 @@ Status: parcialmente implementado (sem webhook e sem autoaprovação).
 - Oportunidade: reduzir densidade técnica e separar “básico” de “avançado”.
 
 ## 17. Comandos avançados (não-main-path)
-- `/busca`
+- `/wishlist` (compatibilidade legado)
 - `/wishlist_add`
 - `/wishlist_remove`
 - `/wishlist_filter_add`
@@ -288,7 +288,7 @@ Status: parcialmente implementado (sem webhook e sem autoaprovação).
 - Permissão negada (áreas admin).
 
 ## 19. Checklist para especialista UX
-- “Wishlist” deveria virar “Busca salva” para leigos?
+- Linguagem pública principal já deve manter “busca”/“busca salva”.
 - Usuário entende diferença entre busca manual e busca?
 - Usuário entende filtros antes da criação?
 - O upgrade aparece no timing correto?
