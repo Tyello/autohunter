@@ -31,6 +31,46 @@ DRAFT_FILTER_PROMPTS = {
     "state": "Qual estado?\nExemplo: SP ou São Paulo",
 }
 
+def _format_brl(value: str) -> str:
+    return f"R$ {int(value):,}".replace(",", ".")
+
+
+def _build_draft_group_label(group: str, filters_payload: list[dict]) -> str:
+    op_map = {f["operator"]: f["value"] for f in filters_payload}
+    if group == "year":
+        if "gte" in op_map and "lte" in op_map:
+            return f"Ano entre {op_map['gte']} e {op_map['lte']}"
+        if "gte" in op_map:
+            return f"Ano a partir de {op_map['gte']}"
+        if "lte" in op_map:
+            return f"Ano até {op_map['lte']}"
+    if group == "price":
+        if "gte" in op_map and "lte" in op_map:
+            return f"Preço entre {_format_brl(op_map['gte'])} e {_format_brl(op_map['lte'])}"
+        if "gte" in op_map:
+            return f"Preço a partir de {_format_brl(op_map['gte'])}"
+        if "lte" in op_map:
+            return f"Preço até {_format_brl(op_map['lte'])}"
+    if group == "mileage_km":
+        if "lte" in op_map:
+            return f"KM até {int(op_map['lte']):,}".replace(",", ".")
+    if group == "state" and "eq" in op_map:
+        return f"Estado: {op_map['eq']}"
+    if group == "city" and "eq" in op_map:
+        return f"Cidade: {op_map['eq']}"
+    return f"{group}: " + ", ".join(f"{f['operator']} {f['value']}" for f in filters_payload)
+
+
+def build_draft_filter_groups(filters: list) -> list[dict]:
+    by_group: dict[str, list[dict]] = {}
+    for f in filters or []:
+        payload = {"field": f.field, "operator": f.operator, "value": f.value}
+        by_group.setdefault(f.field, []).append(payload)
+    groups: list[dict] = []
+    for group, payloads in by_group.items():
+        groups.append({"group": group, "label": _build_draft_group_label(group, payloads), "filters": payloads})
+    return groups
+
 
 
 
@@ -470,13 +510,7 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
 
         draft_filters = context.user_data.setdefault("menu_create_wishlist_draft_filters", [])
         filters_payload = [{"field": n.field, "operator": n.operator, "value": n.value} for n in parsed]
-        label = f"{field}: " + ", ".join(f"{n.operator} {n.value}" for n in parsed)
-        if field == "year" and len(parsed) == 2:
-            label = f"Ano entre {parsed[0].value} e {parsed[1].value}"
-        elif field == "price" and len(parsed) == 1 and parsed[0].operator == "lte":
-            label = f"Preço até R$ {int(parsed[0].value):,}".replace(",", ".")
-        elif field == "mileage_km" and len(parsed) == 1 and parsed[0].operator == "lte":
-            label = f"KM até {int(parsed[0].value):,}".replace(",", ".")
+        label = _build_draft_group_label(field, filters_payload)
         draft_filters = [g for g in draft_filters if g.get("group") != field]
         draft_filters.append({"group": field, "label": label, "filters": filters_payload})
         context.user_data["menu_create_wishlist_draft_filters"] = draft_filters
@@ -498,13 +532,7 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
 
     parsed = parse_wishlist_query_with_implicit_filters(query)
     context.user_data["menu_create_wishlist_query"] = parsed.cleaned_query
-    context.user_data["menu_create_wishlist_draft_filters"] = []
-    if parsed.filters:
-        context.user_data["menu_create_wishlist_draft_filters"].append({
-            "group": "year" if parsed.filters[0].field == "year" else parsed.filters[0].field,
-            "label": f"Ano entre {parsed.filters[0].value} e {parsed.filters[1].value}" if len(parsed.filters) == 2 and parsed.filters[0].field == "year" else f"{parsed.filters[0].field} {parsed.filters[0].operator} {parsed.filters[0].value}",
-            "filters": [{"field": f.field, "operator": f.operator, "value": f.value} for f in parsed.filters],
-        })
+    context.user_data["menu_create_wishlist_draft_filters"] = build_draft_filter_groups(parsed.filters)
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Criar agora", callback_data="CWL:CREATE")],
         [InlineKeyboardButton("⚙️ Adicionar filtros antes de criar", callback_data="CWL:CREATE_FILTERS")],

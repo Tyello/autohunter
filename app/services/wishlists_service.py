@@ -684,6 +684,19 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
                 raise ValueError("Quilometragem fora do intervalo (0-1500000).")
             value = str(km)
     if field == "price":
+        if operator == "between":
+            parts = value.split()
+            if len(parts) != 2:
+                raise ValueError("Preço inválido. Ex: price between 70000 90000")
+            bounds: list[int] = []
+            for p in parts:
+                parsed = _parse_human_money_to_int(p)
+                if parsed is None:
+                    raise ValueError("Preço inválido. Ex: price between 70000 90000")
+                bounds.append(parsed)
+            lo, hi = sorted(bounds)
+            value = f"{lo},{hi}"
+            return NormalizedWishlistFilter(field=field, operator=operator, value=value)
         raw = value.lower().replace("r$", "").replace("km", "").strip()
         raw = re.sub(r"^(até|ate|menor que|maior que|a partir de)\s+", "", raw).strip()
         parsed = _parse_human_money_to_int(raw)

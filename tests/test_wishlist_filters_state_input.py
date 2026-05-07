@@ -48,3 +48,14 @@ def test_parse_query_with_implicit_filters():
     parsed = parse_wishlist_query_with_implicit_filters("a5 entre 2017 e 2021")
     assert parsed.cleaned_query == "a5"
     assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("year", "gte", "2017"), ("year", "lte", "2021")]
+
+
+def test_parse_query_price_range_implicit():
+    parsed = parse_wishlist_query_with_implicit_filters("civic entre 70000 e 90000")
+    assert parsed.cleaned_query == "civic"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("price", "gte", "70000"), ("price", "lte", "90000")]
+
+
+def test_normalize_price_between_canonical():
+    normalized = normalize_wishlist_filter_input("price", "between", "70.000 90.000")
+    assert normalized.value == "70000,90000"
