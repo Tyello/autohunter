@@ -1,6 +1,101 @@
 from __future__ import annotations
 
+from collections import defaultdict
+import re
 from typing import Iterable
+
+
+def _format_int_safe(value: str) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    clean = raw.replace("r$", "").replace("km", "").replace(".", "").replace(",", "")
+    clean = re.sub(r"\D+", "", clean)
+    if not clean:
+        return None
+    try:
+        return f"{int(clean):,}".replace(",", ".")
+    except Exception:
+        return None
+
+
+def _format_year_safe(value: str) -> str | None:
+    raw = str(value or "")
+    m = re.search(r"\b(19|20)\d{2}\b", raw)
+    if not m:
+        return None
+    return m.group(0)
+
+
+def _render_filter_label(field: str, operator: str, value: str) -> str:
+    fallback = f"{field} {operator} {value}"
+    if field == "price" and operator == "lte":
+        parsed = _format_int_safe(value)
+        return f"Preço até R$ {parsed}" if parsed else fallback
+    if field == "price" and operator == "gte":
+        parsed = _format_int_safe(value)
+        return f"Preço a partir de R$ {parsed}" if parsed else fallback
+    if field == "year" and operator == "lte":
+        parsed = _format_year_safe(value)
+        return f"Ano até {parsed}" if parsed else fallback
+    if field == "year" and operator == "gte":
+        parsed = _format_year_safe(value)
+        return f"Ano a partir de {parsed}" if parsed else fallback
+    if field == "mileage_km" and operator == "lte":
+        parsed = _format_int_safe(value)
+        return f"KM até {parsed}" if parsed else fallback
+    if field == "city" and operator == "eq":
+        return f"Cidade: {value}"
+    if field == "state" and operator == "eq":
+        return f"Estado: {value}"
+    if field == "color" and operator == "eq":
+        return f"Cor: {value}"
+    if field == "source" and operator == "eq":
+        return f"Fonte: {str(value).upper()}"
+    return fallback
+
+
+def _friendly_wishlist_filters(filters: list[dict]) -> list[str]:
+    by_field: dict[str, dict[str, str]] = defaultdict(dict)
+    passthrough: list[str] = []
+    for f in filters or []:
+        field = str(f.get("field") or "").strip()
+        operator = str(f.get("operator") or "").strip()
+        value = str(f.get("value") or "").strip()
+        if not (field and operator):
+            continue
+        if field in {"price", "year"} and operator in {"gte", "lte"}:
+            by_field[field][operator] = value
+            continue
+        passthrough.append(_render_filter_label(field, operator, value))
+
+    labels: list[str] = []
+    if "year" in by_field:
+        lo, hi = _format_year_safe(by_field["year"].get("gte") or ""), _format_year_safe(by_field["year"].get("lte") or "")
+        if lo and hi:
+            labels.append(f"Ano entre {lo} e {hi}")
+        elif lo:
+            labels.append(f"Ano a partir de {lo}")
+        elif hi:
+            labels.append(f"Ano até {hi}")
+        else:
+            for op in ("gte", "lte"):
+                if by_field["year"].get(op):
+                    labels.append(_render_filter_label("year", op, by_field["year"][op]))
+    if "price" in by_field:
+        lo, hi = _format_int_safe(by_field["price"].get("gte") or ""), _format_int_safe(by_field["price"].get("lte") or "")
+        if lo and hi:
+            labels.append(f"Preço entre R$ {lo} e R$ {hi}")
+        elif lo:
+            labels.append(f"Preço a partir de R$ {lo}")
+        elif hi:
+            labels.append(f"Preço até R$ {hi}")
+        else:
+            for op in ("gte", "lte"):
+                if by_field["price"].get(op):
+                    labels.append(_render_filter_label("price", op, by_field["price"][op]))
+    labels.extend(passthrough)
+    return labels
 
 
 def render_start_text(active_wishlists_count: int) -> str:
@@ -34,9 +129,19 @@ def render_user_wishlists(wishlists) -> str:
     if isinstance(wishlists[0], dict):
         lines = ["🎯 Suas wishlists", ""]
         for item in wishlists:
+            labels = _friendly_wishlist_filters(item.get("filters", []))
+            shown = labels[:3]
             lines.extend([
                 f"{item['index']}. {item['query']}",
-                f"Filtros: {item.get('filters_count', 0)}",
+                "Filtros:",
+            ])
+            if shown:
+                lines.extend([f"- {label}" for label in shown])
+                if len(labels) > 3:
+                    lines.append(f"- +{len(labels) - 3} filtros")
+            else:
+                lines.append("- Nenhum filtro")
+            lines.extend([
                 f"Rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
                 f"Notificações: {item.get('notifications_24h_count', 0)} nas últimas 24h",
                 "",

@@ -131,6 +131,7 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
     app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^(TRACK:ADD:[^:]+|TRACK:ADDWL:[^:]+:[^:]+|TRACK:ADDT:[^:]+|TRACK:CHOOSE:[^:]+)$"))
     app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^MENU:[A-Z_]+$"))
+    app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^WL:(BACK|TRACKED|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$"))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))
