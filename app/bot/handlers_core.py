@@ -25,11 +25,11 @@ FILTER_TYPE_TO_SPEC = {
 }
 DRAFT_FILTER_TYPE_TO_FIELD = {"price": "price", "year": "year", "mileage": "mileage_km", "city": "city", "state": "state"}
 DRAFT_FILTER_PROMPTS = {
-    "price": "Qual preço?\nExemplos:\n- até 150000\n- entre 70000 e 90000\n- a partir de 50000",
-    "year": "Qual ano?\nExemplos:\n- 2018\n- até 2021\n- a partir de 2017\n- entre 2017 e 2021",
-    "mileage": "Qual quilometragem?\nExemplos:\n- até 90000\n- menor que 80000\n- entre 30000 e 100000",
-    "city": "Qual cidade?\nExemplo: São Paulo",
-    "state": "Qual estado?\nExemplo: SP ou São Paulo",
+    "price": "Qual faixa de preço?\nExemplos:\n- até 120000\n- entre 90000 e 130000\n- a partir de 80000\n\nPode escrever com ou sem R$.",
+    "year": "Qual ano você procura?\nExemplos:\n- 2018\n- a partir de 2017\n- até 2021\n- entre 2017 e 2021",
+    "mileage": "Qual quilometragem máxima?\nExemplos:\n- até 80000\n- entre 30000 e 90000\n\nDica: para carro usado, KM ajuda muito a evitar anúncio ruim.",
+    "city": "Em qual cidade você quer buscar?\nExemplo: São Paulo\n\nVocê também pode deixar sem cidade e filtrar só por estado.",
+    "state": "Em qual estado?\nExemplos:\n- SP\n- São Paulo\n- RJ\n- Paraná",
 }
 
 def _format_brl(value: str) -> str:
@@ -589,12 +589,31 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
     parsed = parse_wishlist_query_with_implicit_filters(query)
     context.user_data["menu_create_wishlist_query"] = parsed.cleaned_query
     context.user_data["menu_create_wishlist_draft_filters"] = build_draft_filter_groups(parsed.filters)
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Criar busca", callback_data="CWL:CREATE")],
-        [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
-        [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
-    ])
-    await reply_text(update, f"Entendi sua busca:\n\nCarro: {parsed.cleaned_query}\nFiltros detectados:\n{_render_draft_filters(context.user_data['menu_create_wishlist_draft_filters'])}\n\nQuer adicionar mais filtros antes de ativar?", reply_markup=kb)
+    draft = context.user_data["menu_create_wishlist_draft_filters"]
+    if draft:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
+            [InlineKeyboardButton("✅ Criar busca", callback_data="CWL:CREATE")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
+        ])
+        text = (
+            f"Entendi sua busca:\n\nCarro: {parsed.cleaned_query}\n"
+            f"Filtros detectados:\n{_render_draft_filters(draft)}\n\n"
+            "Quer adicionar mais filtros antes de ativar?"
+        )
+    else:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
+            [InlineKeyboardButton("✅ Criar mesmo assim", callback_data="CWL:CREATE")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
+        ])
+        text = (
+            f"Entendi: {parsed.cleaned_query}\n\n"
+            "Essa busca ainda está bem aberta.\n"
+            "Para receber alertas melhores, recomendo adicionar pelo menos preço, ano ou região.\n\n"
+            "O que você quer fazer?"
+        )
+    await reply_text(update, text, reply_markup=kb)
     return MENU_CREATE_WISHLIST_QUERY
 
 

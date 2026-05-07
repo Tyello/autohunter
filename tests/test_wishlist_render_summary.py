@@ -3,8 +3,8 @@ from app.bot.renderers import render_user_wishlists
 
 def test_render_user_wishlists_empty_keeps_guidance():
     text = render_user_wishlists([])
-    assert "Você não tem wishlists." in text
-    assert "/wishlist_add" in text
+    assert "Você ainda não criou nenhuma busca." in text
+    assert "Crie uma busca" in text
 
 
 def test_render_user_wishlists_summary_counts_filters_and_tracked():
@@ -12,15 +12,15 @@ def test_render_user_wishlists_summary_counts_filters_and_tracked():
         {"index": 1, "query": "civic si", "filters_count": 0, "filters": [], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
         {"index": 2, "query": "miata", "filters_count": 2, "filters": [{"field": "year", "operator": "gte", "value": "2017"}, {"field": "year", "operator": "lte", "value": "2021"}], "tracked_count": 1, "tracked_limit": 3, "is_active": True},
     ])
-    assert "🎯 Suas wishlists" in text
+    assert "🎯 Minhas buscas" in text
     assert "1. civic si" in text
     assert "Filtros:\n- Nenhum filtro" in text
-    assert "Rastreados: 0/3" in text
-    assert "Notificações: 0 nas últimas 24h" in text
+    assert "Anúncios rastreados: 0/3" in text
+    assert "Alertas enviados hoje: 0" in text
     assert "2. miata" in text
     assert "Filtros:\n- Ano entre 2017 e 2021" in text
-    assert "Rastreados: 1/3" in text
-    assert "Notificações: 0 nas últimas 24h" in text
+    assert "Anúncios rastreados: 1/3" in text
+    assert "Alertas enviados hoje: 0" in text
     assert "Status:" not in text
     assert "Escolha uma ação:" in text
 
@@ -29,7 +29,7 @@ def test_render_user_wishlists_summary_shows_notifications_24h_count():
     text = render_user_wishlists([
         {"index": 1, "query": "civic si", "filters_count": 0, "filters": [], "tracked_count": 0, "tracked_limit": 3, "notifications_24h_count": 3, "is_active": True},
     ])
-    assert "Notificações: 3 nas últimas 24h" in text
+    assert "Alertas enviados hoje: 3" in text
 
 
 def test_render_user_wishlists_summary_limits_filters():
@@ -77,5 +77,5 @@ def test_render_user_wishlists_legacy_format_still_supported():
         query = "legacy"
 
     text = render_user_wishlists([_WL()])
-    assert text.startswith("Wishlists:")
+    assert text.startswith("Minhas buscas:")
     assert "1. legacy" in text

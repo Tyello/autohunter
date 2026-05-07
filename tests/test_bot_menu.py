@@ -210,7 +210,7 @@ def test_callback_menu_help_real():
     q = _CallbackQuery("MENU:HELP")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "Comandos do AutoHunter" in q.edits[-1]
+    assert "Ajuda rápida" in q.edits[-1]
     assert "/menu" in q.edits[-1]
 
 

@@ -179,7 +179,7 @@ def test_free_limit_is_total_across_wishlists(db, monkeypatch):
     assert add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)[0] is True
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=l2.external_id)
     assert ok is False
-    assert "R$ 5,99" in msg
+    assert "Veja os planos em /upgrade." in msg
 
 
 def test_premium_limit_total_5_and_slots_3_per_wishlist(db, monkeypatch):

@@ -15,7 +15,7 @@ AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar ca
 ## 2. Princípios de UX
 1. **Telegram-first**: UX principal depende de mensagens e callbacks, não de web app.
 2. **`/menu` como hub principal**: descoberta de funcionalidades por botões.
-3. **Comando rápido como fallback**: usuários avançados podem usar `/busca_*`, `/buscar` etc.
+3. **Comando rápido como fallback**: usuários avançados podem usar `/wishlist_*`, `/buscar` etc.
 4. **Upgrade no momento de intenção/limite**: não vender no `/start`.
 5. **Primeira experiência orientada por criação de busca**.
 6. **Filtros antes da execução completa quando fizer sentido**.
@@ -166,7 +166,7 @@ Para cada filtro, o bot mostra:
 - ↩️ Voltar
 
 ### Erros
-- Sem busca: orientar criação (`/busca_add` ou menu).
+- Sem busca: orientar criação (`/menu` ou `/wishlist_add` legado).
 
 ## 9. Remover busca
 1. **Lista**: usuário escolhe item da lista.
@@ -271,11 +271,11 @@ Status: parcialmente implementado (sem webhook e sem autoaprovação).
 
 ## 17. Comandos avançados (não-main-path)
 - `/busca`
-- `/busca_add`
-- `/busca_remove`
-- `/busca_filter_add`
-- `/busca_filter_list`
-- `/busca_track_list`
+- `/wishlist_add`
+- `/wishlist_remove`
+- `/wishlist_filter_add`
+- `/wishlist_filter_list`
+- `/wishlist_track_list`
 - `/admin...` e administrativos correlatos
 
 ## 18. Estados globais de erro
