@@ -135,7 +135,7 @@ def test_start_without_wishlist_points_to_guided_menu(monkeypatch):
 
     msg = update.message.sent[0][0]
     assert "👋 Bem-vindo ao AutoHunter" in msg
-    assert "Eu monitoro anúncios de carros usados" in msg
+    assert "Eu monitoro anúncios de carros" in msg
     assert "Use /menu para começar pelo fluxo guiado." in msg
     assert "/wishlist_add" not in msg
     assert "/wishlist_help" not in msg

@@ -6,7 +6,7 @@ from typing import Iterable
 def render_start_text(active_wishlists_count: int) -> str:
     base = (
         "👋 Bem-vindo ao AutoHunter\n\n"
-        "Eu monitoro anúncios de carros usados para você e aviso no Telegram quando aparecer algo compatível com o que você procura.\n\n"
+        "Eu monitoro anúncios de carros para você e aviso no Telegram quando aparecer algo compatível com o que você procura.\n\n"
     )
     if active_wishlists_count > 0:
         return (
