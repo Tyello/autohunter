@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -49,6 +50,8 @@ from app.bot.admin_handlers_sources import (
     admin_sources_reset as _admin_sources_reset_impl,
 )
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
+from app.services.premium_subscription_service import activate_manual_premium
+from app.services.wishlists_service import get_user_plan_snapshot
 
 
 @dataclass
@@ -226,7 +229,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium")
         return
 
     action = args[0].lower()
@@ -254,6 +257,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "runall":
         await _admin_runall(update, args[1:])
         return
+    if action == "premium":
+        await _admin_premium(update, context, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -272,7 +278,72 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
+
+
+async def _admin_premium(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if len(args) < 1:
+        await update.message.reply_text("Use: /admin premium activate <chat_id> <monthly|annual|30d|365d> | /admin premium status <chat_id>")
+        return
+    action = args[0].lower()
+    if action == "activate":
+        if len(args) != 3:
+            await update.message.reply_text("Use: /admin premium activate <chat_id> <monthly|annual|30d|365d>")
+            return
+        try:
+            chat_id = int(args[1])
+        except Exception:
+            await update.message.reply_text("Use: /admin premium activate <chat_id> <monthly|annual|30d|365d>")
+            return
+        period = args[2].lower()
+        with SessionLocal() as db:
+            user = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+            if not user:
+                await update.message.reply_text("Usuário não encontrado.")
+                return
+            result = activate_manual_premium(
+                db,
+                user_id=user.id,
+                period=period,
+                activated_by=str(update.effective_chat.id),
+            )
+            if not result.ok:
+                await update.message.reply_text(result.error or "Falha ao ativar premium.")
+                return
+        valid_until = result.current_period_end.astimezone(timezone.utc).strftime("%d/%m/%Y")
+        await update.message.reply_text(
+            f"✅ Premium ativado. Usuário: {chat_id} Plano: Premium {result.period_label} Válido até: {valid_until}"
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ Seu Premium foi ativado. Válido até: {valid_until}. Use /plan para consultar seu plano.",
+            )
+        except Exception:
+            logger.warning("admin_premium_user_notify_failed", extra={"chat_id": chat_id}, exc_info=True)
+        return
+    if action == "status":
+        if len(args) != 2:
+            await update.message.reply_text("Use: /admin premium status <chat_id>")
+            return
+        try:
+            chat_id = int(args[1])
+        except Exception:
+            await update.message.reply_text("Use: /admin premium status <chat_id>")
+            return
+        with SessionLocal() as db:
+            user = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+            if not user:
+                await update.message.reply_text("Usuário não encontrado.")
+                return
+            snap = get_user_plan_snapshot(db, user.id)
+            end = snap.get("current_period_end")
+            status = "vigente" if end and end > datetime.now(timezone.utc) else "sem validade ativa"
+            end_txt = end.astimezone(timezone.utc).strftime("%d/%m/%Y") if end else "-"
+            await update.message.reply_text(f"Usuário: {chat_id}\nPlano: {snap.get('plan_code')}\nVálido até: {end_txt}\nStatus: {status}")
+        return
+    await update.message.reply_text("Use: /admin premium activate <chat_id> <monthly|annual|30d|365d> | /admin premium status <chat_id>")
 
 async def _admin_sources_dispatch(update: Update, raw_args: List[str]):
     return await _admin_sources_dispatch_impl(
@@ -1632,3 +1703,4 @@ async def _admin_audit(update: Update, raw_args: Optional[List[str]] = None):
         lines.extend(attention_lines)
         lines.extend(["", "Próximo passo:", "Use /admin health para detalhes ou /admin sources para visão por source."])
         await _reply_chunked(update, sanitize_for_telegram("\n".join(lines)[:3800]))
+logger = logging.getLogger(__name__)

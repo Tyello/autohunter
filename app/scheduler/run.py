@@ -392,6 +392,15 @@ def start_scheduler() -> BackgroundScheduler:
         hours=24,
         id="cleanup_notifications",
     )
+    from app.scheduler.premium_expiration_job import job_expire_premium_subscriptions
+    sched.add_job(
+        job_expire_premium_subscriptions,
+        "cron",
+        hour=12,
+        minute=0,
+        id="premium_expiration_daily",
+        replace_existing=True,
+    )
 
     # Warm up Playwright worker thread (cheap) to reduce first-cold-start latency.
     if getattr(settings, "enable_playwright", False) and getattr(settings, "playwright_warmup_on_start", False):
