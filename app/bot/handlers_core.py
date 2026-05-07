@@ -185,11 +185,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        snap = get_user_plan_snapshot(db, user.id)
     await reply_text(
         update,
         "🚗 AutoHunter\n\n"
         "O que você quer fazer?",
-        reply_markup=_menu_keyboard(),
+        reply_markup=_menu_keyboard(bool((snap or {}).get("plan_code") == "premium")),
     )
 
 
@@ -280,6 +283,10 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "MENU:FILTERS":
         await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar wishlist.")
         return
+    if data == "MENU:UPGRADE":
+        from app.bot.handlers import cmd_upgrade
+        await cmd_upgrade(update, context)
+        return
     if data == "MENU:HELP":
         await _safe_edit_or_send(update, render_help_text())
         return
@@ -312,14 +319,17 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Monitoramento: fontes via scheduler\n\n"
         "Use /wishlist para ver suas buscas monitoradas."
     )
-def _menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def _menu_keyboard(is_premium: bool=False) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton("➕ Criar wishlist", callback_data="MENU:CREATE_WISHLIST")],
         [InlineKeyboardButton("🎯 Minhas wishlists", callback_data="MENU:WISHLISTS")],
-        [InlineKeyboardButton("📌 Rastreados", callback_data="MENU:TRACKED")],
+        [InlineKeyboardButton("⭐ Rastreados", callback_data="MENU:TRACKED")],
         [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
-        [InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")],
-    ])
+    ]
+    if not is_premium:
+        rows.append([InlineKeyboardButton("🚀 Upgrade Premium", callback_data="MENU:UPGRADE")])
+    rows.append([InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def _safe_answer_callback(q) -> None:

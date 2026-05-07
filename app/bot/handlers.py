@@ -23,6 +23,7 @@ from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.services.plan_capabilities import resolve_plan_capabilities
+from app.core.settings import settings
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.models.wishlist import Wishlist
 
@@ -366,43 +367,57 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan_code = plan.code if plan else "free"
         caps = resolve_plan_capabilities(db, plan_code)
 
-    plan_label = caps.plan_code
-
-    override = None
-    if sub and sub.daily_alert_limit_override is not None:
-        override = sub.daily_alert_limit_override
-
-    text = (
-        "📦 Seu plano no AutoHunter\n"
-        f"- Plano: {plan_label}\n"
-        f"- Wishlists ativas: até {caps.max_active_wishlists}\n"
-        f"- Rastreados: {total_tracked}/{caps.max_tracked_total} no total\n"
-        f"- Slots por wishlist: até {caps.max_tracked_slots_per_wishlist}\n"
-        f"- Alertas automáticos de tracking: {'sim' if caps.tracking_auto_alerts else 'não'}\n"
-        f"- Notificações por dia por wishlist: {caps.daily_notifications_per_wishlist}\n"
-    )
-    if override is not None:
-        text += f"- Override: {override}\n"
-
-    if not caps.premium:
-        text += "\nUse /upgrade para ver os benefícios do Premium."
+    if caps.premium:
+        valid_until = getattr(sub, "current_period_end", None) or getattr(sub, "ends_at", None)
+        valid_txt = valid_until.astimezone(timezone.utc).strftime("%d/%m/%Y") if valid_until else "-"
+        text = (
+            "Plano atual: Premium\n- Plano: premium\n\n"
+            f"Válido até: {valid_txt}\n\n"
+            "Uso:\n"
+            f"Wishlists: até {caps.max_active_wishlists}\n"
+            f"Rastreados: {total_tracked}/{caps.max_tracked_total}\n"
+            f"Notificações: até {caps.daily_notifications_per_wishlist} por dia por wishlist\n\n"
+            "Renovação: manual"
+        )
+    else:
+        text = (
+            "Plano atual: Free\n- Plano: free\n\n"
+            "Uso:\n"
+            f"Wishlists: {0}/{caps.max_active_wishlists}\n"
+            f"Rastreados: {total_tracked}/{caps.max_tracked_total}\n"
+            f"Notificações: até {caps.daily_notifications_per_wishlist} por dia por wishlist\n\n"
+            "Para liberar mais buscas, mais rastreados e alertas automáticos:\n"
+            "Use /upgrade"
+        )
     await reply_text(update, text)
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "🚀 Premium — De R$ 9,99/mês por R$ 5,99/mês\n\n"
+        "🚀 AutoHunter Premium\n\n"
+        "Escolha seu plano:\n\n"
+        "Mensal\n"
+        "De R$ 9,99 por R$ 5,99/mês no lançamento.\n\n"
+        "Anual\n"
+        "De R$ 89,99 por R$ 59,99/ano.\n"
+        "Equivale a R$ 4,99/mês.\n\n"
         "Benefícios:\n"
-        "- até 15 wishlists\n"
+        "- até 10 wishlists\n"
         "- até 5 anúncios rastreados no total\n"
-        "- alertas automáticos de queda de preço\n"
-        "- alertas quando anúncio sair do ar, quando disponível\n"
-        "- 200 notificações por dia por wishlist\n"
+        "- alertas automáticos de preço/status\n"
+        "- até 15 notificações por dia por wishlist\n"
         "- prioridade em novas funcionalidades\n\n"
-        "Pagamento:\n"
-        "Pagamento integrado será exibido aqui quando configurado."
+        "Após pagar, envie o comprovante aqui no Telegram.\n"
+        "A ativação é feita manualmente."
     )
-    await reply_text(update, text)
+    kb=[]
+    if settings.mercado_pago_monthly_payment_link:
+        kb.append([InlineKeyboardButton("💳 Assinar Mensal", url=settings.mercado_pago_monthly_payment_link)])
+    if settings.mercado_pago_annual_payment_link:
+        kb.append([InlineKeyboardButton("💳 Assinar Anual", url=settings.mercado_pago_annual_payment_link)])
+    if not kb:
+        text += "\n\nOs links de pagamento ainda não estão configurados. Fale com o admin para ativação manual."
+    await reply_text(update, text, reply_markup=InlineKeyboardMarkup(kb) if kb else None)
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):

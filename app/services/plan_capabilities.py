@@ -20,7 +20,7 @@ class PlanCapabilities:
 
 
 _FREE = PlanCapabilities("free", 2, 1, 3, False, 5, False, None, None)
-_PREMIUM = PlanCapabilities("premium", 15, 5, 3, True, 200, True, 5.99, 9.99)
+_PREMIUM = PlanCapabilities("premium", 10, 5, 3, True, 15, True, 5.99, 9.99)
 
 
 def normalize_plan_code(plan_code: str | None) -> str:
@@ -57,7 +57,7 @@ def resolve_plan_capabilities(db: Session, plan_code: str | None) -> PlanCapabil
 
 
 def premium_upgrade_cta() -> str:
-    return "Use /upgrade para ver os benefícios."
+    return "Use /upgrade para ver os planos."
 
 
 def wishlist_limit_message(max_w: int) -> str:

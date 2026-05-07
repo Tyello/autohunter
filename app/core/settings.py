@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     admin_programming_errors_enabled: bool = True
     admin_programming_errors_throttle_seconds: int = 600  # 10 min
 
+    mercado_pago_monthly_payment_link: str | None = None
+    mercado_pago_annual_payment_link: str | None = None
+
     default_alert_limit: int = 30
 
     # Scheduler tuning (DEV)
