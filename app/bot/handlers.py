@@ -22,7 +22,7 @@ from app.services.limits_service import get_daily_limit_for_user, count_sent_tod
 from app.models.user import User
 from app.models.plan import Plan
 from app.models.subscription import Subscription
-from app.services.plan_capabilities import get_plan_capabilities
+from app.services.plan_capabilities import resolve_plan_capabilities
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.models.wishlist import Wishlist
 
@@ -30,6 +30,42 @@ from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
 
 from types import SimpleNamespace
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, sources: list[str] | None) -> list[dict]:
+    with SessionLocal() as db:
+        _user = get_or_create_user_by_chat(db, chat_id, username)
+        results = manual_search(db, query=query, limit=5, sources=sources, force_scrape=bool(sources))
+        if not results:
+            return []
+        pseudo_wishlist = SimpleNamespace(query=query, filters=[])
+        stats_map = {}
+        try:
+            stats_map = batch_get_market_stats(db, results)
+        except Exception:
+            stats_map = {}
+        payloads: list[dict] = []
+        for item in results:
+            ms = None
+            try:
+                k = cohort_key_for_listing(item)
+                if k:
+                    ms = stats_map.get(k)
+            except Exception:
+                ms = None
+
+            sres = score_ad(item, pseudo_wishlist, ms)
+            payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
+            payloads.append(
+                {
+                    "text": payload.text,
+                    "inline_keyboard": payload.inline_keyboard or [],
+                }
+            )
+        return payloads
 
 class _AdView:
     """Adapter: expose listing fields + computed score fields to the vNext formatter."""
@@ -158,31 +194,42 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.username
     await reply_text(update, "Busca recebida. Vou processar em segundo plano e te aviso quando encontrar resultados.")
 
-    async def _run_background_search():
-        with SessionLocal() as db:
-            _user = get_or_create_user_by_chat(db, chat_id, user_name)
-            results = await asyncio.to_thread(manual_search, db, query, 5, sources, force_scrape=bool(sources))
-            if not results:
+    async def _run_background_search() -> None:
+        try:
+            payloads = await asyncio.to_thread(
+                _run_manual_search_sync,
+                chat_id=chat_id,
+                username=user_name,
+                query=query,
+                sources=sources,
+            )
+            if not payloads:
                 await context.bot.send_message(chat_id=chat_id, text="Nada encontrado agora.")
                 return
-            pseudo_wishlist = SimpleNamespace(query=query, filters=[])
-            stats_map = {}
-            try:
-                stats_map = batch_get_market_stats(db, results)
-            except Exception:
-                stats_map = {}
-            for item in results:
-                ms = None
-                try:
-                    k = cohort_key_for_listing(item)
-                    if k:
-                        ms = stats_map.get(k)
-                except Exception:
-                    ms = None
-
-                sres = score_ad(item, pseudo_wishlist, ms)
-                payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
-                await context.bot.send_message(chat_id=chat_id, text=payload.text, disable_web_page_preview=True)
+            for payload in payloads:
+                built_rows = []
+                for row in payload.get("inline_keyboard") or []:
+                    built = []
+                    for btn in row:
+                        if btn.get("callback_data"):
+                            built.append(InlineKeyboardButton(btn.get("text", "Botão"), callback_data=btn.get("callback_data")))
+                        else:
+                            built.append(InlineKeyboardButton(btn.get("text", "Abrir anúncio"), url=btn.get("url")))
+                    if built:
+                        built_rows.append(built)
+                reply_markup = InlineKeyboardMarkup(built_rows) if built_rows else None
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=payload["text"],
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True,
+                )
+        except Exception:
+            logger.exception("manual_search_background_failed", extra={"chat_id": chat_id, "query": query})
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Não consegui concluir essa busca agora. Tente novamente em alguns minutos.",
+            )
 
     asyncio.create_task(_run_background_search())
     return
@@ -316,9 +363,9 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .filter(Wishlist.user_id == user.id)
             .count()
         )
+        plan_code = plan.code if plan else "free"
+        caps = resolve_plan_capabilities(db, plan_code)
 
-    plan_code = plan.code if plan else "free"
-    caps = get_plan_capabilities(plan_code)
     plan_label = caps.plan_code
 
     override = None
@@ -346,11 +393,11 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🚀 Premium — De R$ 9,99/mês por R$ 5,99/mês\n\n"
         "Benefícios:\n"
-        "- até 15 wishlists\n"
+        "- até 10 wishlists\n"
         "- até 5 anúncios rastreados no total\n"
         "- alertas automáticos de queda de preço\n"
         "- alertas quando anúncio sair do ar, quando disponível\n"
-        "- 200 notificações por dia por wishlist\n"
+        "- 15 notificações por dia por wishlist\n"
         "- prioridade em novas funcionalidades\n\n"
         "Pagamento:\n"
         "Pagamento integrado será exibido aqui quando configurado."
