@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -49,7 +50,7 @@ from app.bot.admin_handlers_sources import (
     admin_sources_reset as _admin_sources_reset_impl,
 )
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
-from app.services.premium_subscription_service import activate_manual_premium, expire_due_premium_subscriptions
+from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot
 
 
@@ -228,7 +229,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy")
+        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium")
         return
 
     action = args[0].lower()
@@ -277,7 +278,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
 
 
 async def _admin_premium(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_args: List[str]):
@@ -320,7 +321,7 @@ async def _admin_premium(update: Update, context: ContextTypes.DEFAULT_TYPE, raw
                 text=f"✅ Seu Premium foi ativado. Válido até: {valid_until}. Use /plan para consultar seu plano.",
             )
         except Exception:
-            pass
+            logger.warning("admin_premium_user_notify_failed", extra={"chat_id": chat_id}, exc_info=True)
         return
     if action == "status":
         if len(args) != 2:
@@ -1702,3 +1703,4 @@ async def _admin_audit(update: Update, raw_args: Optional[List[str]] = None):
         lines.extend(attention_lines)
         lines.extend(["", "Próximo passo:", "Use /admin health para detalhes ou /admin sources para visão por source."])
         await _reply_chunked(update, sanitize_for_telegram("\n".join(lines)[:3800]))
+logger = logging.getLogger(__name__)

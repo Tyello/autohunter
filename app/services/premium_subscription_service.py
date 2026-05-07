@@ -102,27 +102,31 @@ def activate_manual_premium(
 
 def expire_due_premium_subscriptions(db: Session, now: datetime | None = None) -> ExpirationResult:
     now = now or datetime.now(timezone.utc)
-    expired_chat_ids: list[int] = []
-    q = (
-        db.query(Subscription, User)
+    expired_chat_ids: set[int] = set()
+    due_subs = (
+        db.query(Subscription)
         .join(Plan, Plan.id == Subscription.plan_id)
-        .join(User, User.account_id == Subscription.account_id)
         .filter(Plan.code == PLAN_CODE_PREMIUM)
         .filter(Subscription.status == "active")
         .all()
     )
     changed = 0
-    for sub, user in q:
+    touched_accounts: set[Any] = set()
+    for sub in due_subs:
         effective_end = _as_utc(getattr(sub, "current_period_end", None) or getattr(sub, "ends_at", None))
         if effective_end and effective_end <= now:
             sub.status = "expired"
             sub.ends_at = effective_end
             changed += 1
+            touched_accounts.add(sub.account_id)
+    if touched_accounts:
+        users = db.query(User).filter(User.account_id.in_(list(touched_accounts))).all()
+        for user in users:
             if getattr(user, "telegram_chat_id", None):
-                expired_chat_ids.append(int(user.telegram_chat_id))
+                expired_chat_ids.add(int(user.telegram_chat_id))
     if changed:
         db.commit()
-    return ExpirationResult(expired_count=changed, expired_chat_ids=expired_chat_ids)
+    return ExpirationResult(expired_count=changed, expired_chat_ids=sorted(expired_chat_ids))
 def _as_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None

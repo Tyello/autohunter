@@ -13,16 +13,30 @@ class _Update:
         self.message = types.SimpleNamespace()
 
 def test_buscar_responds_immediately(monkeypatch):
+    events = []
     monkeypatch.setattr(handlers, "SessionLocal", lambda: _Session())
-    sent = {"n": 0}
-    async def _reply(*_args, **_kwargs): sent["n"] += 1
+    async def _reply(*_args, **_kwargs):
+        events.append("reply")
     monkeypatch.setattr(handlers, "reply_text", _reply)
-    bot_calls = {"n": 0}
-    async def _send_message(**kwargs): bot_calls["n"] += 1
+    def _manual_search(*_args, **_kwargs):
+        events.append("manual_search")
+        return []
+    monkeypatch.setattr(handlers, "_run_manual_search_sync", _manual_search)
+    async def _send_message(**kwargs):
+        events.append("send_result")
+    scheduled = {"coro": None}
+    def _capture_create_task(coro):
+        scheduled["coro"] = coro
+        events.append("task_scheduled")
+        return types.SimpleNamespace()
+    monkeypatch.setattr(handlers.asyncio, "create_task", _capture_create_task)
     ctx = types.SimpleNamespace(args=["civic"], bot=types.SimpleNamespace(send_message=_send_message))
     asyncio.run(handlers.cmd_buscar(_Update(), ctx))
-    assert sent["n"] == 1
-    assert bot_calls["n"] <= 1
+    assert events[0] == "reply"
+    assert "manual_search" not in events
+    assert "task_scheduled" in events
+    if scheduled["coro"] is not None:
+        scheduled["coro"].close()
 
 
 def test_run_manual_search_sync_preserves_open_link_button(monkeypatch):
