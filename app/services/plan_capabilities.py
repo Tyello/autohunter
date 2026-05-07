@@ -20,7 +20,7 @@ class PlanCapabilities:
 
 
 _FREE = PlanCapabilities("free", 2, 1, 3, False, 5, False, None, None)
-_PREMIUM = PlanCapabilities("premium", 10, 5, 3, True, 15, True, 5.99, 9.99)
+_PREMIUM = PlanCapabilities("premium", 15, 5, 3, True, 200, True, 5.99, 9.99)
 
 
 def normalize_plan_code(plan_code: str | None) -> str:
@@ -63,9 +63,13 @@ def premium_upgrade_cta() -> str:
 def wishlist_limit_message(max_w: int) -> str:
     return (
         "Você atingiu o limite do plano Free.\n\n"
-        f"No Free você pode ter até {max_w} wishlists ativas.\n"
-        "No Premium você libera até 10 wishlists, mais rastreados e alertas automáticos.\n\n"
-        f"{premium_upgrade_cta()}"
+        f"No Free, você pode ter até {max_w} buscas salvas.\n\n"
+        "Com o Premium, você libera:\n"
+        "- até 15 buscas salvas;\n"
+        "- até 5 anúncios rastreados;\n"
+        "- alertas automáticos de queda de preço/status;\n"
+        "- até 200 alertas por dia por busca.\n\n"
+        "Veja os planos em /upgrade."
     )
 
 
@@ -73,8 +77,8 @@ def tracking_limit_message(max_tracked: int) -> str:
     if max_tracked <= 1:
         return (
             "Você já está rastreando 1 anúncio, que é o limite do plano Free.\n\n"
-            "No Premium você pode rastrear até 5 anúncios no total e receber alertas automáticos de queda de preço.\n\n"
-            "Use /upgrade para assinar por R$ 5,99/mês."
+            "Com o Premium, você pode rastrear até 5 anúncios e receber alertas automáticos quando houver queda de preço ou mudança de status.\n\n"
+            "Veja os planos em /upgrade."
         )
     return (
         f"Limite atingido: você já está rastreando {max_tracked} anúncios no total.\n\n"

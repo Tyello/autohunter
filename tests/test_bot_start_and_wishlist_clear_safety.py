@@ -76,9 +76,9 @@ def test_start_creates_or_loads_user_without_deleting_wishlist(monkeypatch):
     assert called["remove"] == 0
     assert update.message.sent
     msg = update.message.sent[0][0]
-    assert "👋 Bem-vindo ao AutoHunter" in msg
-    assert "Você já tem 1 wishlist(s) ativa(s)." in msg
-    assert "Use /menu para ver suas buscas, filtros e anúncios rastreados." in msg
+    assert "👋 AutoHunter" in msg
+    assert "Seu monitoramento já está ativo." in msg
+    assert "Use /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual." in msg
     assert "/wishlist_add" not in msg
     assert "/wishlist_help" not in msg
 
@@ -136,6 +136,6 @@ def test_start_without_wishlist_points_to_guided_menu(monkeypatch):
     msg = update.message.sent[0][0]
     assert "👋 Bem-vindo ao AutoHunter" in msg
     assert "Eu monitoro anúncios de carros" in msg
-    assert "Use /menu para começar pelo fluxo guiado." in msg
+    assert "toque em /menu e depois em ➕ Criar busca." in msg
     assert "/wishlist_add" not in msg
     assert "/wishlist_help" not in msg

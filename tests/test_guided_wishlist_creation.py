@@ -58,7 +58,8 @@ def test_create_flow_query_text_shows_create_options():
     ctx = types.SimpleNamespace(user_data={})
     state = asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
     assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
-    assert "Busca:\na5" in msg.sent[-1]["text"]
+    assert "Entendi sua busca:" in msg.sent[-1]["text"]
+    assert "Carro: a5" in msg.sent[-1]["text"]
     assert "Ano entre 2017 e 2021" in msg.sent[-1]["text"]
 
 
@@ -67,7 +68,8 @@ def test_create_flow_query_text_groups_mixed_implicit_filters():
     ctx = types.SimpleNamespace(user_data={})
     asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
     text = msg.sent[-1]["text"]
-    assert "Busca:\ncorolla" in text
+    assert "Entendi sua busca:" in text
+    assert "Carro: corolla" in text
     assert "Ano a partir de 2018" in text
     assert "Preço até R$ 120.000" in text
     assert "Ano entre 2018 e 120000" not in text
@@ -149,7 +151,7 @@ def test_draft_done_without_query_expires_session():
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
     assert state == ConversationHandler.END
     assert ctx.user_data == {}
-    assert "Sessão expirada" in q.edits[-1]["text"]
+    assert "Essa etapa expirou." in q.edits[-1]["text"]
 
 
 def test_draft_cancel_clears_context_and_does_not_create(monkeypatch):

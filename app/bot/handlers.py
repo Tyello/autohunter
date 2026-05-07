@@ -367,21 +367,26 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caps = resolve_plan_capabilities(db, snap.get("plan_code"))
         total_wishlists = len(list_wishlists(db, user.id))
 
-    is_premium = bool(caps.premium)
-    title = "Premium" if is_premium else "Free"
-    text = f"Plano atual: {title}\n- Plano: {caps.plan_code}\n\n"
-    if is_premium and snap.get("current_period_end"):
-        text += f"Válido até: {snap['current_period_end'].astimezone(timezone.utc).strftime('%d/%m/%Y')}\n\n"
-    text += (
-        "Uso:\n"
-        f"Wishlists: {total_wishlists}/{caps.max_active_wishlists}\n"
-        f"Rastreados: {total_tracked}/{caps.max_tracked_total}\n"
-        f"Notificações: até {caps.daily_notifications_per_wishlist} por dia por wishlist\n"
-    )
-    if is_premium:
-        text += "\nRenovação: manual"
+    if caps.premium:
+        text = (
+            "📦 Seu plano: Premium\n\n"
+            "Uso atual:\n"
+            f"- Buscas salvas: {total_wishlists}/{caps.max_active_wishlists}\n"
+            f"- Anúncios rastreados: {total_tracked}/{caps.max_tracked_total}\n"
+            f"- Alertas: até {caps.daily_notifications_per_wishlist} por dia por busca\n\n"
+            f"Válido até: {snap['current_period_end'].astimezone(timezone.utc).strftime('%d/%m/%Y') if snap.get('current_period_end') else '—'}\n"
+            "Renovação: manual"
+        )
     else:
-        text += "\n\nPara liberar mais buscas, mais rastreados e alertas automáticos:\nUse /upgrade"
+        text = (
+            "📦 Seu plano: Free\n\n"
+            "Uso atual:\n"
+            f"- Buscas salvas: {total_wishlists}/{caps.max_active_wishlists}\n"
+            f"- Anúncios rastreados: {total_tracked}/{caps.max_tracked_total}\n"
+            f"- Alertas: até {caps.daily_notifications_per_wishlist} por dia por busca\n\n"
+            "Com o Premium, você libera mais buscas, mais rastreados e alertas automáticos de queda de preço/status.\n\n"
+            "Para ver os planos: /upgrade"
+        )
     await reply_text(update, text)
 
 
