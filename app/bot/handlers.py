@@ -9,14 +9,15 @@ from app.notifications.telegram_formatter import format_ad_message
 from app.scoring.score_v2 import score_ad
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 from app.bot.utils import normalize_args, parse_int, reply_text
-from app.bot.renderers import render_user_wishlists
+from app.bot.renderers import render_user_wishlists, render_upgrade_text, build_upgrade_keyboard
 from app.db.session import SessionLocal
+from app.core.settings import settings
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
 from app.sources import list_sources
 from app.services.wishlists_service import (
     add_wishlist, remove_wishlist,
-    add_filter, list_filters, remove_filter, get_wishlist_summaries, list_wishlists,
+    add_filter, list_filters, remove_filter, get_wishlist_summaries, list_wishlists, get_user_plan_snapshot,
 )
 from app.services.limits_service import get_daily_limit_for_user, count_sent_today
 from app.models.user import User
@@ -356,53 +357,42 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
 
-        sub, plan = _get_active_subscription_and_plan(db, user)
+        snap = get_user_plan_snapshot(db, user.id)
         total_tracked = (
             db.query(WishlistTrackedListing)
             .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
             .filter(Wishlist.user_id == user.id)
             .count()
         )
-        plan_code = plan.code if plan else "free"
-        caps = resolve_plan_capabilities(db, plan_code)
+        caps = resolve_plan_capabilities(db, snap.get("plan_code"))
+        total_wishlists = len(list_wishlists(db, user.id))
 
-    plan_label = caps.plan_code
-
-    override = None
-    if sub and sub.daily_alert_limit_override is not None:
-        override = sub.daily_alert_limit_override
-
-    text = (
-        "📦 Seu plano no AutoHunter\n"
-        f"- Plano: {plan_label}\n"
-        f"- Wishlists ativas: até {caps.max_active_wishlists}\n"
-        f"- Rastreados: {total_tracked}/{caps.max_tracked_total} no total\n"
-        f"- Slots por wishlist: até {caps.max_tracked_slots_per_wishlist}\n"
-        f"- Alertas automáticos de tracking: {'sim' if caps.tracking_auto_alerts else 'não'}\n"
-        f"- Notificações por dia por wishlist: {caps.daily_notifications_per_wishlist}\n"
+    is_premium = bool(caps.premium)
+    title = "Premium" if is_premium else "Free"
+    text = f"Plano atual: {title}\n- Plano: {caps.plan_code}\n\n"
+    if is_premium and snap.get("current_period_end"):
+        text += f"Válido até: {snap['current_period_end'].astimezone(timezone.utc).strftime('%d/%m/%Y')}\n\n"
+    text += (
+        "Uso:\n"
+        f"Wishlists: {total_wishlists}/{caps.max_active_wishlists}\n"
+        f"Rastreados: {total_tracked}/{caps.max_tracked_total}\n"
+        f"Notificações: até {caps.daily_notifications_per_wishlist} por dia por wishlist\n"
     )
-    if override is not None:
-        text += f"- Override: {override}\n"
-
-    if not caps.premium:
-        text += "\nUse /upgrade para ver os benefícios do Premium."
+    if is_premium:
+        text += "\nRenovação: manual"
+    else:
+        text += "\n\nPara liberar mais buscas, mais rastreados e alertas automáticos:\nUse /upgrade"
     await reply_text(update, text)
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "🚀 Premium — De R$ 9,99/mês por R$ 5,99/mês\n\n"
-        "Benefícios:\n"
-        "- até 15 wishlists\n"
-        "- até 5 anúncios rastreados no total\n"
-        "- alertas automáticos de queda de preço\n"
-        "- alertas quando anúncio sair do ar, quando disponível\n"
-        "- 200 notificações por dia por wishlist\n"
-        "- prioridade em novas funcionalidades\n\n"
-        "Pagamento:\n"
-        "Pagamento integrado será exibido aqui quando configurado."
+    monthly_link = settings.mercado_pago_monthly_payment_link
+    annual_link = settings.mercado_pago_annual_payment_link
+    await reply_text(
+        update,
+        render_upgrade_text(bool(monthly_link or annual_link)),
+        reply_markup=build_upgrade_keyboard(monthly_link, annual_link),
     )
-    await reply_text(update, text)
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):

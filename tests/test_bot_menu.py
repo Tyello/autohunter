@@ -67,8 +67,15 @@ def test_cmd_menu_renders_buttons():
         "MENU:WISHLISTS",
         "MENU:TRACKED",
         "MENU:SEARCH",
+        "MENU:UPGRADE",
         "MENU:HELP",
     ]
+
+
+def test_menu_keyboard_hides_upgrade_for_premium():
+    markup = handlers_core._menu_keyboard(is_premium=True)
+    callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert "MENU:UPGRADE" not in callback_data
 
 
 def test_callback_menu_search():

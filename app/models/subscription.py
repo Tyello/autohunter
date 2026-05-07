@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Text, Integer, DateTime, ForeignKey, func
+from sqlalchemy import Text, Integer, DateTime, ForeignKey, func, Boolean
+from sqlalchemy.types import JSON
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base, TimestampMixin
@@ -26,6 +27,10 @@ class Subscription(TimestampMixin, Base):
         server_default=func.now(),
     )
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
 
     source: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
 

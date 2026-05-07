@@ -361,6 +361,12 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         sub = q.first()
         if not sub:
             return snap
+        now = datetime.now(timezone.utc)
+        current_period_end = getattr(sub, "current_period_end", None)
+        ends_at = getattr(sub, "ends_at", None)
+        effective_end = current_period_end or ends_at
+        if effective_end and effective_end <= now:
+            return snap
 
         plan = db.query(Plan).filter(Plan.id == sub.plan_id).first() if getattr(sub, "plan_id", None) else None
         if not plan:
@@ -372,6 +378,8 @@ def get_user_plan_snapshot(db: Session, user_id) -> Dict[str, Any]:
         snap["max_wishlists"] = caps.max_active_wishlists
         snap["daily_notifications_per_wishlist"] = caps.daily_notifications_per_wishlist
         snap["daily_alert_limit"] = caps.daily_notifications_per_wishlist
+        if current_period_end:
+            snap["current_period_end"] = current_period_end
 
         return snap
 
