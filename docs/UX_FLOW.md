@@ -5,19 +5,19 @@ AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar ca
 
 - **Público principal**: comprador pessoa física, normalmente comparando opções de carro por faixa de preço/ano/KM.
 - **Canal principal**: Telegram (comandos + teclado inline).
-- **Objetivo do usuário**: cadastrar buscas persistentes (wishlists), receber anúncios e notificações, e opcionalmente rastrear anúncios específicos.
+- **Objetivo do usuário**: cadastrar buscas persistentes (buscas), receber anúncios e notificações, e opcionalmente rastrear anúncios específicos.
 - **Wishlist (busca persistente)**: intenção de compra salva que roda continuamente no backend.
 - **Busca manual (`/buscar`)**: consulta pontual “agora”, sem persistência.
-- **Filtro**: regra de refinamento (preço, ano, KM, cidade, estado etc.) aplicada à wishlist.
+- **Filtro**: regra de refinamento (preço, ano, KM, cidade, estado etc.) aplicada à busca.
 - **Rastreado**: anúncio específico marcado para acompanhamento (preço/status).
 - **Notificação**: mensagem enviada quando há match de busca/rastreio.
 
 ## 2. Princípios de UX
 1. **Telegram-first**: UX principal depende de mensagens e callbacks, não de web app.
 2. **`/menu` como hub principal**: descoberta de funcionalidades por botões.
-3. **Comando rápido como fallback**: usuários avançados podem usar `/wishlist_*`, `/buscar` etc.
+3. **Comando rápido como fallback**: usuários avançados podem usar `/busca_*`, `/buscar` etc.
 4. **Upgrade no momento de intenção/limite**: não vender no `/start`.
-5. **Primeira experiência orientada por criação de wishlist**.
+5. **Primeira experiência orientada por criação de busca**.
 6. **Filtros antes da execução completa quando fizer sentido**.
 7. **Botão nunca sem feedback**: todo callback deve responder (`q.answer`) e editar/enviar texto de forma segura.
 
@@ -25,16 +25,16 @@ AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar ca
 ```text
 /start
 └── /menu
-    ├── Criar wishlist
+    ├── Criar busca
     │   ├── informar carro
     │   ├── criar agora
     │   └── adicionar filtros antes de criar
-    ├── Minhas wishlists
-    │   ├── remover wishlist
+    ├── Minhas buscas
+    │   ├── remover busca
     │   ├── rastreados
     │   └── voltar
     ├── Rastreados
-    ├── Buscar anúncio
+    ├── Buscar agora
     ├── Upgrade Premium, somente Free
     └── Ajuda
 ```
@@ -43,12 +43,12 @@ AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar ca
 ### Entrada do usuário
 - Usuário envia `/start`.
 
-### Cenário A: usuário sem wishlist
-- **Texto**: boas-vindas + orientação para abrir `/menu` e criar primeira wishlist.
+### Cenário A: usuário sem busca
+- **Texto**: boas-vindas + orientação para abrir `/menu` e criar primeira busca.
 - **Botões**: normalmente CTA para `/menu` (ou instrução textual quando botões não disponíveis).
-- **Próximo passo esperado**: entrar em “➕ Criar wishlist”.
+- **Próximo passo esperado**: entrar em “➕ Criar busca”.
 
-### Cenário B: usuário com wishlist
+### Cenário B: usuário com busca
 - **Texto**: reforça que já existe monitoramento ativo e indica `/menu` para gerenciamento.
 - **Não deve aparecer**: pitch de venda de plano (sem pricing, sem “assine já”).
 
@@ -62,10 +62,10 @@ AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar ca
 
 ### Menu Free (com Upgrade)
 Botões:
-1. ➕ Criar wishlist
-2. 🎯 Minhas wishlists
+1. ➕ Criar busca
+2. 🎯 Minhas buscas
 3. ⭐ Rastreados
-4. 🔎 Buscar anúncio
+4. 🔎 Buscar agora
 5. 🚀 Upgrade Premium
 6. ❓ Ajuda
 
@@ -73,10 +73,10 @@ Botões:
 Mesmos botões, exceto “🚀 Upgrade Premium”.
 
 ### Ação de cada botão
-- **Criar wishlist**: inicia fluxo guiado de criação.
-- **Minhas wishlists**: lista buscas e ações por contexto.
+- **Criar busca**: inicia fluxo guiado de criação.
+- **Minhas buscas**: lista buscas e ações por contexto.
 - **Rastreados**: visão agregada dos anúncios rastreados.
-- **Buscar anúncio**: orienta uso de `/buscar` para consulta pontual.
+- **Buscar agora**: orienta uso de `/buscar` para consulta pontual.
 - **Upgrade Premium**: abre oferta mensal/anual (somente Free).
 - **Ajuda**: mostra comandos e conceitos.
 
@@ -84,9 +84,9 @@ Mesmos botões, exceto “🚀 Upgrade Premium”.
 - Callback antigo/inválido: “Opção inválida. Use /menu novamente.”
 - Edit falhar: fallback para enviar nova mensagem.
 
-## 6. Criar wishlist (fluxo guiado)
+## 6. Criar busca (fluxo guiado)
 ### Entrada
-- Clique em “➕ Criar wishlist”.
+- Clique em “➕ Criar busca”.
 
 ### Passo 1 — texto inicial
 - Bot pede texto da busca (ex.: `civic si`, `corolla 2018`).
@@ -96,7 +96,7 @@ Mesmos botões, exceto “🚀 Upgrade Premium”.
 - **Busca com filtros implícitos**: detecta termos como “até 90k”, “a partir de 2018” e prepara filtros.
 
 ### Passo 3 — decisão
-- **Criar agora**: confirma e cria wishlist imediatamente.
+- **Criar agora**: confirma e cria busca imediatamente.
 - **Adicionar filtros antes de criar**: abre subfluxo de filtros.
 
 ### Cancelar
@@ -142,15 +142,15 @@ Para cada filtro, o bot mostra:
 
 ### Navegação
 - **Voltar**: retorna à tela de filtros.
-- **Concluir e criar**: persiste wishlist + filtros.
+- **Concluir e criar**: persiste busca + filtros.
 
 ### Estados vazios e erro
 - Sem filtro: mostrar “Nenhum filtro adicionado ainda”.
 - Sessão expirada/callback antigo: instruir recomeço no `/menu`.
 
-## 8. Minhas wishlists
+## 8. Minhas buscas
 ### Entrada
-- Botão “🎯 Minhas wishlists”.
+- Botão “🎯 Minhas buscas”.
 
 ### Texto esperado
 - Lista numerada com query, status, filtros e indicadores de rastreados/notificações.
@@ -161,23 +161,23 @@ Para cada filtro, o bot mostra:
 - **Muitos filtros**: manter truncamento seguro + clareza.
 
 ### Botões
-- 🗑️ Remover wishlist
+- 🗑️ Remover busca
 - ⭐ Rastreados
 - ↩️ Voltar
 
 ### Erros
-- Sem wishlist: orientar criação (`/wishlist_add` ou menu).
+- Sem busca: orientar criação (`/busca_add` ou menu).
 
-## 9. Remover wishlist
+## 9. Remover busca
 1. **Lista**: usuário escolhe item da lista.
 2. **Confirmação**: mensagem explícita sobre remoção de vínculos.
-3. **Sucesso**: “Wishlist removida.”
-4. **Erro**: wishlist inexistente/fora da conta.
-5. **Voltar**: retorna para “Minhas wishlists”.
+3. **Sucesso**: “Busca removida.”
+4. **Erro**: busca inexistente/fora da conta.
+5. **Voltar**: retorna para “Minhas buscas”.
 
 ## 10. Rastreados
 ### Entrada
-- Via menu principal “⭐ Rastreados” ou dentro de “Minhas wishlists”.
+- Via menu principal “⭐ Rastreados” ou dentro de “Minhas buscas”.
 
 ### Estados
 - **Slots vazios**: mostrar placeholders `(vazio)`.
@@ -207,18 +207,18 @@ Para cada filtro, o bot mostra:
 - Mensagem genérica sem stacktrace para usuário.
 
 ### O que **não** faz
-- Não cria wishlist.
+- Não cria busca.
 - Não inicia rastreamento automático.
 
 ## 12. /plan
 ### Free
-- Exibe plano Free, uso real (`wishlists X/2`, `rastreados Y/1`, `5 notificações`).
+- Exibe plano Free, uso real (`buscas salvas X/2`, `rastreados Y/1`, `5 notificações`).
 - Mostra CTA para `/upgrade`.
 
 ### Premium vigente
 - Exibe “Plano atual: Premium”.
 - Exibe validade (`Válido até: DD/MM/YYYY`) quando houver.
-- Exibe uso real (`X/10`, `Y/5`, `15 notificações`).
+- Exibe uso real (`X/10`, `Y/5`, `200 notificações`).
 - Exibe “Renovação: manual”.
 
 ### Premium vencido
@@ -246,7 +246,7 @@ Para cada filtro, o bot mostra:
 ### Onde aparece
 - `/menu` de usuário Free.
 - `/plan` de usuário Free.
-- Mensagens de limite de wishlists/rastreados/notificações.
+- Mensagens de limite de buscas/rastreados/notificações.
 
 ### Onde não aparece
 - `/start`.
@@ -270,26 +270,26 @@ Status: parcialmente implementado (sem webhook e sem autoaprovação).
 - Oportunidade: reduzir densidade técnica e separar “básico” de “avançado”.
 
 ## 17. Comandos avançados (não-main-path)
-- `/wishlist`
-- `/wishlist_add`
-- `/wishlist_remove`
-- `/wishlist_filter_add`
-- `/wishlist_filter_list`
-- `/wishlist_track_list`
+- `/busca`
+- `/busca_add`
+- `/busca_remove`
+- `/busca_filter_add`
+- `/busca_filter_list`
+- `/busca_track_list`
 - `/admin...` e administrativos correlatos
 
 ## 18. Estados globais de erro
 - Sessão expirada.
 - Callback antigo/inválido.
-- Usuário sem wishlist.
-- Limite atingido (wishlists/rastreados/notificações).
+- Usuário sem busca.
+- Limite atingido (buscas/rastreados/notificações).
 - Erro genérico de operação.
 - Pagamento não configurado.
 - Permissão negada (áreas admin).
 
 ## 19. Checklist para especialista UX
 - “Wishlist” deveria virar “Busca salva” para leigos?
-- Usuário entende diferença entre busca manual e wishlist?
+- Usuário entende diferença entre busca manual e busca?
 - Usuário entende filtros antes da criação?
 - O upgrade aparece no timing correto?
 - O Free entrega valor sem frustrar cedo demais?

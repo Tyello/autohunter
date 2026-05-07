@@ -99,35 +99,30 @@ def _friendly_wishlist_filters(filters: list[dict]) -> list[str]:
 
 
 def render_start_text(active_wishlists_count: int) -> str:
-    base = (
-        "👋 Bem-vindo ao AutoHunter\n\n"
-        "Eu monitoro anúncios de carros para você e aviso no Telegram quando aparecer algo compatível com o que você procura.\n\n"
-    )
     if active_wishlists_count > 0:
         return (
-            base
-            + f"Você já tem {active_wishlists_count} wishlist(s) ativa(s).\n\n"
-            "Use /menu para ver suas buscas, filtros e anúncios rastreados."
+            "👋 AutoHunter\n\n"
+            "Seu monitoramento já está ativo.\n\n"
+            "Use /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
         )
-
     return (
-        base
-        + "Você pode criar buscas, aplicar filtros, rastrear anúncios específicos e acompanhar mudanças de preço/status.\n\n"
-        "Use /menu para começar pelo fluxo guiado."
+        "👋 Bem-vindo ao AutoHunter\n\n"
+        "Eu monitoro anúncios de carros usados para você.\n\n"
+        "Você me diz o carro que procura, adiciona filtros como preço, ano, KM e região, e eu aviso aqui no Telegram quando aparecer algo compatível.\n\n"
+        "Para começar:\n"
+        "toque em /menu e depois em ➕ Criar busca."
     )
 
 
 def render_user_wishlists(wishlists) -> str:
     if not wishlists:
         return (
-            "Você não tem wishlists.\n"
-            "Opções:\n"
-            "• /wishlist_add (fluxo oficial)\n"
-            "• /wishlist add <termos> (compatibilidade legado)"
+            "Você ainda não criou nenhuma busca.\n\n"
+            "Crie uma busca para eu monitorar anúncios de carros usados e te avisar quando aparecer algo compatível."
         )
 
     if isinstance(wishlists[0], dict):
-        lines = ["🎯 Suas wishlists", ""]
+        lines = ["🎯 Minhas buscas", ""]
         for item in wishlists:
             labels = _friendly_wishlist_filters(item.get("filters", []))
             shown = labels[:3]
@@ -142,23 +137,30 @@ def render_user_wishlists(wishlists) -> str:
             else:
                 lines.append("- Nenhum filtro")
             lines.extend([
-                f"Rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
-                f"Notificações: {item.get('notifications_24h_count', 0)} nas últimas 24h",
+                f"Anúncios rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
+                f"Alertas enviados hoje: {item.get('notifications_24h_count', 0)}",
                 "",
             ])
         lines.append("Escolha uma ação:")
         return "\n".join(lines).strip()
 
     lines = [f"{i + 1}. {x.query}" for i, x in enumerate(wishlists)]
-    return "Wishlists:\n" + "\n".join(lines)
+    return "Minhas buscas:\n" + "\n".join(lines)
 
 
 
 def render_all_tracked_listings(wishlists, tracked_messages: list[str], plan_usage: str | None = None) -> str:
     if not wishlists:
-        return "Você não tem wishlists. Use /wishlist_add para criar a primeira."
+        return (
+            "⭐ Anúncios rastreados\n\n"
+            "Aqui ficam anúncios específicos que você quer acompanhar de perto.\n\n"
+            "Busca salva = eu encontro novos anúncios para você.\n"
+            "Anúncio rastreado = eu acompanho preço/status de um anúncio específico.\n\n"
+            "Você ainda não rastreou nenhum anúncio.\n\n"
+            "Quando receber ou encontrar um anúncio interessante, toque em ⭐ Rastrear para acompanhar preço e status."
+        )
 
-    lines = ["📌 Seus anúncios rastreados"]
+    lines = ["⭐ Anúncios rastreados", "", "Aqui ficam anúncios específicos que você quer acompanhar de perto.", "", "Busca salva = eu encontro novos anúncios para você.", "Anúncio rastreado = eu acompanho preço/status de um anúncio específico."]
     if plan_usage:
         lines.append(plan_usage)
     for msg in tracked_messages:
@@ -220,7 +222,7 @@ def render_wishlist_filters(filters: Iterable, wishlist_query: str | None = None
         return f"{f.field} {f.operator} {f.value}"
 
     fs = list(filters)
-    header = "Filtros da wishlist:"
+    header = "Filtros da busca:"
     if wishlist_query:
         header += f"\n🔎 {wishlist_query}"
     lines = [f"{i + 1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]
@@ -295,16 +297,16 @@ def render_upgrade_text(has_payment_links: bool) -> str:
         "De R$ 89,99 por R$ 59,99/ano.\n"
         "Equivale a R$ 4,99/mês.\n\n"
         "Benefícios:\n"
-        "- até 10 wishlists\n"
+        "- até 15 buscas salvas\n"
         "- até 5 anúncios rastreados no total\n"
-        "- alertas automáticos de preço/status\n"
-        "- até 15 notificações por dia por wishlist\n"
+        "- até 200 alertas por dia por busca\n"
+        "- alertas automáticos de queda de preço/status\n"
         "- prioridade em novas funcionalidades\n\n"
         "Após pagar, envie o comprovante aqui no Telegram.\n"
         "A ativação é feita manualmente."
     )
     if not has_payment_links:
-        text += "\n\nOs links de pagamento ainda não estão configurados. Fale com o admin para ativação manual."
+        text += "\n\nOs links de pagamento ainda não estão disponíveis.\n\nVocê pode falar com o suporte/admin para ativação manual do Premium."
     return text
 
 

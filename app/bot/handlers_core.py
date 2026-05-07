@@ -212,7 +212,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = (q.data or "").strip()
     if data == "MENU:SEARCH":
-        await _safe_edit_or_send(update, "Para buscar agora, use:\n/buscar civic si")
+        await _safe_edit_or_send(update, "🔎 Buscar agora\n\nEssa é uma busca pontual. Eu procuro uma vez e não salvo monitoramento.\n\nExemplo:\n`/buscar civic 2019 até 90000 sp`\n\nPara receber alertas todos os dias, use ➕ Criar busca.")
         return
     if data == "MENU:UPGRADE":
         await _safe_edit_or_send(
@@ -224,12 +224,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "MENU:CREATE_WISHLIST":
         await _safe_edit_or_send(
             update,
-            "Qual carro você quer monitorar?\n"
-            "Exemplos:\n"
-            "- civic si\n"
-            "- miata\n"
-            "- corolla 2018\n\n"
-            "Envie o texto ou use /cancelar.",
+            "Qual carro você quer encontrar?\n\nExemplos:\n- civic si\n- corolla até 120000\n- audi a5 entre 2017 e 2021\n- compass diesel até 180000 em SP\n\nDica: quanto mais específico, melhores serão os alertas.",
         )
         return MENU_CREATE_WISHLIST_QUERY
     if data == "MENU:WISHLISTS":
@@ -237,8 +232,8 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             summaries = get_wishlist_summaries(db, user.id)
         await _safe_edit_or_send(update, render_user_wishlists(summaries), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗑️ Remover wishlist", callback_data="WL:REMOVE_MENU")],
-            [InlineKeyboardButton("⭐ Rastreados", callback_data="WL:TRACKED")],
+            [InlineKeyboardButton("🗑️ Remover busca", callback_data="WL:REMOVE_MENU")],
+            [InlineKeyboardButton("⭐ Anúncios rastreados", callback_data="WL:TRACKED")],
             [InlineKeyboardButton("↩️ Voltar", callback_data="WL:BACK")],
         ]))
         return
@@ -260,11 +255,11 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             wishlists = list_wishlists(db, user.id)
         if not wishlists:
-            await _safe_edit_or_send(update, "Você ainda não tem wishlists para remover.")
+            await _safe_edit_or_send(update, "Você ainda não tem buscas para remover.")
             return
         kb = [[InlineKeyboardButton(f"🗑️ Remover {i} — {wl.query}", callback_data=f"WL:REMOVE:{i}")] for i, wl in enumerate(wishlists, start=1)]
         kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")])
-        await _safe_edit_or_send(update, "Escolha a wishlist para remover:", reply_markup=InlineKeyboardMarkup(kb))
+        await _safe_edit_or_send(update, "Escolha a busca para remover:", reply_markup=InlineKeyboardMarkup(kb))
         return
     if data.startswith("WL:REMOVE:"):
         idx = int(data.split(":")[-1])
@@ -272,11 +267,11 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             wishlists = list_wishlists(db, user.id)
         if idx < 1 or idx > len(wishlists):
-            await _safe_edit_or_send(update, "Wishlist não encontrada para sua conta.")
+            await _safe_edit_or_send(update, "Busca não encontrada para sua conta.")
             return
         wl = wishlists[idx - 1]
-        await _safe_edit_or_send(update, f"Remover wishlist {idx} — {wl.query}?\n\nIsso também remove filtros e rastreados vinculados, quando aplicável.", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirmar remoção", callback_data=f"WL:REMOVE_CONFIRM:{idx}")],
+        await _safe_edit_or_send(update, f"Remover esta busca?\n\nBusca: {wl.query}\n\nIsso também remove os filtros e anúncios rastreados vinculados a ela.\n\nEssa ação não pode ser desfeita.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Sim, remover", callback_data=f"WL:REMOVE_CONFIRM:{idx}")],
             [InlineKeyboardButton("↩️ Voltar", callback_data="WL:REMOVE_MENU")],
         ]))
         return
@@ -285,7 +280,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             ok, _msg = remove_wishlist(db, user.id, idx)
-        await _safe_edit_or_send(update, "Wishlist removida." if ok else "Wishlist não encontrada para sua conta.")
+        await _safe_edit_or_send(update, "✅ Busca removida.\n\nSe quiser, você pode criar uma nova busca em /menu." if ok else "Busca não encontrada para sua conta.")
         return
     if data == "MENU:TRACKED":
         with SessionLocal() as db:
@@ -298,13 +293,13 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _safe_edit_or_send(update, render_all_tracked_listings(wishlists, tracked_messages)[:3900])
         return
     if data == "MENU:FILTERS":
-        await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar wishlist.")
+        await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar busca.")
         return
     if data == "MENU:HELP":
         await _safe_edit_or_send(update, render_help_text())
         return
 
-    await _safe_edit_or_send(update, "Opção inválida. Use /menu novamente.")
+    await _safe_edit_or_send(update, "Essa opção não está mais válida.\n\nAbra o menu novamente para continuar.\n\nUse /menu.")
 
 
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -334,13 +329,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 def _menu_keyboard(is_premium: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("➕ Criar wishlist", callback_data="MENU:CREATE_WISHLIST")],
-        [InlineKeyboardButton("🎯 Minhas wishlists", callback_data="MENU:WISHLISTS")],
-        [InlineKeyboardButton("⭐ Rastreados", callback_data="MENU:TRACKED")],
-        [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
+        [InlineKeyboardButton("➕ Criar busca", callback_data="MENU:CREATE_WISHLIST")],
+        [InlineKeyboardButton("🎯 Minhas buscas", callback_data="MENU:WISHLISTS")],
+        [InlineKeyboardButton("⭐ Anúncios rastreados", callback_data="MENU:TRACKED")],
+        [InlineKeyboardButton("🔎 Buscar agora", callback_data="MENU:SEARCH")],
     ]
     if not is_premium:
-        rows.append([InlineKeyboardButton("🚀 Upgrade Premium", callback_data="MENU:UPGRADE")])
+        rows.append([InlineKeyboardButton("🚀 Premium", callback_data="MENU:UPGRADE")])
     rows.append([InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")])
     return InlineKeyboardMarkup(rows)
 
@@ -375,7 +370,7 @@ async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "FILTER:CANCEL":
         _clear_menu_filter_context(context)
-        await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar wishlist.")
+        await _safe_edit_or_send(update, "Os filtros guiados agora ficam no fluxo de criação da wishlist. Use /menu → ➕ Criar busca.")
         return ConversationHandler.END
 
     if data.startswith("FILTER:WL:"):
@@ -595,11 +590,11 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
     context.user_data["menu_create_wishlist_query"] = parsed.cleaned_query
     context.user_data["menu_create_wishlist_draft_filters"] = build_draft_filter_groups(parsed.filters)
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Criar agora", callback_data="CWL:CREATE")],
-        [InlineKeyboardButton("⚙️ Adicionar filtros antes de criar", callback_data="CWL:CREATE_FILTERS")],
+        [InlineKeyboardButton("✅ Criar busca", callback_data="CWL:CREATE")],
+        [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
     ])
-    await reply_text(update, f"Busca:\n{parsed.cleaned_query}\n\n{_render_draft_filters(context.user_data['menu_create_wishlist_draft_filters'])}\n\nComo deseja continuar?", reply_markup=kb)
+    await reply_text(update, f"Entendi sua busca:\n\nCarro: {parsed.cleaned_query}\nFiltros detectados:\n{_render_draft_filters(context.user_data['menu_create_wishlist_draft_filters'])}\n\nQuer adicionar mais filtros antes de ativar?", reply_markup=kb)
     return MENU_CREATE_WISHLIST_QUERY
 
 
@@ -612,13 +607,13 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
 
     if data == "CWL:CANCEL" or data == "CWLF:CANCEL":
         _clear_menu_create_wishlist_draft_context(context)
-        await _safe_edit_or_send(update, "Criação de wishlist cancelada.")
+        await _safe_edit_or_send(update, "Criação de busca cancelada.")
         return ConversationHandler.END
 
     if data == "CWL:CREATE":
         query = context.user_data.get("menu_create_wishlist_query")
         if not query:
-            await _safe_edit_or_send(update, "Sessão expirada. Use /menu novamente.")
+            await _safe_edit_or_send(update, "Essa etapa expirou.\n\nPara continuar com segurança, abra o menu novamente e refaça a ação.\n\nUse /menu.")
             return ConversationHandler.END
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
@@ -629,10 +624,10 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             else:
                 ok, msg = add_wishlist(db, user.id, query)
         if not ok:
-            await _safe_edit_or_send(update, f"Não consegui criar a wishlist:\n{msg}")
+            await _safe_edit_or_send(update, f"Não consegui concluir essa ação agora.\n\nTente novamente em alguns minutos.\nSe continuar acontecendo, envie esta mensagem para o suporte.\n\nDetalhe: {msg}")
             return MENU_CREATE_WISHLIST_QUERY
         _clear_menu_create_wishlist_draft_context(context)
-        await _safe_edit_or_send(update, f"✅ Wishlist criada: {query}\n\nUse /menu para acompanhar.")
+        await _safe_edit_or_send(update, f"✅ Busca criada: {query}\n\nUse /menu para acompanhar.")
         return ConversationHandler.END
 
     if data == "CWL:CREATE_FILTERS":
@@ -690,29 +685,29 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 filters_draft.append({"field": g["field"], "operator": g["operator"], "value": g["value"]})
         if not query:
             _clear_menu_create_wishlist_draft_context(context)
-            await _safe_edit_or_send(update, "Sessão expirada. Abra novamente /menu → Criar wishlist.")
+            await _safe_edit_or_send(update, "Essa etapa expirou.\n\nPara continuar com segurança, abra o menu novamente e refaça a ação.\n\nUse /menu.")
             return ConversationHandler.END
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             ok, msg, _wid = create_wishlist_with_filters(db, user.id, query, filters_draft)
         if not ok:
-            await _safe_edit_or_send(update, f"Não consegui criar a wishlist:\n{msg}")
+            await _safe_edit_or_send(update, f"Não consegui concluir essa ação agora.\n\nTente novamente em alguns minutos.\nSe continuar acontecendo, envie esta mensagem para o suporte.\n\nDetalhe: {msg}")
             return MENU_CREATE_WISHLIST_QUERY
         _clear_menu_create_wishlist_draft_context(context)
         if draft_groups:
             labels = "\n".join(f"- {g.get('label')}" for g in draft_groups)
-            await _safe_edit_or_send(update, f"✅ Wishlist criada com filtros.\n\nBusca: {query}\nFiltros:\n{labels}\n\nA primeira busca foi agendada com os filtros aplicados.\nUse /menu para acompanhar.")
+            await _safe_edit_or_send(update, f"✅ Busca criada com filtros.\n\nBusca: {query}\nFiltros:\n{labels}\n\nA primeira busca foi agendada com os filtros aplicados.\nUse /menu para acompanhar.")
         else:
-            await _safe_edit_or_send(update, f"✅ Wishlist criada sem filtros. Você pode adicionar filtros depois pelo /menu.\n\nBusca: {query}\nUse /menu para acompanhar.")
+            await _safe_edit_or_send(update, f"✅ Busca criada sem filtros. Você pode adicionar filtros depois pelo /menu.\n\nBusca: {query}\nUse /menu para acompanhar.")
         return ConversationHandler.END
 
-    await _safe_edit_or_send(update, "Ação inválida. Use /menu novamente.")
+    await _safe_edit_or_send(update, "Essa opção não está mais válida.\n\nAbra o menu novamente para continuar.\n\nUse /menu.")
     return MENU_CREATE_WISHLIST_QUERY
 
 
 async def menu_create_wishlist_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _clear_menu_create_wishlist_draft_context(context)
-    await reply_text(update, "Criação de wishlist cancelada.")
+    await reply_text(update, "Criação de busca cancelada.")
     return ConversationHandler.END
 
 
