@@ -419,6 +419,16 @@ def get_wishlist_summaries(db: Session, user_id):
             .all()
         )
     }
+    filters_by_wishlist: dict[Any, list[dict[str, str]]] = defaultdict(list)
+    for row in (
+        db.query(WishlistFilter.wishlist_id, WishlistFilter.field, WishlistFilter.operator, WishlistFilter.value)
+        .filter(WishlistFilter.wishlist_id.in_(wishlist_ids))
+        .order_by(WishlistFilter.created_at.asc())
+        .all()
+    ):
+        filters_by_wishlist[row.wishlist_id].append(
+            {"field": row.field, "operator": row.operator, "value": row.value}
+        )
 
     tracked_counts = {
         wishlist_id: count
@@ -452,6 +462,7 @@ def get_wishlist_summaries(db: Session, user_id):
             "query": wl.query,
             "is_active": bool(getattr(wl, "is_active", True)),
             "filters_count": int(filter_counts.get(wl.id, 0) or 0),
+            "filters": filters_by_wishlist.get(wl.id, []),
             "tracked_count": int(tracked_counts.get(wl.id, 0) or 0),
             "tracked_limit": 3,
             "notifications_24h_count": int(notifications_24h_counts.get(wl.id, 0) or 0),

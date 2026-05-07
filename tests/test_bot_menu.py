@@ -80,13 +80,13 @@ def test_callback_menu_search():
 
 def test_callback_menu_wishlists_real(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [{"index": 1, "query": "civic si", "filters_count": 0, "tracked_count": 0, "tracked_limit": 3, "notifications_24h_count": 2, "is_active": True}])
+    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [{"index": 1, "query": "civic si", "filters_count": 0, "filters": [], "tracked_count": 0, "tracked_limit": 3, "notifications_24h_count": 2, "is_active": True}])
     q = _CallbackQuery("MENU:WISHLISTS")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
     assert "🎯 Suas wishlists" in q.edits[-1]
     assert "1. civic si" in q.edits[-1]
-    assert "Filtros: 0" in q.edits[-1]
+    assert "Filtros:\n- Nenhum filtro" in q.edits[-1]
     assert "Rastreados: 0/3" in q.edits[-1]
     assert "Notificações: 2 nas últimas 24h" in q.edits[-1]
 
@@ -109,6 +109,50 @@ def test_callback_menu_tracked_real(monkeypatch):
     assert q.answers == 1
     assert "Seus anúncios rastreados" in q.edits[-1]
     assert "wishlist 1" in q.edits[-1]
+
+
+def test_callback_menu_wl_back(monkeypatch):
+    _patch_user(monkeypatch)
+    q = _CallbackQuery("WL:BACK")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
+    assert q.answers == 1
+    assert "AutoHunter" in q.edits[-1]
+
+
+def test_callback_menu_wl_tracked(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", query="civic")])
+    monkeypatch.setattr(handlers_core, "list_tracked_listings", lambda _db, **kwargs: (True, "ok"))
+    q = _CallbackQuery("WL:TRACKED")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
+    assert q.answers == 1
+    assert "Seus anúncios rastreados" in q.edits[-1]
+
+
+def test_callback_menu_wl_remove_flow(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", query="civic")])
+    q = _CallbackQuery("WL:REMOVE_MENU")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
+    assert q.answers == 1
+    assert "Escolha a wishlist para remover" in q.edits[-1]
+
+    q2 = _CallbackQuery("WL:REMOVE:1")
+    asyncio.run(handlers_core.cb_menu(_Update(q2), types.SimpleNamespace()))
+    assert q2.answers == 1
+    assert "Remover wishlist 1" in q2.edits[-1]
+
+    monkeypatch.setattr(handlers_core, "remove_wishlist", lambda *_args, **_kwargs: (True, "ok"))
+    q3 = _CallbackQuery("WL:REMOVE_CONFIRM:1")
+    asyncio.run(handlers_core.cb_menu(_Update(q3), types.SimpleNamespace()))
+    assert q3.answers == 1
+    assert "Wishlist removida." in q3.edits[-1]
+
+
+def test_run_registers_wl_callback_pattern():
+    with open("app/bot/run.py", "r", encoding="utf-8") as fh:
+        content = fh.read()
+    assert r'^WL:(BACK|TRACKED|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$' in content
 
 
 def test_callback_menu_tracked_empty_slots(monkeypatch):
