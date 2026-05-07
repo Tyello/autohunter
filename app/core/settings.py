@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     telegram_enabled: bool = True
     autohunter_admins: str | None = None
     public_base_url: str | None = None
+    mercado_pago_monthly_payment_link: str | None = None
+    mercado_pago_annual_payment_link: str | None = None
 
     autohunter_admin_user_ids: str | None = None
     autohunter_admin_chat_ids: str | None = None

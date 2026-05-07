@@ -283,3 +283,37 @@ def render_help_text() -> str:
         "• /version\n"
         "• /me"
     )
+
+
+def render_upgrade_text(has_payment_links: bool) -> str:
+    text = (
+        "🚀 AutoHunter Premium\n\n"
+        "Escolha seu plano:\n\n"
+        "Mensal\n"
+        "De R$ 9,99 por R$ 5,99/mês no lançamento.\n\n"
+        "Anual\n"
+        "De R$ 89,99 por R$ 59,99/ano.\n"
+        "Equivale a R$ 4,99/mês.\n\n"
+        "Benefícios:\n"
+        "- até 10 wishlists\n"
+        "- até 5 anúncios rastreados no total\n"
+        "- alertas automáticos de preço/status\n"
+        "- até 15 notificações por dia por wishlist\n"
+        "- prioridade em novas funcionalidades\n\n"
+        "Após pagar, envie o comprovante aqui no Telegram.\n"
+        "A ativação é feita manualmente."
+    )
+    if not has_payment_links:
+        text += "\n\nOs links de pagamento ainda não estão configurados. Fale com o admin para ativação manual."
+    return text
+
+
+def build_upgrade_keyboard(monthly_link: str | None, annual_link: str | None):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    buttons = []
+    if monthly_link:
+        buttons.append([InlineKeyboardButton("💳 Assinar Mensal", url=monthly_link)])
+    if annual_link:
+        buttons.append([InlineKeyboardButton("💳 Assinar Anual", url=annual_link)])
+    return InlineKeyboardMarkup(buttons) if buttons else None

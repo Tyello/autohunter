@@ -26,6 +26,8 @@ os.environ.setdefault("PLAYWRIGHT_STORAGE_DIR", str(_DATA_DIR / "runtime" / "sta
 os.environ.setdefault("SOURCE_AUDIT_ROOT", str(_DATA_DIR / "runtime" / "cache" / "artifacts" / "source_audit_candidates"))
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_DIR", str(_DATA_DIR / "runtime" / "cache" / "pw-browsers"))
 os.environ.setdefault("OLX_HEALTH_PATH", str(_DATA_DIR / "olx_health.json"))
+os.environ.setdefault("FB_PROFILE_BASE_DIR", str(_DATA_DIR / "runtime" / "fb_profiles"))
+os.environ.setdefault("FB_DEBUG_BASE_DIR", str(_DATA_DIR / "runtime" / "fb_debug"))
 
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.compiler import compiles
@@ -49,6 +51,7 @@ def _compile_array_sqlite(type_, compiler, **kw):
 from app.db.base import Base
 from app.db.deps import get_db
 from app.db.session import SessionLocal, engine
+from app.core.settings import settings
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +62,18 @@ def _reset_db(request: pytest.FixtureRequest):
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _force_fb_test_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    fb_profiles = tmp_path / "fb_profiles"
+    fb_debug = tmp_path / "fb_debug"
+    fb_profiles.mkdir(parents=True, exist_ok=True)
+    fb_debug.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("FB_PROFILE_BASE_DIR", str(fb_profiles))
+    monkeypatch.setenv("FB_DEBUG_BASE_DIR", str(fb_debug))
+    monkeypatch.setattr(settings, "fb_profile_base_dir", str(fb_profiles))
+    monkeypatch.setattr(settings, "fb_debug_base_dir", str(fb_debug))
 
 
 @pytest.fixture()

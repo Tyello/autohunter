@@ -4,7 +4,8 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, Con
 
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
-from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters
+from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters, render_upgrade_text, build_upgrade_keyboard
+from app.core.settings import settings
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist
 from app.services.wishlist_tracking_service import list_tracked_listings
@@ -185,12 +186,24 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _show_main_menu(update)
+
+
+async def _show_main_menu(update: Update) -> None:
+    markup = _main_menu_markup_for_user(update)
     await reply_text(
         update,
         "🚗 AutoHunter\n\n"
         "O que você quer fazer?",
-        reply_markup=_menu_keyboard(),
+        reply_markup=markup,
     )
+
+
+def _main_menu_markup_for_user(update: Update) -> InlineKeyboardMarkup:
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        snap = get_user_plan_snapshot(db, user.id)
+    return _menu_keyboard(is_premium=(snap.get("plan_code") == "premium"))
 
 
 async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -200,6 +213,13 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = (q.data or "").strip()
     if data == "MENU:SEARCH":
         await _safe_edit_or_send(update, "Para buscar agora, use:\n/buscar civic si")
+        return
+    if data == "MENU:UPGRADE":
+        await _safe_edit_or_send(
+            update,
+            render_upgrade_text(bool(settings.mercado_pago_monthly_payment_link or settings.mercado_pago_annual_payment_link)),
+            reply_markup=build_upgrade_keyboard(settings.mercado_pago_monthly_payment_link, settings.mercado_pago_annual_payment_link),
+        )
         return
     if data == "MENU:CREATE_WISHLIST":
         await _safe_edit_or_send(
@@ -223,7 +243,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]))
         return
     if data == "WL:BACK":
-        await _safe_edit_or_send(update, "🚗 AutoHunter\n\nO que você quer fazer?", reply_markup=_menu_keyboard())
+        await _safe_edit_or_send(update, "🚗 AutoHunter\n\nO que você quer fazer?", reply_markup=_main_menu_markup_for_user(update))
         return
     if data == "WL:TRACKED":
         with SessionLocal() as db:
@@ -312,14 +332,17 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Monitoramento: fontes via scheduler\n\n"
         "Use /wishlist para ver suas buscas monitoradas."
     )
-def _menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def _menu_keyboard(is_premium: bool = False) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton("➕ Criar wishlist", callback_data="MENU:CREATE_WISHLIST")],
         [InlineKeyboardButton("🎯 Minhas wishlists", callback_data="MENU:WISHLISTS")],
-        [InlineKeyboardButton("📌 Rastreados", callback_data="MENU:TRACKED")],
+        [InlineKeyboardButton("⭐ Rastreados", callback_data="MENU:TRACKED")],
         [InlineKeyboardButton("🔎 Buscar anúncio", callback_data="MENU:SEARCH")],
-        [InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")],
-    ])
+    ]
+    if not is_premium:
+        rows.append([InlineKeyboardButton("🚀 Upgrade Premium", callback_data="MENU:UPGRADE")])
+    rows.append([InlineKeyboardButton("❓ Ajuda", callback_data="MENU:HELP")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def _safe_answer_callback(q) -> None:

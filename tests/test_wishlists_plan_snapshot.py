@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from app.models.account import Account
 from app.models.plan import Plan
@@ -51,3 +52,51 @@ def test_get_user_plan_snapshot_without_active_subscription_uses_free_capabiliti
     assert snap["max_wishlists"] == 2
     assert snap["daily_notifications_per_wishlist"] == 5
     assert snap["daily_alert_limit"] == 5
+
+
+def test_get_user_plan_snapshot_expired_premium_falls_back_to_free(db):
+    acc = Account(id=uuid.uuid4(), type="personal", name="acc-exp", is_active=True)
+    user = User(id=uuid.uuid4(), telegram_chat_id=990003, username="expired_user", is_active=True, account_id=acc.id)
+    premium = Plan(code="premium", name="Premium", daily_alert_limit=15, max_wishlists=10, is_active=True)
+    db.add_all([acc, user, premium]); db.commit()
+    db.add(Subscription(account_id=acc.id, plan_id=premium.id, status="active", source="seed", current_period_end=datetime.now(timezone.utc) - timedelta(days=1)))
+    db.commit()
+    snap = get_user_plan_snapshot(db, user.id)
+    assert snap["plan_code"] == "free"
+
+
+def test_get_user_plan_snapshot_naive_current_period_end_future_keeps_premium(db):
+    acc = Account(id=uuid.uuid4(), type="personal", name="acc-naive-future", is_active=True)
+    user = User(id=uuid.uuid4(), telegram_chat_id=990004, username="naive_future", is_active=True, account_id=acc.id)
+    premium = Plan(code="premium", name="Premium", daily_alert_limit=15, max_wishlists=10, is_active=True)
+    db.add_all([acc, user, premium]); db.commit()
+    naive_future = datetime.utcnow() + timedelta(days=2)
+    db.add(Subscription(account_id=acc.id, plan_id=premium.id, status="active", source="seed", current_period_end=naive_future))
+    db.commit()
+    snap = get_user_plan_snapshot(db, user.id)
+    assert snap["plan_code"] == "premium"
+
+
+def test_get_user_plan_snapshot_uses_ends_at_when_current_period_end_missing(db):
+    acc = Account(id=uuid.uuid4(), type="personal", name="acc-ends-at", is_active=True)
+    user = User(id=uuid.uuid4(), telegram_chat_id=990005, username="ends_at_user", is_active=True, account_id=acc.id)
+    premium = Plan(code="premium", name="Premium", daily_alert_limit=15, max_wishlists=10, is_active=True)
+    db.add_all([acc, user, premium]); db.commit()
+    future = datetime.now(timezone.utc) + timedelta(days=5)
+    db.add(Subscription(account_id=acc.id, plan_id=premium.id, status="active", source="seed", ends_at=future))
+    db.commit()
+    snap = get_user_plan_snapshot(db, user.id)
+    assert snap["plan_code"] == "premium"
+    assert snap["current_period_end"] == future
+
+
+def test_get_user_plan_snapshot_naive_current_period_end_past_falls_back_to_free(db):
+    acc = Account(id=uuid.uuid4(), type="personal", name="acc-naive-past", is_active=True)
+    user = User(id=uuid.uuid4(), telegram_chat_id=990006, username="naive_past", is_active=True, account_id=acc.id)
+    premium = Plan(code="premium", name="Premium", daily_alert_limit=15, max_wishlists=10, is_active=True)
+    db.add_all([acc, user, premium]); db.commit()
+    naive_past = datetime.utcnow() - timedelta(days=2)
+    db.add(Subscription(account_id=acc.id, plan_id=premium.id, status="active", source="seed", current_period_end=naive_past))
+    db.commit()
+    snap = get_user_plan_snapshot(db, user.id)
+    assert snap["plan_code"] == "free"

@@ -24,10 +24,11 @@ def test_cmd_upgrade_uses_current_commercial_values(monkeypatch):
     monkeypatch.setattr(handlers, "reply_text", _reply)
     asyncio.run(handlers.cmd_upgrade(_Update(), types.SimpleNamespace()))
     text = sent[-1]
+    assert "Mensal" in text
+    assert "Anual" in text
     assert "até 10 wishlists" in text
     assert "15 notificações por dia por wishlist" in text
-    assert "15 wishlists" not in text
-    assert "200 notificações" not in text
+    assert "Os links de pagamento ainda não estão configurados" in text
 
 
 def test_cmd_plan_uses_db_capabilities(db, monkeypatch):
@@ -53,5 +54,5 @@ def test_cmd_plan_uses_db_capabilities(db, monkeypatch):
     asyncio.run(handlers.cmd_plan(_Update(), types.SimpleNamespace()))
     text = sent[-1]
     assert "- Plano: premium" in text
-    assert "- Wishlists ativas: até 9" in text
-    assert "- Notificações por dia por wishlist: 12" in text
+    assert "Wishlists: 0/9" in text
+    assert "Notificações: até 12 por dia por wishlist" in text
