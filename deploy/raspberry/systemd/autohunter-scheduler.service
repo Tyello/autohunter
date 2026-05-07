@@ -11,6 +11,9 @@ EnvironmentFile=/opt/autohunter/.env
 ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_scheduler.sh
 Restart=always
 RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=180
+KillMode=mixed
 
 NoNewPrivileges=true
 PrivateTmp=true

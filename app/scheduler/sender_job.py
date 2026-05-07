@@ -1,10 +1,13 @@
 import time
+from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
 from app.services.system_logs_service import log
 from app.scheduler.jobs_send import send_queued_notifications
 from app.bot.sender import telegram_sender
 
 def job_send_notifications():
+    if is_shutdown_requested():
+        return
     t0 = time.time()
     with SessionLocal() as db:
         try:

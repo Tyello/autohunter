@@ -1,11 +1,14 @@
 import time
 
+from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
 from app.services.system_logs_service import log
 from app.services.notifications_cleanup_service import cleanup_old_notifications
 
 
 def job_cleanup_notifications():
+    if is_shutdown_requested():
+        return
     t0 = time.time()
     with SessionLocal() as db:
         try:

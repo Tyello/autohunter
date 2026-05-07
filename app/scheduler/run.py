@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timezone, timedelta
 
 from app.core.settings import settings
+from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
 from app.sources import list_sources
 from app.scheduler.heartbeat import heartbeat
@@ -68,6 +69,9 @@ def job_run_source_for_all_wishlists(source_name: str):
 
     Fontes HTTP tambem entram em fila persistente ('http'). Execucao pesada sai do tick e vai para workers, garantindo fairness e paralelismo controlado.
     """
+    if is_shutdown_requested():
+        return
+
     src = (source_name or "").lower().strip()
     plugin = get_source(src)
     if not plugin:
@@ -223,6 +227,8 @@ def start_scheduler() -> BackgroundScheduler:
         )
 
     def _job_heartbeat():
+        if is_shutdown_requested():
+            return
         db = SessionLocal()
         try:
             heartbeat(db)
