@@ -186,15 +186,24 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with SessionLocal() as db:
-        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        snap = get_user_plan_snapshot(db, user.id)
+    await _show_main_menu(update)
+
+
+async def _show_main_menu(update: Update) -> None:
+    markup = _main_menu_markup_for_user(update)
     await reply_text(
         update,
         "🚗 AutoHunter\n\n"
         "O que você quer fazer?",
-        reply_markup=_menu_keyboard(is_premium=(snap.get("plan_code") == "premium")),
+        reply_markup=markup,
     )
+
+
+def _main_menu_markup_for_user(update: Update) -> InlineKeyboardMarkup:
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        snap = get_user_plan_snapshot(db, user.id)
+    return _menu_keyboard(is_premium=(snap.get("plan_code") == "premium"))
 
 
 async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -234,7 +243,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]))
         return
     if data == "WL:BACK":
-        await _safe_edit_or_send(update, "🚗 AutoHunter\n\nO que você quer fazer?", reply_markup=_menu_keyboard())
+        await _safe_edit_or_send(update, "🚗 AutoHunter\n\nO que você quer fazer?", reply_markup=_main_menu_markup_for_user(update))
         return
     if data == "WL:TRACKED":
         with SessionLocal() as db:

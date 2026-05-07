@@ -21,6 +21,7 @@ class _CallbackQuery:
         self.fail_edit = fail_edit
         self.answers = 0
         self.edits: list[str] = []
+        self.edit_payloads: list[dict] = []
         self.message = _Message()
 
     async def answer(self):
@@ -30,6 +31,7 @@ class _CallbackQuery:
         if self.fail_edit:
             raise RuntimeError("cannot edit")
         self.edits.append(text)
+        self.edit_payloads.append({"text": text, "reply_markup": reply_markup})
 
 
 class _Update:
@@ -120,10 +122,29 @@ def test_callback_menu_tracked_real(monkeypatch):
 
 def test_callback_menu_wl_back(monkeypatch):
     _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "get_user_plan_snapshot", lambda *_: {"plan_code": "free"})
     q = _CallbackQuery("WL:BACK")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
     assert "AutoHunter" in q.edits[-1]
+
+
+def test_callback_menu_wl_back_keeps_upgrade_hidden_for_premium(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "get_user_plan_snapshot", lambda *_: {"plan_code": "premium"})
+    q = _CallbackQuery("WL:BACK")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
+    markup = q.edit_payloads[-1]["reply_markup"]
+    callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert "MENU:UPGRADE" not in callback_data
+
+
+def test_callback_menu_wl_back_shows_upgrade_for_free(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "get_user_plan_snapshot", lambda *_: {"plan_code": "free"})
+    markup = handlers_core._main_menu_markup_for_user(_Update())
+    callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert "MENU:UPGRADE" in callback_data
 
 
 def test_callback_menu_wl_tracked(monkeypatch):
