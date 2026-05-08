@@ -157,6 +157,7 @@ def test_erro_retry_e_cancelamentos(monkeypatch):
     u2 = _Update(text="90000")
     state2 = asyncio.run(handlers_core.menu_filter_on_value(u2, ctx))
     assert state2 == ConversationHandler.END
+    assert "✅ Filtro atualizado." in u2.message.sent[-1]["text"]
     assert "Ver filtros: /wishlist_filter_list 1" in u2.message.sent[-1]["text"]
 
     cctx = _ctx()

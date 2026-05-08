@@ -7,7 +7,8 @@ from app.models.account import Account
 from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.user import User
-from app.services.wishlists_service import get_user_plan_snapshot
+from app.services.wishlists_service import get_user_plan_snapshot, add_wishlist
+from app.models.wishlist import Wishlist
 
 
 def test_get_user_plan_snapshot_with_active_premium_subscription(db):
@@ -100,3 +101,17 @@ def test_get_user_plan_snapshot_naive_current_period_end_past_falls_back_to_free
     db.commit()
     snap = get_user_plan_snapshot(db, user.id)
     assert snap["plan_code"] == "free"
+
+
+def test_paused_wishlist_still_counts_against_free_limit(db, monkeypatch):
+    user = User(id=uuid.uuid4(), telegram_chat_id=999001, username="limitfree", is_active=True)
+    db.add(user); db.commit()
+    db.add_all([
+        Wishlist(id=uuid.uuid4(), user_id=user.id, query="civic", is_active=True),
+        Wishlist(id=uuid.uuid4(), user_id=user.id, query="corolla", is_active=False),
+    ])
+    db.commit()
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    ok, msg = add_wishlist(db, user.id, "audi a3")
+    assert ok is False
+    assert "limite" in msg.lower()
