@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, List
 import logging
+import json
 
 from app.core.settings import settings
 from app.bot.text_sanitize import sanitize_for_telegram
@@ -85,12 +86,31 @@ def send_admin_text_with_report(text: str) -> dict:
     for chat_id in report["target_chats"]:
         report["attempted"] += 1
         try:
-            session.post(
+            resp = session.post(
                 url,
                 data={"chat_id": chat_id, "text": msg, "disable_web_page_preview": True},
                 timeout=15,
             )
-            report["sent"] += 1
+            is_http_ok = 200 <= getattr(resp, "status_code", 0) < 300
+            api_ok = False
+            try:
+                payload = resp.json()
+                api_ok = bool(isinstance(payload, dict) and payload.get("ok") is True)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                api_ok = False
+
+            if is_http_ok and api_ok:
+                report["sent"] += 1
+            else:
+                report["failed"] += 1
+                logger.warning(
+                    "admin_alert_send_failed_response",
+                    extra={
+                        "chat_id": chat_id,
+                        "status_code": getattr(resp, "status_code", None),
+                        "body": str(getattr(resp, "text", ""))[:500],
+                    },
+                )
         except Exception:
             report["failed"] += 1
             logger.warning("admin_alert_send_failed", extra={"chat_id": chat_id}, exc_info=True)
