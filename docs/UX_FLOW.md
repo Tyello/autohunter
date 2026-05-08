@@ -237,11 +237,17 @@ Para cada filtro, o bot mostra:
 
 ### Com links configurados
 - Botões:
-  - 💳 Assinar Mensal
-  - 💳 Assinar Anual
+  - 💳 Assinar Mensal (`callback_data=UPGRADE:MONTHLY`)
+  - 💳 Assinar Anual (`callback_data=UPGRADE:ANNUAL`)
+- Fluxo:
+  1. usuário clica em Assinar Mensal/Anual;
+  2. admin recebe notificação de **interesse** no plano (não confirmação de pagamento);
+  3. bot responde com botão URL real do Mercado Pago;
+  4. usuário paga e envia comprovante no Telegram;
+  5. admin ativa manualmente com `/admin premium activate <chat_id> monthly|annual`.
 
 ### Sem links configurados
-- Exibe fallback: admin ainda precisa configurar links.
+- Exibe fallback: "Os links de pagamento ainda não estão configurados. Fale com o admin para ativação manual."
 
 ### Instrução operacional
 - Usuário paga no link e envia comprovante no Telegram.
