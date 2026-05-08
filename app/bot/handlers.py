@@ -42,6 +42,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+async def _notify_upgrade_intent_admin_safe(admin_msg: str, *, chat_id: int, plan_period: str) -> None:
+    try:
+        await asyncio.to_thread(send_admin_text, admin_msg)
+    except Exception:
+        logger.warning("upgrade_admin_notify_failed", extra={"chat_id": chat_id, "plan_period": plan_period}, exc_info=True)
+
+
 def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, sources: list[str] | None) -> list[dict]:
     with SessionLocal() as db:
         _user = get_or_create_user_by_chat(db, chat_id, username)
@@ -437,11 +444,6 @@ async def cb_upgrade_plan_choice(update: Update, context: ContextTypes.DEFAULT_T
         "Aguardar comprovante e, se aprovado:\n"
         f"`{next_cmd}`"
     )
-    try:
-        await asyncio.to_thread(send_admin_text, admin_msg)
-    except Exception:
-        logger.warning("upgrade_admin_notify_failed", extra={"chat_id": chat_id, "plan_period": plan_period}, exc_info=True)
-
     if plan_period == "monthly":
         text = (
             "💳 Premium Mensal\n\n"
@@ -462,6 +464,7 @@ async def cb_upgrade_plan_choice(update: Update, context: ContextTypes.DEFAULT_T
         reply_markup=build_upgrade_payment_link_keyboard(plan_period=plan_period, payment_link=payment_link),
         disable_web_page_preview=True,
     )
+    asyncio.create_task(_notify_upgrade_intent_admin_safe(admin_msg, chat_id=chat_id, plan_period=plan_period))
 
 
 async def cmd_setplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
