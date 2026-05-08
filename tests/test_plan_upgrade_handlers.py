@@ -67,7 +67,10 @@ def test_upgrade_callback_monthly_notifies_admin_and_sends_real_link(monkeypatch
     notified = []
     monkeypatch.setattr(handlers, "send_admin_text", lambda text: notified.append(text))
     q = _CallbackQuery("UPGRADE:MONTHLY")
-    asyncio.run(handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace()))
+    async def _run():
+        await handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace())
+        await asyncio.sleep(0)
+    asyncio.run(_run())
     assert q.answered == 1
     assert "Interesse em Premium" in notified[0]
     assert "Plano: Mensal" in notified[0]
@@ -88,7 +91,10 @@ def test_upgrade_callback_admin_notify_failure_does_not_block_user(monkeypatch):
         raise RuntimeError("boom")
     monkeypatch.setattr(handlers, "send_admin_text", _raise)
     q = _CallbackQuery("UPGRADE:ANNUAL")
-    asyncio.run(handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace()))
+    async def _run():
+        await handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace())
+        await asyncio.sleep(0)
+    asyncio.run(_run())
     assert q.answered == 1
     assert "Premium Anual" in q.messages[-1]["text"]
 
