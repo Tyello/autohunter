@@ -178,6 +178,65 @@ def test_callback_menu_wl_remove_flow(monkeypatch):
     assert "✅ Busca removida." in q3.edits[-1]
 
 
+def test_callback_menu_pause_resume_flow(monkeypatch):
+    _patch_user(monkeypatch)
+    wl = types.SimpleNamespace(id="w1", query="audi a5", is_active=True, filters=[{"field": "price"}], tracked_count=1)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [wl])
+    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [{
+        "index": 1, "query": wl.query, "filters": [], "tracked_count": wl.tracked_count, "tracked_limit": 3,
+        "notifications_24h_count": 0, "is_active": wl.is_active,
+    }])
+
+    def _set_state(_db, _user_id, idx, is_active):
+        if idx != 1:
+            return False, "Busca não encontrada para sua conta."
+        wl.is_active = is_active
+        return True, wl.query
+    monkeypatch.setattr(handlers_core, "set_wishlist_active_state", _set_state)
+
+    q1 = _CallbackQuery("MENU:WISHLISTS")
+    asyncio.run(handlers_core.cb_menu(_Update(q1), types.SimpleNamespace(user_data={})))
+    assert "⏸️ Pausar busca" in str(q1.edit_payloads[-1]["reply_markup"])
+
+    q2 = _CallbackQuery("WL:PAUSE_MENU")
+    asyncio.run(handlers_core.cb_menu(_Update(q2), types.SimpleNamespace(user_data={})))
+    assert "Escolha a busca:" in q2.edits[-1]
+
+    q3 = _CallbackQuery("WL:PAUSE:1")
+    asyncio.run(handlers_core.cb_menu(_Update(q3), types.SimpleNamespace(user_data={})))
+    assert "continuam ocupando vaga do seu plano" in q3.edits[-1]
+    assert q3.edit_payloads[-1]["reply_markup"].inline_keyboard[0][0].text == "⏸️ Pausar"
+
+    q4 = _CallbackQuery("WL:PAUSE_CONFIRM:1")
+    asyncio.run(handlers_core.cb_menu(_Update(q4), types.SimpleNamespace(user_data={})))
+    assert wl.is_active is False
+
+    q5 = _CallbackQuery("MENU:WISHLISTS")
+    asyncio.run(handlers_core.cb_menu(_Update(q5), types.SimpleNamespace(user_data={})))
+    assert "Status: pausada" in q5.edits[-1]
+
+    q6 = _CallbackQuery("WL:RESUME:1")
+    asyncio.run(handlers_core.cb_menu(_Update(q6), types.SimpleNamespace(user_data={})))
+    assert q6.edit_payloads[-1]["reply_markup"].inline_keyboard[0][0].text == "▶️ Reativar"
+
+    q7 = _CallbackQuery("WL:RESUME_CONFIRM:1")
+    asyncio.run(handlers_core.cb_menu(_Update(q7), types.SimpleNamespace(user_data={})))
+    assert wl.is_active is True
+    assert wl.filters and wl.tracked_count == 1
+
+    q8 = _CallbackQuery("MENU:WISHLISTS")
+    asyncio.run(handlers_core.cb_menu(_Update(q8), types.SimpleNamespace(user_data={})))
+    assert "Status: ativa" in q8.edits[-1]
+
+
+def test_callback_menu_pause_invalid_index(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", query="civic")])
+    q = _CallbackQuery("WL:PAUSE:9")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace(user_data={})))
+    assert "Busca não encontrada" in q.edits[-1]
+
+
 def test_run_registers_wl_callback_pattern():
     with open("app/bot/run.py", "r", encoding="utf-8") as fh:
         content = fh.read()

@@ -7,7 +7,7 @@ from app.models.source_config import SourceConfig
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
-from app.services.source_execution_service import run_source_for_all_wishlists
+from app.services.source_execution_service import run_source_for_all_wishlists, _wishlist_eligibility_snapshot
 
 
 def _mk_user(db, *, chat_id: int = 111) -> User:
@@ -108,3 +108,15 @@ def test_runall_reports_source_binding_filter(db, monkeypatch):
     assert res["active_wishlists"] == 1
     assert res["eligible_wishlists"] == 0
     assert res["filtered_by_source_binding"] == 1
+
+
+def test_runall_ignores_paused_and_keeps_active(db, monkeypatch):
+    user = _mk_user(db, chat_id=112)
+    active = Wishlist(id=uuid.uuid4(), user_id=user.id, query="civic", is_active=True)
+    paused = Wishlist(id=uuid.uuid4(), user_id=user.id, query="jetta", is_active=False)
+    db.add_all([active, paused]); db.commit()
+    wishlists, stats = _wishlist_eligibility_snapshot(db, "olx")
+    assert [w.id for w in wishlists] == [active.id]
+    assert stats["total_wishlists"] == 2
+    assert stats["active_wishlists"] == 1
+    assert stats["filtered_by_disabled"] == 1

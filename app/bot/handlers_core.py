@@ -269,7 +269,8 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = f"▶️ Reativar busca\n\nEssa busca voltará a gerar alertas quando aparecerem anúncios compatíveis.\n\nBusca: {wl.query}"
             cb = f"WL:RESUME_CONFIRM:{idx}"
-        await _safe_edit_or_send(update, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Confirmar", callback_data=cb)], [InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")]]))
+        confirm_label = "⏸️ Pausar" if is_pause else "▶️ Reativar"
+        await _safe_edit_or_send(update, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(confirm_label, callback_data=cb)], [InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")]]))
         return
     if data.startswith("WL:PAUSE_CONFIRM:") or data.startswith("WL:RESUME_CONFIRM:"):
         idx = int(data.split(":")[-1])
@@ -534,10 +535,7 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
         return MENU_FILTER_SELECT_VALUE
 
     _clear_menu_filter_context(context)
-    await reply_text(
-        update,
-        f"{msg}\n\nVer filtros: /wishlist_filter_list {wishlist_index}\nAdicionar outro filtro: /menu → ⚙️ Filtros",
-    )
+    await reply_text(update, f"✅ Filtro atualizado.\nA busca continuará usando os filtros atualizados nas próximas execuções.\n\nVer filtros: /wishlist_filter_list {wishlist_index}")
     return ConversationHandler.END
 
 
