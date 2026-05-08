@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, Con
 
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
-from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters, render_upgrade_text, build_upgrade_keyboard
+from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters, render_upgrade_text, build_upgrade_choice_keyboard
 from app.core.settings import settings
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist, set_wishlist_active_state
@@ -218,7 +218,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _safe_edit_or_send(
             update,
             render_upgrade_text(bool(settings.mercado_pago_monthly_payment_link or settings.mercado_pago_annual_payment_link)),
-            reply_markup=build_upgrade_keyboard(settings.mercado_pago_monthly_payment_link, settings.mercado_pago_annual_payment_link),
+            reply_markup=build_upgrade_choice_keyboard(settings.mercado_pago_monthly_payment_link, settings.mercado_pago_annual_payment_link),
         )
         return
     if data == "MENU:CREATE_WISHLIST":

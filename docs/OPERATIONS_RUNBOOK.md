@@ -269,6 +269,15 @@ Boas práticas para novas migrations:
   - `MERCADO_PAGO_MONTHLY_PAYMENT_LINK`
   - `MERCADO_PAGO_ANNUAL_PAYMENT_LINK`
 - Fluxo operacional: usuário envia comprovante no Telegram -> admin valida -> ativa manualmente.
+- Clique de intenção no bot:
+  - ao clicar em **Assinar Mensal/Anual** no `/upgrade`, o admin recebe notificação de interesse.
+  - esta notificação **não confirma pagamento**; ela indica somente intenção/clique.
+  - após o clique, o bot envia o link real do Mercado Pago para o usuário.
+- Procedimento recomendado:
+  - aguardar comprovante enviado no Telegram e/ou conferir Mercado Pago;
+  - então ativar manualmente:
+    - `/admin premium activate <chat_id> monthly`
+    - `/admin premium activate <chat_id> annual`
 - Ativação mensal:
   - `/admin premium activate <chat_id> monthly` (ou `30d`)
 - Ativação anual:

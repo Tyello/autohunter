@@ -9,7 +9,12 @@ from app.notifications.telegram_formatter import format_ad_message
 from app.scoring.score_v2 import score_ad
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 from app.bot.utils import normalize_args, parse_int, reply_text
-from app.bot.renderers import render_user_wishlists, render_upgrade_text, build_upgrade_keyboard
+from app.bot.renderers import (
+    render_user_wishlists,
+    render_upgrade_text,
+    build_upgrade_choice_keyboard,
+    build_upgrade_payment_link_keyboard,
+)
 from app.db.session import SessionLocal
 from app.core.settings import settings
 from app.services.search_service import manual_search
@@ -26,6 +31,7 @@ from app.models.subscription import Subscription
 from app.services.plan_capabilities import resolve_plan_capabilities
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.models.wishlist import Wishlist
+from app.services.admin_alerts_service import send_admin_text
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
@@ -396,7 +402,65 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text(
         update,
         render_upgrade_text(bool(monthly_link or annual_link)),
-        reply_markup=build_upgrade_keyboard(monthly_link, annual_link),
+        reply_markup=build_upgrade_choice_keyboard(monthly_link, annual_link),
+    )
+
+
+async def cb_upgrade_plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = (q.data or "").strip()
+    plan_period = "monthly" if data.endswith("MONTHLY") else "annual"
+    payment_link = settings.mercado_pago_monthly_payment_link if plan_period == "monthly" else settings.mercado_pago_annual_payment_link
+    if not payment_link:
+        await q.message.reply_text("Link de pagamento ainda não configurado. Tente novamente mais tarde.")
+        return
+
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    username = getattr(user, "username", None) or "-"
+    first_name = getattr(user, "first_name", None) or "-"
+    plan_label = "Mensal" if plan_period == "monthly" else "Anual"
+    value_label = "R$ 5,99/mês" if plan_period == "monthly" else "R$ 59,99/ano"
+    next_cmd = f"/admin premium activate {chat_id} {plan_period}"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    admin_msg = (
+        "💳 Interesse em Premium\n\n"
+        f"Usuário: {username}\n"
+        f"Nome: {first_name}\n"
+        f"Chat ID: {chat_id}\n"
+        f"Plano: {plan_label}\n"
+        f"Valor: {value_label}\n"
+        "Origem: /upgrade\n"
+        f"Horário: {ts}\n\n"
+        "Próximo passo:\n"
+        "Aguardar comprovante e, se aprovado:\n"
+        f"`{next_cmd}`"
+    )
+    try:
+        await asyncio.to_thread(send_admin_text, admin_msg)
+    except Exception:
+        logger.warning("upgrade_admin_notify_failed", extra={"chat_id": chat_id, "plan_period": plan_period}, exc_info=True)
+
+    if plan_period == "monthly":
+        text = (
+            "💳 Premium Mensal\n\n"
+            "Valor de lançamento: R$ 5,99/mês.\n\n"
+            "Toque no botão abaixo para abrir o pagamento no Mercado Pago.\n\n"
+            "Depois de pagar, envie o comprovante aqui no Telegram para ativação manual."
+        )
+    else:
+        text = (
+            "💳 Premium Anual\n\n"
+            "Valor de lançamento: R$ 59,99/ano.\n"
+            "Equivale a R$ 4,99/mês.\n\n"
+            "Toque no botão abaixo para abrir o pagamento no Mercado Pago.\n\n"
+            "Depois de pagar, envie o comprovante aqui no Telegram para ativação manual."
+        )
+    await q.message.reply_text(
+        text,
+        reply_markup=build_upgrade_payment_link_keyboard(plan_period=plan_period, payment_link=payment_link),
+        disable_web_page_preview=True,
     )
 
 

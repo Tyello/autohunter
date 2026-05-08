@@ -255,25 +255,32 @@ def render_upgrade_text(has_payment_links: bool) -> str:
         "De R$ 89,99 por R$ 59,99/ano.\n"
         "Equivale a R$ 4,99/mês.\n\n"
         "Benefícios:\n"
-        "- até 15 buscas salvas\n"
+        "- até 10 wishlists\n"
         "- até 5 anúncios rastreados no total\n"
-        "- até 200 alertas por dia por busca\n"
-        "- alertas automáticos de queda de preço/status\n"
+        "- alertas automáticos de preço/status\n"
+        "- até 15 notificações por dia por wishlist\n"
         "- prioridade em novas funcionalidades\n\n"
         "Após pagar, envie o comprovante aqui no Telegram.\n"
         "A ativação é feita manualmente."
     )
     if not has_payment_links:
-        text += "\n\nOs links de pagamento ainda não estão disponíveis.\n\nVocê pode falar com o suporte/admin para ativação manual do Premium."
+        text += "\n\nOs links de pagamento ainda não estão configurados. Fale com o admin para ativação manual."
     return text
 
 
-def build_upgrade_keyboard(monthly_link: str | None, annual_link: str | None):
+def build_upgrade_choice_keyboard(monthly_link: str | None, annual_link: str | None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
     buttons = []
     if monthly_link:
-        buttons.append([InlineKeyboardButton("💳 Assinar Mensal", url=monthly_link)])
+        buttons.append([InlineKeyboardButton("💳 Assinar Mensal", callback_data="UPGRADE:MONTHLY")])
     if annual_link:
-        buttons.append([InlineKeyboardButton("💳 Assinar Anual", url=annual_link)])
+        buttons.append([InlineKeyboardButton("💳 Assinar Anual", callback_data="UPGRADE:ANNUAL")])
     return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+def build_upgrade_payment_link_keyboard(*, plan_period: str, payment_link: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    label = "Abrir pagamento mensal" if plan_period == "monthly" else "Abrir pagamento anual"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, url=payment_link)]])

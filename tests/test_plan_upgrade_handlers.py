@@ -12,9 +12,24 @@ from app.models.user import User
 
 
 class _Update:
-    def __init__(self):
+    def __init__(self, callback_query=None):
         self.effective_chat = types.SimpleNamespace(id=123)
-        self.effective_user = types.SimpleNamespace(username="tester")
+        self.effective_user = types.SimpleNamespace(username="tester", first_name="Test")
+        self.callback_query = callback_query
+
+
+class _CallbackQuery:
+    def __init__(self, data: str):
+        self.data = data
+        self.answered = 0
+        self.messages = []
+        self.message = self
+
+    async def answer(self):
+        self.answered += 1
+
+    async def reply_text(self, text, **kwargs):
+        self.messages.append({"text": text, **kwargs})
 
 
 def test_cmd_upgrade_uses_current_commercial_values(monkeypatch):
@@ -26,9 +41,56 @@ def test_cmd_upgrade_uses_current_commercial_values(monkeypatch):
     text = sent[-1]
     assert "Mensal" in text
     assert "Anual" in text
-    assert "até 15 buscas salvas" in text
-    assert "200 alertas por dia por busca" in text
-    assert "Os links de pagamento ainda não estão disponíveis" in text
+    assert "até 10 wishlists" in text
+    assert "até 15 notificações por dia por wishlist" in text
+    assert "Os links de pagamento ainda não estão configurados" in text
+
+
+def test_cmd_upgrade_uses_callback_buttons_when_links_exist(monkeypatch):
+    sent = []
+
+    async def _reply(_update, text, **kwargs):
+        sent.append({"text": text, "reply_markup": kwargs.get("reply_markup")})
+
+    monkeypatch.setattr(handlers, "reply_text", _reply)
+    monkeypatch.setattr(handlers.settings, "mercado_pago_monthly_payment_link", "https://mp/monthly")
+    monkeypatch.setattr(handlers.settings, "mercado_pago_annual_payment_link", "https://mp/annual")
+    asyncio.run(handlers.cmd_upgrade(_Update(), types.SimpleNamespace()))
+
+    markup = sent[-1]["reply_markup"]
+    callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert callback_data == ["UPGRADE:MONTHLY", "UPGRADE:ANNUAL"]
+
+
+def test_upgrade_callback_monthly_notifies_admin_and_sends_real_link(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "mercado_pago_monthly_payment_link", "https://mp/monthly")
+    notified = []
+    monkeypatch.setattr(handlers, "send_admin_text", lambda text: notified.append(text))
+    q = _CallbackQuery("UPGRADE:MONTHLY")
+    asyncio.run(handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace()))
+    assert q.answered == 1
+    assert "Interesse em Premium" in notified[0]
+    assert "Plano: Mensal" in notified[0]
+    assert q.messages[-1]["reply_markup"].inline_keyboard[0][0].url == "https://mp/monthly"
+
+
+def test_upgrade_callback_annual_fallback_when_link_missing(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "mercado_pago_annual_payment_link", None)
+    q = _CallbackQuery("UPGRADE:ANNUAL")
+    asyncio.run(handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace()))
+    assert q.answered == 1
+    assert "Link de pagamento ainda não configurado" in q.messages[-1]["text"]
+
+
+def test_upgrade_callback_admin_notify_failure_does_not_block_user(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "mercado_pago_annual_payment_link", "https://mp/annual")
+    def _raise(_):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(handlers, "send_admin_text", _raise)
+    q = _CallbackQuery("UPGRADE:ANNUAL")
+    asyncio.run(handlers.cb_upgrade_plan_choice(_Update(q), types.SimpleNamespace()))
+    assert q.answered == 1
+    assert "Premium Anual" in q.messages[-1]["text"]
 
 
 def test_cmd_plan_uses_db_capabilities(db, monkeypatch):

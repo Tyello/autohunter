@@ -12,7 +12,7 @@ from app.bot.handlers_core import (
     cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu,
     menu_create_wishlist_conversation, menu_filter_conversation,
 )
-from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit
+from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit, cb_upgrade_plan_choice
 from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_admin import cmd_admin
 from app.bot.handlers_misc import cmd_me
@@ -141,6 +141,7 @@ def main():
     # misc
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("upgrade", cmd_upgrade))
+    app.add_handler(CallbackQueryHandler(cb_upgrade_plan_choice, pattern=r"^UPGRADE:(MONTHLY|ANNUAL)$"))
     app.add_handler(CommandHandler("setplan", cmd_setplan))
     app.add_handler(CommandHandler("setlimit", cmd_setlimit))
 
