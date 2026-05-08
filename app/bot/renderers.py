@@ -126,8 +126,10 @@ def render_user_wishlists(wishlists) -> str:
         for item in wishlists:
             labels = _friendly_wishlist_filters(item.get("filters", []))
             shown = labels[:3]
+            status = "ativa" if item.get("is_active", True) else "pausada"
             lines.extend([
                 f"{item['index']}. {item['query']}",
+                f"Status: {status}",
                 "Filtros:",
             ])
             if shown:
@@ -160,7 +162,7 @@ def render_all_tracked_listings(wishlists, tracked_messages: list[str], plan_usa
             "Quando receber ou encontrar um anúncio interessante, toque em ⭐ Rastrear para acompanhar preço e status."
         )
 
-    lines = ["⭐ Anúncios rastreados", "", "Aqui ficam anúncios específicos que você quer acompanhar de perto.", "", "Busca salva = eu encontro novos anúncios para você.", "Anúncio rastreado = eu acompanho preço/status de um anúncio específico."]
+    lines = ["⭐ Anúncios rastreados", "", "Aqui ficam anúncios específicos que você quer acompanhar de perto.", "", "Busca salva = eu encontro novos anúncios para você.", "Anúncio rastreado = eu acompanho preço/status de um anúncio específico.", ""]
     if plan_usage:
         lines.append(plan_usage)
     for msg in tracked_messages:

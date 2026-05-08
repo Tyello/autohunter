@@ -21,7 +21,7 @@ def test_render_user_wishlists_summary_counts_filters_and_tracked():
     assert "Filtros:\n- Ano entre 2017 e 2021" in text
     assert "Anúncios rastreados: 1/3" in text
     assert "Alertas enviados hoje: 0" in text
-    assert "Status:" not in text
+    assert "Status: ativa" in text
     assert "Escolha uma ação:" in text
 
 

@@ -187,13 +187,13 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         await reply_text(
             update,
-            "Use: /buscar <termos>\nEx: /buscar civic 2019\nDica: /buscar audi a5 @mobiauto",
+            "🔎 Buscar agora\n\nUse assim:\n`/buscar civic 2019 até 90000 sp`\n\nEssa busca procura uma vez e não salva monitoramento.\n\nPara receber alertas contínuos, use /menu → ➕ Criar busca.",
         )
         return
 
     chat_id = update.effective_chat.id
     user_name = update.effective_user.username
-    await reply_text(update, "Busca recebida. Vou processar em segundo plano e te aviso quando encontrar resultados.")
+    await reply_text(update, "🔎 Busca recebida.\n\nVou procurar agora e te envio até 5 resultados, se encontrar.\n\nEssa busca não fica salva.\nPara monitorar continuamente, use /menu → ➕ Criar busca.")
 
     async def _run_background_search() -> None:
         try:
@@ -205,7 +205,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sources=sources,
             )
             if not payloads:
-                await context.bot.send_message(chat_id=chat_id, text="Nada encontrado agora.")
+                await context.bot.send_message(chat_id=chat_id, text="Não encontrei anúncios bons agora.\n\nTente mudar o termo ou criar uma busca salva para monitorar continuamente.\n\nExemplo:\n`/buscar civic 2019`")
                 return
             for payload in payloads:
                 built_rows = []

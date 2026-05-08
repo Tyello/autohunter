@@ -68,7 +68,7 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
     assert "Slot 3" in msg
     assert "Preço atual:" in msg
     assert "Preço inicial:" in msg
-    assert "Notificações automáticas:" in msg
+    assert "Alertas automáticos:" in msg
 
     ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, slot=2)
     assert ok is True

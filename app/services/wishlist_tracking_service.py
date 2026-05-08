@@ -107,7 +107,7 @@ def _fmt_price(price: Decimal | None) -> str:
 def _fmt_dt(dt: datetime | None) -> str:
     if not dt:
         return "sem informação"
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return dt.astimezone(timezone.utc).strftime("%d/%m/%Y %H:%M")
 
 
 def _listing_status(listing: CarListing | None) -> str:
@@ -404,19 +404,19 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
         .count()
     )
     lines: list[str] = [
-        f"📌 Rastreados da wishlist {wishlist_index} — {wishlist.query}",
-        f"Uso total do plano: {total_tracked}/{plan_caps.max_tracked_total} rastreados",
+        f"Busca {wishlist_index} — {wishlist.query}",
+        f"Uso do plano: {total_tracked}/{plan_caps.max_tracked_total} rastreados",
     ]
     by_slot = {int(r.slot): (r, l) for r, l in rows}
     for slot in range(1, MAX_TRACKED_PER_WISHLIST + 1):
         pair = by_slot.get(slot)
         if pair is None:
-            lines.append(f"\nSlot {slot} — vazio\nPara rastrear: clique em ⭐ Rastrear em um anúncio.")
+            lines.append(f"\nSlot {slot} — vazio\nPara usar esse espaço, toque em ⭐ Rastrear em um anúncio.")
             continue
         row, listing = pair
         refresh_tracked_listing_snapshot(db, row, listing)
         if listing is None:
-            lines.append(f"\nSlot {slot} — anúncio indisponível (registro removido)")
+            lines.append(f"\nSlot {slot} — anúncio indisponível\nStatus: indisponível")
             continue
         label = _short_label(listing.title or listing.external_id or "Anúncio", max_len=70)
         ref = listing.external_id or "-"
@@ -434,17 +434,17 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
                 var_txt = f"Caiu {_fmt_price(abs(delta))}{pct}"
             else:
                 var_txt = f"Subiu {_fmt_price(abs(delta))}{pct}"
-        status_map = {"active": "ativo", "inactive": "inativo", "orphan": "inativo/removido"}
+        status_map = {"active": "ativo", "inactive": "inativo/removido", "orphan": "indisponível"}
         status_txt = status_map.get(row.listing_status or "", "sem informação")
-        notif_txt = "ativadas" if row.price_drop_alert_enabled else "Premium"
+        notif_txt = "ativos" if row.price_drop_alert_enabled else "Premium"
         lines.append(
             f"\nSlot {slot} — {label}\n"
-            f"Preço atual: {_fmt_price(row.last_observed_price)}\n"
             f"Preço inicial: {_fmt_price(row.initial_price)}\n"
+            f"Preço atual: {_fmt_price(row.last_observed_price)}\n"
             f"Variação: {var_txt}\n"
             f"Status: {status_txt}\n"
             f"Última vez visto: {_fmt_dt(row.last_seen_at)}\n"
-            f"Notificações automáticas: {notif_txt}"
+            f"Alertas automáticos: {notif_txt}"
         )
 
     db.commit()

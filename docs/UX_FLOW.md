@@ -161,6 +161,9 @@ Para cada filtro, o bot mostra:
 - **Muitos filtros**: manter truncamento seguro + clareza.
 
 ### Botões
+- ⚙️ Ajustar filtros
+- ⏸️ Pausar busca
+- ▶️ Reativar busca
 - 🗑️ Remover busca
 - ⭐ Rastreados
 - ↩️ Voltar
@@ -180,12 +183,13 @@ Para cada filtro, o bot mostra:
 - Via menu principal “⭐ Rastreados” ou dentro de “Minhas buscas”.
 
 ### Estados
-- **Slots vazios**: mostrar placeholders `(vazio)`.
-- **Slots preenchidos**: listar anúncio e status básico.
+- **Slots vazios**: mostrar “Slot X — vazio” + instrução para tocar em ⭐ Rastrear.
+- **Slots preenchidos**: listar preço inicial, preço atual, variação (caiu/subiu/sem mudança), status humano, última vez visto e automação.
+- **Status humanos**: `ativo`, `indisponível`, `inativo/removido`.
 
 ### Regras de plano
-- **Free**: limite total menor e sem automação completa.
-- **Premium**: mais rastreados totais + automações ativas.
+- **Free**: mostra `Alertas automáticos: Premium` (contextual e leve).
+- **Premium**: mostra `Alertas automáticos: ativos`.
 
 ### Limites/erro
 - Ao atingir limite, orientar upgrade (quando Free) ou remoção de slot.
@@ -195,20 +199,22 @@ Para cada filtro, o bot mostra:
 - `/buscar <termo>`
 
 ### Resposta imediata
-- Bot confirma recebimento e informa processamento.
+- Bot reforça que é busca pontual (quebra-galho), retorna até 5 resultados e **não salva monitoramento**.
 
 ### Resultado
 - Lista de anúncios relevantes para aquela execução.
 
 ### Sem resultado
-- Mensagem neutra, com sugestão de ajustar termo/fonte.
+- Mensagem neutra, com sugestão de ajustar termo ou criar busca salva.
 
 ### Erro
 - Mensagem genérica sem stacktrace para usuário.
 
 ### O que **não** faz
 - Não cria busca.
+- Não cria rastreado.
 - Não inicia rastreamento automático.
+- Não é o caminho principal (caminho principal é ➕ Criar busca).
 
 ## 12. /plan
 ### Free

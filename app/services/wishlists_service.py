@@ -485,6 +485,17 @@ def get_wishlist_summaries(db: Session, user_id):
         })
     return out
 
+
+def set_wishlist_active_state(db: Session, user_id, wishlist_index: int, is_active: bool) -> tuple[bool, str]:
+    wishlists = list_wishlists(db, user_id)
+    if wishlist_index < 1 or wishlist_index > len(wishlists):
+        return False, "Busca não encontrada para sua conta."
+    wl = wishlists[wishlist_index - 1]
+    wl.is_active = bool(is_active)
+    db.add(wl)
+    db.commit()
+    return True, wl.query
+
 def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = True):
     """Cria wishlist e opcionalmente cria filtros de ano/preço se diretivas existirem."""
     try:
