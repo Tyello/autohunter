@@ -63,7 +63,7 @@ Definição suportada pelo runtime:
 
 ### Sources implementadas no código atual
 Pelo registry atual, existem plugins para:
-`mercadolivre`, `olx`, `chavesnamao`, `webmotors`, `gogarage`, `icarros`, `mobiauto`, `kavak`, `facebook_marketplace`, `turboclass`, `turboclass_vendidos`.
+`mercadolivre`, `olx`, `chavesnamao`, `webmotors`, `gogarage`, `icarros`, `mobiauto`, `kavak`, `facebook_marketplace`, `turboclass`.
 
 **Importante:** quais estão efetivamente ativas em produção depende do banco (`source_configs.is_enabled`) e não pode ser inferido só do código estático.
 

@@ -121,10 +121,6 @@ def test_admin_health_stale_filters_and_sections(monkeypatch, db):
     db.add(SourceConfig(source="turboclass", is_enabled=False, sched_minutes=60))
     db.add(SourceRun(source="turboclass", kind="scheduler", status="success", created_at=old))
 
-    # auxiliary/not implemented should not be stale critical
-    db.add(SourceConfig(source="turboclass_vendidos", is_enabled=False, sched_minutes=60))
-    db.add(SourceRun(source="turboclass_vendidos", kind="scheduler", status="success", created_at=old))
-
     # paused/backoff + webmotors anti-bot hint
     db.add(SourceConfig(source="webmotors", is_enabled=True, sched_minutes=60))
     db.add(SourceRun(source="webmotors", kind="scheduler", status="blocked", created_at=old, error="perimeterx"))
@@ -152,28 +148,12 @@ def test_admin_health_stale_filters_and_sections(monkeypatch, db):
     assert "Sources stale:" in text
     assert "- mercadolivre: stale" in text
     assert "- turboclass: stale" not in text
-    assert "- turboclass_vendidos: stale" not in text
     assert "Sources disabled:" in text and "turboclass: disabled" in text
     assert "Sources paused (backoff/throttle):" in text
     assert "webmotors" in text and "anti-bot" in text
     assert "scrape_jobs:" in text and "queued=" in text and "running=" in text
     assert "notifications:" in text and "queued=" in text and "sent=" in text
     assert text.index("err-new") < text.index("err-old")
-
-
-def test_admin_health_auxiliary_source_is_not_stale_critical(monkeypatch, db):
-    now = datetime.now(timezone.utc)
-    old = now - timedelta(minutes=500)
-    db.add(SourceConfig(source="turboclass_vendidos", is_enabled=True, sched_minutes=60))
-    db.add(SourceRun(source="turboclass_vendidos", kind="scheduler", status="success", created_at=old))
-    db.commit()
-
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
-    text = _run_health(monkeypatch, _Update(), ["verbose"])
-
-    assert "- turboclass_vendidos: stale" not in text
-    assert "Sources auxiliary/not_implemented:" in text
-    assert "turboclass_vendidos" in text
 
 
 def test_admin_health_experimental_enabled_source_is_not_stale_critical(monkeypatch, db):

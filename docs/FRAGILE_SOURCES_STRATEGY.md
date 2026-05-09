@@ -20,7 +20,6 @@ Não aumentar agressividade de scraping. Melhorar controle operacional e previsi
 | kavak | experimental | cobertura em validação operacional | experimental, observar manualmente |
 | facebook_marketplace | experimental | restrições de sessão/plataforma | experimental, observar manualmente |
 | turboclass | experimental | integração recente, default desabilitada | experimental, observar manualmente |
-| turboclass_vendidos | auxiliary | feed de vendidos (sem wishlist) | feed auxiliar, não crítico |
 
 ## Diretriz operacional
 - `blocked/challenge/parser/network` devem ser tratados como categorias explícitas no health/admin.

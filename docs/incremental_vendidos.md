@@ -27,14 +27,6 @@ Se sua row já existia, rode:
 
 (ou atualize `source_configs.extra` manualmente).
 
-### 2) Vendidos
-
-Habilite a source `turboclass_vendidos`:
-
-```text
-/admin sources enable turboclass_vendidos
-```
-
 Ela roda em modo feed (sem wishlists), varre `/vendidos` e marca `is_sold=true`.
 O matching ignora itens vendidos.
 

@@ -14,7 +14,6 @@
 | kavak | `app/scrapers/kavak.py` | listagem |
 | facebook_marketplace | `app/scrapers/facebook_marketplace.py` | listagem |
 | turboclass | `app/scrapers/turboclass.py` | listagem |
-| turboclass_vendidos | `app/scrapers/turboclass.py` (plugin dedicado) | listagem vendidas |
 
 ## Pipeline observado
 
@@ -40,7 +39,6 @@ mobiauto | ok | ok | ok | parcial | parcial | parcial | parcial | parcial | ok |
 kavak | parcial | ok | parcial | parcial | parcial | parcial | parcial | parcial | ok | parcial | campos não padronizados
 facebook_marketplace | parcial | parcial | parcial | gap | gap | gap | parcial | parcial | ok | não | dados automotivos limitados
 turboclass | parcial | ok | parcial | parcial | parcial | gap | parcial | parcial | ok | não | feed heterogêneo
-turboclass_vendidos | gap | parcial | gap | gap | gap | gap | gap | gap | ok | não | foco em vendido
 
 ## Proposta normalizeAd final (objetiva)
 

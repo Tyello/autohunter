@@ -47,11 +47,6 @@ def _scrape_turboclass(search_url: str, ctx: ScrapeContext) -> list[dict]:
     return scrape_turboclass(search_url, ctx=ctx)
 
 
-def turboclass_vendidos_url(_: str) -> str:
-    """TurboClass 'vendidos' feed (wishlist-independent)."""
-    return "https://turboclass.com.br/vendidos"
-
-
 # Mercado Livre: API/HTML; always enabled in the MVP.
 register_source(
     SourcePlugin(
@@ -297,32 +292,6 @@ register_source(
             "incremental_enabled": True,
             # cap new ingested items per URL-run (still matches on full set)
             "incremental_max_new": 120,
-        },
-    )
-)
-
-
-# TurboClass vendidas: feed para marcar anúncios como vendidos (não notifica).
-register_source(
-    SourcePlugin(
-        name="turboclass_vendidos",
-        build_url=turboclass_vendidos_url,
-        scrape=_scrape_turboclass,
-        supports_manual_search=False,
-        supports_wishlist_monitoring=False,
-        fetch_mode="http",
-        default_enabled=False,
-        default_sched_minutes=360,
-        default_browser_fallback_enabled=True,
-        default_extra={
-            "operational_role": "auxiliary",
-            "http_connect_timeout_s": 5,
-            "http_read_timeout_s": 20,
-            "http_min_delay_ms": 220,
-            "http_max_delay_ms": 650,
-            "browser_timeout_ms": 35000,
-            "browser_wait_until": "domcontentloaded",
-            "incremental_enabled": False,
         },
     )
 )

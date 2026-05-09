@@ -184,10 +184,6 @@ def scrape_turboclass(search_url: str, ctx: ScrapeContext | None = None, limit: 
     if not anchors:
         anchors = soup.select('a[href*="anuncio/detalhe/"]')
 
-    is_sold_mode = ("/vendidos" in (search_url or "")) or ("vendidos" in (search_url or "").lower()) or (
-        bool(ctx) and (getattr(ctx, "source", "").strip().lower() in {"turboclass_vendidos", "turboclass_sold"})
-    )
-
     for a in anchors:
         href = (a.get("href") or "").strip()
         if not href:
@@ -282,14 +278,6 @@ def scrape_turboclass(search_url: str, ctx: ScrapeContext | None = None, limit: 
                 "make": make or None,
                 "model": model or None,
         }
-
-        if is_sold_mode:
-            payload["is_sold"] = True
-            payload["sold_at"] = datetime.now(timezone.utc)
-            payload["listing_type"] = "marketplace"
-            payload.setdefault("extras", {})
-            payload["extras"] = dict(payload["extras"] or {})
-            payload["extras"]["sold_source"] = "turboclass_vendidos"
 
         out.append(payload)
 
