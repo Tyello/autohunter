@@ -196,3 +196,31 @@ def test_cwl_create_with_mixed_implicit_filters_calls_create_with_filters(monkey
     assert called["query"] == "corolla"
     assert {"field": "year", "operator": "gte", "value": "2018"} in called["filters"]
     assert {"field": "price", "operator": "lte", "value": "120000"} in called["filters"]
+
+
+def test_cwl_create_plan_limit_shows_only_business_message(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (False, "Você atingiu o limite do plano Free..."))
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
+    q = _CallbackQuery("CWL:CREATE")
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert "Você atingiu o limite do plano Free" in q.edits[-1]["text"]
+    assert "Não consegui concluir essa ação agora" not in q.edits[-1]["text"]
+
+
+def test_upgrade_fallback_ends_flow_and_opens_upgrade(monkeypatch):
+    called = {"upgrade": 0}
+
+    async def _cmd_upgrade(update, context):
+        called["upgrade"] += 1
+        await update.message.reply_text("Premium: teste")
+
+    monkeypatch.setattr("app.bot.handlers.cmd_upgrade", _cmd_upgrade)
+    msg = _Message("/upgrade")
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic", "menu_create_wishlist_draft_filters": []})
+    state = asyncio.run(handlers_core.menu_upgrade_fallback(_Update(message=msg), ctx))
+    assert state == ConversationHandler.END
+    assert called["upgrade"] == 1
+    assert ctx.user_data == {}
+    assert "Premium" in msg.sent[-1]["text"]

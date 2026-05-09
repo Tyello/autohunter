@@ -605,7 +605,7 @@ def parse_wishlist_filter_expression(field: str, raw_text: str) -> list[Normaliz
                 normalize_wishlist_filter_input(canonical_field, "gte", str(lo_i)),
                 normalize_wishlist_filter_input(canonical_field, "lte", str(hi_i)),
             ]
-        if "a partir de" in lowered or "desde" in lowered:
+        if any(term in lowered for term in ("a partir de", "desde", "acima de", "mais de")):
             num = re.search(r"([0-9\.\,]+)", lowered)
             if not num:
                 raise ValueError("Valor inválido.")
