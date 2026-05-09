@@ -231,14 +231,20 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             summaries = get_wishlist_summaries(db, user.id)
-        await _safe_edit_or_send(update, render_user_wishlists(summaries), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⚙️ Ajustar filtros", callback_data="WL:FILTERS_MENU")],
-            [InlineKeyboardButton("⏸️ Pausar busca", callback_data="WL:PAUSE_MENU")],
-            [InlineKeyboardButton("▶️ Reativar busca", callback_data="WL:RESUME_MENU")],
-            [InlineKeyboardButton("🗑️ Remover busca", callback_data="WL:REMOVE_MENU")],
+        buttons = []
+        if summaries:
+            buttons.append([InlineKeyboardButton("⚙️ Ajustar filtros", callback_data="WL:FILTERS_MENU")])
+        if any(item.get("is_active", True) for item in summaries):
+            buttons.append([InlineKeyboardButton("⏸️ Pausar busca", callback_data="WL:PAUSE_MENU")])
+        if any(not item.get("is_active", True) for item in summaries):
+            buttons.append([InlineKeyboardButton("▶️ Reativar busca", callback_data="WL:RESUME_MENU")])
+        if summaries:
+            buttons.append([InlineKeyboardButton("🗑️ Remover busca", callback_data="WL:REMOVE_MENU")])
+        buttons.extend([
             [InlineKeyboardButton("⭐ Anúncios rastreados", callback_data="WL:TRACKED")],
             [InlineKeyboardButton("↩️ Voltar", callback_data="WL:BACK")],
-        ]))
+        ])
+        await _safe_edit_or_send(update, render_user_wishlists(summaries), reply_markup=InlineKeyboardMarkup(buttons))
         return
     if data in {"WL:PAUSE_MENU", "WL:RESUME_MENU", "WL:FILTERS_MENU"}:
         with SessionLocal() as db:
@@ -249,7 +255,17 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         action = "PAUSE" if "PAUSE" in data else ("RESUME" if "RESUME" in data else "FILTERS")
         label = {"PAUSE": "⏸️ Pausar", "RESUME": "▶️ Reativar", "FILTERS": "⚙️ Ajustar filtros"}[action]
-        kb = [[InlineKeyboardButton(f"{label} {i} — {wl.query}", callback_data=f"WL:{action}:{i}")] for i, wl in enumerate(wishlists, start=1)]
+        if action == "PAUSE":
+            indexed = [(i, wl) for i, wl in enumerate(wishlists, start=1) if getattr(wl, "is_active", True)]
+        elif action == "RESUME":
+            indexed = [(i, wl) for i, wl in enumerate(wishlists, start=1) if not getattr(wl, "is_active", True)]
+        else:
+            indexed = list(enumerate(wishlists, start=1))
+        if not indexed:
+            empty_msg = "Não há buscas ativas para pausar." if action == "PAUSE" else "Não há buscas pausadas para reativar."
+            await _safe_edit_or_send(update, empty_msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")]]))
+            return
+        kb = [[InlineKeyboardButton(f"{label} {i} — {wl.query}", callback_data=f"WL:{action}:{i}")] for i, wl in indexed]
         kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")])
         await _safe_edit_or_send(update, "Escolha a busca:", reply_markup=InlineKeyboardMarkup(kb))
         return
@@ -709,7 +725,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             else:
                 ok, msg = add_wishlist(db, user.id, query)
         if not ok:
-            await _safe_edit_or_send(update, f"Não consegui concluir essa ação agora.\n\nTente novamente em alguns minutos.\nSe continuar acontecendo, envie esta mensagem para o suporte.\n\nDetalhe: {msg}")
+            await _safe_edit_or_send(update, msg)
             return MENU_CREATE_WISHLIST_QUERY
         _clear_menu_create_wishlist_draft_context(context)
         await _safe_edit_or_send(update, f"✅ Busca criada: {query}\n\nUse /menu para acompanhar.")
@@ -776,7 +792,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             ok, msg, _wid = create_wishlist_with_filters(db, user.id, query, filters_draft)
         if not ok:
-            await _safe_edit_or_send(update, f"Não consegui concluir essa ação agora.\n\nTente novamente em alguns minutos.\nSe continuar acontecendo, envie esta mensagem para o suporte.\n\nDetalhe: {msg}")
+            await _safe_edit_or_send(update, msg)
             return MENU_CREATE_WISHLIST_QUERY
         _clear_menu_create_wishlist_draft_context(context)
         if draft_groups:
@@ -802,6 +818,14 @@ async def menu_filter_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+async def menu_upgrade_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_menu_create_wishlist_draft_context(context)
+    _clear_menu_filter_context(context)
+    from app.bot.handlers import cmd_upgrade
+    await cmd_upgrade(update, context)
+    return ConversationHandler.END
+
+
 def menu_create_wishlist_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:CREATE_WISHLIST$")],
@@ -815,6 +839,7 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
         fallbacks=[
             CommandHandler("cancelar", menu_create_wishlist_cancel),
             CommandHandler("cancel", menu_create_wishlist_cancel),
+            CommandHandler("upgrade", menu_upgrade_fallback),
         ],
         name="menu_create_wishlist",
         persistent=False,
@@ -836,6 +861,7 @@ def menu_filter_conversation() -> ConversationHandler:
         fallbacks=[
             CommandHandler("cancelar", menu_filter_cancel),
             CommandHandler("cancel", menu_filter_cancel),
+            CommandHandler("upgrade", menu_upgrade_fallback),
             CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:CANCEL$"),
         ],
         name="menu_filter_add",

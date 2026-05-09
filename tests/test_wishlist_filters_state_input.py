@@ -59,3 +59,16 @@ def test_parse_query_price_range_implicit():
 def test_normalize_price_between_canonical():
     normalized = normalize_wishlist_filter_input("price", "between", "70.000 90.000")
     assert normalized.value == "70000,90000"
+
+
+def test_parse_filter_expression_price_directional_terms():
+    assert parse_wishlist_filter_expression("price", "acima de 110000")[0].operator == "gte"
+    assert parse_wishlist_filter_expression("price", "acima de 110000")[0].value == "110000"
+    assert parse_wishlist_filter_expression("price", "acima de R$ 110.000")[0].value == "110000"
+    assert parse_wishlist_filter_expression("price", "mais de 110000")[0].operator == "gte"
+    assert parse_wishlist_filter_expression("price", "a partir de 110000")[0].operator == "gte"
+    assert parse_wishlist_filter_expression("price", "desde 110000")[0].operator == "gte"
+    assert parse_wishlist_filter_expression("price", "maior que 110000")[0].operator == "gt"
+    assert parse_wishlist_filter_expression("price", "até 110000")[0].operator == "lte"
+    rng = parse_wishlist_filter_expression("price", "entre 90000 e 130000")
+    assert [(f.operator, f.value) for f in rng] == [("gte", "90000"), ("lte", "130000")]

@@ -240,7 +240,7 @@ def test_callback_menu_pause_invalid_index(monkeypatch):
 def test_run_registers_wl_callback_pattern():
     with open("app/bot/run.py", "r", encoding="utf-8") as fh:
         content = fh.read()
-    assert r'^WL:(BACK|TRACKED|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$' in content
+    assert r'^WL:(BACK|TRACKED|FILTERS_MENU|FILTERS:\d+|PAUSE_MENU|PAUSE:\d+|PAUSE_CONFIRM:\d+|RESUME_MENU|RESUME:\d+|RESUME_CONFIRM:\d+|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$' in content
 
 
 def test_callback_menu_tracked_empty_slots(monkeypatch):
@@ -291,3 +291,36 @@ def test_quick_commands_still_registered():
     names = {c.command for c in ADVANCED_USER_COMMANDS}
     assert "buscar" in names
     assert "wishlist" in names
+
+
+def test_wishlists_menu_hides_resume_when_no_paused(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [{"index":1,"query":"civic","filters":[],"tracked_count":0,"tracked_limit":3,"notifications_24h_count":0,"is_active":True}])
+    q = _CallbackQuery("MENU:WISHLISTS")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace(user_data={})))
+    labels = [btn.text for row in q.edit_payloads[-1]["reply_markup"].inline_keyboard for btn in row]
+    assert "▶️ Reativar busca" not in labels
+
+
+def test_wishlists_menu_hides_pause_when_all_paused(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "get_wishlist_summaries", lambda *_: [{"index":1,"query":"civic","filters":[],"tracked_count":0,"tracked_limit":3,"notifications_24h_count":0,"is_active":False}])
+    q = _CallbackQuery("MENU:WISHLISTS")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace(user_data={})))
+    labels = [btn.text for row in q.edit_payloads[-1]["reply_markup"].inline_keyboard for btn in row]
+    assert "⏸️ Pausar busca" not in labels
+
+
+def test_callback_menu_filters_flow_opens_selection_and_filter_screen(monkeypatch):
+    _patch_user(monkeypatch)
+    wl = types.SimpleNamespace(id="w1", query="audi a5", is_active=True)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [wl])
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    ctx = types.SimpleNamespace(user_data={})
+    q1 = _CallbackQuery("WL:FILTERS_MENU")
+    asyncio.run(handlers_core.cb_menu(_Update(q1), ctx))
+    assert "Escolha a busca:" in q1.edits[-1]
+    q2 = _CallbackQuery("WL:FILTERS:1")
+    state = asyncio.run(handlers_core.cb_menu(_Update(q2), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "⚙️ Ajustar filtros" in q2.edits[-1]
