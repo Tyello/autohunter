@@ -255,7 +255,7 @@ def render_upgrade_text(has_payment_links: bool) -> str:
         "De R$ 89,99 por R$ 59,99/ano.\n"
         "Equivale a R$ 4,99/mês.\n\n"
         "Benefícios:\n"
-        "- até 15 wishlists\n"
+        "- até 15 buscas\n"
         "- até 5 anúncios rastreados no total\n"
         "- alertas automáticos de preço/status\n"
         "- até 200 notificações por dia por wishlist\n"

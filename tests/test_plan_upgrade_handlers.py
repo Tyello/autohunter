@@ -41,7 +41,7 @@ def test_cmd_upgrade_uses_current_commercial_values(monkeypatch):
     text = sent[-1]
     assert "Mensal" in text
     assert "Anual" in text
-    assert "até 15 wishlists" in text
+    assert "até 15 buscas" in text
     assert "até 200 notificações por dia por wishlist" in text
     assert "Os links de pagamento ainda não estão configurados" in text
 
