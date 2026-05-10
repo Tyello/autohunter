@@ -251,6 +251,16 @@ class Settings(BaseSettings):
     operational_retention_notifications_days: int = 90
     operational_retention_wishlist_activity_days: int = 90
 
+    # Filesystem cleanup (runtime artifacts/debug only; safe defaults)
+    filesystem_cleanup_enabled: bool = True
+    filesystem_cleanup_artifacts_days: int = 7
+    filesystem_cleanup_debug_days: int = 7
+    filesystem_cleanup_max_delete_per_run: int = 1000
+
+    # Disk pressure alerts
+    disk_alert_root_used_pct: float = 85.0
+    disk_alert_cache_limit_gb: float = 5.0
+
     def model_post_init(self, __context) -> None:
         self._per_source_scraper_flags: dict[str, bool] = {}
         for key, value in os.environ.items():

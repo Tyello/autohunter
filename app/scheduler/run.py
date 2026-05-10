@@ -392,6 +392,15 @@ def start_scheduler() -> BackgroundScheduler:
         hours=24,
         id="cleanup_notifications",
     )
+    from app.scheduler.filesystem_cleanup_job import job_filesystem_cleanup_daily
+    sched.add_job(
+        job_filesystem_cleanup_daily,
+        "cron",
+        hour=3,
+        minute=0,
+        id="filesystem_cleanup_daily",
+        replace_existing=True,
+    )
     from app.scheduler.premium_expiration_job import job_expire_premium_subscriptions
     sched.add_job(
         job_expire_premium_subscriptions,

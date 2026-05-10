@@ -288,3 +288,34 @@ Boas práticas para novas migrations:
 - Job diário `premium_expiration_daily` roda em UTC (12:00) e expira subscriptions premium vencidas.
 - Usuário recebe notificação de ativação e, no vencimento, de retorno para Free.
 - Para validar pós-ativação: pedir para o usuário rodar `/plan` (deve mostrar Premium + validade).
+
+## Storage / Disk pressure
+
+### Diagnóstico rápido
+```bash
+df -h
+journalctl --disk-usage
+du -xh --max-depth=2 /var/lib/autohunter /var/cache/autohunter /var/log/autohunter
+python scripts/disk_audit.py
+```
+
+### O que foi endurecido no runtime
+- Job diário `filesystem_cleanup_daily` remove artefatos antigos de:
+  - `SOURCE_AUDIT_ROOT` (default: 7 dias)
+  - `RUNTIME_CACHE_DIR/debug` (default: 7 dias)
+- Limites de segurança:
+  - `FILESYSTEM_CLEANUP_MAX_DELETE_PER_RUN` (default: 1000 arquivos por execução)
+- Segurança por padrão:
+  - **Não** remove `PLAYWRIGHT_STORAGE_DIR`
+  - **Não** remove `FB_PROFILE_BASE_DIR`
+
+### Alertas operacionais
+- Alerta admin quando uso de `/` >= `DISK_ALERT_ROOT_USED_PCT` (default 85%).
+- Alerta admin quando `/var/cache/autohunter` ultrapassa `DISK_ALERT_CACHE_LIMIT_GB`.
+- Cooldown anti-spam aplicado no monitor operacional.
+
+### Resposta emergencial
+1. Rodar `python scripts/disk_audit.py` e identificar top arquivos.
+2. Verificar `journalctl --disk-usage` (se necessário, aplicar vacuum com política operacional).
+3. Confirmar que `FILESYSTEM_CLEANUP_ENABLED=true` em produção.
+4. Reduzir TTLs de artifacts/debug temporariamente se pressão continuar alta.
