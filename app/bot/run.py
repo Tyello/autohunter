@@ -131,7 +131,9 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
     app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^(TRACK:ADD:[^:]+|TRACK:ADDWL:[^:]+:[^:]+|TRACK:ADDT:[^:]+|TRACK:CHOOSE:[^:]+)$"))
     app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^MENU:[A-Z_]+$"))
-    app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^WL:(BACK|TRACKED|FILTERS_MENU|FILTERS:\d+|PAUSE_MENU|PAUSE:\d+|PAUSE_CONFIRM:\d+|RESUME_MENU|RESUME:\d+|RESUME_CONFIRM:\d+|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$"))
+    # WL:FILTERS:<idx> é entry-point do menu_filter_conversation e não deve
+    # ser capturado por handler global para preservar estado do ConversationHandler.
+    app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^WL:(BACK|TRACKED|FILTERS_MENU|PAUSE_MENU|PAUSE:\d+|PAUSE_CONFIRM:\d+|RESUME_MENU|RESUME:\d+|RESUME_CONFIRM:\d+|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$"))
 
     # plan
     app.add_handler(CommandHandler("alertas", cmd_alertas))

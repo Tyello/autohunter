@@ -851,7 +851,12 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
 
 def menu_filter_conversation() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:FILTERS$")],
+        # Contrato: seleção da wishlist em "Ajustar filtros" entra nesta conversa
+        # via WL:FILTERS:<idx>. MENU:FILTERS permanece por compatibilidade legada.
+        entry_points=[
+            CallbackQueryHandler(cb_menu, pattern=r"^WL:FILTERS:\d+$"),
+            CallbackQueryHandler(cb_menu, pattern=r"^MENU:FILTERS$"),
+        ],
         states={
             MENU_FILTER_SELECT_VALUE: [
                 CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|ACTION:(?:add|list)|RM:\d+:\d+|BACK|CANCEL)$"),
