@@ -275,3 +275,35 @@ def test_wishlist_filter_add_continua_funcionando(monkeypatch):
     ctx = types.SimpleNamespace(args=["1", "year", "lte", "2015"], user_data={})
     asyncio.run(handlers_wishlist_ui.cmd_wishlist_filter_add(update, ctx))
     assert "Filtro adicionado." in update.message.sent[-1]["text"]
+
+
+def test_bug_real_wl_filters_to_filter_type_and_value(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic si")])
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    called = {}
+
+    def _fake_add_filter(_db, wishlist_id, field, op, value):
+        called.update({"wishlist_id": wishlist_id, "field": field, "op": op, "value": value})
+        return True, "ok"
+
+    monkeypatch.setattr(handlers_core, "add_filter", _fake_add_filter)
+
+    ctx = _ctx()
+    q1 = _CallbackQuery("WL:FILTERS_MENU")
+    asyncio.run(handlers_core.cb_menu(_Update(q=q1), ctx))
+    assert "Escolha a busca:" in q1.edits[-1]["text"]
+
+    q2 = _CallbackQuery("WL:FILTERS:1")
+    state2 = asyncio.run(handlers_core.cb_menu(_Update(q=q2), ctx))
+    assert state2 == handlers_core.MENU_FILTER_SELECT_VALUE
+
+    q3 = _CallbackQuery("FILTER:TYPE:price_max")
+    state3 = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q3), ctx))
+    assert state3 == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "preço máximo" in q3.edits[-1]["text"]
+
+    msg = _Update(text="120000")
+    state4 = asyncio.run(handlers_core.menu_filter_on_value(msg, ctx))
+    assert state4 == ConversationHandler.END
+    assert called == {"wishlist_id": "wl-1", "field": "price", "op": "lte", "value": "120000"}

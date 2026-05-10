@@ -240,7 +240,10 @@ def test_callback_menu_pause_invalid_index(monkeypatch):
 def test_run_registers_wl_callback_pattern():
     with open("app/bot/run.py", "r", encoding="utf-8") as fh:
         content = fh.read()
-    assert r'^WL:(BACK|TRACKED|FILTERS_MENU|FILTERS:\d+|PAUSE_MENU|PAUSE:\d+|PAUSE_CONFIRM:\d+|RESUME_MENU|RESUME:\d+|RESUME_CONFIRM:\d+|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$' in content
+    with open("app/bot/handlers_core.py", "r", encoding="utf-8") as fh:
+        handlers_core_content = fh.read()
+    assert r'^WL:(BACK|TRACKED|FILTERS_MENU|PAUSE_MENU|PAUSE:\d+|PAUSE_CONFIRM:\d+|RESUME_MENU|RESUME:\d+|RESUME_CONFIRM:\d+|REMOVE_MENU|REMOVE:\d+|REMOVE_CONFIRM:\d+)$' in content
+    assert r'^WL:FILTERS:\d+$' in handlers_core_content
 
 
 def test_callback_menu_tracked_empty_slots(monkeypatch):
