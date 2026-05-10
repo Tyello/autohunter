@@ -17,11 +17,15 @@ MENU_FILTER_USER_DATA_KEYS = ("menu_filter_wishlist_index", "menu_filter_wishlis
 MENU_CREATE_WISHLIST_DRAFT_KEYS = ("menu_create_wishlist_query", "menu_create_wishlist_draft_filters", "menu_create_wishlist_draft_filter_type")
 
 FILTER_TYPE_TO_SPEC = {
-    "price_max": ("price", "lte", "Qual preço máximo?\nExemplos:\n- 120000\n- 120.000\n- R$ 120.000"),
-    "year_min": ("year", "gte", "Qual ano mínimo?\nExemplos:\n- 2017\n- 2020"),
-    "km_max": ("mileage_km", "lte", "Qual KM máximo?\nExemplos:\n- 80000\n- 80.000"),
+    "price": ("price", "eq", "Qual faixa de preço?\nExemplos:\n- até 120000\n- acima de 50000\n- a partir de 80000\n- entre 50000 e 90000"),
+    "year": ("year", "eq", "Qual ano?\nExemplos:\n- a partir de 2017\n- até 2021\n- entre 2017 e 2021"),
+    "mileage": ("mileage_km", "eq", "Qual quilometragem?\nExemplos:\n- até 80000\n- acima de 30000\n- entre 30000 e 90000"),
     "city": ("city", "eq", "Em qual cidade você quer buscar?\nExemplo: São Paulo"),
     "state": ("state", "eq", "Em qual estado?\nExemplos:\n- SP\n- São Paulo"),
+    # Compatibilidade temporária com callbacks antigos já enviados no Telegram.
+    "price_max": ("price", "eq", "Qual faixa de preço?\nExemplos:\n- até 120000\n- acima de 50000\n- a partir de 80000\n- entre 50000 e 90000"),
+    "year_min": ("year", "eq", "Qual ano?\nExemplos:\n- a partir de 2017\n- até 2021\n- entre 2017 e 2021"),
+    "km_max": ("mileage_km", "eq", "Qual quilometragem?\nExemplos:\n- até 80000\n- acima de 30000\n- entre 30000 e 90000"),
 }
 DRAFT_FILTER_TYPE_TO_FIELD = {"price": "price", "year": "year", "mileage": "mileage_km", "city": "city", "state": "state"}
 DRAFT_FILTER_PROMPTS = {
@@ -313,9 +317,9 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["menu_filter_wishlist_id"] = wl.id
         text = "⚙️ Ajustar filtros\n\nVocê pode adicionar ou alterar filtros desta busca.\n\nSe já existir um filtro do mesmo tipo, ele será atualizado.\n\nBusca: " + wl.query + "\n\n" + ("Filtros atuais:\n- Nenhum filtro ainda" if not fs else render_wishlist_filters(fs, wishlist_query=None)) + "\n\nEscolha o que deseja ajustar:"
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 Preço", callback_data="FILTER:TYPE:price_max")],
-            [InlineKeyboardButton("📅 Ano", callback_data="FILTER:TYPE:year_min")],
-            [InlineKeyboardButton("🛣️ KM", callback_data="FILTER:TYPE:km_max")],
+            [InlineKeyboardButton("💰 Preço / faixa", callback_data="FILTER:TYPE:price")],
+            [InlineKeyboardButton("📅 Ano", callback_data="FILTER:TYPE:year")],
+            [InlineKeyboardButton("🛣️ KM", callback_data="FILTER:TYPE:mileage")],
             [InlineKeyboardButton("📍 Cidade", callback_data="FILTER:TYPE:city")],
             [InlineKeyboardButton("🗺️ Estado", callback_data="FILTER:TYPE:state")],
             [InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")],
@@ -487,9 +491,9 @@ async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _safe_edit_or_send(update, "Sessão expirada. Use /menu → ⚙️ Filtros novamente.")
             return ConversationHandler.END
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 Preço máximo", callback_data="FILTER:TYPE:price_max")],
-            [InlineKeyboardButton("📅 Ano mínimo", callback_data="FILTER:TYPE:year_min")],
-            [InlineKeyboardButton("🛣️ KM máximo", callback_data="FILTER:TYPE:km_max")],
+            [InlineKeyboardButton("💰 Preço / faixa", callback_data="FILTER:TYPE:price")],
+            [InlineKeyboardButton("📅 Ano", callback_data="FILTER:TYPE:year")],
+            [InlineKeyboardButton("🛣️ KM", callback_data="FILTER:TYPE:mileage")],
             [InlineKeyboardButton("📍 Cidade", callback_data="FILTER:TYPE:city")],
             [InlineKeyboardButton("🗺️ Estado", callback_data="FILTER:TYPE:state")],
             [InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")],
@@ -544,14 +548,48 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     with SessionLocal() as db:
-        ok, msg = add_filter(db, wishlist_id, spec[0], spec[1], value)
+        try:
+            parsed = parse_wishlist_filter_expression(spec[0], value)
+        except ValueError as exc:
+            await reply_text(update, f"{exc}\n\nEnvie outro valor ou /cancelar.")
+            return MENU_FILTER_SELECT_VALUE
+
+        fields_to_replace = {"price", "year", "mileage_km"}
+        if spec[0] in fields_to_replace:
+            existing = list_filters(db, wishlist_id)
+            for idx in range(len(existing), 0, -1):
+                if existing[idx - 1].field == spec[0]:
+                    remove_filter(db, wishlist_id, idx)
+
+        ok, msg = True, ""
+        for item in parsed:
+            ok, msg = add_filter(db, wishlist_id, item.field, item.operator, item.value)
+            if not ok:
+                break
 
     if not ok:
         await reply_text(update, f"{msg}\n\nEnvie outro valor ou /cancelar.")
         return MENU_FILTER_SELECT_VALUE
 
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        wishlists = list_wishlists(db, user.id)
+        wl = wishlists[wishlist_index - 1] if 1 <= wishlist_index <= len(wishlists) else None
+        fs = list_filters(db, wl.id) if wl else []
+
     _clear_menu_filter_context(context)
-    await reply_text(update, f"✅ Filtro atualizado.\nA busca continuará usando os filtros atualizados nas próximas execuções.\n\nVer filtros: /wishlist_filter_list {wishlist_index}")
+    text = (
+        f"✅ Filtro atualizado.\n"
+        f"Busca: {wl.query if wl else '(indisponível)'}\n\n"
+        f"Filtros atuais:\n{('- Nenhum filtro ainda' if not fs else render_wishlist_filters(fs, wishlist_query=None))}\n\n"
+        "O que deseja fazer agora?"
+    )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Ajustar outro filtro", callback_data=f"WL:FILTERS:{wishlist_index}")],
+        [InlineKeyboardButton("📋 Ver filtros", callback_data=f"WL:FILTERS:{wishlist_index}")],
+        [InlineKeyboardButton("↩️ Voltar para Minhas buscas", callback_data="MENU:WISHLISTS")],
+    ])
+    await reply_text(update, text, reply_markup=kb)
     return ConversationHandler.END
 
 

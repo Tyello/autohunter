@@ -514,6 +514,8 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
     cleaned_query = (cleaned_query or "").strip()
     if not cleaned_query:
         return False, "Query inválida. Ex: /wishlist_add audi a6 entre 2014 e 2020"
+    if cleaned_query.lower() in {"gte", "lte", "gt", "lt", "eq", "neq"}:
+        return False, "Query inválida. Use um termo de busca (ex: civic touring)."
 
     w = Wishlist(id=uuid.uuid4(), user_id=user_id, query=cleaned_query, is_active=True)
     db.add(w)
