@@ -356,6 +356,43 @@ def test_multi_wishlist_sequence_uses_wishlist_id(monkeypatch):
     assert calls["wl-3"] == [("gte", "120000"), ("lte", "180000")]
 
 
+def test_menu_filter_on_value_uses_wishlist_id_not_index(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(
+        handlers_core,
+        "list_wishlists",
+        lambda *_: [types.SimpleNamespace(id="wl-1", query="civic"), types.SimpleNamespace(id="wl-2", query="corolla")],
+    )
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "ok"))
+    called = {}
+    monkeypatch.setattr(
+        handlers_core,
+        "add_filter",
+        lambda _db, wid, field, op, value: called.update(wishlist_id=wid, field=field, op=op, value=value) or (True, "ok"),
+    )
+    ctx = _ctx()
+    ctx.user_data.update({"menu_filter_wishlist_index": 1, "menu_filter_wishlist_id": "wl-2", "menu_filter_type": "price"})
+    state = asyncio.run(handlers_core.menu_filter_on_value(_Update(text="até 90000"), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert called == {"wishlist_id": "wl-2", "field": "price", "op": "lte", "value": "90000"}
+
+
+def test_menu_filter_on_value_invalid_wishlist_id_clears_context(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic")])
+    called = {"n": 0}
+    monkeypatch.setattr(handlers_core, "add_filter", lambda *_: called.update(n=called["n"] + 1))
+    ctx = _ctx()
+    ctx.user_data.update({"menu_filter_wishlist_index": 1, "menu_filter_wishlist_id": "wl-999", "menu_filter_type": "price"})
+    update = _Update(text="até 90000")
+    state = asyncio.run(handlers_core.menu_filter_on_value(update, ctx))
+    assert state == ConversationHandler.END
+    assert update.message.sent[-1]["text"] == "Busca não encontrada. Abra Minhas buscas novamente."
+    assert ctx.user_data == {}
+    assert called["n"] == 0
+
+
 def test_filters_id_security_other_user_denied(monkeypatch):
     _patch_user(monkeypatch)
     monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic")])

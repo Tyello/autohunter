@@ -566,14 +566,21 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
         return MENU_FILTER_SELECT_VALUE
 
     wishlist_id = context.user_data.get("menu_filter_wishlist_id")
-    wishlist_index = context.user_data.get("menu_filter_wishlist_index")
     spec = FILTER_TYPE_TO_SPEC.get(context.user_data.get("menu_filter_type"))
-    if not wishlist_id or not wishlist_index or not spec:
+    if not wishlist_id or not spec:
         _clear_menu_filter_context(context)
         await reply_text(update, "Sessão expirada. Use /menu → ⚙️ Filtros novamente.")
         return ConversationHandler.END
 
     with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        wishlists = list_wishlists(db, user.id)
+        _wishlist_index, wl = _find_user_wishlist_by_id(wishlists, wishlist_id)
+        if not wl:
+            _clear_menu_filter_context(context)
+            await reply_text(update, "Busca não encontrada. Abra Minhas buscas novamente.")
+            return ConversationHandler.END
+
         try:
             parsed = parse_wishlist_filter_expression(spec[0], value)
         except ValueError as exc:
@@ -600,8 +607,12 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
-        wl = wishlists[wishlist_index - 1] if 1 <= wishlist_index <= len(wishlists) else None
-        fs = list_filters(db, wl.id) if wl else []
+        _wishlist_index, wl = _find_user_wishlist_by_id(wishlists, wishlist_id)
+        if not wl:
+            _clear_menu_filter_context(context)
+            await reply_text(update, "Busca não encontrada. Abra Minhas buscas novamente.")
+            return ConversationHandler.END
+        fs = list_filters(db, wl.id)
 
     text = (
         f"✅ Filtro atualizado.\n"
