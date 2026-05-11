@@ -269,7 +269,10 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             empty_msg = "Não há buscas ativas para pausar." if action == "PAUSE" else "Não há buscas pausadas para reativar."
             await _safe_edit_or_send(update, empty_msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")]]))
             return
-        kb = [[InlineKeyboardButton(f"{label} {i} — {wl.query}", callback_data=f"WL:{action}:{i}")] for i, wl in indexed]
+        if action == "FILTERS":
+            kb = [[InlineKeyboardButton(f"{label} {i} — {wl.query}", callback_data=f"WL:FILTERS_ID:{wl.id}")] for i, wl in indexed]
+        else:
+            kb = [[InlineKeyboardButton(f"{label} {i} — {wl.query}", callback_data=f"WL:{action}:{i}")] for i, wl in indexed]
         kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")])
         await _safe_edit_or_send(update, "Escolha a busca:", reply_markup=InlineKeyboardMarkup(kb))
         return
@@ -314,6 +317,29 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wl = wishlists[idx - 1]
             fs = list_filters(db, wl.id)
         context.user_data["menu_filter_wishlist_index"] = idx
+        context.user_data["menu_filter_wishlist_id"] = wl.id
+        text = "⚙️ Ajustar filtros\n\nVocê pode adicionar ou alterar filtros desta busca.\n\nSe já existir um filtro do mesmo tipo, ele será atualizado.\n\nBusca: " + wl.query + "\n\n" + ("Filtros atuais:\n- Nenhum filtro ainda" if not fs else render_wishlist_filters(fs, wishlist_query=None)) + "\n\nEscolha o que deseja ajustar:"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 Preço / faixa", callback_data="FILTER:TYPE:price")],
+            [InlineKeyboardButton("📅 Ano", callback_data="FILTER:TYPE:year")],
+            [InlineKeyboardButton("🛣️ KM", callback_data="FILTER:TYPE:mileage")],
+            [InlineKeyboardButton("📍 Cidade", callback_data="FILTER:TYPE:city")],
+            [InlineKeyboardButton("🗺️ Estado", callback_data="FILTER:TYPE:state")],
+            [InlineKeyboardButton("↩️ Voltar", callback_data="MENU:WISHLISTS")],
+        ])
+        await _safe_edit_or_send(update, text, reply_markup=kb)
+        return MENU_FILTER_SELECT_VALUE
+    if data.startswith("WL:FILTERS_ID:"):
+        wishlist_id = data.split(":")[-1]
+        with SessionLocal() as db:
+            user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+            wishlists = list_wishlists(db, user.id)
+            wishlist_index, wl = _find_user_wishlist_by_id(wishlists, wishlist_id)
+            if not wl:
+                await _safe_edit_or_send(update, "Busca não encontrada. Abra Minhas buscas novamente.")
+                return
+            fs = list_filters(db, wl.id)
+        context.user_data["menu_filter_wishlist_index"] = wishlist_index
         context.user_data["menu_filter_wishlist_id"] = wl.id
         text = "⚙️ Ajustar filtros\n\nVocê pode adicionar ou alterar filtros desta busca.\n\nSe já existir um filtro do mesmo tipo, ele será atualizado.\n\nBusca: " + wl.query + "\n\n" + ("Filtros atuais:\n- Nenhum filtro ainda" if not fs else render_wishlist_filters(fs, wishlist_query=None)) + "\n\nEscolha o que deseja ajustar:"
         kb = InlineKeyboardMarkup([
@@ -577,7 +603,6 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
         wl = wishlists[wishlist_index - 1] if 1 <= wishlist_index <= len(wishlists) else None
         fs = list_filters(db, wl.id) if wl else []
 
-    _clear_menu_filter_context(context)
     text = (
         f"✅ Filtro atualizado.\n"
         f"Busca: {wl.query if wl else '(indisponível)'}\n\n"
@@ -585,17 +610,18 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
         "O que deseja fazer agora?"
     )
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Ajustar outro filtro", callback_data=f"WL:FILTERS:{wishlist_index}")],
-        [InlineKeyboardButton("📋 Ver filtros", callback_data=f"WL:FILTERS:{wishlist_index}")],
+        [InlineKeyboardButton("➕ Ajustar outro filtro", callback_data="FILTER:ACTION:add")],
+        [InlineKeyboardButton("📋 Ver filtros", callback_data="FILTER:ACTION:list")],
+        [InlineKeyboardButton("🎯 Escolher outra busca", callback_data="WL:FILTERS_MENU")],
         [InlineKeyboardButton("↩️ Voltar para Minhas buscas", callback_data="MENU:WISHLISTS")],
     ])
     await reply_text(update, text, reply_markup=kb)
-    return ConversationHandler.END
+    return MENU_FILTER_SELECT_VALUE
 
 
 async def _show_menu_filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE, feedback: str | None = None):
-    wishlist_index = context.user_data.get("menu_filter_wishlist_index")
-    if not wishlist_index:
+    wishlist_id = context.user_data.get("menu_filter_wishlist_id")
+    if not wishlist_id:
         _clear_menu_filter_context(context)
         await _safe_edit_or_send(update, "Sessão expirada. Use /menu → ⚙️ Filtros novamente.")
         return ConversationHandler.END
@@ -603,11 +629,11 @@ async def _show_menu_filter_list(update: Update, context: ContextTypes.DEFAULT_T
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
-        if wishlist_index < 1 or wishlist_index > len(wishlists):
+        wishlist_index, wl = _find_user_wishlist_by_id(wishlists, wishlist_id)
+        if not wl:
             _clear_menu_filter_context(context)
-            await _safe_edit_or_send(update, "Busca inválida. Use /menu → ⚙️ Filtros novamente.")
+            await _safe_edit_or_send(update, "Busca não encontrada. Abra Minhas buscas novamente.")
             return ConversationHandler.END
-        wl = wishlists[wishlist_index - 1]
         fs = list_filters(db, wl.id)
 
     if not fs:
@@ -625,11 +651,11 @@ async def _show_menu_filter_list(update: Update, context: ContextTypes.DEFAULT_T
     text = render_wishlist_filters(fs, wishlist_query=wl.query)
     if feedback:
         text = f"{feedback}\n\n{text}"
-    buttons = [[InlineKeyboardButton(f"🗑️ Remover {i}", callback_data=f"FILTER:RM:{wishlist_index}:{i}")] for i in range(1, len(fs) + 1)]
+    buttons = [[InlineKeyboardButton(f"🗑️ Remover {i}", callback_data=f"FILTER:RM:{wishlist_id}:{i}")] for i in range(1, len(fs) + 1)]
     buttons.extend([
-        [InlineKeyboardButton("➕ Adicionar filtro", callback_data="FILTER:ACTION:add")],
-        [InlineKeyboardButton("↩️ Voltar", callback_data="FILTER:BACK")],
-        [InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")],
+        [InlineKeyboardButton("➕ Ajustar outro filtro", callback_data="FILTER:ACTION:add")],
+        [InlineKeyboardButton("🎯 Escolher outra busca", callback_data="WL:FILTERS_MENU")],
+        [InlineKeyboardButton("↩️ Voltar para Minhas buscas", callback_data="MENU:WISHLISTS")],
     ])
     await _safe_edit_or_send(update, text, reply_markup=InlineKeyboardMarkup(buttons))
     return MENU_FILTER_SELECT_VALUE
@@ -642,27 +668,27 @@ async def _menu_filter_remove_from_callback(update: Update, context: ContextType
         return ConversationHandler.END
 
     try:
-        wishlist_index = int(parts[2])
+        wishlist_id = parts[2]
         filter_index = int(parts[3])
     except ValueError:
         await _safe_edit_or_send(update, "Filtro não encontrado. Atualize a lista de filtros.")
         return MENU_FILTER_SELECT_VALUE
 
-    if not context.user_data.get("menu_filter_wishlist_index"):
+    if not context.user_data.get("menu_filter_wishlist_id"):
         await _safe_edit_or_send(update, "Sessão expirada. Abra novamente /menu → ⚙️ Filtros.")
         return ConversationHandler.END
 
-    if wishlist_index != context.user_data.get("menu_filter_wishlist_index"):
+    if str(wishlist_id) != str(context.user_data.get("menu_filter_wishlist_id")):
         await _safe_edit_or_send(update, "Busca não encontrada para sua conta.")
         return ConversationHandler.END
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         wishlists = list_wishlists(db, user.id)
-        if wishlist_index < 1 or wishlist_index > len(wishlists):
+        _wishlist_index, wl = _find_user_wishlist_by_id(wishlists, wishlist_id)
+        if not wl:
             await _safe_edit_or_send(update, "Busca não encontrada para sua conta.")
             return ConversationHandler.END
-        wl = wishlists[wishlist_index - 1]
         fs = list_filters(db, wl.id)
         if filter_index < 1 or filter_index > len(fs):
             await _safe_edit_or_send(update, "Filtro não encontrado. Atualize a lista de filtros.")
@@ -893,11 +919,12 @@ def menu_filter_conversation() -> ConversationHandler:
         # via WL:FILTERS:<idx>. MENU:FILTERS permanece por compatibilidade legada.
         entry_points=[
             CallbackQueryHandler(cb_menu, pattern=r"^WL:FILTERS:\d+$"),
+            CallbackQueryHandler(cb_menu, pattern=r"^WL:FILTERS_ID:[^:]+$"),
             CallbackQueryHandler(cb_menu, pattern=r"^MENU:FILTERS$"),
         ],
         states={
             MENU_FILTER_SELECT_VALUE: [
-                CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|ACTION:(?:add|list)|RM:\d+:\d+|BACK|CANCEL)$"),
+                CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|ACTION:(?:add|list)|RM:[^:]+:\d+|BACK|CANCEL)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_filter_on_value),
             ],
         },
@@ -913,3 +940,8 @@ def menu_filter_conversation() -> ConversationHandler:
         per_user=True,
         per_message=False,
     )
+def _find_user_wishlist_by_id(wishlists: list, wishlist_id):
+    for idx, wishlist in enumerate(wishlists, start=1):
+        if str(getattr(wishlist, "id", "")) == str(wishlist_id):
+            return idx, wishlist
+    return None, None

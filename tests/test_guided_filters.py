@@ -127,7 +127,7 @@ def test_filter_mapping_calls_parser_and_replaces_numeric_field(monkeypatch):
     called = {}
     monkeypatch.setattr(handlers_core, "add_filter", lambda _db, wishlist_id, field, op, value: called.update(wishlist_id=wishlist_id, field=field, op=op, value=value) or (True, "ok"))
     state = asyncio.run(handlers_core.menu_filter_on_value(_Update(text="acima de 50000"), ctx))
-    assert state == ConversationHandler.END
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
     assert called == {"wishlist_id": "wl-1", "field": "price", "op": "gte", "value": "50000"}
 
 
@@ -158,7 +158,7 @@ def test_erro_retry_e_cancelamentos(monkeypatch):
 
     u3 = _Update(text="90000")
     state3 = asyncio.run(handlers_core.menu_filter_on_value(u3, ctx))
-    assert state3 == ConversationHandler.END
+    assert state3 == handlers_core.MENU_FILTER_SELECT_VALUE
     assert "✅ Filtro atualizado." in u3.message.sent[-1]["text"]
     assert "/wishlist_filter_list" not in u3.message.sent[-1]["text"]
     labels = [row[0].text for row in u3.message.sent[-1]["reply_markup"].inline_keyboard]
@@ -191,7 +191,7 @@ def test_ver_filtros_com_remover(monkeypatch):
     qlist = _CallbackQuery("FILTER:ACTION:list")
     asyncio.run(handlers_core.cb_menu_filter(_Update(q=qlist), ctx))
     assert "Preço até R$ 90.000" in qlist.edits[-1]["text"]
-    assert qlist.edits[-1]["reply_markup"].inline_keyboard[0][0].callback_data == "FILTER:RM:1:1"
+    assert qlist.edits[-1]["reply_markup"].inline_keyboard[0][0].callback_data == "FILTER:RM:wl-1:1"
 
     monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "Filtro removido."))
     seq = {"n": 0}
@@ -201,7 +201,7 @@ def test_ver_filtros_com_remover(monkeypatch):
             return [types.SimpleNamespace(field="price", operator="lte", value="90000")]
         return []
     monkeypatch.setattr(handlers_core, "list_filters", _list_filters_after_remove)
-    qrm = _CallbackQuery("FILTER:RM:1:1")
+    qrm = _CallbackQuery("FILTER:RM:wl-1:1")
     asyncio.run(handlers_core.cb_menu_filter(_Update(q=qrm), ctx))
     assert "Filtro removido" in qrm.edits[-1]["text"]
     assert qrm.answers == 1
@@ -209,7 +209,7 @@ def test_ver_filtros_com_remover(monkeypatch):
 
 def test_filter_rm_sessao_expirada(monkeypatch):
     _patch_user(monkeypatch)
-    q = _CallbackQuery("FILTER:RM:1:1")
+    q = _CallbackQuery("FILTER:RM:wl-1:1")
     ctx = _ctx()
     state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
     assert state == ConversationHandler.END
@@ -235,7 +235,7 @@ def test_filter_rm_filter_index_invalido(monkeypatch):
         "list_filters",
         lambda *_: [types.SimpleNamespace(field="price", operator="lte", value="90000")],
     )
-    q = _CallbackQuery("FILTER:RM:1:2")
+    q = _CallbackQuery("FILTER:RM:wl-1:2")
     calls = {"n": 0}
     monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: calls.update(n=calls["n"] + 1))
     state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
@@ -261,7 +261,7 @@ def test_filter_rm_lista_mudou_entre_render_e_clique(monkeypatch):
     ctx = _start_with_wishlist(monkeypatch)
     asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:WL:1")), ctx))
     monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
-    q = _CallbackQuery("FILTER:RM:1:1")
+    q = _CallbackQuery("FILTER:RM:wl-1:1")
     called = {"n": 0}
     monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: called.update(n=called["n"] + 1))
     state = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), ctx))
@@ -310,7 +310,7 @@ def test_bug_real_wl_filters_to_filter_type_and_value(monkeypatch):
 
     msg = _Update(text="120000")
     state4 = asyncio.run(handlers_core.menu_filter_on_value(msg, ctx))
-    assert state4 == ConversationHandler.END
+    assert state4 == handlers_core.MENU_FILTER_SELECT_VALUE
     assert called == {"wishlist_id": "wl-1", "field": "price", "op": "lte", "value": "120000"}
 
 
@@ -330,5 +330,35 @@ def test_guided_price_parsing_variants(monkeypatch):
         calls: list[tuple[str, str, str]] = []
         monkeypatch.setattr(handlers_core, "add_filter", lambda _db, _wid, field, op, value: calls.append((field, op, value)) or (True, "ok"))
         state = asyncio.run(handlers_core.menu_filter_on_value(_Update(text=user_text), ctx))
-        assert state == ConversationHandler.END
+        assert state == handlers_core.MENU_FILTER_SELECT_VALUE
         assert calls == expected
+
+
+def test_multi_wishlist_sequence_uses_wishlist_id(monkeypatch):
+    _patch_user(monkeypatch)
+    wishlists = [
+        types.SimpleNamespace(id="wl-1", query="civic"),
+        types.SimpleNamespace(id="wl-2", query="corolla"),
+        types.SimpleNamespace(id="wl-3", query="audi"),
+    ]
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: wishlists)
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "ok"))
+    calls: dict[str, list[tuple[str, str]]] = {"wl-1": [], "wl-2": [], "wl-3": []}
+    monkeypatch.setattr(handlers_core, "add_filter", lambda _db, wid, field, op, value: calls[wid].append((op, value)) or (True, "ok"))
+    ctx = _ctx()
+    for wid, value in [("wl-1", "acima de 50000"), ("wl-2", "até 90000"), ("wl-3", "entre 120000 e 180000")]:
+        asyncio.run(handlers_core.cb_menu(_Update(q=_CallbackQuery(f"WL:FILTERS_ID:{wid}")), ctx))
+        asyncio.run(handlers_core.cb_menu_filter(_Update(q=_CallbackQuery("FILTER:TYPE:price")), ctx))
+        asyncio.run(handlers_core.menu_filter_on_value(_Update(text=value), ctx))
+    assert calls["wl-1"] == [("gte", "50000")]
+    assert calls["wl-2"] == [("lte", "90000")]
+    assert calls["wl-3"] == [("gte", "120000"), ("lte", "180000")]
+
+
+def test_filters_id_security_other_user_denied(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic")])
+    q = _CallbackQuery("WL:FILTERS_ID:wl-999")
+    asyncio.run(handlers_core.cb_menu(_Update(q=q), _ctx()))
+    assert q.edits[-1]["text"] == "Busca não encontrada. Abra Minhas buscas novamente."
