@@ -109,36 +109,31 @@ def test_ver_filtros_sem_filtros(monkeypatch):
     assert "ainda não tem filtros" in q.edits[-1]["text"]
 
 
-def test_filter_mapping_calls_add_filter(monkeypatch):
-    cases = [
-        ("price_max", "price", "lte"),
-        ("year_min", "year", "gte"),
-        ("km_max", "mileage_km", "lte"),
-        ("city", "city", "eq"),
-        ("state", "state", "eq"),
-    ]
-    for filter_type, expected_field, expected_op in cases:
-        ctx = _start_with_wishlist(monkeypatch)
-        ctx.user_data["menu_filter_wishlist_index"] = 1
-        ctx.user_data["menu_filter_wishlist_id"] = "wl-1"
-        ctx.user_data["menu_filter_type"] = filter_type
-        called = {}
-
-        def _fake_add_filter(_db, wishlist_id, field, op, value):
-            called.update({"wishlist_id": wishlist_id, "field": field, "op": op, "value": value})
-            return True, "Filtro adicionado."
-
-        monkeypatch.setattr(handlers_core, "add_filter", _fake_add_filter)
-        state = asyncio.run(handlers_core.menu_filter_on_value(_Update(text="90.000"), ctx))
-        assert state == ConversationHandler.END
-        assert called["wishlist_id"] == "wl-1"
-        assert called["field"] == expected_field
-        assert called["op"] == expected_op
+def test_filter_mapping_calls_parser_and_replaces_numeric_field(monkeypatch):
+    ctx = _start_with_wishlist(monkeypatch)
+    ctx.user_data.update({"menu_filter_wishlist_index": 1, "menu_filter_wishlist_id": "wl-1", "menu_filter_type": "price"})
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic si")])
+    monkeypatch.setattr(
+        handlers_core,
+        "list_filters",
+        lambda *_: [types.SimpleNamespace(field="price", operator="lte", value="120000"), types.SimpleNamespace(field="state", operator="eq", value="SP")],
+    )
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "ok"))
+    monkeypatch.setattr(
+        handlers_core,
+        "parse_wishlist_filter_expression",
+        lambda *_: [types.SimpleNamespace(field="price", operator="gte", value="50000")],
+    )
+    called = {}
+    monkeypatch.setattr(handlers_core, "add_filter", lambda _db, wishlist_id, field, op, value: called.update(wishlist_id=wishlist_id, field=field, op=op, value=value) or (True, "ok"))
+    state = asyncio.run(handlers_core.menu_filter_on_value(_Update(text="acima de 50000"), ctx))
+    assert state == ConversationHandler.END
+    assert called == {"wishlist_id": "wl-1", "field": "price", "op": "gte", "value": "50000"}
 
 
 def test_erro_retry_e_cancelamentos(monkeypatch):
     ctx = _start_with_wishlist(monkeypatch)
-    ctx.user_data.update({"menu_filter_wishlist_index": 1, "menu_filter_wishlist_id": "wl-1", "menu_filter_type": "price_max"})
+    ctx.user_data.update({"menu_filter_wishlist_index": 1, "menu_filter_wishlist_id": "wl-1", "menu_filter_type": "price"})
     calls = {"n": 0}
 
     def _fake_add_filter(_db, *_args):
@@ -148,30 +143,40 @@ def test_erro_retry_e_cancelamentos(monkeypatch):
         return True, "Filtro adicionado."
 
     monkeypatch.setattr(handlers_core, "add_filter", _fake_add_filter)
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "ok"))
 
     u1 = _Update(text="abc")
     state1 = asyncio.run(handlers_core.menu_filter_on_value(u1, ctx))
     assert state1 == handlers_core.MENU_FILTER_SELECT_VALUE
-    assert "Erro real" in u1.message.sent[-1]["text"]
+    assert "Valor inválido" in u1.message.sent[-1]["text"]
 
     u2 = _Update(text="90000")
     state2 = asyncio.run(handlers_core.menu_filter_on_value(u2, ctx))
-    assert state2 == ConversationHandler.END
-    assert "✅ Filtro atualizado." in u2.message.sent[-1]["text"]
-    assert "Ver filtros: /wishlist_filter_list 1" in u2.message.sent[-1]["text"]
+    assert state2 == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "Erro real" in u2.message.sent[-1]["text"]
+
+    u3 = _Update(text="90000")
+    state3 = asyncio.run(handlers_core.menu_filter_on_value(u3, ctx))
+    assert state3 == ConversationHandler.END
+    assert "✅ Filtro atualizado." in u3.message.sent[-1]["text"]
+    assert "/wishlist_filter_list" not in u3.message.sent[-1]["text"]
+    labels = [row[0].text for row in u3.message.sent[-1]["reply_markup"].inline_keyboard]
+    assert "➕ Ajustar outro filtro" in labels
+    assert "📋 Ver filtros" in labels
 
     cctx = _ctx()
-    cctx.user_data["menu_filter_type"] = "price_max"
-    u3 = _Update(text="/cancelar")
-    state3 = asyncio.run(handlers_core.menu_filter_cancel(u3, cctx))
-    assert state3 == ConversationHandler.END
+    cctx.user_data["menu_filter_type"] = "price"
+    u4 = _Update(text="/cancelar")
+    state4 = asyncio.run(handlers_core.menu_filter_cancel(u4, cctx))
+    assert state4 == ConversationHandler.END
     assert cctx.user_data == {}
 
     bctx = _ctx()
-    bctx.user_data["menu_filter_type"] = "price_max"
+    bctx.user_data["menu_filter_type"] = "price"
     q = _CallbackQuery("FILTER:CANCEL")
-    state4 = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), bctx))
-    assert state4 == ConversationHandler.END
+    state5 = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q), bctx))
+    assert state5 == ConversationHandler.END
     assert bctx.user_data == {}
 
 
@@ -298,12 +303,32 @@ def test_bug_real_wl_filters_to_filter_type_and_value(monkeypatch):
     state2 = asyncio.run(handlers_core.cb_menu(_Update(q=q2), ctx))
     assert state2 == handlers_core.MENU_FILTER_SELECT_VALUE
 
-    q3 = _CallbackQuery("FILTER:TYPE:price_max")
+    q3 = _CallbackQuery("FILTER:TYPE:price")
     state3 = asyncio.run(handlers_core.cb_menu_filter(_Update(q=q3), ctx))
     assert state3 == handlers_core.MENU_FILTER_SELECT_VALUE
-    assert "preço máximo" in q3.edits[-1]["text"]
+    assert "faixa de preço" in q3.edits[-1]["text"].lower()
 
     msg = _Update(text="120000")
     state4 = asyncio.run(handlers_core.menu_filter_on_value(msg, ctx))
     assert state4 == ConversationHandler.END
     assert called == {"wishlist_id": "wl-1", "field": "price", "op": "lte", "value": "120000"}
+
+
+def test_guided_price_parsing_variants(monkeypatch):
+    cases = [
+        ("acima de 50000", [("price", "gte", "50000")]),
+        ("mais de 50000", [("price", "gte", "50000")]),
+        ("até 50000", [("price", "lte", "50000")]),
+        ("entre 50000 e 90000", [("price", "gte", "50000"), ("price", "lte", "90000")]),
+    ]
+    for user_text, expected in cases:
+        ctx = _start_with_wishlist(monkeypatch)
+        ctx.user_data.update({"menu_filter_wishlist_index": 1, "menu_filter_wishlist_id": "wl-1", "menu_filter_type": "price"})
+        monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="wl-1", query="civic si")])
+        monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+        monkeypatch.setattr(handlers_core, "remove_filter", lambda *_: (True, "ok"))
+        calls: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(handlers_core, "add_filter", lambda _db, _wid, field, op, value: calls.append((field, op, value)) or (True, "ok"))
+        state = asyncio.run(handlers_core.menu_filter_on_value(_Update(text=user_text), ctx))
+        assert state == ConversationHandler.END
+        assert calls == expected
