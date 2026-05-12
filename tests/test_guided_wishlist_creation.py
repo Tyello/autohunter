@@ -85,6 +85,10 @@ def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     assert called["q"] == "civic si"
     assert q.answers == 1
     assert state == ConversationHandler.END
+    assert "✅ Busca criada com sucesso." in q.edits[-1]["text"]
+    buttons = q.edits[-1]["reply_markup"].inline_keyboard
+    assert buttons[0][0].text == "🎯 Ver minhas buscas"
+    assert buttons[1][0].text == "➕ Criar outra busca"
 
 
 def test_cwl_create_filters_enters_draft_without_creation(monkeypatch):
@@ -142,7 +146,9 @@ def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     assert state == ConversationHandler.END
     assert called["query"] == "civic si"
     assert len(called["filters"]) == 1
-    assert ctx.user_data == {}
+    assert "menu_create_wishlist_query" not in ctx.user_data
+    assert "menu_create_wishlist_draft_filters" not in ctx.user_data
+    assert "✅ Busca criada com sucesso." in q.edits[-1]["text"]
 
 
 def test_draft_done_without_query_expires_session():
@@ -198,6 +204,28 @@ def test_cwl_create_with_mixed_implicit_filters_calls_create_with_filters(monkey
     assert {"field": "price", "operator": "lte", "value": "120000"} in called["filters"]
 
 
+def test_cwl_create_is_idempotent_for_repeated_callback(monkeypatch):
+    _patch_user(monkeypatch)
+    calls = {"count": 0}
+
+    def _create(_db, _uid, query, filters):
+        calls["count"] += 1
+        return True, "ok", "wid"
+
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", _create)
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    ctx = types.SimpleNamespace(user_data={})
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("civic si entre 2014 e 2015")), ctx))
+    q1 = _CallbackQuery("CWL:CREATE")
+    first_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q1), ctx))
+    assert first_state == ConversationHandler.END
+    q2 = _CallbackQuery("CWL:CREATE")
+    second_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q2), ctx))
+    assert second_state == ConversationHandler.END
+    assert calls["count"] == 1
+    assert "Essa busca já foi criada" in q2.edits[-1]["text"]
+
+
 def test_cwl_create_plan_limit_shows_only_business_message(monkeypatch):
     _patch_user(monkeypatch)
     monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (False, "Você atingiu o limite do plano Free..."))
@@ -207,6 +235,30 @@ def test_cwl_create_plan_limit_shows_only_business_message(monkeypatch):
     assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
     assert "Você atingiu o limite do plano Free" in q.edits[-1]["text"]
     assert "Não consegui concluir essa ação agora" not in q.edits[-1]["text"]
+    assert ctx.user_data.get("menu_create_wishlist_completed") is not True
+
+
+def test_cwlf_done_is_idempotent_for_repeated_callback(monkeypatch):
+    _patch_user(monkeypatch)
+    calls = {"count": 0}
+
+    def _create(_db, _uid, query, filters):
+        calls["count"] += 1
+        return True, "ok", "wid"
+
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", _create)
+    ctx = types.SimpleNamespace(user_data={
+        "menu_create_wishlist_query": "civic si",
+        "menu_create_wishlist_draft_filters": [{"group": "state", "label": "Estado: SP", "filters": [{"field": "state", "operator": "eq", "value": "SP"}]}],
+    })
+    q1 = _CallbackQuery("CWLF:DONE")
+    first_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q1), ctx))
+    assert first_state == ConversationHandler.END
+    q2 = _CallbackQuery("CWLF:DONE")
+    second_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q2), ctx))
+    assert second_state == ConversationHandler.END
+    assert calls["count"] == 1
+    assert "Essa busca já foi criada" in q2.edits[-1]["text"]
 
 
 def test_upgrade_fallback_ends_flow_and_opens_upgrade(monkeypatch):
