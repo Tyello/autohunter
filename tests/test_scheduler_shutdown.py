@@ -51,6 +51,37 @@ def test_tick_does_not_enqueue_during_shutdown(monkeypatch):
     assert called["enqueue"] == 0
 
 
+def test_heartbeat_rolls_back_and_logs_short_error(monkeypatch, capsys):
+    from app.scheduler import run as scheduler_run
+
+    class DummyDB:
+        def __init__(self):
+            self.rolled_back = False
+            self.closed = False
+
+        def commit(self):
+            raise RuntimeError("relation system_logs does not exist")
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            self.closed = True
+
+    db = DummyDB()
+    monkeypatch.setattr(scheduler_run, "SessionLocal", lambda: db)
+    monkeypatch.setattr(scheduler_run, "heartbeat", lambda _db: None)
+    monkeypatch.setattr(scheduler_run, "_last_heartbeat_error_log_at", None)
+
+    scheduler_run.job_heartbeat()
+
+    out = capsys.readouterr().out
+    assert db.rolled_back is True
+    assert db.closed is True
+    assert "heartbeat_failed" in out
+    assert "alembic upgrade head" in out
+
+
 def test_http_worker_does_not_dequeue_during_shutdown(monkeypatch):
     from app.scheduler import http_queue_job
 

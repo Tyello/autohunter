@@ -25,6 +25,8 @@ from app.services.scrape_jobs_service import enqueue_job, count_active_jobs
 from app.sources.registry import get_source
 
 
+_last_heartbeat_error_log_at: datetime | None = None
+
 
 def _utcnow():
     return datetime.now(timezone.utc)
@@ -58,6 +60,37 @@ def _get_cfg(db, source: str):
 
 def _get_state(db, source: str):
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
+
+
+def _print_throttled_scheduler_error(stage: str, exc: Exception) -> None:
+    global _last_heartbeat_error_log_at
+    now = _utcnow()
+    if _last_heartbeat_error_log_at and now - _last_heartbeat_error_log_at < timedelta(minutes=1):
+        return
+    _last_heartbeat_error_log_at = now
+    print(
+        "[scheduler] "
+        f"{stage}_failed exc_type={type(exc).__name__} message={str(exc)[:300]} "
+        "hint='check DATABASE_URL and run alembic upgrade head'",
+        flush=True,
+    )
+
+
+def job_heartbeat():
+    if is_shutdown_requested():
+        return
+    db = SessionLocal()
+    try:
+        heartbeat(db)
+        db.commit()
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        _print_throttled_scheduler_error("heartbeat", exc)
+    finally:
+        db.close()
 
 
 def job_run_source_for_all_wishlists(source_name: str):
@@ -226,17 +259,7 @@ def start_scheduler() -> BackgroundScheduler:
             replace_existing=True,
         )
 
-    def _job_heartbeat():
-        if is_shutdown_requested():
-            return
-        db = SessionLocal()
-        try:
-            heartbeat(db)
-            db.commit()
-        finally:
-            db.close()
-
-    sched.add_job(_job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
+    sched.add_job(job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
 
     # Browser queue worker: executa jobs Playwright em ordem (FIFO)
     try:
