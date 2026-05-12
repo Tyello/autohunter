@@ -1,6 +1,9 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler, filters
+import hashlib
+import json
+import logging
 
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
@@ -15,6 +18,7 @@ MENU_FILTER_SELECT_VALUE = 2
 
 MENU_FILTER_USER_DATA_KEYS = ("menu_filter_wishlist_index", "menu_filter_wishlist_id", "menu_filter_type")
 MENU_CREATE_WISHLIST_DRAFT_KEYS = ("menu_create_wishlist_query", "menu_create_wishlist_draft_filters", "menu_create_wishlist_draft_filter_type")
+logger = logging.getLogger(__name__)
 
 FILTER_TYPE_TO_SPEC = {
     "price": ("price", "eq", "Qual faixa de preço?\nExemplos:\n- até 120000\n- acima de 50000\n- a partir de 80000\n- entre 50000 e 90000"),
@@ -82,6 +86,34 @@ def build_draft_filter_groups(filters: list) -> list[dict]:
 def _clear_menu_create_wishlist_draft_context(context: ContextTypes.DEFAULT_TYPE) -> None:
     for key in MENU_CREATE_WISHLIST_DRAFT_KEYS:
         context.user_data.pop(key, None)
+
+
+def _build_wishlist_create_key(chat_id: int, query: str, filters: list[dict]) -> str:
+    normalized_filters = sorted(
+        [
+            {
+                "field": str(f.get("field", "")).strip().lower(),
+                "operator": str(f.get("operator", "")).strip().lower(),
+                "value": str(f.get("value", "")).strip().lower(),
+            }
+            for f in (filters or [])
+        ],
+        key=lambda item: (item["field"], item["operator"], item["value"]),
+    )
+    payload = {
+        "chat_id": chat_id,
+        "query": (query or "").strip().lower(),
+        "filters": normalized_filters,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _post_creation_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎯 Ver minhas buscas", callback_data="MENU:WISHLISTS")],
+        [InlineKeyboardButton("➕ Criar outra busca", callback_data="MENU:CREATE_WISHLIST")],
+    ])
 
 
 def _render_draft_filters(filters_draft: list[dict]) -> str:
@@ -745,6 +777,9 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
         return MENU_CREATE_WISHLIST_QUERY
 
     parsed = parse_wishlist_query_with_implicit_filters(query)
+    context.user_data.pop("menu_create_wishlist_creating", None)
+    context.user_data.pop("menu_create_wishlist_completed", None)
+    context.user_data.pop("menu_create_wishlist_last_create_key", None)
     context.user_data["menu_create_wishlist_query"] = parsed.cleaned_query
     context.user_data["menu_create_wishlist_draft_filters"] = build_draft_filter_groups(parsed.filters)
     draft = context.user_data["menu_create_wishlist_draft_filters"]
@@ -788,23 +823,56 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     if data == "CWL:CREATE":
+        if context.user_data.get("menu_create_wishlist_creating") or context.user_data.get("menu_create_wishlist_completed"):
+            await _safe_edit_or_send(update, "Essa busca já foi criada. Abra /menu para continuar.")
+            return ConversationHandler.END
         query = context.user_data.get("menu_create_wishlist_query")
         if not query:
             await _safe_edit_or_send(update, "Essa etapa expirou.\n\nPara continuar com segurança, abra o menu novamente e refaça a ação.\n\nUse /menu.")
             return ConversationHandler.END
+        draft_groups = context.user_data.get("menu_create_wishlist_draft_filters") or []
+        flat = [flt for g in draft_groups for flt in g.get("filters", [])]
+        create_key = _build_wishlist_create_key(update.effective_chat.id, query, flat)
+        if (
+            context.user_data.get("menu_create_wishlist_creating")
+            or context.user_data.get("menu_create_wishlist_completed")
+            or context.user_data.get("menu_create_wishlist_last_create_key") == create_key
+        ):
+            await _safe_edit_or_send(update, "Essa busca já foi criada. Abra /menu para continuar.")
+            return ConversationHandler.END
+        context.user_data["menu_create_wishlist_creating"] = True
+        context.user_data["menu_create_wishlist_last_create_key"] = create_key
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-            draft_groups = context.user_data.get("menu_create_wishlist_draft_filters") or []
-            if draft_groups:
-                flat = [flt for g in draft_groups for flt in g.get("filters", [])]
-                ok, msg, _ = create_wishlist_with_filters(db, user.id, query, flat)
-            else:
-                ok, msg = add_wishlist(db, user.id, query)
+            try:
+                if draft_groups:
+                    ok, msg, _ = create_wishlist_with_filters(db, user.id, query, flat)
+                else:
+                    ok, msg = add_wishlist(db, user.id, query)
+            except Exception:
+                logger.exception(
+                    "Unexpected error creating wishlist via CWL:CREATE",
+                    extra={"chat_id": update.effective_chat.id, "query": query, "filters_draft": draft_groups, "callback_data": data},
+                )
+                context.user_data["menu_create_wishlist_creating"] = False
+                context.user_data.pop("menu_create_wishlist_last_create_key", None)
+                await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
+                return MENU_CREATE_WISHLIST_QUERY
         if not ok:
+            context.user_data["menu_create_wishlist_creating"] = False
+            context.user_data.pop("menu_create_wishlist_last_create_key", None)
             await _safe_edit_or_send(update, msg)
             return MENU_CREATE_WISHLIST_QUERY
+        context.user_data["menu_create_wishlist_completed"] = True
+        context.user_data["menu_create_wishlist_creating"] = False
+        labels = [g.get("label") for g in draft_groups if g.get("label")]
+        filters_text = "\n".join(f"- {label}" for label in labels) if labels else "- Sem filtros adicionais"
         _clear_menu_create_wishlist_draft_context(context)
-        await _safe_edit_or_send(update, f"✅ Busca criada: {query}\n\nUse /menu para acompanhar.")
+        await _safe_edit_or_send(
+            update,
+            f"✅ Busca criada com sucesso.\n\nBusca: {query}\nFiltros:\n{filters_text}\n\nPróximo passo: acompanhe suas buscas ou crie uma nova.",
+            reply_markup=_post_creation_markup(),
+        )
         return ConversationHandler.END
 
     if data == "CWL:CREATE_FILTERS":
@@ -852,6 +920,9 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         return await _show_draft_filters_screen(update, context, feedback="✅ Filtro removido.")
 
     if data == "CWLF:DONE":
+        if context.user_data.get("menu_create_wishlist_creating") or context.user_data.get("menu_create_wishlist_completed"):
+            await _safe_edit_or_send(update, "Essa busca já foi criada. Abra /menu para continuar.")
+            return ConversationHandler.END
         query = context.user_data.get("menu_create_wishlist_query")
         draft_groups = context.user_data.get("menu_create_wishlist_draft_filters") or []
         filters_draft = []
@@ -864,18 +935,43 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             _clear_menu_create_wishlist_draft_context(context)
             await _safe_edit_or_send(update, "Essa etapa expirou.\n\nPara continuar com segurança, abra o menu novamente e refaça a ação.\n\nUse /menu.")
             return ConversationHandler.END
+        create_key = _build_wishlist_create_key(update.effective_chat.id, query, filters_draft)
+        if (
+            context.user_data.get("menu_create_wishlist_creating")
+            or context.user_data.get("menu_create_wishlist_completed")
+            or context.user_data.get("menu_create_wishlist_last_create_key") == create_key
+        ):
+            await _safe_edit_or_send(update, "Essa busca já foi criada. Abra /menu para continuar.")
+            return ConversationHandler.END
+        context.user_data["menu_create_wishlist_creating"] = True
+        context.user_data["menu_create_wishlist_last_create_key"] = create_key
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-            ok, msg, _wid = create_wishlist_with_filters(db, user.id, query, filters_draft)
+            try:
+                ok, msg, _wid = create_wishlist_with_filters(db, user.id, query, filters_draft)
+            except Exception:
+                logger.exception(
+                    "Unexpected error creating wishlist via CWLF:DONE",
+                    extra={"chat_id": update.effective_chat.id, "query": query, "filters_draft": filters_draft, "callback_data": data},
+                )
+                context.user_data["menu_create_wishlist_creating"] = False
+                context.user_data.pop("menu_create_wishlist_last_create_key", None)
+                await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
+                return MENU_CREATE_WISHLIST_QUERY
         if not ok:
+            context.user_data["menu_create_wishlist_creating"] = False
+            context.user_data.pop("menu_create_wishlist_last_create_key", None)
             await _safe_edit_or_send(update, msg)
             return MENU_CREATE_WISHLIST_QUERY
+        context.user_data["menu_create_wishlist_completed"] = True
+        context.user_data["menu_create_wishlist_creating"] = False
+        labels = "\n".join(f"- {g.get('label')}" for g in draft_groups if g.get("label")) or "- Sem filtros adicionais"
         _clear_menu_create_wishlist_draft_context(context)
-        if draft_groups:
-            labels = "\n".join(f"- {g.get('label')}" for g in draft_groups)
-            await _safe_edit_or_send(update, f"✅ Busca criada com filtros.\n\nBusca: {query}\nFiltros:\n{labels}\n\nA primeira busca foi agendada com os filtros aplicados.\nUse /menu para acompanhar.")
-        else:
-            await _safe_edit_or_send(update, f"✅ Busca criada sem filtros. Você pode adicionar filtros depois pelo /menu.\n\nBusca: {query}\nUse /menu para acompanhar.")
+        await _safe_edit_or_send(
+            update,
+            f"✅ Busca criada com sucesso.\n\nBusca: {query}\nFiltros:\n{labels}\n\nPróximo passo: acompanhe suas buscas ou crie uma nova.",
+            reply_markup=_post_creation_markup(),
+        )
         return ConversationHandler.END
 
     await _safe_edit_or_send(update, "Essa opção não está mais válida.\n\nAbra o menu novamente para continuar.\n\nUse /menu.")
