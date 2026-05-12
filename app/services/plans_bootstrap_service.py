@@ -5,7 +5,7 @@ from typing import Final
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.plan import PLAN_CODE_FREE, PLAN_CODE_PREMIUM, PLAN_CODE_PRO, PLAN_CODE_ULTRA, Plan
+from app.models.plan import PLAN_CODE_FREE, PLAN_CODE_PREMIUM, Plan
 
 BASE_PLANS: Final[dict[str, dict[str, int | str | bool]]] = {
     PLAN_CODE_FREE: {
@@ -18,18 +18,6 @@ BASE_PLANS: Final[dict[str, dict[str, int | str | bool]]] = {
         "name": "Premium",
         "daily_alert_limit": 15,
         "max_wishlists": 10,
-        "is_active": True,
-    },
-    PLAN_CODE_PRO: {
-        "name": "Pro",
-        "daily_alert_limit": 50,
-        "max_wishlists": 10,
-        "is_active": True,
-    },
-    PLAN_CODE_ULTRA: {
-        "name": "Ultra",
-        "daily_alert_limit": 200,
-        "max_wishlists": 30,
         "is_active": True,
     },
 }
@@ -74,7 +62,7 @@ def ensure_base_plans(db: Session) -> dict[str, Plan]:
         return plans_by_code
     except SQLAlchemyError as exc:
         raise PlansBootstrapError(
-            "Unable to bootstrap required plans (free/premium + legacy). "
+            "Unable to bootstrap required plans (free/premium). "
             "Check DATABASE_URL and run migrations."
         ) from exc
 

@@ -131,7 +131,7 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - A validação completa da migration de índice deve ser feita na lane PostgreSQL (`pytest -m postgres` com `TEST_DATABASE_URL`).
 
 ## 15) Modelo comercial mínimo (Free vs Premium)
-- Planos oficiais para UX: **Free** e **Premium** (mantendo compatibilidade com códigos legados `pro/ultra/paid` mapeados para Premium).
+- Planos oficiais para UX: **Free** e **Premium**.
 - Operação admin pública deve expor apenas `/setplan free` e `/setplan premium`; códigos legados ficam somente para compatibilidade interna de dados históricos.
 - **Free**: até 2 buscas ativas, até 1 anúncio rastreado no total, sem alertas automáticos de tracking, acompanhamento manual por `/wishlist_track_list`, referência comercial de 5 notificações/dia por busca.
 - **Premium**: até 15 buscas ativas, até 5 anúncios rastreados no total, limite técnico de 3 slots por wishlist preservado, alertas automáticos de queda de preço, suporte a alertas de anúncio inativo quando disponível no pipeline, referência comercial de 200 notificações/dia por busca.
