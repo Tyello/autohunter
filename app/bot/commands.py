@@ -1,6 +1,7 @@
 import logging
 
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+from telegram.error import BadRequest
 
 from app.core.settings import settings
 logger = logging.getLogger(__name__)
@@ -61,5 +62,14 @@ async def setup_bot_commands(bot):
     for chat_id in _parse_admin_chat_ids():
         try:
             await bot.set_my_commands(ADMIN_SCOPED_COMMANDS, scope=BotCommandScopeChat(chat_id=chat_id))
+        except BadRequest as exc:
+            if "chat not found" in str(exc).lower():
+                logger.warning(
+                    "skipping admin scoped Telegram commands for chat_id=%s: chat not found; "
+                    "confirm AUTOHUNTER_ADMIN_CHAT_IDS and make sure the admin has started the bot",
+                    chat_id,
+                )
+                continue
+            logger.warning("failed to register admin scoped Telegram commands for chat_id=%s", chat_id, exc_info=True)
         except Exception:
             logger.warning("failed to register admin scoped Telegram commands for chat_id=%s", chat_id, exc_info=True)

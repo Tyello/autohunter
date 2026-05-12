@@ -143,6 +143,7 @@ class Settings(BaseSettings):
     tracking_price_drop_alert_min_amount: int = 500
     tracking_price_drop_alert_min_pct: float = 1.0
 
+
     # Logging
     log_level: str = "info"
     log_stdout: bool = False

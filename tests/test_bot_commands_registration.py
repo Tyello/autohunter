@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from telegram import BotCommandScopeChat, BotCommandScopeDefault
+from telegram.error import BadRequest
 
 from app.bot import commands
 
@@ -13,6 +15,13 @@ class _FakeBot:
 
     async def set_my_commands(self, cmds, scope):
         self.calls.append((cmds, scope))
+
+
+class _ChatNotFoundBot(_FakeBot):
+    async def set_my_commands(self, cmds, scope):
+        self.calls.append((cmds, scope))
+        if isinstance(scope, BotCommandScopeChat):
+            raise BadRequest("Chat not found")
 
 
 def test_public_commands_are_slim_and_exclude_admin():
@@ -59,3 +68,15 @@ def test_setup_bot_commands_registers_default_and_admin_scopes(monkeypatch):
     assert all(isinstance(scope, BotCommandScopeChat) for scope in admin_scopes)
     assert sorted(scope.chat_id for scope in admin_scopes) == [101, 202]
     assert all([c.command for c in call] == [c.command for c in commands.ADMIN_SCOPED_COMMANDS] for call in admin_calls)
+
+
+def test_setup_bot_commands_logs_chat_not_found_without_traceback(monkeypatch, caplog):
+    fake = _ChatNotFoundBot()
+    monkeypatch.setattr(commands, "_parse_admin_chat_ids", lambda: {101})
+
+    with caplog.at_level(logging.WARNING, logger=commands.__name__):
+        asyncio.run(commands.setup_bot_commands(fake))
+
+    assert len(fake.calls) == 2
+    assert "chat not found" in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
