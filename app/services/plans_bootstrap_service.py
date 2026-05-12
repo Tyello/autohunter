@@ -16,8 +16,8 @@ BASE_PLANS: Final[dict[str, dict[str, int | str | bool]]] = {
     },
     PLAN_CODE_PREMIUM: {
         "name": "Premium",
-        "daily_alert_limit": 15,
-        "max_wishlists": 10,
+        "daily_alert_limit": 200,
+        "max_wishlists": 15,
         "is_active": True,
     },
 }

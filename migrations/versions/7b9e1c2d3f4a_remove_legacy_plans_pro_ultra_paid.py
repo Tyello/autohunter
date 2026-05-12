@@ -34,7 +34,7 @@ def upgrade() -> None:
     op.execute(
         """
         insert into plans (id, code, name, daily_alert_limit, max_wishlists, is_active, created_at, updated_at)
-        values (gen_random_uuid(), 'premium', 'Premium', 15, 10, true, now(), now())
+        values (gen_random_uuid(), 'premium', 'Premium', 200, 15, true, now(), now())
         on conflict (code) do update set
           name = excluded.name,
           daily_alert_limit = excluded.daily_alert_limit,

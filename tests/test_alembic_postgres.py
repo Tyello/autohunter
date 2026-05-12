@@ -63,6 +63,9 @@ def test_migration_remaps_legacy_plan_subscriptions_to_premium() -> None:
 
     with engine.connect() as conn:
         premium_id = conn.execute(text("select id from plans where code='premium'")).scalar_one()
+        premium_plan = conn.execute(text("select daily_alert_limit, max_wishlists from plans where code='premium'")).one()
+        assert premium_plan.daily_alert_limit == 200
+        assert premium_plan.max_wishlists == 15
         sub_plan_id = conn.execute(text("""
             select s.plan_id
             from subscriptions s
