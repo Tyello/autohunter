@@ -39,6 +39,25 @@ class _ProgrammingErrorDB:
         return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
 
+class _RowsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _PgIndexDefDB:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def get_bind(self):
+        return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    def execute(self, _stmt):
+        return _RowsResult(self._rows)
+
+
 def test_enqueue_job_builds_expected_on_conflict_target(monkeypatch):
     db = _CaptureDB(rowcount=1)
 
@@ -102,5 +121,18 @@ def test_has_active_source_queue_partial_index_guard_detects_sqlite_partial_inde
         WHERE status IN ('queued','running')
     """))
     db.commit()
+
+    assert svc.has_active_source_queue_partial_index(db) is True
+
+
+def test_has_active_source_queue_partial_index_guard_accepts_postgres_any_array_format():
+    db = _PgIndexDefDB(
+        rows=[
+            (
+                "CREATE UNIQUE INDEX ix_scrape_jobs_active_source_queue_unique ON public.scrape_jobs USING btree (source, queue) "
+                "WHERE ((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying])::text[]))",
+            )
+        ]
+    )
 
     assert svc.has_active_source_queue_partial_index(db) is True

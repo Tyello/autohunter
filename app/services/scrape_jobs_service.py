@@ -49,6 +49,18 @@ def _build_schema_mismatch_detail(db: Session, *, queue: str) -> str:
 
 
 def has_active_source_queue_partial_index(db: Session) -> bool:
+    def _matches_active_conflict_partial_index(definition: str | None) -> bool:
+        normalized = " ".join((definition or "").lower().split())
+        checks = [
+            "unique index",
+            "(source, queue)",
+            "where",
+            "status",
+            "queued",
+            "running",
+        ]
+        return all(token in normalized for token in checks)
+
     bind = db.get_bind()
     if not bind:
         return False
@@ -65,8 +77,7 @@ def has_active_source_queue_partial_index(db: Session) -> bool:
             )
         ).all()
         for (indexdef,) in rows:
-            normalized = " ".join((indexdef or "").lower().split())
-            if "(source, queue)" in normalized and "where status in ('queued','running')" in normalized:
+            if _matches_active_conflict_partial_index(indexdef):
                 return True
         return False
 
@@ -82,8 +93,7 @@ def has_active_source_queue_partial_index(db: Session) -> bool:
             )
         ).all()
         for (sql_def,) in rows:
-            normalized = " ".join((sql_def or "").lower().split())
-            if "(source, queue)" in normalized and "where status in ('queued','running')" in normalized:
+            if _matches_active_conflict_partial_index(sql_def):
                 return True
         return False
 
