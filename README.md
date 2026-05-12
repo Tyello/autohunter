@@ -1,6 +1,9 @@
-# AutoHunter
+# Garagem Alvo
 
-AutoHunter é uma plataforma **Telegram-first** de monitoramento recorrente de anúncios de carros usados.
+Garagem Alvo é a marca pública do produto.
+AutoHunter é o nome interno/técnico do runtime e deste repositório.
+
+Garagem Alvo é uma plataforma **Telegram-first** para entusiastas monitorarem anúncios de carros especiais, versões raras e boas bases de projeto/preparação.
 
 > Produto principal hoje: bot no Telegram + runtime contínuo (scheduler, filas, workers, matching e envio de notificações).
 >

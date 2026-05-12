@@ -1,7 +1,10 @@
-# AutoHunter — Project Guideline (runtime atual)
+# Garagem Alvo / AutoHunter — Project Guideline (runtime atual)
 
 ## 1) Visão geral do produto
-AutoHunter é, no estado atual do código, uma plataforma **Telegram-first** de monitoramento contínuo de anúncios de carros usados.
+Marca pública: Garagem Alvo.
+Nome interno/técnico: AutoHunter.
+
+Garagem Alvo é a marca pública do produto Telegram-first; AutoHunter é o runtime interno, no estado atual do código.
 
 O valor entregue não é “rodar scraper manual”: é manter um ciclo recorrente que transforma wishlists em notificações úteis com dedupe, matching e observabilidade operacional.
 

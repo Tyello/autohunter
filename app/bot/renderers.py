@@ -101,14 +101,15 @@ def _friendly_wishlist_filters(filters: list[dict]) -> list[str]:
 def render_start_text(active_wishlists_count: int) -> str:
     if active_wishlists_count > 0:
         return (
-            "👋 AutoHunter\n\n"
+            "👋 Garagem Alvo\n\n"
             "Seu monitoramento já está ativo.\n\n"
             "Use /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
         )
     return (
-        "👋 Bem-vindo ao AutoHunter\n\n"
-        "Eu monitoro anúncios de carros usados para você.\n\n"
-        "Você me diz o carro que procura, adiciona filtros como preço, ano, KM e região, e eu aviso aqui no Telegram quando aparecer algo compatível.\n\n"
+        "👋 Bem-vindo ao Garagem Alvo\n\n"
+        "O buscador do entusiasta.\n\n"
+        "Crie buscas para carros especiais, versões raras e boas bases de projeto.\n"
+        "A gente monitora anúncios e te avisa aqui no Telegram quando aparecer algo compatível.\n\n"
         "Para começar:\n"
         "toque em /menu e depois em ➕ Criar busca."
     )
@@ -233,7 +234,7 @@ def render_wishlist_filters(filters: Iterable, wishlist_query: str | None = None
 
 def render_help_text() -> str:
     return (
-        "❓ Ajuda rápida\n\n"
+        "❓ Ajuda rápida — Garagem Alvo\n\n"
         "• /menu — abrir o menu principal\n"
         "• ➕ Criar busca — monitorar um carro continuamente\n"
         "• 🎯 Minhas buscas — ver e gerenciar buscas salvas\n"
@@ -247,7 +248,8 @@ def render_help_text() -> str:
 
 def render_upgrade_text(has_payment_links: bool) -> str:
     text = (
-        "🚀 AutoHunter Premium\n\n"
+        "🚀 Garagem Alvo Premium\n\n"
+        "Para quem procura carro especial de verdade e não quer perder anúncio bom.\n\n"
         "Escolha seu plano:\n\n"
         "Mensal\n"
         "De R$ 9,99 por R$ 5,99/mês no lançamento.\n\n"

@@ -5,6 +5,7 @@ def test_ux_flow_doc_exists_and_sections():
     assert p.exists()
     t = p.read_text(encoding='utf-8')
     for s in [
+        'Garagem Alvo', 'AutoHunter é o nome interno',
         '## 1. Visão geral do produto','## 3. Mapa macro de navegação','## 12. /plan','## 13. /upgrade','## 20. Lacunas conhecidas'
     ]:
         assert s in t

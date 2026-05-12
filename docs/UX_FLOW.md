@@ -1,9 +1,11 @@
-# AutoHunter — Fluxo de Experiência do Sistema
+# Garagem Alvo — Fluxo de Experiência do Sistema
 
 ## 1. Visão geral do produto
-AutoHunter é um produto **Telegram-first** para pessoas que querem monitorar carros usados sem ficar repetindo busca manual ao longo do dia.
+Garagem Alvo é a marca pública, e AutoHunter é o nome interno/técnico do runtime/repo.
 
-- **Público principal**: comprador pessoa física, normalmente comparando opções de carro por faixa de preço/ano/KM.
+Garagem Alvo é um produto **Telegram-first** para entusiastas que querem monitorar carros especiais sem ficar repetindo busca manual ao longo do dia.
+
+- **Público principal**: entusiastas buscando carros especiais, versões raras, configurações específicas e boas bases de projeto/preparação.
 - **Canal principal**: Telegram (comandos + teclado inline).
 - **Objetivo do usuário**: cadastrar buscas persistentes (buscas), receber anúncios e notificações, e opcionalmente rastrear anúncios específicos.
 - **Busca salva**: termo público para o usuário; internamente o sistema ainda usa `wishlist` como nome técnico.
