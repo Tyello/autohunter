@@ -109,6 +109,17 @@ def _build_wishlist_create_key(chat_id: int, query: str, filters: list[dict]) ->
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _normalize_create_feedback(msg: object) -> str:
+    if not isinstance(msg, str):
+        return ""
+    lines = [line.strip() for line in msg.strip().splitlines() if line.strip()]
+    if not lines:
+        return ""
+    if lines[0].startswith("✅ Busca criada com sucesso.") or lines[0].startswith("✅ Wishlist criada:"):
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
 def _post_creation_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎯 Ver minhas buscas", callback_data="MENU:WISHLISTS")],
@@ -874,7 +885,8 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["menu_create_wishlist_creating"] = False
         labels = [g.get("label") for g in draft_groups if g.get("label")]
         filters_text = "\n".join(f"- {label}" for label in labels) if labels else "- Sem filtros adicionais"
-        service_feedback = (msg or "").strip() if isinstance(msg, str) else ""
+        service_feedback = _normalize_create_feedback(msg)
+        feedback_block = f"{service_feedback}\n\n" if service_feedback else ""
         _clear_menu_create_wishlist_draft_context(context)
         await _safe_edit_or_send(
             update,
@@ -882,7 +894,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 f"✅ Busca criada com sucesso.\n\n"
                 f"Busca: {query}\n"
                 f"Filtros:\n{filters_text}\n\n"
-                f"{service_feedback}\n\n"
+                f"{feedback_block}"
                 "Próximo passo: acompanhe suas buscas ou crie uma nova."
             ),
             reply_markup=_post_creation_markup(),

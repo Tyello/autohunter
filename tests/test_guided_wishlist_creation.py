@@ -277,9 +277,11 @@ def test_cwl_create_partial_enqueue_message_still_confirms_and_is_idempotent(mon
     q1 = _CallbackQuery("CWL:CREATE")
     first_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q1), ctx))
     assert first_state == ConversationHandler.END
-    assert "✅ Busca criada com sucesso." in q1.edits[-1]["text"]
-    assert "Não consegui agendar a primeira busca agora" in q1.edits[-1]["text"]
-    assert "Não consegui concluir essa ação agora" not in q1.edits[-1]["text"]
+    first_text = q1.edits[-1]["text"]
+    assert first_text.count("✅ Busca criada com sucesso.") == 1
+    assert "Wishlist criada" not in first_text
+    assert "Não consegui agendar a primeira busca agora" in first_text
+    assert "Não consegui concluir essa ação agora" not in first_text
 
     q2 = _CallbackQuery("CWL:CREATE")
     second_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q2), ctx))
