@@ -263,6 +263,31 @@ def test_cwl_create_plan_limit_does_not_lock_idempotency_key(monkeypatch):
     assert "Essa busca já foi criada" not in q2.edits[-1]["text"]
 
 
+def test_cwl_create_partial_enqueue_message_still_confirms_and_is_idempotent(monkeypatch):
+    _patch_user(monkeypatch)
+    calls = {"count": 0}
+
+    def _add(*_args):
+        calls["count"] += 1
+        return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
+
+    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "a4 avant 2019"})
+
+    q1 = _CallbackQuery("CWL:CREATE")
+    first_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q1), ctx))
+    assert first_state == ConversationHandler.END
+    assert "✅ Busca criada com sucesso." in q1.edits[-1]["text"]
+    assert "Não consegui agendar a primeira busca agora" in q1.edits[-1]["text"]
+    assert "Não consegui concluir essa ação agora" not in q1.edits[-1]["text"]
+
+    q2 = _CallbackQuery("CWL:CREATE")
+    second_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q2), ctx))
+    assert second_state == ConversationHandler.END
+    assert calls["count"] == 1
+    assert "Essa busca já foi criada" in q2.edits[-1]["text"]
+
+
 def test_cwlf_done_is_idempotent_for_repeated_callback(monkeypatch):
     _patch_user(monkeypatch)
     calls = {"count": 0}
