@@ -359,10 +359,10 @@ async def cmd_alertas(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reply_text(
         update,
-        "Alertas do Garagem Alvo:\n"
+        "Alertas — Garagem Alvo:\n"
         "- Monitoramento: a cada 30 min (Mercado Livre e OLX)\n"
         f"- Limite: {limit} alertas/dia\n"
-        "Use /plan para ver consumo e /wishlist para gerenciar."
+        "Use /plan para ver consumo e /menu para gerenciar suas buscas."
     )
 
 
