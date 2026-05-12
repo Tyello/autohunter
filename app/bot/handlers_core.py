@@ -855,10 +855,12 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                     extra={"chat_id": update.effective_chat.id, "query": query, "filters_draft": draft_groups, "callback_data": data},
                 )
                 context.user_data["menu_create_wishlist_creating"] = False
+                context.user_data.pop("menu_create_wishlist_last_create_key", None)
                 await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
                 return MENU_CREATE_WISHLIST_QUERY
         if not ok:
             context.user_data["menu_create_wishlist_creating"] = False
+            context.user_data.pop("menu_create_wishlist_last_create_key", None)
             await _safe_edit_or_send(update, msg)
             return MENU_CREATE_WISHLIST_QUERY
         context.user_data["menu_create_wishlist_completed"] = True
@@ -953,10 +955,12 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                     extra={"chat_id": update.effective_chat.id, "query": query, "filters_draft": filters_draft, "callback_data": data},
                 )
                 context.user_data["menu_create_wishlist_creating"] = False
+                context.user_data.pop("menu_create_wishlist_last_create_key", None)
                 await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
                 return MENU_CREATE_WISHLIST_QUERY
         if not ok:
             context.user_data["menu_create_wishlist_creating"] = False
+            context.user_data.pop("menu_create_wishlist_last_create_key", None)
             await _safe_edit_or_send(update, msg)
             return MENU_CREATE_WISHLIST_QUERY
         context.user_data["menu_create_wishlist_completed"] = True

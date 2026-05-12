@@ -238,6 +238,31 @@ def test_cwl_create_plan_limit_shows_only_business_message(monkeypatch):
     assert ctx.user_data.get("menu_create_wishlist_completed") is not True
 
 
+def test_cwl_create_plan_limit_does_not_lock_idempotency_key(monkeypatch):
+    _patch_user(monkeypatch)
+    calls = {"count": 0}
+
+    def _add(*_args):
+        calls["count"] += 1
+        return False, "Você atingiu o limite do plano Free..."
+
+    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
+
+    q1 = _CallbackQuery("CWL:CREATE")
+    first_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q1), ctx))
+    assert first_state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert "Você atingiu o limite do plano Free" in q1.edits[-1]["text"]
+    assert "menu_create_wishlist_last_create_key" not in ctx.user_data
+    assert ctx.user_data.get("menu_create_wishlist_completed") is not True
+
+    q2 = _CallbackQuery("CWL:CREATE")
+    second_state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q2), ctx))
+    assert second_state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert calls["count"] == 2
+    assert "Essa busca já foi criada" not in q2.edits[-1]["text"]
+
+
 def test_cwlf_done_is_idempotent_for_repeated_callback(monkeypatch):
     _patch_user(monkeypatch)
     calls = {"count": 0}
