@@ -119,7 +119,8 @@ async def _show_draft_filters_screen(update: Update, context: ContextTypes.DEFAU
 
 def _wishlist_help_text() -> str:
     return (
-        "🧰 Wishlist — ajuda rápida\n\n"
+        "🧰 Ajuda avançada de buscas\n\n"
+        "Comandos /wishlist_* são legados/avançados e continuam funcionando por compatibilidade.\n\n"
         "Criar (assistente):\n"
         "• /wishlist_add\n"
         "  Depois digite, por exemplo:\n"
@@ -197,7 +198,7 @@ async def _show_main_menu(update: Update) -> None:
     markup = _main_menu_markup_for_user(update)
     await reply_text(
         update,
-        "🚗 AutoHunter\n\n"
+        "🎯 Garagem Alvo\n\n"
         "O que você quer fazer?",
         reply_markup=markup,
     )
@@ -216,7 +217,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = (q.data or "").strip()
     if data == "MENU:SEARCH":
-        await _safe_edit_or_send(update, "🔎 Buscar agora\n\nEssa é uma busca pontual. Eu procuro uma vez e não salvo monitoramento.\n\nExemplo:\n`/buscar civic 2019 até 90000 sp`\n\nPara receber alertas todos os dias, use ➕ Criar busca.")
+        await _safe_edit_or_send(update, "🔎 Buscar agora\n\nEssa é uma busca pontual. Eu procuro uma vez e não salvo monitoramento.\n\nExemplo:\n`/buscar civic si até 120000 sp`\n\nPara receber alertas todos os dias, use ➕ Criar busca.")
         return
     if data == "MENU:UPGRADE":
         await _safe_edit_or_send(
@@ -353,7 +354,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _safe_edit_or_send(update, text, reply_markup=kb)
         return MENU_FILTER_SELECT_VALUE
     if data == "WL:BACK":
-        await _safe_edit_or_send(update, "🚗 AutoHunter\n\nO que você quer fazer?", reply_markup=_main_menu_markup_for_user(update))
+        await _safe_edit_or_send(update, "🎯 Garagem Alvo\n\nO que você quer fazer?", reply_markup=_main_menu_markup_for_user(update))
         return
     if data == "WL:TRACKED":
         with SessionLocal() as db:
@@ -418,7 +419,7 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await reply_text(update, "🤖 AutoHunter (bot) — appv4")
+    await reply_text(update, "🤖 Garagem Alvo — appv4\nRuntime interno: AutoHunter")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):

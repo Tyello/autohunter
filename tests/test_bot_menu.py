@@ -61,7 +61,7 @@ def test_cmd_menu_renders_buttons():
     asyncio.run(handlers_core.cmd_menu(update, types.SimpleNamespace()))
 
     payload = update.message.sent[-1]
-    assert "AutoHunter" in payload["text"]
+    assert "Garagem Alvo" in payload["text"]
     markup = payload["reply_markup"]
     callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
     assert callback_data == [
@@ -85,7 +85,7 @@ def test_callback_menu_search():
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
     assert "Buscar agora" in q.edits[-1]
-    assert "/buscar civic 2019 até 90000 sp" in q.edits[-1]
+    assert "/buscar civic si até 120000 sp" in q.edits[-1]
 
 
 def test_callback_menu_wishlists_real(monkeypatch):
@@ -127,7 +127,7 @@ def test_callback_menu_wl_back(monkeypatch):
     q = _CallbackQuery("WL:BACK")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "AutoHunter" in q.edits[-1]
+    assert "Garagem Alvo" in q.edits[-1]
 
 
 def test_callback_menu_wl_back_keeps_upgrade_hidden_for_premium(monkeypatch):
@@ -287,7 +287,7 @@ def test_callback_menu_fallback_when_edit_fails():
     q = _CallbackQuery("MENU:SEARCH", fail_edit=True)
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "/buscar civic 2019 até 90000 sp" in q.message.sent[-1]["text"]
+    assert "/buscar civic si até 120000 sp" in q.message.sent[-1]["text"]
 
 
 def test_quick_commands_still_registered():

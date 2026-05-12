@@ -1,5 +1,7 @@
 # AutoHunter — Operations Runbook (curto)
 
+> Este runbook opera o runtime interno AutoHunter, que sustenta a marca pública Garagem Alvo.
+
 ## 1) Objetivo do runbook
 Este runbook serve para operação diária e triagem inicial de incidentes do AutoHunter.
 

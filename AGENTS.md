@@ -1,7 +1,10 @@
 # AGENTS.md — AutoHunter
 
+Marca pública: Garagem Alvo.
+Nome interno/runtime/repo: AutoHunter.
+
 ## O que este projeto é
-AutoHunter é um produto **Telegram-first** para monitoramento contínuo de anúncios de carros usados.
+AutoHunter é o runtime interno de um produto público chamado Garagem Alvo.
 
 Não é web-first e não é apenas scraping manual: o runtime central é recorrente.
 

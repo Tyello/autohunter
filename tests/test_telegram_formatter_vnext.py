@@ -251,7 +251,7 @@ def test_tracked_price_drop_formatter_full_payload():
     assert "📉 Queda de preço no anúncio rastreado" in payload.text
     assert "De R$ 89.900,00 por R$ 86.900,00" in payload.text
     assert "Caiu R$ 3.000,00 (-3,3%)" in payload.text
-    assert "Wishlist: civic" in payload.text
+    assert "Busca: civic" in payload.text
 
 
 def test_tracked_price_drop_formatter_partial_payload():
@@ -262,4 +262,4 @@ def test_tracked_price_drop_formatter_partial_payload():
     n = SimpleNamespace(score_breakdown={"current_price": 50000})
     payload = format_tracked_price_drop_message(n, ad)
     assert "queda detectada" in payload.text
-    assert "Wishlist: sua wishlist" in payload.text
+    assert "Busca: sua wishlist" in payload.text

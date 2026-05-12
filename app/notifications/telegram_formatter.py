@@ -525,7 +525,7 @@ def format_tracked_price_drop_message(notification: Any, ad: Any) -> TelegramMes
         pct_txt = f" (-{str(drop_pct).replace('.', ',')}%)" if drop_pct is not None else ""
         lines.append(f"Caiu {_format_price_brl(drop_amount)}{pct_txt}")
     lines.append("")
-    lines.append(f"Wishlist: {wishlist_query}")
+    lines.append(f"Busca: {wishlist_query}")
     lines.append(f"Slot: {slot if slot is not None else '-'}")
     return TelegramMessagePayload(
         text="\n".join([_clip(x, _MAX_LINE) for x in lines if x is not None]).strip(),

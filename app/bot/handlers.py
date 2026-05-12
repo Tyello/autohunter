@@ -200,7 +200,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         await reply_text(
             update,
-            "🔎 Buscar agora\n\nUse assim:\n`/buscar civic 2019 até 90000 sp`\n\nEssa busca procura uma vez e não salva monitoramento.\n\nPara receber alertas contínuos, use /menu → ➕ Criar busca.",
+            "🔎 Buscar agora\n\nUse assim:\n`/buscar civic si até 120000 sp`\n\nEssa busca procura uma vez e não salva monitoramento.\n\nPara receber alertas contínuos, use /menu → ➕ Criar busca.",
         )
         return
 
@@ -218,7 +218,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sources=sources,
             )
             if not payloads:
-                await context.bot.send_message(chat_id=chat_id, text="Não encontrei anúncios bons agora.\n\nTente mudar o termo ou criar uma busca salva para monitorar continuamente.\n\nExemplo:\n`/buscar civic 2019`")
+                await context.bot.send_message(chat_id=chat_id, text="Não encontrei anúncios bons agora.\n\nTente mudar o termo ou criar uma busca salva para monitorar continuamente.\n\nExemplo:\n`/buscar golf gti manual sp`")
                 return
             for payload in payloads:
                 built_rows = []
@@ -359,7 +359,7 @@ async def cmd_alertas(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reply_text(
         update,
-        "Alertas do AutoHunter:\n"
+        "Alertas do Garagem Alvo:\n"
         "- Monitoramento: a cada 30 min (Mercado Livre e OLX)\n"
         f"- Limite: {limit} alertas/dia\n"
         "Use /plan para ver consumo e /wishlist para gerenciar."
@@ -432,7 +432,7 @@ async def cb_upgrade_plan_choice(update: Update, context: ContextTypes.DEFAULT_T
     next_cmd = f"/admin premium activate {chat_id} {plan_period}"
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
     admin_msg = (
-        "💳 Interesse em Premium\n\n"
+        "💳 Interesse em Garagem Alvo Premium\n\n"
         f"Usuário: {username}\n"
         f"Nome: {first_name}\n"
         f"Chat ID: {chat_id}\n"
@@ -446,14 +446,14 @@ async def cb_upgrade_plan_choice(update: Update, context: ContextTypes.DEFAULT_T
     )
     if plan_period == "monthly":
         text = (
-            "💳 Premium Mensal\n\n"
+            "💳 Garagem Alvo Premium Mensal\n\n"
             "Valor de lançamento: R$ 5,99/mês.\n\n"
             "Toque no botão abaixo para abrir o pagamento no Mercado Pago.\n\n"
             "Depois de pagar, envie o comprovante aqui no Telegram para ativação manual."
         )
     else:
         text = (
-            "💳 Premium Anual\n\n"
+            "💳 Garagem Alvo Premium Anual\n\n"
             "Valor de lançamento: R$ 59,99/ano.\n"
             "Equivale a R$ 4,99/mês.\n\n"
             "Toque no botão abaixo para abrir o pagamento no Mercado Pago.\n\n"

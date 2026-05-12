@@ -72,7 +72,7 @@ def test_upgrade_callback_monthly_notifies_admin_and_sends_real_link(monkeypatch
         await asyncio.sleep(0)
     asyncio.run(_run())
     assert q.answered == 1
-    assert "Interesse em Premium" in notified[0]
+    assert "Interesse em Garagem Alvo Premium" in notified[0]
     assert "Plano: Mensal" in notified[0]
     assert q.messages[-1]["reply_markup"].inline_keyboard[0][0].url == "https://mp/monthly"
 
@@ -96,7 +96,7 @@ def test_upgrade_callback_admin_notify_failure_does_not_block_user(monkeypatch):
         await asyncio.sleep(0)
     asyncio.run(_run())
     assert q.answered == 1
-    assert "Premium Anual" in q.messages[-1]["text"]
+    assert "Garagem Alvo Premium Anual" in q.messages[-1]["text"]
 
 
 def test_cmd_plan_uses_db_capabilities(db, monkeypatch):
