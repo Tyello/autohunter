@@ -48,6 +48,48 @@ def _build_schema_mismatch_detail(db: Session, *, queue: str) -> str:
     )
 
 
+def has_active_source_queue_partial_index(db: Session) -> bool:
+    bind = db.get_bind()
+    if not bind:
+        return False
+    dialect = bind.dialect.name
+    if dialect == "postgresql":
+        rows = db.execute(
+            text(
+                """
+                select indexdef
+                from pg_indexes
+                where schemaname = current_schema()
+                  and tablename = 'scrape_jobs'
+                """
+            )
+        ).all()
+        for (indexdef,) in rows:
+            normalized = " ".join((indexdef or "").lower().split())
+            if "(source, queue)" in normalized and "where status in ('queued','running')" in normalized:
+                return True
+        return False
+
+    if dialect == "sqlite":
+        rows = db.execute(
+            text(
+                """
+                select sql
+                from sqlite_master
+                where type = 'index'
+                  and tbl_name = 'scrape_jobs'
+                """
+            )
+        ).all()
+        for (sql_def,) in rows:
+            normalized = " ".join((sql_def or "").lower().split())
+            if "(source, queue)" in normalized and "where status in ('queued','running')" in normalized:
+                return True
+        return False
+
+    return False
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -154,6 +196,7 @@ def enqueue_job(
     except ProgrammingError as exc:
         if not _is_missing_on_conflict_constraint(exc):
             raise
+        db.rollback()
         detail = _build_schema_mismatch_detail(db, queue=queue)
         raise RuntimeError(
             "scrape_jobs enqueue schema mismatch: "

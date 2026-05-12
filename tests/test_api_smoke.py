@@ -9,7 +9,9 @@ from app.models.car_listing import CarListing
 def test_health_ok(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    payload = resp.json()
+    assert payload["status"] in {"ok", "warning"}
+    assert "scrape_jobs_conflict_index_ok" in payload
 
 
 def test_db_check_ok(client):
@@ -71,7 +73,8 @@ def test_admin_health_includes_olx_snapshot(client):
     assert resp.status_code == 200
     payload = resp.json()
 
-    assert payload["status"] == "ok"
+    assert payload["status"] in {"ok", "warning"}
+    assert "scrape_jobs_conflict_index_ok" in payload
     assert "olx" in payload
     # keep it robust: just validate some stable keys
     assert "browser_fallback_24h" in payload["olx"]
