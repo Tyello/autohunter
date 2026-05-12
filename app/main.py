@@ -12,6 +12,7 @@ from app.scheduler.run import start_scheduler
 from app.models.car_listing import CarListing
 from app.schemas.car_listing import CarListingOut
 from app.scrapers.olx import get_olx_health_snapshot
+from app.services.scrape_jobs_service import has_active_source_queue_partial_index
 
 from app.db.deps import get_db
 from app.web.routes_auth_facebook import router as facebook_auth_router
@@ -43,8 +44,12 @@ async def fb_agent_ws(websocket: WebSocket):
     await handle_fb_agent_ws(websocket)
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    has_index = has_active_source_queue_partial_index(db)
+    return {
+        "status": "ok" if has_index else "warning",
+        "scrape_jobs_conflict_index_ok": has_index,
+    }
 
 @app.get("/db-check")
 def db_check(db: Session = Depends(get_db)):
@@ -66,8 +71,10 @@ def list_listings(
     return listings
 
 @app.get("/admin/health")
-def admin_health():
+def admin_health(db: Session = Depends(get_db)):
+    has_index = has_active_source_queue_partial_index(db)
     return {
-        "status": "ok",
+        "status": "ok" if has_index else "warning",
+        "scrape_jobs_conflict_index_ok": has_index,
         "olx": get_olx_health_snapshot(),
     }

@@ -564,7 +564,7 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
     run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
 
     if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
-        return True, f"✅ Wishlist criada: {cleaned_query}\n\nNão consegui agendar a primeira busca agora. O monitoramento contínuo segue ativo."
+        return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
     return True, (
         f"✅ Wishlist criada: {cleaned_query}\n\n"
         "Vou fazer a primeira busca em segundo plano.\n"
@@ -835,7 +835,12 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
                 wishlist.id,
                 status,
             )
+        except SQLAlchemyError as exc:
+            db.rollback()
+            status = "enqueue_failed"
+            logger.warning("initial wishlist enqueue failed source=%s wishlist_id=%s err=%s", src, wishlist.id, exc)
         except Exception as exc:
+            db.rollback()
             status = "enqueue_failed"
             logger.warning("initial wishlist enqueue failed source=%s wishlist_id=%s err=%s", src, wishlist.id, exc)
         out["sources"].append({"source": src, "queue": queue, "status": status})
@@ -847,24 +852,27 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
         else:
             out["failed"] += 1
 
-    log(
-        db,
-        "info",
-        "wishlist",
-        "initial_run_dispatched",
-        {
-            "wishlist_id": str(wishlist.id),
-            "run_reason": run_reason,
-            "triggered": out["triggered"],
-            "ok": out["ok"],
-            "skipped": out["skipped"],
-            "failed": out["failed"],
-            "sources": out["sources"],
-        },
-        event_type="wishlist_initial_run",
-        tags=["wishlist", run_reason],
-    )
-    db.commit()
+    try:
+        log(
+            db,
+            "info",
+            "wishlist",
+            "initial_run_dispatched",
+            {
+                "wishlist_id": str(wishlist.id),
+                "run_reason": run_reason,
+                "triggered": out["triggered"],
+                "ok": out["ok"],
+                "skipped": out["skipped"],
+                "failed": out["failed"],
+                "sources": out["sources"],
+            },
+            event_type="wishlist_initial_run",
+            tags=["wishlist", run_reason],
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
     return out
 
 
