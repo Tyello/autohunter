@@ -23,6 +23,7 @@ from app.sources import list_sources
 from app.services.wishlists_service import (
     add_wishlist, remove_wishlist,
     add_filter, list_filters, remove_filter, get_wishlist_summaries, list_wishlists, get_user_plan_snapshot,
+    parse_wishlist_query_with_implicit_filters, NormalizedWishlistFilter,
 )
 from app.services.limits_service import get_daily_limit_for_user, count_sent_today
 from app.models.user import User
@@ -49,12 +50,17 @@ async def _notify_upgrade_intent_admin_safe(admin_msg: str, *, chat_id: int, pla
         logger.warning("upgrade_admin_notify_failed", extra={"chat_id": chat_id, "plan_period": plan_period}, exc_info=True)
 
 
-def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, sources: list[str] | None) -> list[dict]:
+def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, sources: list[str] | None) -> tuple[list[dict], dict]:
     with SessionLocal() as db:
         _user = get_or_create_user_by_chat(db, chat_id, username)
-        results = manual_search(db, query=query, limit=5, sources=sources, force_scrape=bool(sources))
+        parsed = parse_wishlist_query_with_implicit_filters(query)
+        cleaned_query, extra_price_filters = _extract_extra_price_filters(parsed.cleaned_query)
+        cleaned_query, state_filters = _extract_state_filter_from_query(cleaned_query)
+        semantic_filters = [*parsed.filters, *extra_price_filters, *state_filters]
+        results = manual_search(db, query=cleaned_query, limit=30, sources=sources, force_scrape=bool(sources))
+        results = [r for r in results if _listing_matches_semantic_filters(r, semantic_filters)]
         if not results:
-            return []
+            return [], {"query": query, "cleaned_query": cleaned_query, "sources": sources or [], "semantic_filters": [f.__dict__ for f in semantic_filters], "source_counts": {}}
         pseudo_wishlist = SimpleNamespace(query=query, filters=[])
         stats_map = {}
         try:
@@ -79,7 +85,11 @@ def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, s
                     "inline_keyboard": payload.inline_keyboard or [],
                 }
             )
-        return payloads
+        source_counts: dict[str, int] = {}
+        for item in results:
+            src = (getattr(item, "source", None) or "unknown").lower()
+            source_counts[src] = source_counts.get(src, 0) + 1
+        return payloads[:5], {"query": query, "cleaned_query": cleaned_query, "sources": sources or [], "semantic_filters": [f.__dict__ for f in semantic_filters], "source_counts": source_counts, "final_results": len(payloads[:5])}
 
 class _AdView:
     """Adapter: expose listing fields + computed score fields to the vNext formatter."""
@@ -179,6 +189,70 @@ def _parse_query_and_sources(args: list[str] | None) -> tuple[str, list[str] | N
     return query, (sources or None)
 
 
+
+
+_STATE_CODES = {"AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"}
+
+
+def _extract_state_filter_from_query(query: str) -> tuple[str, list[NormalizedWishlistFilter]]:
+    parts = [p for p in (query or "").split() if p]
+    if not parts:
+        return query, []
+    last = parts[-1].upper()
+    if last in _STATE_CODES:
+        cleaned = " ".join(parts[:-1]).strip()
+        return (cleaned or query), [NormalizedWishlistFilter(field="state", operator="eq", value=last)]
+    return query, []
+
+
+
+
+def _extract_extra_price_filters(query: str) -> tuple[str, list[NormalizedWishlistFilter]]:
+    q = (query or "").strip()
+    low = q.lower()
+    m = re.search(r"\bentre\s+([0-9\.\,]+)\s+e\s+([0-9\.\,]+)", low)
+    if m:
+        lo = int(m.group(1).replace(".", "").replace(",", ""))
+        hi = int(m.group(2).replace(".", "").replace(",", ""))
+        cleaned = (q[:m.start()] + q[m.end():]).strip()
+        return cleaned, [NormalizedWishlistFilter("price", "gte", str(min(lo, hi))), NormalizedWishlistFilter("price", "lte", str(max(lo, hi)))]
+    m = re.search(r"\bacima\s+de\s+([0-9\.\,]+)", low)
+    if m:
+        val = int(m.group(1).replace(".", "").replace(",", ""))
+        cleaned = (q[:m.start()] + q[m.end():]).strip()
+        return cleaned, [NormalizedWishlistFilter("price", "gte", str(val))]
+    return q, []
+def _listing_matches_semantic_filters(listing, filters: list[NormalizedWishlistFilter]) -> bool:
+    for f in filters:
+        field = (f.field or "").lower()
+        op = (f.operator or "").lower()
+        val = (f.value or "").strip()
+        if field == "price":
+            price = getattr(listing, "price", None)
+            if price is None:
+                return False
+            target = int(val)
+            price_i = int(price)
+            if op == "gte" and price_i < target:
+                return False
+            if op == "lte" and price_i > target:
+                return False
+        elif field == "year":
+            year = getattr(listing, "year", None)
+            if year is None:
+                return False
+            target = int(val)
+            year_i = int(year)
+            if op == "gte" and year_i < target:
+                return False
+            if op == "lte" and year_i > target:
+                return False
+        elif field == "state":
+            state = (getattr(listing, "state", None) or "").strip().upper()
+            location = (getattr(listing, "location", None) or "").upper()
+            if op == "eq" and state != val.upper() and f" {val.upper()}" not in location:
+                return False
+    return True
 def _resolve_target_chat_id(args: list[str], default_chat_id: int) -> tuple[int | None, str | None]:
     if len(args) >= 2:
         chat_id = parse_int(args[1])
@@ -210,7 +284,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async def _run_background_search() -> None:
         try:
-            payloads = await asyncio.to_thread(
+            payloads, debug = await asyncio.to_thread(
                 _run_manual_search_sync,
                 chat_id=chat_id,
                 username=user_name,
@@ -239,7 +313,7 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     disable_web_page_preview=True,
                 )
         except Exception:
-            logger.exception("manual_search_background_failed", extra={"chat_id": chat_id, "query": query})
+            logger.exception("manual_search_background_failed", extra={"chat_id": chat_id, "query": query, "cleaned_query": locals().get("debug", {}).get("cleaned_query"), "sources": locals().get("debug", {}).get("sources"), "source_counts": locals().get("debug", {}).get("source_counts"), "final_results": locals().get("debug", {}).get("final_results")})
             await context.bot.send_message(
                 chat_id=chat_id,
                 text="Não consegui concluir essa busca agora. Tente novamente em alguns minutos.",

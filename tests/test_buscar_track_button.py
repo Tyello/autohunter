@@ -55,6 +55,45 @@ def test_run_manual_search_sync_preserves_open_link_button(monkeypatch):
         "format_ad_message",
         lambda *_args, **_kwargs: types.SimpleNamespace(text="resultado", inline_keyboard=[[{"text": "Abrir anúncio", "url": "https://x"}]]),
     )
-    payloads = handlers._run_manual_search_sync(chat_id=1, username="u", query="civic", sources=None)
+    payloads, debug = handlers._run_manual_search_sync(chat_id=1, username="u", query="civic", sources=None)
     assert payloads
+    assert debug["cleaned_query"] == "civic"
     assert payloads[0]["inline_keyboard"][0][0]["url"] == "https://x"
+
+
+def test_buscar_sends_results_when_found(monkeypatch):
+    sent = []
+    async def _reply(*_args, **_kwargs):
+        return None
+    async def _send_message(**kwargs):
+        sent.append(kwargs["text"])
+    monkeypatch.setattr(handlers, "reply_text", _reply)
+    monkeypatch.setattr(handlers, "_run_manual_search_sync", lambda **_kwargs: ([{"text": "resultado", "inline_keyboard": []}], {}))
+    created = {}
+    def _capture(coro):
+        created["coro"] = coro
+        return types.SimpleNamespace()
+    monkeypatch.setattr(handlers.asyncio, "create_task", _capture)
+    ctx = types.SimpleNamespace(args=["civic"], bot=types.SimpleNamespace(send_message=_send_message))
+    asyncio.run(handlers.cmd_buscar(_Update(), ctx))
+    asyncio.run(created["coro"])
+    assert "resultado" in sent
+
+
+def test_buscar_sends_not_found_when_empty(monkeypatch):
+    sent = []
+    async def _reply(*_args, **_kwargs):
+        return None
+    async def _send_message(**kwargs):
+        sent.append(kwargs["text"])
+    monkeypatch.setattr(handlers, "reply_text", _reply)
+    monkeypatch.setattr(handlers, "_run_manual_search_sync", lambda **_kwargs: ([], {}))
+    created = {}
+    def _capture(coro):
+        created["coro"] = coro
+        return types.SimpleNamespace()
+    monkeypatch.setattr(handlers.asyncio, "create_task", _capture)
+    ctx = types.SimpleNamespace(args=["civic"], bot=types.SimpleNamespace(send_message=_send_message))
+    asyncio.run(handlers.cmd_buscar(_Update(), ctx))
+    asyncio.run(created["coro"])
+    assert any("Não encontrei anúncios" in t for t in sent)
