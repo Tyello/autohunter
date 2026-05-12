@@ -45,7 +45,7 @@ def test_plan_code_unique(db):
 
 def test_subscription_starts_at_default_not_null(db):
     acc = Account(type="personal", name="Test")
-    plan = Plan(code="pro", name="Pro", daily_alert_limit=30)
+    plan = Plan(code="free", name="Free", daily_alert_limit=30)
     db.add_all([acc, plan])
     db.commit()
 

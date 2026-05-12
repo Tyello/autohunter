@@ -25,7 +25,7 @@ _PREMIUM = PlanCapabilities("premium", 15, 5, 3, True, 200, True, 5.99, 9.99)
 
 def normalize_plan_code(plan_code: str | None) -> str:
     code = str(plan_code or "free").strip().lower()
-    if code in {"premium", "pro", "ultra", "paid"}:
+    if code == "premium":
         return "premium"
     if code in {"free", "basic"}:
         return "free"

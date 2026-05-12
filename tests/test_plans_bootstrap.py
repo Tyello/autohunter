@@ -22,8 +22,8 @@ def test_ensure_base_plans_creates_free_plan(db):
 
     premium = db.query(Plan).filter(Plan.code == PLAN_CODE_PREMIUM).first()
     assert premium is not None
-    assert premium.daily_alert_limit == 15
-    assert premium.max_wishlists == 10
+    assert premium.daily_alert_limit == 200
+    assert premium.max_wishlists == 15
 
 
 def test_ensure_base_plans_is_idempotent(db):
@@ -79,5 +79,5 @@ def test_compat_existing_premium_plan_is_updated_to_official_limits(db):
     db.refresh(custom)
 
     assert custom.name == "Premium"
-    assert custom.daily_alert_limit == 15
-    assert custom.max_wishlists == 10
+    assert custom.daily_alert_limit == 200
+    assert custom.max_wishlists == 15
