@@ -109,6 +109,17 @@ def _build_wishlist_create_key(chat_id: int, query: str, filters: list[dict]) ->
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _normalize_create_feedback(msg: object) -> str:
+    if not isinstance(msg, str):
+        return ""
+    lines = [line.strip() for line in msg.strip().splitlines() if line.strip()]
+    if not lines:
+        return ""
+    if lines[0].startswith("✅ Busca criada com sucesso.") or lines[0].startswith("✅ Wishlist criada:"):
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
 def _post_creation_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎯 Ver minhas buscas", callback_data="MENU:WISHLISTS")],
@@ -849,10 +860,17 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                     ok, msg, _ = create_wishlist_with_filters(db, user.id, query, flat)
                 else:
                     ok, msg = add_wishlist(db, user.id, query)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Unexpected error creating wishlist via CWL:CREATE",
-                    extra={"chat_id": update.effective_chat.id, "query": query, "filters_draft": draft_groups, "callback_data": data},
+                    extra={
+                        "chat_id": update.effective_chat.id,
+                        "query": query,
+                        "draft_filters": draft_groups,
+                        "create_key": create_key,
+                        "exception_type": type(exc).__name__,
+                        "callback_data": data,
+                    },
                 )
                 context.user_data["menu_create_wishlist_creating"] = False
                 context.user_data.pop("menu_create_wishlist_last_create_key", None)
@@ -867,10 +885,18 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["menu_create_wishlist_creating"] = False
         labels = [g.get("label") for g in draft_groups if g.get("label")]
         filters_text = "\n".join(f"- {label}" for label in labels) if labels else "- Sem filtros adicionais"
+        service_feedback = _normalize_create_feedback(msg)
+        feedback_block = f"{service_feedback}\n\n" if service_feedback else ""
         _clear_menu_create_wishlist_draft_context(context)
         await _safe_edit_or_send(
             update,
-            f"✅ Busca criada com sucesso.\n\nBusca: {query}\nFiltros:\n{filters_text}\n\nPróximo passo: acompanhe suas buscas ou crie uma nova.",
+            (
+                f"✅ Busca criada com sucesso.\n\n"
+                f"Busca: {query}\n"
+                f"Filtros:\n{filters_text}\n\n"
+                f"{feedback_block}"
+                "Próximo passo: acompanhe suas buscas ou crie uma nova."
+            ),
             reply_markup=_post_creation_markup(),
         )
         return ConversationHandler.END
