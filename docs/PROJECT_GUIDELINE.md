@@ -138,3 +138,11 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Preço comunicado no upgrade: lançamento **R$ 5,99/mês** e preço futuro **R$ 9,99/mês**.
 - Billing integrado fica para PR separada; enquanto não estiver disponível, `/upgrade` deve apenas preparar o usuário para esse fluxo sem prometer link.
 - Fora de escopo desta tranche: gateway de pagamento, dashboard de billing, alteração de frequência de busca por plano.
+
+## 16) Roadmap de evolução incremental (schema e produto)
+- Validar registro de `admin_deploy_audits` e criar `/admin deploy history`.
+- Evoluir Autopilot v2.
+- Implementar filtros avançados usando campos ricos de `car_listings`.
+- Usar `fipe_prices` e `market_stats_cohorts` para score e preço justo.
+- Manter Facebook Marketplace/Auth como investigação futura.
+- Manter Leilões/Oportunidades especiais como futura expansão.
