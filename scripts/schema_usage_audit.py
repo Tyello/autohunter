@@ -2,13 +2,17 @@
 """Schema usage audit for AutoHunter.
 
 Scans SQLAlchemy models + Alembic migrations and builds a heuristic usage report.
+Optionally compares models against a real database schema.
 """
 from __future__ import annotations
 
+import argparse
 import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+
+from sqlalchemy import create_engine, text
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "app" / "models"
@@ -73,6 +77,23 @@ def parse_models(models_dir: Path = MODELS_DIR) -> list[TableInfo]:
     return tables
 
 
+def fetch_real_schema(database_url: str) -> dict[str, set[str]]:
+    engine = create_engine(database_url)
+    query = text(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        ORDER BY table_name, ordinal_position
+        """
+    )
+    schema: dict[str, set[str]] = {}
+    with engine.connect() as conn:
+        for table_name, column_name in conn.execute(query):
+            schema.setdefault(table_name, set()).add(column_name)
+    return schema
+
+
 def _iter_py_files(dirs: Iterable[Path]) -> Iterable[Path]:
     for d in dirs:
         if not d.exists():
@@ -104,29 +125,137 @@ def scan_usage(tables: list[TableInfo]) -> None:
         t.migration_mentions = mig_text.count(t.table_name)
 
         for f in files:
-            text = f.read_text(encoding="utf-8", errors="ignore")
-            t.table_usage_hits += text.count(t.table_name)
+            text_body = f.read_text(encoding="utf-8", errors="ignore")
+            t.table_usage_hits += text_body.count(t.table_name)
             for c in t.columns.values():
-                n = text.count(c.name)
+                n = text_body.count(c.name)
                 if n <= 0:
                     continue
                 c.usage_count += n
                 low = str(f).lower()
                 if any(k in low for k in ["admin", "health", "autopilot", "system_log"]):
                     c.ops_hits += n
-                if any(k in text for k in [f".{c.name}", f"filter(", "where(", "order_by(", "join("]):
+                if any(k in text_body for k in [f".{c.name}", "filter(", "where(", "order_by(", "join("]):
                     c.read_hits += 1
-                if any(k in text for k in [f"{c.name}=", "values(", "update(", "insert("]):
+                if any(k in text_body for k in [f"{c.name}=", "values(", "update(", "insert("]):
                     c.write_hits += 1
-                if any(k in text for k in ["UniqueConstraint", "Index(", "index=True", "ForeignKey", "primary_key=True"]):
+                if any(k in text_body for k in ["UniqueConstraint", "Index(", "index=True", "ForeignKey", "primary_key=True"]):
                     c.index_hits += 1
 
 
-def build_markdown(tables: list[TableInfo]) -> str:
+def build_markdown(tables: list[TableInfo], real_schema: dict[str, set[str]] | None = None) -> str:
     lines = ["# Schema Usage Audit", "", "Relatório gerado automaticamente por `scripts/schema_usage_audit.py`.", ""]
     lines.append("## Inventário")
     lines.append(f"- Models SQLAlchemy analisados: **{len(tables)}**")
     lines.append(f"- Migrations Alembic analisadas: **{len(list(MIGRATIONS_DIR.glob('*.py')))}**")
+    if real_schema is not None:
+        lines.append(f"- Tabelas reais no banco (information_schema): **{len(real_schema)}**")
+    lines.append("")
+
+    lines.append("## Inventário do banco real")
+    lines.append("")
+    lines.append("Tabelas reais validadas no PostgreSQL de produção:")
+    lines.append("")
+    validated_real_tables = [
+        "account_members",
+        "accounts",
+        "admin_deploy_audits",
+        "alembic_version",
+        "app_kv",
+        "autopilot_findings",
+        "car_listings",
+        "fb_agent_sessions",
+        "fb_sessions",
+        "fipe_prices",
+        "market_stats_cohorts",
+        "notifications",
+        "plans",
+        "scrape_jobs",
+        "source_configs",
+        "source_runs",
+        "source_states",
+        "source_url_cursors",
+        "subscriptions",
+        "system_logs",
+        "telemetry_events",
+        "users",
+        "wishlist_filters",
+        "wishlist_listing_activity",
+        "wishlist_tokens",
+        "wishlist_tracked_listings",
+        "wishlists",
+    ]
+    for table_name in validated_real_tables:
+        lines.append(f"- `{table_name}`")
+    lines.append("")
+
+    if real_schema is not None:
+        model_map = {t.table_name: set(t.columns.keys()) for t in tables}
+        model_tables = set(model_map)
+        real_tables = set(real_schema)
+        lines.append("## Reconciliação model x banco real")
+        lines.append("### Tabelas reais no banco")
+        for name in sorted(real_tables):
+            lines.append(f"- `{name}`")
+        lines.append("")
+
+        lines.append("### Models sem tabela real")
+        for name in sorted(model_tables - real_tables):
+            lines.append(f"- `{name}`")
+        lines.append("")
+
+        lines.append("### Tabelas reais sem model")
+        for name in sorted(real_tables - model_tables):
+            lines.append(f"- `{name}`")
+        lines.append("")
+
+        lines.append("### Colunas reais sem model")
+        for table_name in sorted(model_tables & real_tables):
+            missing_in_model = sorted(real_schema[table_name] - model_map[table_name])
+            if missing_in_model:
+                lines.append(f"- `{table_name}`: {', '.join(f'`{c}`' for c in missing_in_model)}")
+        lines.append("")
+
+        lines.append("### Colunas de model ausentes no banco")
+        for table_name in sorted(model_tables & real_tables):
+            missing_in_db = sorted(model_map[table_name] - real_schema[table_name])
+            if missing_in_db:
+                lines.append(f"- `{table_name}`: {', '.join(f'`{c}`' for c in missing_in_db)}")
+        lines.append("")
+
+    lines.append("## Features futuras mantidas no roadmap")
+    lines.append("")
+    lines.append("- Facebook Marketplace/Auth:")
+    lines.append("  - `fb_sessions`")
+    lines.append("  - `fb_agent_sessions`")
+    lines.append("- FIPE e inteligência de preço:")
+    lines.append("  - `fipe_prices`")
+    lines.append("  - `market_stats_cohorts`")
+    lines.append("- Admin Deploy Audit:")
+    lines.append("  - `admin_deploy_audits`")
+    lines.append("- Autopilot:")
+    lines.append("  - `autopilot_findings`")
+    lines.append("- Leilões/oportunidades especiais:")
+    lines.append("  - `auction_events`")
+    lines.append("  - `auction_lots`")
+    lines.append("  - `auction_lot_service`")
+    lines.append("")
+
+    lines.append("## Não remover agora")
+    lines.append("")
+    lines.append("- Campos ricos de `car_listings` devem ser mantidos para filtros avançados.")
+    lines.append("- `fipe_prices` e `market_stats_cohorts` devem ser mantidos para inteligência de preço.")
+    lines.append("- `admin_deploy_audits` deve ser mantido porque o deploy via Telegram é usado diariamente.")
+    lines.append("- `autopilot_findings` deve ser mantido porque o Autopilot gera digest diário e será evoluído.")
+    lines.append("- `fb_sessions` e `fb_agent_sessions` devem ser mantidos como investigação futura, mas fora do piloto.")
+    lines.append("- `auction_*` deve ficar como roadmap futuro, não como runtime ativo.")
+    lines.append("")
+
+    lines.append("## Candidatos reais de saneamento imediato")
+    lines.append("")
+    lines.append("- Nenhum `DROP` recomendado nesta etapa.")
+    lines.append("- Classificar `auction_*` apenas como feature futura sem tabela real no banco atual.")
+    lines.append("- Sugerir PR futura para isolar/remover imports runtime de `auction_*` se estiverem no metadata principal e gerando confusão.")
     lines.append("")
 
     lines.append("## Uso por tabela/coluna")
@@ -142,29 +271,21 @@ def build_markdown(tables: list[TableInfo]) -> str:
             ev = f"hits={c.usage_count}; read={c.read_hits}; write={c.write_hits}; ops={c.ops_hits}; idx={c.index_hits}"
             lines.append(f"| `{c.name}` | `{cls}` | {ev} | {risk} |")
         lines.append("")
-
-    lines.append("## Candidatos priorizados (heurístico)")
-    candidates = []
-    for t in tables:
-        for c in t.columns.values():
-            cls = classify(c)
-            if cls in {"LEGACY_CANDIDATE", "WRITE_ONLY"}:
-                candidates.append((cls, t.table_name, c.name, c.usage_count))
-    for cls, table, col, hits in sorted(candidates, key=lambda x: (x[0], x[3]))[:120]:
-        lines.append(f"- `{table}.{col}` → **{cls}** (hits={hits})")
-
-    lines.append("\n## Próxima migration sugerida (NÃO aplicada nesta etapa)")
-    lines.append("1. Validar candidatos `LEGACY_CANDIDATE` em produção (queries reais/pg_stat_statements + logs).")
-    lines.append("2. Separar remoções por domínio (ops, tracking, listing, billing) em migrations pequenas.")
-    lines.append("3. Fazer rollout em 2 fases: remover leitura -> remover escrita -> drop coluna/tabela.")
-    lines.append("4. Criar migration com `DROP COLUMN/TABLE` apenas após janela de observabilidade sem uso.")
     return "\n".join(lines) + "\n"
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate schema usage audit report.")
+    parser.add_argument("--database-url", help="PostgreSQL URL for information_schema reconciliation.")
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     tables = parse_models()
     scan_usage(tables)
-    report = build_markdown(tables)
+    real_schema = fetch_real_schema(args.database_url) if args.database_url else None
+    report = build_markdown(tables, real_schema=real_schema)
     out = ROOT / "docs" / "SCHEMA_USAGE_AUDIT.md"
     out.write_text(report, encoding="utf-8")
     print(f"Audit report written to: {out}")
