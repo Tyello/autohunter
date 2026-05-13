@@ -73,7 +73,7 @@ def _friendly_wishlist_filters(filters: list[dict]) -> list[str]:
     if "year" in by_field:
         lo, hi = _format_year_safe(by_field["year"].get("gte") or ""), _format_year_safe(by_field["year"].get("lte") or "")
         if lo and hi:
-            labels.append(f"Ano entre {lo} e {hi}")
+            labels.append(f"Ano {lo}" if lo == hi else f"Ano entre {lo} e {hi}")
         elif lo:
             labels.append(f"Ano a partir de {lo}")
         elif hi:
@@ -225,10 +225,25 @@ def render_wishlist_filters(filters: Iterable, wishlist_query: str | None = None
         return f"{f.field} {f.operator} {f.value}"
 
     fs = list(filters)
+    year_gte = next((f for f in fs if f.field == "year" and f.operator == "gte"), None)
+    year_lte = next((f for f in fs if f.field == "year" and f.operator == "lte"), None)
+    skip_ids: set[int] = set()
+    friendly_lines: list[str] = []
+    if year_gte and year_lte:
+        try:
+            lo = int(year_gte.value)
+            hi = int(year_lte.value)
+            if lo == hi:
+                friendly_lines.append(f"Ano {lo}")
+                skip_ids.update({id(year_gte), id(year_lte)})
+        except Exception:
+            pass
+
     header = "Filtros da busca:"
     if wishlist_query:
         header += f"\n🔎 {wishlist_query}"
-    lines = [f"{i + 1}. {_fmt_filter(f)}" for i, f in enumerate(fs)]
+    entries = friendly_lines + [_fmt_filter(f) for f in fs if id(f) not in skip_ids]
+    lines = [f"{i + 1}. {line}" for i, line in enumerate(entries)]
     return f"{header}\n\n" + "\n".join(lines)
 
 

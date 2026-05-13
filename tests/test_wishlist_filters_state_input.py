@@ -56,6 +56,32 @@ def test_parse_query_price_range_implicit():
     assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("price", "gte", "70000"), ("price", "lte", "90000")]
 
 
+def test_parse_query_with_implicit_single_year_token():
+    parsed = parse_wishlist_query_with_implicit_filters("a4 avant 2019")
+    assert parsed.cleaned_query == "a4 avant"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("year", "gte", "2019"), ("year", "lte", "2019")]
+
+
+def test_parse_query_with_numeric_models_keeps_tokens_and_extracts_year():
+    parsed = parse_wishlist_query_with_implicit_filters("bmw 320i 2019")
+    assert parsed.cleaned_query == "bmw 320i"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("year", "gte", "2019"), ("year", "lte", "2019")]
+
+    parsed = parse_wishlist_query_with_implicit_filters("porsche 911 2021")
+    assert parsed.cleaned_query == "porsche 911"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("year", "gte", "2021"), ("year", "lte", "2021")]
+
+    parsed = parse_wishlist_query_with_implicit_filters("fiat 500 2017")
+    assert parsed.cleaned_query == "fiat 500"
+    assert [(f.field, f.operator, f.value) for f in parsed.filters] == [("year", "gte", "2017"), ("year", "lte", "2017")]
+
+
+def test_parse_query_pure_model_codes_do_not_become_year_filter():
+    assert parse_wishlist_query_with_implicit_filters("a4").filters == []
+    assert parse_wishlist_query_with_implicit_filters("320i").filters == []
+    assert parse_wishlist_query_with_implicit_filters("911").filters == []
+
+
 def test_normalize_price_between_canonical():
     normalized = normalize_wishlist_filter_input("price", "between", "70.000 90.000")
     assert normalized.value == "70000,90000"

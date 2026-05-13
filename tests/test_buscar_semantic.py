@@ -38,3 +38,10 @@ def test_listing_semantic_filter_does_not_match_token_ate():
     ]
     assert handlers._listing_matches_semantic_filters(listing_ok, filters)
     assert not handlers._listing_matches_semantic_filters(listing_bad, filters)
+
+
+def test_parse_implicit_year_token_at_end():
+    parsed = handlers.parse_wishlist_query_with_implicit_filters("a4 avant 2019")
+    assert parsed.cleaned_query == "a4 avant"
+    assert any(f.field == "year" and f.operator == "gte" and f.value == "2019" for f in parsed.filters)
+    assert any(f.field == "year" and f.operator == "lte" and f.value == "2019" for f in parsed.filters)

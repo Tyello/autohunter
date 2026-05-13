@@ -75,6 +75,16 @@ def test_create_flow_query_text_groups_mixed_implicit_filters():
     assert "Ano entre 2018 e 120000" not in text
 
 
+def test_create_flow_query_text_parses_implicit_single_year():
+    msg = _Message("a4 avant 2019")
+    ctx = types.SimpleNamespace(user_data={})
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
+    text = msg.sent[-1]["text"]
+    assert "Entendi sua busca:" in text
+    assert "Carro: a4 avant" in text
+    assert "Ano 2019" in text
+
+
 def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     _patch_user(monkeypatch)
     called = {}

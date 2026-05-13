@@ -48,7 +48,7 @@ def _build_draft_group_label(group: str, filters_payload: list[dict]) -> str:
     op_map = {f["operator"]: f["value"] for f in filters_payload}
     if group == "year":
         if "gte" in op_map and "lte" in op_map:
-            return f"Ano entre {op_map['gte']} e {op_map['lte']}"
+            return f"Ano {op_map['gte']}" if op_map["gte"] == op_map["lte"] else f"Ano entre {op_map['gte']} e {op_map['lte']}"
         if "gte" in op_map:
             return f"Ano a partir de {op_map['gte']}"
         if "lte" in op_map:
