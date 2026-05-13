@@ -1,4 +1,6 @@
 from app.bot.renderers import render_user_wishlists
+from types import SimpleNamespace
+from app.bot.renderers import render_wishlist_filters
 
 
 def test_render_user_wishlists_empty_keeps_guidance():
@@ -70,6 +72,27 @@ def test_render_user_wishlists_mixed_valid_invalid_filters_do_not_break():
     ])
     assert "Ano a partir de 2017" in text
     assert "Cidade: São Paulo" in text
+
+
+def test_render_user_wishlists_single_year_range_is_friendly():
+    text = render_user_wishlists([
+        {"index": 1, "query": "a4 avant", "filters": [
+            {"field": "year", "operator": "gte", "value": "2019"},
+            {"field": "year", "operator": "lte", "value": "2019"},
+        ], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
+    ])
+    assert "Ano 2019" in text
+    assert "Ano entre 2019 e 2019" not in text
+
+
+def test_render_wishlist_filters_single_year_range_is_friendly():
+    filters = [
+        SimpleNamespace(field="year", operator="gte", value="2019"),
+        SimpleNamespace(field="year", operator="lte", value="2019"),
+    ]
+    text = render_wishlist_filters(filters, wishlist_query="a4 avant")
+    assert "1. Ano 2019" in text
+    assert "Ano entre 2019 e 2019" not in text
 
 
 def test_render_user_wishlists_legacy_format_still_supported():

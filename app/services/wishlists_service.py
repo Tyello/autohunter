@@ -64,6 +64,7 @@ _YEAR_RANGE_PATTERNS = [
     re.compile(r"\b(\d{4})\s*(?:\bate\b|\baté\b)\s*(\d{4})\b", re.IGNORECASE),
     re.compile(r"\b(\d{4})\s*(?:-|–|—)\s*(\d{4})\b", re.IGNORECASE),
 ]
+_YEAR_STANDALONE_PATTERN = re.compile(r"(?:\bano\s+)?(\d{4})\b$", re.IGNORECASE)
 
 
 # Aceita diretivas de preço (BRL) embutidas na query:
@@ -274,6 +275,18 @@ def _extract_year_directives(query: str) -> Tuple[str, Optional[int], Optional[i
                 year_min = y
                 q = _clean_span(q, m.start(), m.end())
                 break
+
+    if year_min is None and year_max is None:
+        m = _YEAR_STANDALONE_PATTERN.search(q)
+        if m:
+            try:
+                y = int(m.group(1))
+            except Exception:
+                y = None
+            if y and 1900 <= y <= 2100:
+                year_min = y
+                year_max = y
+                q = _clean_span(q, m.start(), m.end())
 
     return q, year_min, year_max
 
