@@ -12,10 +12,21 @@ from app.core.settings import settings
 from app.models.source_run import SourceRun
 from app.models.system_log import SystemLog
 from app.models.autopilot_finding import AutopilotFinding
+from app.models.scrape_job import ScrapeJob
+from app.models.notification import Notification
+from app.services.scrape_jobs_service import has_active_source_queue_partial_index
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _sha1(s: str) -> str:
@@ -395,6 +406,36 @@ def _candidate_system_log_errors(db: Session, now: datetime) -> List[FindingCand
     return out
 
 
+def _candidate_operational(db: Session, now: datetime) -> List[FindingCandidate]:
+    out: List[FindingCandidate] = []
+    queued_threshold = int(getattr(settings, "autopilot_scrape_jobs_queued_threshold", 100) or 100)
+    running_old_minutes = int(getattr(settings, "autopilot_scrape_jobs_running_old_minutes", 20) or 20)
+    sender_idle_minutes = int(getattr(settings, "autopilot_sender_idle_minutes", 60) or 60)
+    cutoff_running = now - timedelta(minutes=running_old_minutes)
+    running_old = db.query(func.count(ScrapeJob.id)).filter(ScrapeJob.status == "running", ScrapeJob.started_at.isnot(None), ScrapeJob.started_at < cutoff_running).scalar() or 0
+    queued = db.query(func.count(ScrapeJob.id)).filter(ScrapeJob.status == "queued").scalar() or 0
+    if int(queued) >= queued_threshold or int(running_old) > 0:
+        out.append(FindingCandidate(kind="scrape_jobs_stuck", source=None, fingerprint=_sha1("scrape_jobs_stuck_global"), title=f"Fila scrape_jobs degradada (queued={int(queued)}, running_old={int(running_old)})", severity="error" if int(running_old) > 0 else "warn", evidence={"queued": int(queued), "running_old": int(running_old), "thresholds": {"queued": queued_threshold, "running_old_minutes": running_old_minutes}}, suggested_actions="Ações sugeridas: validar workers/scheduler e requeue de jobs running antigos."))
+
+    hb = db.query(SystemLog).filter(SystemLog.component == "scheduler", SystemLog.message == "heartbeat").order_by(SystemLog.created_at.desc()).first()
+    hb_at = _as_utc(hb.created_at) if hb else None
+    source_runs_window_m = int(getattr(settings, "autopilot_source_runs_zero_window_minutes", 30) or 30)
+    sr_cut = now - timedelta(minutes=source_runs_window_m)
+    runs_recent = db.query(func.count(SourceRun.id)).filter(SourceRun.created_at >= sr_cut).scalar() or 0
+    if hb_at and hb_at >= sr_cut and int(runs_recent) == 0:
+        out.append(FindingCandidate(kind="scheduler_heartbeat_without_runs", source=None, fingerprint=_sha1("scheduler_heartbeat_without_runs"), title="Scheduler heartbeat ativo, mas source_runs zerado na janela", severity="error", evidence={"heartbeat_at": hb_at.isoformat(), "window_minutes": source_runs_window_m, "source_runs_count": int(runs_recent)}, suggested_actions="Ações sugeridas: revisar scheduler tick/enqueue e conectividade do worker com o banco."))
+
+    sent_cut = now - timedelta(minutes=sender_idle_minutes)
+    sent_recent = db.query(func.count(Notification.id)).filter(Notification.sent_at.isnot(None), Notification.sent_at >= sent_cut).scalar() or 0
+    queued_old = db.query(func.count(Notification.id)).filter(Notification.status == "queued", Notification.created_at < sent_cut).scalar() or 0
+    if int(sent_recent) == 0 and int(queued_old) > 0:
+        out.append(FindingCandidate(kind="sender_idle_with_backlog", source=None, fingerprint=_sha1("sender_idle_with_backlog"), title=f"Sender sem envios na janela e backlog antigo (queued_old={int(queued_old)})", severity="warn", evidence={"sender_idle_minutes": sender_idle_minutes, "sent_recent": int(sent_recent), "queued_old": int(queued_old)}, suggested_actions="Ações sugeridas: validar sender_job, token Telegram e fila notifications."))
+
+    if not has_active_source_queue_partial_index(db):
+        out.append(FindingCandidate(kind="scrape_jobs_missing_critical_index", source=None, fingerprint=_sha1("scrape_jobs_missing_critical_index"), title="Índice crítico de dedupe em scrape_jobs ausente", severity="error", evidence={"index_check": "active_source_queue_partial_index", "ok": False}, suggested_actions="Ações sugeridas: aplicar migration/DDL do índice parcial para evitar duplicação e lock contention."))
+    return out
+
+
 def build_candidates(db: Session, now: Optional[datetime] = None) -> List[FindingCandidate]:
     now = now or _utcnow()
     cands: List[FindingCandidate] = []
@@ -402,6 +443,7 @@ def build_candidates(db: Session, now: Optional[datetime] = None) -> List[Findin
     cands.extend(_candidate_error_burst(db, now))
     cands.extend(_candidate_found_drop(db, now))
     cands.extend(_candidate_system_log_errors(db, now))
+    cands.extend(_candidate_operational(db, now))
     return cands
 
 
@@ -487,15 +529,19 @@ def format_alert(row: AutopilotFinding) -> str:
 
 def format_daily_digest(rows: List[AutopilotFinding]) -> str:
     if not rows:
-        return "✅ Autopilot — sem novos achados relevantes nas últimas 24h"
+        return "✅ Autopilot operacional — sem novos problemas relevantes"
 
     lines = ["🧠 Autopilot — digest (últimas 24h)"]
-    # prioritize error > warn
-    def _key(r: AutopilotFinding):
-        sev = 2 if r.severity == "error" else (1 if r.severity == "warn" else 0)
-        return (-sev, -(r.hit_count or 0), r.kind or "")
-    for r in sorted(rows, key=_key)[:10]:
-        src = r.source or "-"
-        icon = "🔴" if r.severity == "error" else "🟡"
-        lines.append(f"- {icon} {src} {r.kind}: {r.title} (hits={r.hit_count})")
+    grouped: dict[tuple[str, str], list[AutopilotFinding]] = {}
+    for r in rows:
+        grouped.setdefault((r.severity or "warn", r.kind or "unknown"), []).append(r)
+    for sev in ("error", "warn", "info"):
+        sev_groups = [(k, v) for k, v in grouped.items() if k[0] == sev]
+        if not sev_groups:
+            continue
+        lines.append(f"{'🔴' if sev=='error' else ('🟡' if sev=='warn' else '🔵')} severity={sev}")
+        for (_sev, kind), items in sorted(sev_groups, key=lambda x: (-len(x[1]), x[0][1])):
+            total_hits = sum(int(i.hit_count or 0) for i in items)
+            first = sorted(items, key=lambda x: int(x.hit_count or 0), reverse=True)[0]
+            lines.append(f"- {kind}: casos={len(items)} hits={total_hits} | ação: {first.suggested_actions or '-'}")
     return "\n".join(lines)

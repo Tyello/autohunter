@@ -81,6 +81,7 @@ async def admin_deploy(update, args: list[str], *, fmt_dt):
             out = service.deploy_status()
             last = out.get("last")
             current = out.get("current")
+            last_failed = out.get("last_failed")
             if not last:
                 await update.message.reply_text("Deploy status: idle\nÚltimo deploy (UTC): -")
                 return
@@ -100,6 +101,16 @@ async def admin_deploy(update, args: list[str], *, fmt_dt):
                 f"Duração: {duration}",
                 f"Resumo: {last.summary or '-'}",
             ]
+            if last_failed:
+                lines.extend([
+                    "Última falha:",
+                    f"- when: {fmt_dt(last_failed.finished_at or last_failed.started_at or last_failed.requested_at)}",
+                    f"- status: {last_failed.status}",
+                    f"- branch: {last_failed.branch or '-'}",
+                    f"- before: {last_failed.before_commit or '-'}",
+                    f"- after: {last_failed.after_commit or '-'}",
+                    f"- error: {(last_failed.error_type or '-')}: {(last_failed.error_message or '-')[:160]}",
+                ])
             if current:
                 lines.extend([
                     "Operação em andamento:",
@@ -109,4 +120,36 @@ async def admin_deploy(update, args: list[str], *, fmt_dt):
             await update.message.reply_text("\n".join(lines))
             return
 
-        await update.message.reply_text("Use: /admin deploy | /admin deploy confirm <operation_id> | /admin deploy status")
+        if sub == "history":
+            raw_limit = (args[1] if len(args) > 1 else "5").strip()
+            try:
+                limit = int(raw_limit)
+            except Exception:
+                limit = 5
+            rows = service.deploy_history(limit=limit)
+            if not rows:
+                await update.message.reply_text("Sem histórico de deploy.")
+                return
+            lines = [f"Deploy history (últimos {len(rows)}):"]
+            for d in rows:
+                started = d.started_at or d.requested_at
+                finished = d.finished_at or d.started_at
+                duration = "-"
+                if d.started_at and d.finished_at:
+                    duration = f"{int((d.finished_at - d.started_at).total_seconds())}s"
+                services = "-"
+                if isinstance(d.services_json, dict):
+                    services = ", ".join(sorted([str(k) for k in d.services_json.keys()])) or "-"
+                elif isinstance(d.services_json, list):
+                    services = ", ".join([str(x) for x in d.services_json]) or "-"
+                short_summary = (d.summary or d.error_message or "-").split("\n", 1)[0][:120]
+                lines.extend([
+                    f"- {fmt_dt(finished or started)} | {d.status} | {d.branch or '-'}",
+                    f"  {d.before_commit or '-'} → {d.after_commit or '-'} | duração={duration}",
+                    f"  serviços={services}",
+                    f"  resumo={short_summary}",
+                ])
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        await update.message.reply_text("Use: /admin deploy | /admin deploy confirm <operation_id> | /admin deploy status | /admin deploy history [5|10]")

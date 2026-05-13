@@ -393,9 +393,26 @@ class AdminDeployService:
             else:
                 normalized_status = "failed"
 
+        last_failed = (
+            self.db.query(AdminDeployAudit)
+            .filter(AdminDeployAudit.status == "failed")
+            .order_by(AdminDeployAudit.finished_at.desc(), AdminDeployAudit.requested_at.desc())
+            .first()
+        )
+
         return {
             "running": self._lock.locked(),
             "status": normalized_status,
             "last": last,
             "current": running,
+            "last_failed": last_failed,
         }
+
+    def deploy_history(self, limit: int = 5) -> list[AdminDeployAudit]:
+        lim = max(1, min(int(limit or 5), 20))
+        return (
+            self.db.query(AdminDeployAudit)
+            .order_by(AdminDeployAudit.requested_at.desc())
+            .limit(lim)
+            .all()
+        )
