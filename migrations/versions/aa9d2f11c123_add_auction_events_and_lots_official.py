@@ -35,8 +35,8 @@ def upgrade() -> None:
         sa.Column('vehicle_lots', sa.Integer(), nullable=True),
         sa.Column('extras', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column('raw_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index('uq_auction_events_source_external_id', 'auction_events', ['source', 'external_id'], unique=True)
     op.create_index('ix_auction_events_source_status', 'auction_events', ['source', 'status'])
@@ -64,8 +64,8 @@ def upgrade() -> None:
         sa.Column('has_documentation', sa.Boolean(), nullable=True), sa.Column('has_debts', sa.Boolean(), nullable=True),
         sa.Column('image_count', sa.Integer(), nullable=True), sa.Column('images', postgresql.ARRAY(sa.Text()), nullable=True),
         sa.Column('extras', postgresql.JSONB(astext_type=sa.Text()), nullable=True), sa.Column('raw_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column('first_seen_at', sa.DateTime(timezone=True), nullable=False), sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False), sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('first_seen_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()), sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()), sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index('uq_auction_lots_source_external_id', 'auction_lots', ['source', 'external_id'], unique=True)
     op.create_index('ix_auction_lots_source_status', 'auction_lots', ['source', 'status'])
