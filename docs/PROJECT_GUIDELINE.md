@@ -148,8 +148,8 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Manter Leilões/Oportunidades especiais como futura expansão.
 
 ## 17) POC de leilões (fase atual)
-- Source experimental **Copart Brasil** em andamento com chave `copart_auctions` para coleta pública conservadora.
+- Source experimental **Copart Brasil** com chave `copart_auctions` retorna HTTP 200, porém sem cards públicos estáticos no `vehicleFinder`; status operacional: `needs_js_or_endpoint_study` (reason técnica atual: `requires_js_or_internal_endpoint`).
+- Source experimental **VIP Leilões** ativa na POC com chave `vip_auctions`, focada em coleta pública por HTML estático.
 - Escopo atual restrito a coleta/normalização/persistência em `auction_lots`; sem notificação para usuário final.
 - Matching com wishlists permanece fora de escopo nesta fase.
-- VIP Leilões fica como próxima source candidata após validação técnica da Copart.
-- Se o `vehicleFinder` depender exclusivamente de JS/endpoints internos não públicos para cards reais, tratar como limitação técnica explícita (`requires_js_or_internal_endpoint`) e registrar decisão operacional antes de avançar.
+- Sem login e sem bypass anti-bot nesta etapa; evolução para browser automation fica para fase posterior, se necessária.

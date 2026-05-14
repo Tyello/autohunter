@@ -3,13 +3,20 @@ from __future__ import annotations
 import logging
 import re
 import time
-from decimal import Decimal
 from typing import Iterable
 from urllib.parse import urlparse
 
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
+from app.sources.auctions.parsing import (
+    extract_state_from_location,
+    normalize_item_type,
+    normalize_status,
+    parse_int_br,
+    parse_money_br,
+    parse_year_from_title,
+)
 
 SOURCE_KEY = "copart_auctions"
 ALLOWED_DOMAINS = {"copart.com.br", "www.copart.com.br"}
@@ -28,59 +35,6 @@ def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> boo
     hostname = (parsed.hostname or "").lower()
     return hostname in {d.lower() for d in allowed_domains}
 
-
-def parse_money_br(value: str | None) -> Decimal | None:
-    if not value:
-        return None
-    cleaned = re.sub(r"[^\d,.-]", "", value)
-    if not cleaned:
-        return None
-    normalized = cleaned.replace(".", "").replace(",", ".")
-    try:
-        return Decimal(normalized)
-    except Exception:
-        return None
-
-
-def parse_int_br(value: str | None) -> int | None:
-    if not value:
-        return None
-    digits = re.sub(r"\D", "", value)
-    return int(digits) if digits else None
-
-
-def parse_year_from_title(title: str | None) -> int | None:
-    if not title:
-        return None
-    m = re.search(r"\b(19\d{2}|20\d{2})\b", title)
-    return int(m.group(1)) if m else None
-
-
-def normalize_item_type(category_text: str | None) -> str:
-    text = (category_text or "").lower()
-    if "moto" in text:
-        return "motorcycle"
-    if "autom" in text or "car" in text:
-        return "car"
-    return "other"
-
-
-def normalize_status(text: str | None) -> str:
-    val = (text or "").lower()
-    if "compre agora" in val:
-        return "buy_now"
-    if "leil" in val or "auction" in val:
-        return "auction"
-    if "vend" in val or "sold" in val:
-        return "sold"
-    return "unknown"
-
-
-def extract_state_from_location(text: str | None) -> str | None:
-    if not text:
-        return None
-    m = re.search(r"\b([A-Z]{2})\b", text.upper())
-    return m.group(1) if m else None
 
 
 def _extract_static_cards(html: str, limit: int) -> list[NormalizedAuctionLot]:
