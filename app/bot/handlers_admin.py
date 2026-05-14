@@ -54,6 +54,7 @@ from app.bot.admin_handlers_sources import (
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot
+from app.services.auction_ingestion_service import run_auction_ingestion
 
 
 @dataclass
@@ -176,6 +177,44 @@ def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
         return 0
     return int((dt - now).total_seconds() // 60)
 
+
+
+_ADMIN_AUCTION_RUN_LOCK = asyncio.Lock()
+
+
+def _resolve_auction_source_alias(raw_source: str) -> str | None:
+    alias = {"vip": "vip_auctions", "vip_auctions": "vip_auctions"}
+    return alias.get((raw_source or "").lower())
+
+
+def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
+    if len(args) < 2:
+        return None, None, False, "Use: /admin auctions run <source> [--limit N] [--enrich]"
+    source = _resolve_auction_source_alias(args[1])
+    if not source:
+        return None, None, False, "Source de leilão não suportada. Use: vip"
+    limit = 10
+    enrich = False
+    idx = 2
+    while idx < len(args):
+        token = args[idx].lower()
+        if token == "--enrich":
+            enrich = True
+            idx += 1
+            continue
+        if token == "--limit":
+            if idx + 1 >= len(args):
+                return None, None, False, "Limite inválido. Use: --limit <1-30>."
+            try:
+                limit = int(args[idx + 1])
+            except ValueError:
+                return None, None, False, "Limite inválido. Use: --limit <1-30>."
+            idx += 2
+            continue
+        return None, None, False, f"Argumento inválido: {args[idx]}"
+    if limit < 1 or limit > 30:
+        return None, None, False, "Limite inválido. Use: --limit <1-30>."
+    return source, limit, enrich, None
 
 def _classify_error(source: str, err: str | None, http_status: Optional[int]) -> tuple[str, str, str]:
     """
@@ -336,6 +375,68 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
+        if sub == "run":
+            source, limit, enrich_details, err = _parse_auction_run_args(args)
+            if err:
+                await update.message.reply_text(err)
+                return
+            if _ADMIN_AUCTION_RUN_LOCK.locked():
+                await update.message.reply_text("Já existe uma execução de leilões em andamento. Aguarde finalizar.")
+                return
+
+            await update.message.reply_text(f"⏳ Rodando leilões VIP com limit={limit} enrich={'true' if enrich_details else 'false'}...")
+            logger.info(
+                "admin_auction_run_started",
+                extra={"source": source, "limit": limit, "enrich_details": enrich_details, "chat_id": update.effective_chat.id},
+            )
+            try:
+                async with _ADMIN_AUCTION_RUN_LOCK:
+                    summary = await asyncio.to_thread(
+                        run_auction_ingestion,
+                        source=source,
+                        limit=limit,
+                        enrich_details=enrich_details,
+                    )
+            except Exception:
+                logger.exception(
+                    "admin_auction_run_failed",
+                    extra={"source": source, "limit": limit, "enrich_details": enrich_details, "chat_id": update.effective_chat.id},
+                )
+                await update.message.reply_text("Falha ao rodar ingestão de leilões. Verifique logs.")
+                return
+
+            logger.info(
+                "admin_auction_run_finished",
+                extra={
+                    "source": source,
+                    "limit": limit,
+                    "enrich_details": enrich_details,
+                    "chat_id": update.effective_chat.id,
+                    "fetched": summary.get("fetched", 0),
+                    "inserted": summary.get("inserted", 0),
+                    "updated": summary.get("updated", 0),
+                    "errors": summary.get("errors", 0),
+                },
+            )
+            lines = [
+                f"⚠️ Admin Leilões — run {summary.get('source', source)}",
+                "",
+                f"limit: {limit}",
+                f"enrich: {'sim' if enrich_details else 'não'}",
+                "",
+                "Resultado:",
+                f"- encontrados: {summary.get('fetched', 0)}",
+                f"- inseridos: {summary.get('inserted', 0)}",
+                f"- atualizados: {summary.get('updated', 0)}",
+                f"- ignorados: {summary.get('skipped', 0)}",
+                f"- erros: {summary.get('errors', 0)}",
+            ]
+            if (summary.get("fetched", 0) == 0) and summary.get("reason"):
+                lines.extend(["", f"Motivo: {summary.get('reason')}"])
+            lines.extend(["", "Próximo passo:", "/admin auctions source vip"])
+            await update.message.reply_text("\n".join(lines))
+            return
+
         if sub == "motos":
             lots = db.query(AuctionLot).filter(AuctionLot.item_type == "motorcycle").order_by(AuctionLot.updated_at.desc()).limit(10).all()
             if not lots:
@@ -348,7 +449,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
-    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions upcoming | /admin auctions motos")
+    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos")
 
 
 async def _admin_premium(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_args: List[str]):

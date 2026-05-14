@@ -15,30 +15,13 @@ def test_run_dry_run_does_not_import_db_modules(monkeypatch):
 
 
 def test_run_persistent_calls_upsert(monkeypatch):
-    lots = [NormalizedAuctionLot(source="vip_auctions", external_id="1")]
-    monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", lambda limit, enrich=False: lots)
-
     calls = {"n": 0}
 
-    def fake_upsert(db, payload):
+    def fake_run_ingestion(**kwargs):
         calls["n"] += 1
-        return object(), True
+        return {"source": "vip_auctions", "fetched": 1, "inserted": 1, "updated": 0, "skipped": 0, "errors": 0, "reason": None}
 
-    class FakeSession:
-        def commit(self):
-            return None
-
-        def rollback(self):
-            return None
-
-        def close(self):
-            return None
-
-    fake_db_module = types.SimpleNamespace(SessionLocal=lambda: FakeSession())
-    fake_service_module = types.SimpleNamespace(upsert_lot=fake_upsert)
-    monkeypatch.setitem(sys.modules, "app.db.session", fake_db_module)
-    monkeypatch.setitem(sys.modules, "app.services.auction_lot_service", fake_service_module)
-
+    monkeypatch.setattr("scripts.run_auction_source.run_auction_ingestion", fake_run_ingestion)
     run(source="vip_auctions", limit=1, dry_run=False)
     assert calls["n"] == 1
 
