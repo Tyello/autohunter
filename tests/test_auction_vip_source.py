@@ -107,3 +107,47 @@ def test_extract_total_bids_discards_invalid_large_values():
 
 def test_normalize_status_maps_dou_lhe_duas_to_live():
     assert vip._normalize_status_vip("Dou-lhe duas") == "live"
+
+
+FIXTURE_DETAIL_BIDS = Path("tests/fixtures/auctions/vip_detail_with_bids.html")
+FIXTURE_DETAIL_MIN = Path("tests/fixtures/auctions/vip_detail_minimal.html")
+
+
+def test_parse_detail_with_bids_and_dates_location_image():
+    html = FIXTURE_DETAIL_BIDS.read_text(encoding="utf-8")
+    detail = vip.parse_vip_lot_detail_html(html, base_url="https://www.vipleiloes.com.br/evento/anuncio/x")
+    assert float(detail["initial_bid"]) == 5000.0
+    assert float(detail["current_bid"]) == 8200.0
+    assert detail["auction_end_at"] is not None
+    assert detail["city"] == "Curitiba"
+    assert detail["state"] == "PR"
+    assert detail["thumbnail_url"].endswith("/images/lote1.jpg")
+    assert detail["lot_number"] == "444"
+
+
+def test_parse_detail_minimal_does_not_break():
+    html = FIXTURE_DETAIL_MIN.read_text(encoding="utf-8")
+    detail = vip.parse_vip_lot_detail_html(html)
+    assert isinstance(detail, dict)
+
+
+def test_detail_rejects_non_allowlisted_domain():
+    try:
+        vip.fetch_vip_lot_detail("https://evil.com/lot")
+    except ValueError as exc:
+        assert "invalid_detail_url" in str(exc)
+    else:
+        assert False
+
+
+def test_enrich_failure_keeps_base_and_adds_warning(monkeypatch):
+    lot = vip.NormalizedAuctionLot(source="vip_auctions", external_id="1", title="Base", url="https://www.vipleiloes.com.br/evento/anuncio/1")
+
+    def boom(url, timeout=15.0):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(vip, "fetch_vip_lot_detail", boom)
+    out = vip.enrich_vip_lot_detail(lot)
+    assert out.title == "Base"
+    assert "parser_warnings" in out.extras
+
