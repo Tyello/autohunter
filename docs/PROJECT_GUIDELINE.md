@@ -146,3 +146,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Usar `fipe_prices` e `market_stats_cohorts` para score e preço justo.
 - Manter Facebook Marketplace/Auth como investigação futura.
 - Manter Leilões/Oportunidades especiais como futura expansão.
+
+## 17) POC de leilões (fase atual)
+- Source experimental **Copart Brasil** em andamento com chave `copart_auctions` para coleta pública conservadora.
+- Escopo atual restrito a coleta/normalização/persistência em `auction_lots`; sem notificação para usuário final.
+- Matching com wishlists permanece fora de escopo nesta fase.
+- VIP Leilões fica como próxima source candidata após validação técnica da Copart.
+- Se o `vehicleFinder` depender exclusivamente de JS/endpoints internos não públicos para cards reais, tratar como limitação técnica explícita (`requires_js_or_internal_endpoint`) e registrar decisão operacional antes de avançar.

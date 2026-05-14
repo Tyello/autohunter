@@ -1,0 +1,1 @@
+"""Auction source implementations."""
