@@ -10,17 +10,25 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.sources.auctions.copart import SOURCE_KEY, fetch_copart_lots, get_last_reason
+from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
+from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
 
 logging.basicConfig(level=logging.INFO)
 
+SUPPORTED_SOURCES = {"copart_auctions", "vip_auctions"}
+
+
+def _fetch_source(source: str, limit: int):
+    if source == "copart_auctions":
+        return fetch_copart_lots(limit=limit), copart_reason()
+    if source == "vip_auctions":
+        return fetch_vip_lots(limit=limit), vip_reason()
+    raise ValueError(f"Unsupported source: {source}. Available: {', '.join(sorted(SUPPORTED_SOURCES))}")
+
 
 def run(source: str, limit: int, dry_run: bool) -> int:
-    if source != SOURCE_KEY:
-        raise ValueError(f"Unsupported source: {source}. Available: {SOURCE_KEY}")
-
-    lots = fetch_copart_lots(limit=limit)
-    summary = {"source": source, "fetched": len(lots), "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": get_last_reason() if not lots else None}
+    lots, reason = _fetch_source(source=source, limit=limit)
+    summary = {"source": source, "fetched": len(lots), "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": reason if not lots else None}
 
     if dry_run:
         for lot in lots:
