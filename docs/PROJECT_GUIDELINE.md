@@ -155,6 +155,8 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Campos já observados persistidos na POC VIP: `external_id` estável, `title`, `make`, `item_type`, `status`, `year`, `mileage_km`, `url`; `total_bids` permanece `None` quando não há campo explícito.
 - Escopo atual restrito a coleta/normalização/persistência em `auction_lots`; sem notificação para usuário final.
 - Próxima camada de preview operacional: comandos admin `/admin auctions` (somente leitura), ainda sem exposição para usuário final.
+- Execução manual admin-only via Telegram habilitada na POC: `/admin auctions run vip --limit 10 --enrich` (alias `vip` -> `vip_auctions`), sem scheduler nesta ação pontual.
+- Fora de escopo nesta tranche: usuário final, matching com wishlists, scheduler de leilões e notificações.
 - Próximo passo futuro (fora desta tranche): enriquecer detalhes por página de lote para capturar lance inicial/atual, local e datas de leilão.
 - Matching com wishlists permanece fora de escopo nesta fase.
 - Sem login e sem bypass anti-bot nesta etapa; evolução para browser automation fica para fase posterior, se necessária.

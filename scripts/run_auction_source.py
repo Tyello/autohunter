@@ -10,13 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.services.auction_ingestion_service import SUPPORTED_SOURCES, run_auction_ingestion
 from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
 from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
 
 logging.basicConfig(level=logging.INFO)
-
-SUPPORTED_SOURCES = {"copart_auctions", "vip_auctions"}
-
 
 def _fetch_source(source: str, limit: int, enrich_details: bool = False):
     if source == "copart_auctions":
@@ -27,34 +25,16 @@ def _fetch_source(source: str, limit: int, enrich_details: bool = False):
 
 
 def run(source: str, limit: int, dry_run: bool, enrich_details: bool = False) -> int:
-    lots, reason = _fetch_source(source=source, limit=limit, enrich_details=enrich_details)
-    summary = {"source": source, "fetched": len(lots), "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": reason if not lots else None}
-
     if dry_run:
+        lots, reason = _fetch_source(source=source, limit=limit, enrich_details=enrich_details)
+        summary = {"source": source, "fetched": len(lots), "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": reason if not lots else None}
         for lot in lots:
             print(json.dumps(lot.to_payload(), default=str, ensure_ascii=False))
         print(json.dumps(summary, ensure_ascii=False))
         return 0
 
-    from app.db.session import SessionLocal
-    from app.services.auction_lot_service import upsert_lot
-
-    db = SessionLocal()
-    try:
-        for lot in lots:
-            _, created = upsert_lot(db, lot.to_payload())
-            if created:
-                summary["inserted"] += 1
-            else:
-                summary["updated"] += 1
-        db.commit()
-    except Exception:
-        db.rollback()
-        summary["errors"] += 1
-        raise
-    finally:
-        db.close()
-        print(json.dumps(summary, ensure_ascii=False))
+    summary = run_auction_ingestion(source=source, limit=limit, enrich_details=enrich_details)
+    print(json.dumps(summary, ensure_ascii=False))
     return 0
 
 

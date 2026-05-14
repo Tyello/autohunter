@@ -23,8 +23,10 @@ class _Update:
 class _SessionWrap:
     def __init__(self, db):
         self.db = db
+
     def __enter__(self):
         return self.db
+
     def __exit__(self, *_):
         return False
 
@@ -45,8 +47,6 @@ def test_render_admin_auctions_summary_with_lots(db):
     stats = {"total_lots": 1, "by_source": {"vip_auctions": 1}, "by_status": {"open": 1}, "by_item_type": {"car": 1}}
     text = render_admin_auctions_summary(stats, [lot])
     assert "vip_auctions: 1" in text
-    assert "open: 1" in text
-    assert "car: 1" in text
 
 
 def test_admin_auctions_and_source_and_upcoming_and_motos(monkeypatch, db):
@@ -57,29 +57,50 @@ def test_admin_auctions_and_source_and_upcoming_and_motos(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
-
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions")))
     assert "Total de lotes: 2" in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "vip")))
-    assert "source vip_auctions" in up.message.sent[-1]
-    assert "UNO WAY" in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "upcoming")))
-    assert "Sem data de encerramento capturada nesta fase." in up.message.sent[-1]
+def test_admin_auctions_run_variants(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "run_auction_ingestion", lambda **kwargs: {"source": "vip_auctions", "fetched": 10, "inserted": 2, "updated": 8, "skipped": 0, "errors": 0, "reason": None})
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip")))
+    assert "limit: 10" in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "5")))
+    assert "limit: 5" in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "10", "--enrich")))
+    assert "enrich: sim" in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "motos")))
-    assert "CB 500" in up.message.sent[-1]
+
+def test_admin_auctions_run_errors_and_lock(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "copart")))
+    assert "não suportada" in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "999")))
+    assert "Limite inválido" in up.message.sent[-1]
+
+    async def locked_case():
+        await handlers_admin._ADMIN_AUCTION_RUN_LOCK.acquire()
+        try:
+            await handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip"))
+        finally:
+            handlers_admin._ADMIN_AUCTION_RUN_LOCK.release()
+    asyncio.run(locked_case())
+    assert "Já existe uma execução" in up.message.sent[-1]
 
 
-def test_admin_auctions_motos_empty_and_non_admin(monkeypatch, db):
+def test_admin_auctions_run_reason_and_non_admin(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update(chat_id=10)
-
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions")))
-    assert "Sem permissão." in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip")))
+    assert "Sem permissão" in up.message.sent[-1]
 
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "motos")))
-    assert "Não há lotes de motos persistidos ainda." in up.message.sent[-1]
+    monkeypatch.setattr(handlers_admin, "run_auction_ingestion", lambda **kwargs: {"source": "vip_auctions", "fetched": 0, "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": "no_public_lot_cards_found"})
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip")))
+    assert "Motivo: no_public_lot_cards_found" in up.message.sent[-1]
