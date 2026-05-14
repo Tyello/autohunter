@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timezone
 import re
 from typing import Iterable
 
@@ -259,6 +260,111 @@ def render_help_text() -> str:
         "• /upgrade — ver detalhes do Premium\n\n"
         "Dica: se quiser comandos avançados/legados, use /wishlist_help."
     )
+
+
+def _fmt_money_br(value) -> str | None:
+    if value is None:
+        return None
+    try:
+        return f"R$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return None
+
+
+def _fmt_int_br(value) -> str | None:
+    if value is None:
+        return None
+    try:
+        return f"{int(value):,}".replace(",", ".")
+    except Exception:
+        return None
+
+
+def _fmt_dt_utc(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def render_admin_auction_lot(lot) -> str:
+    title = str(getattr(lot, "title", None) or "Sem título")
+    source = str(getattr(lot, "source", None) or "-")
+    make = str(getattr(lot, "make", None) or "-")
+    item_type = str(getattr(lot, "item_type", None) or "-")
+    status = str(getattr(lot, "status", None) or "-")
+    year = getattr(lot, "year", None)
+    mileage = _fmt_int_br(getattr(lot, "mileage_km", None))
+    initial_bid = _fmt_money_br(getattr(lot, "initial_bid", None))
+    current_bid = _fmt_money_br(getattr(lot, "current_bid", None))
+    total_bids = getattr(lot, "total_bids", None)
+    city = str(getattr(lot, "city", None) or "").strip()
+    state = str(getattr(lot, "state", None) or "").strip()
+    location = " / ".join([x for x in [city, state] if x]) if (city or state) else None
+    url = str(getattr(lot, "url", None) or "-")
+    extras = getattr(lot, "extras", None) or {}
+    plate_final = extras.get("plate_final") if isinstance(extras, dict) else None
+
+    lines = [
+        f"⚠️ Leilão — {source}",
+        title,
+        f"{make} | {item_type} | {status}",
+    ]
+    if year:
+        lines.append(f"Ano: {year}")
+    if mileage:
+        lines.append(f"KM: {mileage}")
+    if initial_bid:
+        lines.append(f"Lance inicial: {initial_bid}")
+    if current_bid:
+        lines.append(f"Lance atual: {current_bid}")
+    if total_bids is not None:
+        lines.append(f"Lances: {total_bids}")
+    if location:
+        lines.append(f"Local: {location}")
+    if plate_final:
+        lines.append(f"Placa final: {plate_final}")
+    lines.append(f"Link: {url}")
+    return "\n".join(lines)
+
+
+def render_admin_auctions_summary(stats: dict, latest_lots: list) -> str:
+    total = int(stats.get("total_lots") or 0)
+    by_source = stats.get("by_source") or {}
+    by_status = stats.get("by_status") or {}
+    by_item_type = stats.get("by_item_type") or {}
+
+    lines = ["⚠️ Admin Leilões", f"Total de lotes: {total}", ""]
+    lines.append("Por source:")
+    if by_source:
+        for key, value in sorted(by_source.items(), key=lambda kv: (-int(kv[1]), str(kv[0]))):
+            lines.append(f"- {key}: {value}")
+    else:
+        lines.append("- (vazio)")
+    lines.append("")
+    lines.append("Por status:")
+    if by_status:
+        for key, value in sorted(by_status.items(), key=lambda kv: (-int(kv[1]), str(kv[0]))):
+            lines.append(f"- {key or 'unknown'}: {value}")
+    else:
+        lines.append("- (vazio)")
+    lines.append("")
+    lines.append("Por tipo:")
+    if by_item_type:
+        for key, value in sorted(by_item_type.items(), key=lambda kv: (-int(kv[1]), str(kv[0]))):
+            lines.append(f"- {key or 'other'}: {value}")
+    else:
+        lines.append("- (vazio)")
+    lines.append("")
+    lines.append("Últimos lotes:")
+    if latest_lots:
+        for lot in latest_lots:
+            updated_at = _fmt_dt_utc(getattr(lot, "updated_at", None)) or "-"
+            lines.append(f"- {getattr(lot, 'source', '-')}/{getattr(lot, 'external_id', '-')}: {getattr(lot, 'title', 'Sem título')} ({updated_at})")
+    else:
+        lines.append("- Nenhum lote persistido ainda.")
+    return "\n".join(lines)
 
 
 def render_upgrade_text(has_payment_links: bool) -> str:
