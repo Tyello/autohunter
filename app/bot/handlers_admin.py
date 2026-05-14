@@ -14,6 +14,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -28,6 +29,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.scrape_job import ScrapeJob
 from app.models.fb_session import FBSession
+from app.models.auction_lot import AuctionLot
 from app.sources.registry import list_sources
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
 from app.services.plan_capabilities import normalize_plan_code
@@ -229,7 +231,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium")
         return
 
     action = args[0].lower()
@@ -260,6 +262,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "premium":
         await _admin_premium(update, context, args[1:])
         return
+    if action == "auctions":
+        await _admin_auctions(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -278,7 +283,72 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
+
+
+async def _admin_auctions(update: Update, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    with SessionLocal() as db:
+        if not args:
+            total = db.query(func.count(AuctionLot.id)).scalar() or 0
+            by_source = dict(db.query(AuctionLot.source, func.count(AuctionLot.id)).group_by(AuctionLot.source).all())
+            by_status = dict(db.query(AuctionLot.status, func.count(AuctionLot.id)).group_by(AuctionLot.status).all())
+            by_item_type = dict(db.query(AuctionLot.item_type, func.count(AuctionLot.id)).group_by(AuctionLot.item_type).all())
+            latest = db.query(AuctionLot).order_by(AuctionLot.updated_at.desc()).limit(5).all()
+            text = render_admin_auctions_summary(
+                {"total_lots": total, "by_source": by_source, "by_status": by_status, "by_item_type": by_item_type},
+                latest,
+            )
+            await update.message.reply_text(text)
+            return
+
+        sub = args[0].lower()
+        if sub == "source":
+            if len(args) < 2:
+                await update.message.reply_text("Use: /admin auctions source <source>")
+                return
+            alias = {"vip": "vip_auctions", "copart": "copart_auctions"}
+            source = alias.get(args[1].lower(), args[1].lower())
+            lots = db.query(AuctionLot).filter(AuctionLot.source == source).order_by(AuctionLot.updated_at.desc()).limit(10).all()
+            if not lots:
+                await update.message.reply_text(f"Nenhum lote persistido para source={source}.")
+                return
+            lines = [f"⚠️ Admin Leilões — source {source} (últimos {len(lots)})", ""]
+            for lot in lots:
+                lines.append(render_admin_auction_lot(lot))
+                lines.append("")
+            await update.message.reply_text("\n".join(lines).strip())
+            return
+
+        if sub == "upcoming":
+            lots = db.query(AuctionLot).order_by(
+                case((AuctionLot.auction_end_at.is_(None), 1), else_=0).asc(),
+                AuctionLot.auction_end_at.asc(),
+                AuctionLot.updated_at.desc(),
+            ).limit(10).all()
+            lines = ["⚠️ Admin Leilões — upcoming", "Sem data de encerramento capturada nesta fase.", ""]
+            if not lots:
+                lines.append("Nenhum lote persistido ainda.")
+            else:
+                for lot in lots:
+                    lines.append(render_admin_auction_lot(lot))
+                    lines.append("")
+            await update.message.reply_text("\n".join(lines).strip())
+            return
+
+        if sub == "motos":
+            lots = db.query(AuctionLot).filter(AuctionLot.item_type == "motorcycle").order_by(AuctionLot.updated_at.desc()).limit(10).all()
+            if not lots:
+                await update.message.reply_text("Não há lotes de motos persistidos ainda.")
+                return
+            lines = [f"⚠️ Admin Leilões — motos (últimos {len(lots)})", ""]
+            for lot in lots:
+                lines.append(render_admin_auction_lot(lot))
+                lines.append("")
+            await update.message.reply_text("\n".join(lines).strip())
+            return
+
+    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions upcoming | /admin auctions motos")
 
 
 async def _admin_premium(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_args: List[str]):

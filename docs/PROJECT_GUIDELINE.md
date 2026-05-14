@@ -151,6 +151,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Source experimental **Copart Brasil** com chave `copart_auctions` retorna HTTP 200, porém sem cards públicos estáticos no `vehicleFinder`; status operacional: `needs_js_or_endpoint_study` (reason técnica atual: `requires_js_or_internal_endpoint`).
 - Source experimental **VIP Leilões** ativa na POC com chave `vip_auctions`, com HTML público acessível e parser inicial validado no Raspberry.
 - Refinamento atual do parser VIP: agrupamento por URL de anúncio (`/evento/anuncio/<slug-id>`) e `external_id` estável (ID numérico final da URL, com fallback para slug).
+- Validação operacional recente no Raspberry para VIP: dry-run com 12 lotes únicos e persistência com `fetched=12`, `inserted=12`, `updated=0`, `errors=0`.
+- Campos já observados persistidos na POC VIP: `external_id` estável, `title`, `make`, `item_type`, `status`, `year`, `mileage_km`, `url`; `total_bids` permanece `None` quando não há campo explícito.
 - Escopo atual restrito a coleta/normalização/persistência em `auction_lots`; sem notificação para usuário final.
+- Próxima camada de preview operacional: comandos admin `/admin auctions` (somente leitura), ainda sem exposição para usuário final.
+- Próximo passo futuro (fora desta tranche): enriquecer detalhes por página de lote para capturar lance inicial/atual, local e datas de leilão.
 - Matching com wishlists permanece fora de escopo nesta fase.
 - Sem login e sem bypass anti-bot nesta etapa; evolução para browser automation fica para fase posterior, se necessária.
