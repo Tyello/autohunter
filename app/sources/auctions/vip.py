@@ -76,6 +76,8 @@ def _extract_cards(html: str) -> list[str]:
 
 def _normalize_status_vip(text: str | None) -> str:
     val = (text or "").strip().lower()
+    if "dou-lhe duas" in val or "dou lhe duas" in val:
+        return "live"
     if "ao vivo" in val:
         return "live"
     if "em preg" in val:
@@ -94,9 +96,29 @@ def _infer_item_type(title: str | None, make: str | None, mileage_km: int | None
     moto_tokens = ("moto", "motocicleta", " cg ", " biz ", " fan ", " twister", " xre")
     if any(token in f" {text} " for token in moto_tokens):
         return "motorcycle"
+    truck_tokens = ("axor", "caminh", "carreta", "truck", "bau", "baú", "cavalo mec")
+    if any(token in text for token in truck_tokens):
+        return "truck"
     if title and (make or mileage_km is not None):
         return "car"
     return "other"
+
+
+def _extract_total_bids_vip(card_html: str, card_text: str) -> int | None:
+    patterns = (
+        r"\bLances\b\s*[:\-]?\s*(\d{1,5})\b",
+        r"\b(\d{1,5})\s+lances\b",
+    )
+    for source in (card_html, card_text):
+        for pattern in patterns:
+            m = re.search(pattern, source, flags=re.I)
+            if not m:
+                continue
+            total_bids = parse_int_br(m.group(1))
+            if total_bids is None or total_bids < 0 or total_bids > 10000:
+                return None
+            return total_bids
+    return None
 
 
 def _extract_external_id(href: str | None) -> str | None:
@@ -153,7 +175,7 @@ def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> l
         city, state = _extract_city_state(location)
         current_bid = parse_money_br(_extract_label_value(merged, "Valor Atual"))
         initial_bid = parse_money_br(_extract_label_value(merged, "Valor inicial"))
-        total_bids = parse_int_br(_first_group(r"\bLances\b\s*(?:</?[^>]+>\s*)*([\d.]+)", merged) or _extract_label_value(merged, "Lances"))
+        total_bids = _extract_total_bids_vip(merged, merged_text)
         auction_start_at = parse_datetime_br(_extract_label_value(merged, "Início"))
         year = parse_year_from_title(title)
         url = urljoin(listing_url, href)

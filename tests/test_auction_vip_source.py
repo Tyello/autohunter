@@ -89,3 +89,21 @@ def test_fallback_without_cards_returns_reason(monkeypatch):
     lots = vip.fetch_vip_lots(limit=5)
     assert lots == []
     assert vip.get_last_reason() == "no_public_lot_cards_found"
+
+
+def test_extract_total_bids_requires_explicit_field():
+    assert vip._extract_total_bids_vip("<article>AXOR 2540 S - 2009/2009</article>", "AXOR 2540 S - 2009/2009") is None
+    assert vip._extract_total_bids_vip("<article>CLASSIC LS - 2012/2013</article>", "CLASSIC LS - 2012/2013") is None
+
+
+def test_extract_total_bids_accepts_explicit_patterns():
+    assert vip._extract_total_bids_vip("<div>Lances: 7</div>", "texto qualquer") == 7
+    assert vip._extract_total_bids_vip("<div>status</div>", "7 lances") == 7
+
+
+def test_extract_total_bids_discards_invalid_large_values():
+    assert vip._extract_total_bids_vip("<div>Lances: 10001</div>", "Lances: 10001") is None
+
+
+def test_normalize_status_maps_dou_lhe_duas_to_live():
+    assert vip._normalize_status_vip("Dou-lhe duas") == "live"
