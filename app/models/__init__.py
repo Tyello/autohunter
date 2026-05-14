@@ -22,6 +22,8 @@ from .fb_agent_session import FBAgentSession
 from .admin_deploy_audit import AdminDeployAudit
 from .wishlist_listing_activity import WishlistListingActivity
 from .wishlist_tracked_listing import WishlistTrackedListing
+from .auction_event import AuctionEvent
+from .auction_lot import AuctionLot
 
 __all__ = [
     "User",
@@ -48,4 +50,6 @@ __all__ = [
     "AdminDeployAudit",
     "WishlistListingActivity",
     "WishlistTrackedListing",
+    "AuctionEvent",
+    "AuctionLot",
 ]

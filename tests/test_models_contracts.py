@@ -15,6 +15,8 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
+from app.models.auction_event import AuctionEvent
+from app.models.auction_lot import AuctionLot
 
 
 def _mk_user() -> User:
@@ -114,3 +116,18 @@ def test_notification_default_status(db):
 
     db.refresh(n)
     assert n.status == "queued"
+
+
+def test_auction_indexes_and_unique_constraints_declared():
+    events_indexes = {idx.name: idx for idx in AuctionEvent.__table__.indexes}
+    assert "uq_auction_events_source_external_id" in events_indexes
+    assert events_indexes["uq_auction_events_source_external_id"].unique is True
+
+    lots_indexes = {idx.name: idx for idx in AuctionLot.__table__.indexes}
+    assert "uq_auction_lots_source_external_id" in lots_indexes
+    assert lots_indexes["uq_auction_lots_source_external_id"].unique is True
+    assert "ix_auction_lots_source_status" in lots_indexes
+    assert "ix_auction_lots_auction_end_at" in lots_indexes
+    assert "ix_auction_lots_make_model_year" in lots_indexes
+    assert "ix_auction_lots_item_type_status" in lots_indexes
+    assert "ix_auction_lots_city_state" in lots_indexes
