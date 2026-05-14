@@ -1,13 +1,17 @@
+import sys
+import types
+
 from app.sources.auctions.base import NormalizedAuctionLot
 from scripts.run_auction_source import run
 
 
-def test_run_dry_run_does_not_persist(monkeypatch):
-    called = {"upsert": 0}
+def test_run_dry_run_does_not_import_db_modules(monkeypatch):
     monkeypatch.setattr("scripts.run_auction_source.fetch_copart_lots", lambda limit: [NormalizedAuctionLot(source="copart_auctions", external_id="1")])
-    monkeypatch.setattr("scripts.run_auction_source.upsert_lot", lambda *args, **kwargs: called.__setitem__("upsert", called["upsert"] + 1))
+    sys.modules.pop("app.db.session", None)
+    sys.modules.pop("app.services.auction_lot_service", None)
     run(source="copart_auctions", limit=1, dry_run=True)
-    assert called["upsert"] == 0
+    assert "app.db.session" not in sys.modules
+    assert "app.services.auction_lot_service" not in sys.modules
 
 
 def test_run_persistent_calls_upsert(monkeypatch):
@@ -30,7 +34,10 @@ def test_run_persistent_calls_upsert(monkeypatch):
         def close(self):
             return None
 
-    monkeypatch.setattr("scripts.run_auction_source.upsert_lot", fake_upsert)
-    monkeypatch.setattr("scripts.run_auction_source.SessionLocal", lambda: FakeSession())
+    fake_db_module = types.SimpleNamespace(SessionLocal=lambda: FakeSession())
+    fake_service_module = types.SimpleNamespace(upsert_lot=fake_upsert)
+    monkeypatch.setitem(sys.modules, "app.db.session", fake_db_module)
+    monkeypatch.setitem(sys.modules, "app.services.auction_lot_service", fake_service_module)
+
     run(source="copart_auctions", limit=1, dry_run=False)
     assert calls["n"] == 1

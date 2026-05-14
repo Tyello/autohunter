@@ -10,8 +10,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.db.session import SessionLocal
-from app.services.auction_lot_service import upsert_lot
 from app.sources.auctions.copart import SOURCE_KEY, fetch_copart_lots, get_last_reason
 
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +27,9 @@ def run(source: str, limit: int, dry_run: bool) -> int:
             print(json.dumps(lot.to_payload(), default=str, ensure_ascii=False))
         print(json.dumps(summary, ensure_ascii=False))
         return 0
+
+    from app.db.session import SessionLocal
+    from app.services.auction_lot_service import upsert_lot
 
     db = SessionLocal()
     try:
