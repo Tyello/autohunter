@@ -149,7 +149,8 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 
 ## 17) POC de leilões (fase atual)
 - Source experimental **Copart Brasil** com chave `copart_auctions` retorna HTTP 200, porém sem cards públicos estáticos no `vehicleFinder`; status operacional: `needs_js_or_endpoint_study` (reason técnica atual: `requires_js_or_internal_endpoint`).
-- Source experimental **VIP Leilões** ativa na POC com chave `vip_auctions`, focada em coleta pública por HTML estático.
+- Source experimental **VIP Leilões** ativa na POC com chave `vip_auctions`, com HTML público acessível e parser inicial validado no Raspberry.
+- Refinamento atual do parser VIP: agrupamento por URL de anúncio (`/evento/anuncio/<slug-id>`) e `external_id` estável (ID numérico final da URL, com fallback para slug).
 - Escopo atual restrito a coleta/normalização/persistência em `auction_lots`; sem notificação para usuário final.
 - Matching com wishlists permanece fora de escopo nesta fase.
 - Sem login e sem bypass anti-bot nesta etapa; evolução para browser automation fica para fase posterior, se necessária.
