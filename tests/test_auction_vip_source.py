@@ -123,6 +123,7 @@ def test_parse_detail_with_bids_and_dates_location_image():
     assert detail["state"] == "PR"
     assert detail["thumbnail_url"].endswith("/images/lote1.jpg")
     assert detail["lot_number"] == "444"
+    assert detail["image_count"] >= 1
 
 
 def test_parse_detail_minimal_does_not_break():
@@ -151,3 +152,59 @@ def test_enrich_failure_keeps_base_and_adds_warning(monkeypatch):
     assert out.title == "Base"
     assert "parser_warnings" in out.extras
 
+
+def test_parse_detail_sanitizes_dirty_location_state_lot_and_images():
+    html = """
+    <div>Local do Lote: &gt;Local do Lote:</div>
+    <div>UF: DO</div>
+    <div>cidade: &gt;Local do Lote:</div>
+    <script>{"lote": "100", "x":1}</script>
+    <img src="https://www.vipleiloes.com.br/images/vipleiloes/logo.svg">
+    <img src="https://www.vipleiloes.com.br/images/fixbtn-wapp.png">
+    <img src="https://www.vipleiloes.com.br/images/logo-footer.png">
+    <img src="https://www.vipleiloes.com.br/images/aleibras.svg">
+    <img src="https://www.vipleiloes.com.br/images/leilao-seguro.svg">
+    <img src="https://armazupvipleiloesprd.blob.core.windows.net/uploads/lote-real-1.jpg">
+    <img src="https://armazupvipleiloesprd.blob.core.windows.net/uploads/lote-real-2.jpg">
+    <div>Lance atual: R$ 8.200,00</div>
+    <div>Lances: 3</div>
+    """
+    detail = vip.parse_vip_lot_detail_html(html, base_url="https://www.vipleiloes.com.br/evento/anuncio/x")
+    assert detail.get("city") is None
+    assert detail.get("state") is None
+    assert detail.get("location") is None
+    assert detail.get("lot_number") == "100"
+    assert detail["thumbnail_url"].startswith("https://armazupvipleiloesprd.blob.core.windows.net/uploads/")
+    assert detail["image_count"] == 2
+    assert all("logo" not in img.lower() for img in detail["images"])
+    assert float(detail["current_bid"]) == 8200.0
+    assert detail["total_bids"] == 3
+
+
+def test_apply_vip_detail_does_not_overwrite_with_dirty_values():
+    lot = vip.NormalizedAuctionLot(
+        source="vip_auctions",
+        external_id="1",
+        title="Base",
+        city="Curitiba",
+        state="PR",
+        location="Curitiba/PR",
+        lot_number="321",
+        thumbnail_url="https://armazupvipleiloesprd.blob.core.windows.net/uploads/good.jpg",
+        images=["https://armazupvipleiloesprd.blob.core.windows.net/uploads/good.jpg"],
+    )
+    dirty = {
+        "city": ">Local do Lote:",
+        "state": "DO",
+        "location": "Local do Lote",
+        "lot_number": '": "100",',
+        "thumbnail_url": "https://www.vipleiloes.com.br/images/vipleiloes/logo.svg",
+        "images": ["https://www.vipleiloes.com.br/images/logo-footer.png"],
+    }
+    out = vip.apply_vip_detail(lot, dirty)
+    assert out.city == "Curitiba"
+    assert out.state == "PR"
+    assert out.location == "Curitiba/PR"
+    assert out.lot_number == "321"
+    assert out.thumbnail_url.endswith("/good.jpg")
+    assert out.to_payload()["image_count"] == 1

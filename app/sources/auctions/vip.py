@@ -62,6 +62,96 @@ def _extract_city_state(location: str | None) -> tuple[str | None, str | None]:
     return city, state
 
 
+VALID_UFS = {
+    "AC",
+    "AL",
+    "AP",
+    "AM",
+    "BA",
+    "CE",
+    "DF",
+    "ES",
+    "GO",
+    "MA",
+    "MT",
+    "MS",
+    "MG",
+    "PA",
+    "PB",
+    "PR",
+    "PE",
+    "PI",
+    "RJ",
+    "RN",
+    "RS",
+    "RO",
+    "RR",
+    "SC",
+    "SP",
+    "SE",
+    "TO",
+}
+
+
+def _sanitize_location_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    clean = _strip_html(value).strip(" :,-")
+    lowered = clean.lower()
+    if not clean or "<" in clean or ">" in clean:
+        return None
+    if "local do lote" in lowered or clean.lower() == "local":
+        return None
+    return clean
+
+
+def _sanitize_uf(value: str | None) -> str | None:
+    if not value:
+        return None
+    clean = _strip_html(value).strip().upper()
+    if clean in VALID_UFS:
+        return clean
+    return None
+
+
+def _extract_vip_lot_number(text: str | None) -> str | None:
+    if not text:
+        return None
+    raw = text.strip()
+    if '": "' in raw and "lote" not in raw.lower():
+        return None
+    m = re.search(r"^\D*(\d{1,8})\D*$", raw)
+    if m:
+        return m.group(1)
+    m = re.search(r"\bLote\b\s*[:\-]?\s*(\d{1,8})\b", text, flags=re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r'"lote"\s*:\s*"(\d{1,8})"', text, flags=re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"\blote\b\s*:\s*\"?(\d{1,8})\"?", text, flags=re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"\blote\s+(\d{1,8})\b", text, flags=re.I)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _filter_vip_lot_images(images: list[str]) -> list[str]:
+    blocked_tokens = ("logo", "footer", "whatsapp", "wapp", "aleibras", "leilao-seguro", "comitente", "images/vipleiloes")
+    preferred = "armazupvipleiloesprd.blob.core.windows.net/uploads/"
+    filtered: list[str] = []
+    for img in images:
+        lowered = img.lower()
+        if any(token in lowered for token in blocked_tokens):
+            continue
+        if img not in filtered:
+            filtered.append(img)
+    filtered.sort(key=lambda url: (0 if preferred in url.lower() else 1))
+    return filtered
+
+
 def _extract_mileage(text: str) -> int | None:
     m = re.search(r"(\d{1,3}(?:\.\d{3})+)\s*km", text, flags=re.I)
     return parse_int_br(m.group(1)) if m else None
@@ -143,16 +233,17 @@ def parse_vip_lot_detail_html(html: str, base_url: str | None = None) -> dict[st
     detail["current_bid"] = parse_money_br(_extract_label_value(html, "Lance atual") or _extract_label_value(html, "Valor atual") or _extract_label_value(html, "Atual"))
     detail["auction_start_at"] = parse_datetime_br(_extract_label_value(html, "Início") or _extract_label_value(html, "Data de início"))
     detail["auction_end_at"] = parse_datetime_br(_extract_label_value(html, "Término") or _extract_label_value(html, "Encerramento") or _extract_label_value(html, "Fim"))
-    detail["location"] = _extract_label_value(html, "Local") or _extract_label_value(html, "Pátio")
-    detail["city"] = _extract_label_value(html, "Cidade")
-    detail["state"] = _extract_label_value(html, "UF")
+    detail["location"] = _sanitize_location_text(_extract_label_value(html, "Local") or _extract_label_value(html, "Pátio"))
+    detail["city"] = _sanitize_location_text(_extract_label_value(html, "Cidade"))
+    detail["state"] = _sanitize_uf(_extract_label_value(html, "UF"))
     if detail.get("location") and (not detail.get("city") or not detail.get("state")):
         city, state = _extract_city_state(detail["location"])
-        detail["city"] = detail["city"] or city
-        detail["state"] = detail["state"] or state
+        detail["city"] = detail["city"] or _sanitize_location_text(city)
+        detail["state"] = detail["state"] or _sanitize_uf(state)
     detail["condition"] = _extract_label_value(html, "Condição") or _extract_label_value(html, "Observação") or _extract_label_value(html, "Estado")
     detail["document_type"] = _extract_label_value(html, "Documento") or _extract_label_value(html, "Tipo de documento")
-    detail["lot_number"] = _extract_label_value(html, "Lote")
+    raw_lot_number = _extract_label_value(html, "Lote")
+    detail["lot_number"] = _extract_vip_lot_number(raw_lot_number) or _extract_vip_lot_number(html)
     detail["total_bids"] = _extract_total_bids_vip(html, _strip_html(html))
     images = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.I)
     filtered = []
@@ -160,17 +251,50 @@ def parse_vip_lot_detail_html(html: str, base_url: str | None = None) -> dict[st
         full = urljoin(base_url or "", img)
         if full not in filtered and (full.startswith("http://") or full.startswith("https://")):
             filtered.append(full)
+    filtered = _filter_vip_lot_images(filtered)
     if filtered:
         detail["thumbnail_url"] = filtered[0]
         detail["images"] = filtered
+        detail["image_count"] = len(filtered)
     return {k: v for k, v in detail.items() if v is not None}
 
 
 def apply_vip_detail(lot: NormalizedAuctionLot, detail: dict[str, Any]) -> NormalizedAuctionLot:
+    protected = {"city", "state", "location", "lot_number", "thumbnail_url", "images", "image_count"}
     for key, value in detail.items():
         if value is None:
             continue
+        if key in protected:
+            if key == "state":
+                value = _sanitize_uf(str(value))
+                if value is None:
+                    continue
+            if key in {"city", "location"}:
+                value = _sanitize_location_text(str(value))
+                if value is None:
+                    continue
+            if key == "lot_number":
+                value = _extract_vip_lot_number(str(value))
+                if value is None:
+                    continue
+            if key in {"images"}:
+                if not isinstance(value, list):
+                    continue
+                value = _filter_vip_lot_images(value)
+                if not value:
+                    continue
+            if key == "thumbnail_url":
+                if not isinstance(value, str):
+                    continue
+                thumb = _filter_vip_lot_images([value])
+                if not thumb:
+                    continue
+                value = thumb[0]
         setattr(lot, key, value)
+    if lot.images:
+        lot.images = _filter_vip_lot_images(list(lot.images))
+        if lot.images and (not lot.thumbnail_url or lot.thumbnail_url not in lot.images):
+            lot.thumbnail_url = lot.images[0]
     return lot
 
 
