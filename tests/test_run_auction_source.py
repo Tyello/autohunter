@@ -6,7 +6,7 @@ from scripts.run_auction_source import run
 
 
 def test_run_dry_run_does_not_import_db_modules(monkeypatch):
-    monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", lambda limit: [NormalizedAuctionLot(source="vip_auctions", external_id="1")])
+    monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", lambda limit, enrich=False: [NormalizedAuctionLot(source="vip_auctions", external_id="1")])
     sys.modules.pop("app.db.session", None)
     sys.modules.pop("app.services.auction_lot_service", None)
     run(source="vip_auctions", limit=1, dry_run=True)
@@ -16,7 +16,7 @@ def test_run_dry_run_does_not_import_db_modules(monkeypatch):
 
 def test_run_persistent_calls_upsert(monkeypatch):
     lots = [NormalizedAuctionLot(source="vip_auctions", external_id="1")]
-    monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", lambda limit: lots)
+    monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", lambda limit, enrich=False: lots)
 
     calls = {"n": 0}
 
@@ -52,3 +52,15 @@ def test_invalid_source_raises_clear_error():
         assert "vip_auctions" in str(exc)
     else:
         assert False, "Expected ValueError"
+
+
+def test_run_enrich_details_passed_to_vip(monkeypatch):
+    called = {"enrich": None}
+
+    def fake_fetch(limit, enrich=False):
+        called["enrich"] = enrich
+        return [NormalizedAuctionLot(source="vip_auctions", external_id="1")]
+
+    monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", fake_fetch)
+    run(source="vip_auctions", limit=1, dry_run=True, enrich_details=True)
+    assert called["enrich"] is True

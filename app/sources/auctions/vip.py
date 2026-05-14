@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -105,10 +105,7 @@ def _infer_item_type(title: str | None, make: str | None, mileage_km: int | None
 
 
 def _extract_total_bids_vip(card_html: str, card_text: str) -> int | None:
-    patterns = (
-        r"\bLances\b\s*[:\-]?\s*(\d{1,5})\b",
-        r"\b(\d{1,5})\s+lances\b",
-    )
+    patterns = (r"\bLances\b\s*[:\-]?\s*(\d{1,5})\b", r"\b(\d{1,5})\s+lances\b")
     for source in (card_html, card_text):
         for pattern in patterns:
             m = re.search(pattern, source, flags=re.I)
@@ -131,7 +128,66 @@ def _extract_external_id(href: str | None) -> str | None:
     return m.group(1) if m else slug
 
 
-def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
+def fetch_vip_lot_detail(url: str, timeout: float = 15.0) -> dict[str, Any]:
+    if not validate_auction_source_url(url, ALLOWED_DOMAINS):
+        raise ValueError("invalid_detail_url")
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers={"User-Agent": "AutoHunter/1.0 (+experimental)"}) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+    return parse_vip_lot_detail_html(resp.text, base_url=url)
+
+
+def parse_vip_lot_detail_html(html: str, base_url: str | None = None) -> dict[str, Any]:
+    detail: dict[str, Any] = {}
+    detail["initial_bid"] = parse_money_br(_extract_label_value(html, "Lance inicial") or _extract_label_value(html, "Valor inicial") or _extract_label_value(html, "Inicial"))
+    detail["current_bid"] = parse_money_br(_extract_label_value(html, "Lance atual") or _extract_label_value(html, "Valor atual") or _extract_label_value(html, "Atual"))
+    detail["auction_start_at"] = parse_datetime_br(_extract_label_value(html, "Início") or _extract_label_value(html, "Data de início"))
+    detail["auction_end_at"] = parse_datetime_br(_extract_label_value(html, "Término") or _extract_label_value(html, "Encerramento") or _extract_label_value(html, "Fim"))
+    detail["location"] = _extract_label_value(html, "Local") or _extract_label_value(html, "Pátio")
+    detail["city"] = _extract_label_value(html, "Cidade")
+    detail["state"] = _extract_label_value(html, "UF")
+    if detail.get("location") and (not detail.get("city") or not detail.get("state")):
+        city, state = _extract_city_state(detail["location"])
+        detail["city"] = detail["city"] or city
+        detail["state"] = detail["state"] or state
+    detail["condition"] = _extract_label_value(html, "Condição") or _extract_label_value(html, "Observação") or _extract_label_value(html, "Estado")
+    detail["document_type"] = _extract_label_value(html, "Documento") or _extract_label_value(html, "Tipo de documento")
+    detail["lot_number"] = _extract_label_value(html, "Lote")
+    detail["total_bids"] = _extract_total_bids_vip(html, _strip_html(html))
+    images = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.I)
+    filtered = []
+    for img in images:
+        full = urljoin(base_url or "", img)
+        if full not in filtered and (full.startswith("http://") or full.startswith("https://")):
+            filtered.append(full)
+    if filtered:
+        detail["thumbnail_url"] = filtered[0]
+        detail["images"] = filtered
+    return {k: v for k, v in detail.items() if v is not None}
+
+
+def apply_vip_detail(lot: NormalizedAuctionLot, detail: dict[str, Any]) -> NormalizedAuctionLot:
+    for key, value in detail.items():
+        if value is None:
+            continue
+        setattr(lot, key, value)
+    return lot
+
+
+def enrich_vip_lot_detail(lot: NormalizedAuctionLot) -> NormalizedAuctionLot:
+    try:
+        detail = fetch_vip_lot_detail(str(lot.url or ""))
+        return apply_vip_detail(lot, detail)
+    except Exception as exc:
+        extras = dict(lot.extras or {})
+        warnings = list(extras.get("parser_warnings") or [])
+        warnings.append(f"vip_detail_failed:{type(exc).__name__}")
+        extras["parser_warnings"] = warnings
+        lot.extras = extras
+        return lot
+
+
+def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enrich: bool = False) -> list[NormalizedAuctionLot]:
     global _LAST_REASON
     _LAST_REASON = None
     if not validate_auction_source_url(listing_url, ALLOWED_DOMAINS):
@@ -147,7 +203,6 @@ def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> l
     if not cards:
         _LAST_REASON = "no_public_lot_cards_found"
         return []
-
     grouped: dict[str, list[str]] = {}
     for card in cards:
         href = _first_group(r'href="([^"]*/evento/anuncio/[^"]+)"', card)
@@ -155,7 +210,6 @@ def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> l
             continue
         key = href.split("?", 1)[0]
         grouped.setdefault(key, []).append(card)
-
     if not grouped:
         _LAST_REASON = "no_public_lot_cards_found"
         return []
@@ -164,7 +218,6 @@ def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> l
     for href, chunks in list(grouped.items())[:limit]:
         merged = "\n".join(chunks)
         merged_text = _strip_html(merged)
-
         title = _strip_html(_first_group(r'<[^>]*class="[^"]*anc-title[^"]*"[^>]*>.*?<h1[^>]*>(.*?)</h1>', merged) or "") or None
         make = _strip_html(_first_group(r'<[^>]*class="[^"]*anc-info[^"]*"[^>]*>\s*<span[^>]*>(.*?)</span>', merged) or "") or None
         make = make.title() if make else None
@@ -180,32 +233,9 @@ def fetch_vip_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> l
         year = parse_year_from_title(title)
         url = urljoin(listing_url, href)
         external_id = _extract_external_id(href) or lot_number or f"vip-{len(lots) + 1}"
-
         plate_final = _first_group(r"placa\s*final\s*(?:</?[^>]+>\s*)*([a-z0-9]+)", merged)
         item_type = _infer_item_type(title, make, mileage_km, merged_text)
-
-        lots.append(
-            NormalizedAuctionLot(
-                source=SOURCE_KEY,
-                external_id=str(external_id),
-                url=url,
-                title=title,
-                lot_number=lot_number,
-                item_type=item_type,
-                year=year,
-                mileage_km=mileage_km,
-                make=make,
-                city=city,
-                state=state,
-                location=location,
-                initial_bid=initial_bid,
-                current_bid=current_bid,
-                total_bids=total_bids,
-                status=_normalize_status_vip(status_text),
-                auction_start_at=auction_start_at,
-                extras={"plate_final": plate_final} if plate_final else {},
-                raw_payload={"html_card": merged[:1000]},
-            )
-        )
-    logger.info("auction_source_finished", extra={"source": SOURCE_KEY, "fetched": len(lots)})
+        lot = NormalizedAuctionLot(source=SOURCE_KEY, external_id=str(external_id), url=url, title=title, lot_number=lot_number, item_type=item_type, year=year, mileage_km=mileage_km, make=make, city=city, state=state, location=location, initial_bid=initial_bid, current_bid=current_bid, total_bids=total_bids, status=_normalize_status_vip(status_text), auction_start_at=auction_start_at, extras={"plate_final": plate_final} if plate_final else {}, raw_payload={"html_card": merged[:1000]})
+        lots.append(enrich_vip_lot_detail(lot) if enrich else lot)
+    logger.info("auction_source_finished", extra={"source": SOURCE_KEY, "fetched": len(lots), "enrich": enrich})
     return lots
