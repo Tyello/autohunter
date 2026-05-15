@@ -132,6 +132,7 @@ def render_user_wishlists(wishlists) -> str:
             lines.extend([
                 f"{item['index']}. {item['query']}",
                 f"Status: {status}",
+                f"Leilões: {'ativado' if item.get('include_auctions', False) else 'desativado'}",
                 "Filtros:",
             ])
             if shown:

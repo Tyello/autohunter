@@ -12,7 +12,7 @@ def _mk_wishlist(db, query: str):
     u = User(id=uuid.uuid4(), telegram_chat_id=70001, username="admin")
     db.add(u)
     db.flush()
-    w = Wishlist(user_id=u.id, query=query, is_active=True)
+    w = Wishlist(user_id=u.id, query=query, is_active=True, include_auctions=True)
     db.add(w)
     db.commit()
     db.refresh(w)
@@ -41,7 +41,7 @@ def test_filter_by_wishlist_and_no_notifications_created(db):
     u2 = User(id=uuid.uuid4(), telegram_chat_id=70002, username="admin2")
     db.add(u2)
     db.flush()
-    w2 = Wishlist(user_id=u2.id, query="civic 2015", is_active=True)
+    w2 = Wishlist(user_id=u2.id, query="civic 2015", is_active=True, include_auctions=False)
     db.add(w2)
     db.commit()
     db.refresh(w2)
@@ -51,7 +51,7 @@ def test_filter_by_wishlist_and_no_notifications_created(db):
 
     all_matches = match_auction_lots_for_all_wishlists(db, source="vip_auctions", limit_per_wishlist=5)
     assert str(w1.id) in all_matches
-    assert str(w2.id) in all_matches
+    assert str(w2.id) not in all_matches
 
     only_w1 = match_auction_lots_for_wishlist(db, w1, source="vip_auctions", limit=5)
     assert only_w1
@@ -66,3 +66,17 @@ def test_no_matches_returns_empty(db):
     db.commit()
     matches = match_auction_lots_for_wishlist(db, w, limit=5)
     assert matches == []
+
+
+def test_match_for_all_wishlists_can_ignore_include_auctions_filter(db):
+    w = _mk_wishlist(db, "uno")
+    w.include_auctions = False
+    db.add(w)
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "fa1", "title": "Fiat Uno", "status": "open"})
+    db.commit()
+
+    default_matches = match_auction_lots_for_all_wishlists(db, source="vip_auctions", limit_per_wishlist=5)
+    assert str(w.id) not in default_matches
+
+    forced_matches = match_auction_lots_for_all_wishlists(db, source="vip_auctions", limit_per_wishlist=5, include_auctions_only=False)
+    assert str(w.id) in forced_matches

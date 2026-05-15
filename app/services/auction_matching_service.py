@@ -148,8 +148,16 @@ def match_auction_lots_for_wishlist(db: Session, wishlist: Wishlist, source: str
     return out[:limit]
 
 
-def match_auction_lots_for_all_wishlists(db: Session, source: str | None = None, limit_per_wishlist: int = 5) -> dict[str, list[AuctionWishlistMatch]]:
-    wishlists = db.query(Wishlist).filter(Wishlist.is_active.is_(True)).all()
+def match_auction_lots_for_all_wishlists(
+    db: Session,
+    source: str | None = None,
+    limit_per_wishlist: int = 5,
+    include_auctions_only: bool = True,
+) -> dict[str, list[AuctionWishlistMatch]]:
+    wishlists_q = db.query(Wishlist).filter(Wishlist.is_active.is_(True))
+    if include_auctions_only:
+        wishlists_q = wishlists_q.filter(Wishlist.include_auctions.is_(True))
+    wishlists = wishlists_q.all()
     result: dict[str, list[AuctionWishlistMatch]] = {}
     for w in wishlists:
         matches = match_auction_lots_for_wishlist(db, w, source=source, limit=limit_per_wishlist)

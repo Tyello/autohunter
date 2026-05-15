@@ -185,7 +185,7 @@ def test_admin_auctions_match_variants(monkeypatch, db):
     u = User(id=uuid.uuid4(), telegram_chat_id=901, username="x")
     db.add(u)
     db.flush()
-    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True)
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
     db.add(w)
     db.flush()
     upsert_lot(db, {"source": "vip_auctions", "external_id": "m1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "current_bid": 91000})
@@ -308,3 +308,41 @@ def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "acao_invalida")))
     assert "vip|mega|win|sodre|superbid|copart" in up.message.sent[-1]
     assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id>]" in up.message.sent[-1]
+
+
+def test_admin_auctions_wishlist_toggle_and_match_force(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+
+    u = User(id=uuid.uuid4(), telegram_chat_id=902, username="y")
+    db.add(u)
+    db.flush()
+    w = Wishlist(user_id=u.id, query="gol", is_active=True, include_auctions=False)
+    db.add(w)
+    db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "tg1", "title": "VW Gol", "status": "open"})
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
+    assert "não está habilitada para leilões" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id), "--force")))
+    assert "🎯 Busca: gol" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", str(w.id), "enable")))
+    assert up.message.sent[-1] == "✅ Leilões ativados para esta busca."
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", str(w.id), "disable")))
+    assert up.message.sent[-1] == "✅ Leilões desativados para esta busca."
+
+
+def test_admin_auctions_wishlist_toggle_not_found(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "invalido", "enable")))
+    assert up.message.sent[-1] == "Wishlist não encontrada."
