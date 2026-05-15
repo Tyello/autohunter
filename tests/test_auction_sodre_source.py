@@ -73,3 +73,47 @@ def test_fetch_empty_sets_reason(monkeypatch):
     lots = sodre.fetch_sodre_lots(limit=10)
     assert lots == []
     assert sodre.get_last_reason() == 'no_public_lot_cards_found'
+
+
+def test_parse_anchor_fallback_without_known_classes_and_deduplicate():
+    lots = sodre.parse_sodre_listing_html(_read('sodre_listing_anchor_fallback.html'), limit=10)
+    assert len(lots) == 1
+    lot = lots[0]
+    assert lot.title == 'Honda CG 160 FAN - 2020'
+    assert lot.url == 'https://www.sodresantoro.com.br/lote/honda-cg-160-fan-2020-12345'
+    assert lot.external_id == '12345'
+    assert lot.item_type == 'motorcycle'
+    assert lot.city == 'São Paulo'
+    assert lot.state == 'SP'
+    assert lot.status == 'open'
+    assert lot.current_bid == Decimal('9200.00')
+    assert lot.auction_end_at is not None
+    assert lot.lot_number == '101'
+
+
+def test_fetch_empty_listing_with_js_signals_sets_requires_js_reason(monkeypatch):
+    html = '<html><body><div id="react-root"></div><script>window.__NEXT_DATA__={}</script></body></html>'
+
+    class _Resp:
+        text = html
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def get(self, _url):
+            return _Resp()
+
+    monkeypatch.setattr(sodre.httpx, 'Client', _Client)
+    lots = sodre.fetch_sodre_lots(limit=10)
+    assert lots == []
+    assert sodre.get_last_reason() == 'requires_js_or_internal_endpoint'

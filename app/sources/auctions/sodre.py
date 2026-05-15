@@ -102,10 +102,45 @@ def filter_sodre_images(urls: list[str], listing_url: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+
+
+def _extract_sodre_candidate_blocks(html: str) -> list[str]:
+    class_blocks = [
+        blk
+        for _, blk in re.findall(
+            r'<(article|div)[^>]*class="[^"]*(?:card|lot|item|leilao|leilão)[^"]*"[^>]*>(.*?)</\1>',
+            html,
+            flags=re.I | re.S,
+        )
+    ]
+    if class_blocks:
+        return class_blocks
+
+    keywords = r"lote|lotes|leilao|leilão|anuncio|anúncio|veiculo|veículo|veiculo-usado|carro|moto|caminhao|caminhão|onibus|ônibus"
+    anchors = list(re.finditer(r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", html, flags=re.I | re.S))
+    blocks: list[str] = []
+    seen_href: set[str] = set()
+
+    for a in anchors:
+        href = (a.group(1) or "").strip()
+        anchor_text = _strip_html(a.group(2) or "")
+        blob = f"{href} {anchor_text}".lower()
+        if not re.search(keywords, blob, flags=re.I):
+            continue
+        if href in seen_href:
+            continue
+        seen_href.add(href)
+        start = max(0, a.start() - 2000)
+        end = min(len(html), a.end() + 2000)
+        blocks.append(html[start:end])
+
+    return blocks
+
 def parse_sodre_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
-    cards = re.findall(r"<(article|div)[^>]*class=\"[^\"]*(?:card|lot|item|leilao|leilão)[^\"]*\"[^>]*>(.*?)</\1>", html, flags=re.I | re.S)
+    cards = _extract_sodre_candidate_blocks(html)
     lots: list[NormalizedAuctionLot] = []
-    for _, card in cards:
+    seen_keys: set[str] = set()
+    for card in cards:
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
         if not href:
             continue
@@ -113,7 +148,13 @@ def parse_sodre_listing_html(html: str, limit: int = 50, listing_url: str = DEFA
         ext_id = extract_sodre_external_id(url)
         if not ext_id:
             continue
+        dedupe_key = f"{url}|{ext_id}"
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
         title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "") or None
+        if not title:
+            title = _strip_html(_first_group(r">\s*([^<]{6,120})\s*</a>", card) or "") or None
         full_text = _strip_html(card)
         category = _first_group(r"(?:categoria|leilão|leilao)\s*: ?\s*([^\n<|]+)", card)
         raw_status = _first_group(r"(?:status\s*:?)\s*(Ao vivo|Aberto(?:s)?|Encerrado(?:s)?|Em breve|Futuro|Agendado)", card) or _first_group(r"\b(Ao vivo|Aberto(?:s)?|Encerrado(?:s)?|Em breve|Futuro|Agendado)\b", card)
