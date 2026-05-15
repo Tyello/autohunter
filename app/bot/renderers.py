@@ -413,3 +413,38 @@ def build_upgrade_payment_link_keyboard(*, plan_period: str, payment_link: str):
 
     label = "Abrir pagamento mensal" if plan_period == "monthly" else "Abrir pagamento anual"
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, url=payment_link)]])
+
+
+def render_admin_auction_quality_report(report: dict) -> str:
+    def _fmt_dt(value):
+        if not value:
+            return "-"
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    lines = ["⚠️ Admin Leilões — qualidade", ""]
+    sources = report.get("sources") or []
+    if not sources:
+        lines.append("Nenhuma source encontrada.")
+        return "\n".join(lines)
+
+    for idx, item in enumerate(sources):
+        total = int(item.get("total_lots", 0) or 0)
+        lines.extend([
+            f"{item.get('source', '-')}",
+            f"Score: {int(item.get('quality_score', 0) or 0)}/100 — {item.get('quality_label', 'sem dados')}",
+            f"Lotes: {total}",
+            f"Atualizados 24h: {int(item.get('updated_last_24h', 0) or 0)}",
+            f"Com lance atual: {int(item.get('with_current_bid_count', 0) or 0)}/{total}",
+            f"Com lance inicial: {int(item.get('with_initial_bid_count', 0) or 0)}/{total}",
+            f"Com ano: {int(item.get('with_year_count', 0) or 0)}/{total}",
+            f"Com encerramento: {int(item.get('with_auction_end_at_count', 0) or 0)}/{total}",
+            f"Com cidade/UF: {int(item.get('with_city_state_count', 0) or 0)}/{total}",
+            f"Com URL: {int(item.get('with_url_count', 0) or 0)}/{total}",
+            f"Com imagem: {int(item.get('with_image_count', 0) or 0)}/{total}",
+            f"Open/live: {int(item.get('open_or_live_count', 0) or 0)}",
+            f"Último update: {_fmt_dt(item.get('latest_updated_at'))}",
+        ])
+        if idx < len(sources) - 1:
+            lines.append("")
+
+    return "\n".join(lines).strip()

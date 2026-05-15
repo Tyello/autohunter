@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.models.auction_lot import AuctionLot
+from app.sources.auctions.registry import list_auction_sources, resolve_auction_source_alias
+
+
+def _has_text(column):
+    return func.length(func.trim(func.coalesce(column, ""))) > 0
+
+
+def _score(metrics: dict[str, Any]) -> int:
+    total = int(metrics["total_lots"])
+    if total <= 0:
+        return 0
+
+    def cov(key: str) -> float:
+        return float(metrics.get(key, 0) or 0) / total
+
+    score = 20
+    score += 15 if cov("with_current_bid_count") >= 0.50 else 0
+    score += 10 if cov("with_initial_bid_count") >= 0.30 else 0
+    score += 15 if cov("with_year_count") >= 0.50 else 0
+    score += 10 if cov("with_city_state_count") >= 0.30 else 0
+    score += 15 if cov("with_auction_end_at_count") >= 0.30 else 0
+    score += 10 if cov("with_url_count") >= 0.90 else 0
+    score += 10 if int(metrics.get("open_or_live_count", 0) or 0) > 0 else 0
+    score += 5 if cov("with_image_count") > 0.0 else 0
+    return min(100, score)
+
+
+def _label(score: int) -> str:
+    if score == 0:
+        return "sem dados"
+    if score >= 80:
+        return "boa"
+    if score >= 50:
+        return "promissora"
+    return "fraca"
+
+
+def _build_source_metrics(db: Session, source: str, now_utc: datetime) -> dict[str, Any]:
+    cutoff = now_utc - timedelta(hours=24)
+    total_lots = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source).scalar() or 0)
+    updated_last_24h = int(
+        db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.updated_at >= cutoff).scalar() or 0
+    )
+    latest_updated_at = db.query(func.max(AuctionLot.updated_at)).filter(AuctionLot.source == source).scalar()
+
+    status_counts = {
+        (k or "unknown"): int(v)
+        for k, v in db.query(AuctionLot.status, func.count(AuctionLot.id)).filter(AuctionLot.source == source).group_by(AuctionLot.status).all()
+    }
+    item_type_counts = {
+        (k or "other"): int(v)
+        for k, v in db.query(AuctionLot.item_type, func.count(AuctionLot.id)).filter(AuctionLot.source == source).group_by(AuctionLot.item_type).all()
+    }
+
+    with_title_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, _has_text(AuctionLot.title)).scalar() or 0)
+    with_year_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.year.isnot(None)).scalar() or 0)
+    with_current_bid_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.current_bid.isnot(None)).scalar() or 0)
+    with_initial_bid_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.initial_bid.isnot(None)).scalar() or 0)
+    with_auction_end_at_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_end_at.isnot(None)).scalar() or 0)
+    with_city_state_count = int(
+        db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, _has_text(AuctionLot.city), _has_text(AuctionLot.state)).scalar() or 0
+    )
+    with_url_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, _has_text(AuctionLot.url)).scalar() or 0)
+    with_image_count = int(
+        db.query(func.count(AuctionLot.id))
+        .filter(
+            AuctionLot.source == source,
+            (AuctionLot.image_count.isnot(None) & (AuctionLot.image_count > 0))
+            | _has_text(AuctionLot.thumbnail_url),
+        )
+        .scalar()
+        or 0
+    )
+
+    upcoming_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_end_at > now_utc).scalar() or 0)
+    open_or_live_count = int(
+        db.query(func.count(AuctionLot.id))
+        .filter(AuctionLot.source == source, func.lower(func.coalesce(AuctionLot.status, "")).in_(["open", "live"]))
+        .scalar()
+        or 0
+    )
+    ended_count = int(
+        db.query(func.count(AuctionLot.id))
+        .filter(AuctionLot.source == source, (func.lower(func.coalesce(AuctionLot.status, "")) == "ended") | (AuctionLot.auction_end_at <= now_utc))
+        .scalar()
+        or 0
+    )
+
+    metrics: dict[str, Any] = {
+        "source": source,
+        "total_lots": total_lots,
+        "updated_last_24h": updated_last_24h,
+        "latest_updated_at": latest_updated_at,
+        "status_counts": status_counts,
+        "item_type_counts": item_type_counts,
+        "with_title_count": with_title_count,
+        "with_year_count": with_year_count,
+        "with_current_bid_count": with_current_bid_count,
+        "with_initial_bid_count": with_initial_bid_count,
+        "with_auction_end_at_count": with_auction_end_at_count,
+        "with_city_state_count": with_city_state_count,
+        "with_url_count": with_url_count,
+        "with_image_count": with_image_count,
+        "upcoming_count": upcoming_count,
+        "open_or_live_count": open_or_live_count,
+        "ended_count": ended_count,
+    }
+    metrics["quality_score"] = _score(metrics)
+    metrics["quality_label"] = _label(metrics["quality_score"])
+    return metrics
+
+
+def build_auction_quality_report(db: Session, source: str | None = None) -> dict[str, Any]:
+    now_utc = datetime.now(timezone.utc)
+    keys = [item.key for item in list_auction_sources()]
+    if source:
+        key = resolve_auction_source_alias(source)
+        if key:
+            keys = [key]
+        elif source in keys:
+            keys = [source]
+        else:
+            keys = []
+
+    sources = [_build_source_metrics(db, key, now_utc) for key in keys]
+    return {"generated_at": now_utc, "sources": sources}

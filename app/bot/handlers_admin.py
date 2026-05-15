@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, _fmt_money_br
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -57,6 +57,7 @@ from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.auction_ingestion_service import run_auction_ingestion
 from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
+from app.services.auction_quality_service import build_auction_quality_report
 from app.sources.auctions.registry import resolve_auction_source_alias, render_supported_auction_sources_hint
 
 
@@ -359,6 +360,15 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
+        if sub == "quality":
+            source = args[1] if len(args) >= 2 else None
+            if source and not resolve_auction_source_alias(source):
+                await update.message.reply_text(f"Source de leilão não suportada. {render_supported_auction_sources_hint()}")
+                return
+            report = build_auction_quality_report(db, source=source)
+            await update.message.reply_text(render_admin_auction_quality_report(report))
+            return
+
         if sub == "upcoming":
             lots = db.query(AuctionLot).order_by(
                 case((AuctionLot.auction_end_at.is_(None), 1), else_=0).asc(),
@@ -503,7 +513,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
-    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos | /admin auctions match [vip|mega|win|copart|wishlist <id>]")
+    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos | /admin auctions match [vip|mega|win|copart|wishlist <id>]")
 
 
 def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[str]:
