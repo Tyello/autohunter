@@ -4,6 +4,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.source_run import SourceRun
 from app.models.system_log import SystemLog
 from app.services import autopilot_service
+from app.models.autopilot_finding import AutopilotFinding
 
 
 def test_autopilot_detects_stuck_queue(db, monkeypatch):
@@ -22,6 +23,49 @@ def test_autopilot_detects_heartbeat_without_runs(db, monkeypatch):
     monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
     cands = autopilot_service.build_candidates(db, now=now)
     assert any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
+
+
+def test_autopilot_heartbeat_with_recent_source_runs_does_not_alert(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(SourceRun(source="vip_auctions", kind="scheduler", status="success", created_at=now - timedelta(minutes=2)))
+    db.commit()
+    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    cands = autopilot_service.build_candidates(db, now=now)
+    assert not any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
+
+
+def test_autopilot_heartbeat_source_run_error_counts_as_recent_run(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(SourceRun(source="vip_auctions", kind="scheduler", status="error", created_at=now - timedelta(minutes=2), error="boom"))
+    db.commit()
+    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    cands = autopilot_service.build_candidates(db, now=now)
+    assert not any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
+
+
+def test_autopilot_consecutive_same_finding_respects_cooldown(db):
+    now = datetime.now(timezone.utc)
+    row = AutopilotFinding(
+        status="open",
+        kind="scheduler_heartbeat_without_runs",
+        source=None,
+        fingerprint="fp1",
+        title="x",
+        severity="error",
+        first_seen_at=now,
+        last_seen_at=now,
+        hit_count=1,
+        evidence={},
+        suggested_actions="x",
+    )
+    db.add(row)
+    db.commit()
+    assert autopilot_service.should_alert(row, now=now)
+    autopilot_service.mark_alerted(db, row, now=now)
+    db.commit()
+    assert not autopilot_service.should_alert(row, now=now + timedelta(seconds=10))
 
 
 def test_autopilot_fingerprint_stable_and_digest_no_dupe(db, monkeypatch):
