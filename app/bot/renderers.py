@@ -302,6 +302,7 @@ def render_admin_auction_lot(lot) -> str:
     city = str(getattr(lot, "city", None) or "").strip()
     state = str(getattr(lot, "state", None) or "").strip()
     location = " / ".join([x for x in [city, state] if x]) if (city or state) else None
+    auction_start_at = _fmt_dt_utc(getattr(lot, "auction_start_at", None))
     auction_end_at = _fmt_dt_utc(getattr(lot, "auction_end_at", None))
     url = str(getattr(lot, "url", None) or "-")
     extras = getattr(lot, "extras", None) or {}
@@ -324,6 +325,8 @@ def render_admin_auction_lot(lot) -> str:
         lines.append(f"Lances: {total_bids}")
     if location:
         lines.append(f"Local: {location}")
+    if auction_start_at:
+        lines.append(f"Início: {auction_start_at}")
     if auction_end_at:
         lines.append(f"Encerra: {auction_end_at}")
     if plate_final:

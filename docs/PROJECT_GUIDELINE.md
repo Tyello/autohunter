@@ -157,6 +157,8 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Próxima camada de preview operacional: comandos admin `/admin auctions` (somente leitura), ainda sem exposição para usuário final.
 - Execução manual admin-only via Telegram habilitada na POC: `/admin auctions run vip --limit 10 --enrich` (alias `vip` -> `vip_auctions`), sem scheduler nesta ação pontual.
 - Fora de escopo nesta tranche: usuário final, matching com wishlists, scheduler de leilões e notificações.
-- Próximo passo futuro (fora desta tranche): enriquecer detalhes por página de lote para capturar lance inicial/atual, local e datas de leilão.
+- Parser de detalhe VIP evoluído para tentar capturar também `auction_start_at` e `auction_end_at` por labels e JSON embutido quando disponível.
+- `/admin auctions upcoming` passa a ser o comando operacional recomendado para validar próximos encerramentos capturados na POC VIP.
+- Se a página VIP não expuser encerramento confiável no HTML atual, o fallback continua explícito no comando admin sem impacto para usuário final.
 - Matching com wishlists permanece fora de escopo nesta fase.
 - Sem login e sem bypass anti-bot nesta etapa; evolução para browser automation fica para fase posterior, se necessária.

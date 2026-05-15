@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 from typing import Any, Iterable
 from urllib.parse import urljoin, urlparse
 
@@ -50,6 +51,29 @@ def _first_group(pattern: str, text: str) -> str | None:
 def _extract_label_value(card: str, label: str) -> str | None:
     m = re.search(rf"(?:>|\b){label}\b\s*[:\-]?\s*(?:</?[^>]+>\s*)*([^<\n]+)", card, flags=re.I)
     return m.group(1).strip() if m else None
+
+
+def _extract_datetime_by_patterns(html: str, patterns: list[str]) -> datetime | None:
+    text = _strip_html(html)
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.I)
+        if not match:
+            continue
+        parsed = parse_datetime_br(match.group(1))
+        if parsed:
+            return parsed
+    return None
+
+
+def _extract_datetime_from_embedded_json(html: str, keys: list[str]) -> datetime | None:
+    for key in keys:
+        match = re.search(rf'"{key}"\s*:\s*"([^"]+)"', html, flags=re.I)
+        if not match:
+            continue
+        parsed = parse_datetime_br(match.group(1))
+        if parsed:
+            return parsed
+    return None
 
 
 def _extract_city_state(location: str | None) -> tuple[str | None, str | None]:
@@ -231,8 +255,33 @@ def parse_vip_lot_detail_html(html: str, base_url: str | None = None) -> dict[st
     detail: dict[str, Any] = {}
     detail["initial_bid"] = parse_money_br(_extract_label_value(html, "Lance inicial") or _extract_label_value(html, "Valor inicial") or _extract_label_value(html, "Inicial"))
     detail["current_bid"] = parse_money_br(_extract_label_value(html, "Lance atual") or _extract_label_value(html, "Valor atual") or _extract_label_value(html, "Atual"))
-    detail["auction_start_at"] = parse_datetime_br(_extract_label_value(html, "Início") or _extract_label_value(html, "Data de início"))
-    detail["auction_end_at"] = parse_datetime_br(_extract_label_value(html, "Término") or _extract_label_value(html, "Encerramento") or _extract_label_value(html, "Fim"))
+    start_raw = _extract_label_value(html, "Início") or _extract_label_value(html, "Data de início")
+    end_raw = (
+        _extract_label_value(html, "Término")
+        or _extract_label_value(html, "Encerramento")
+        or _extract_label_value(html, "Fim")
+        or _extract_label_value(html, "Fechamento")
+        or _extract_label_value(html, "Data de encerramento")
+        or _extract_label_value(html, "Encerra")
+    )
+    detail["auction_start_at"] = parse_datetime_br(start_raw)
+    detail["auction_end_at"] = parse_datetime_br(end_raw)
+    if not detail["auction_start_at"]:
+        detail["auction_start_at"] = _extract_datetime_by_patterns(
+            html,
+            [r"(?:Início|Data de início|Pregão|Data do leilão)\s*(?:em|:)?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*(?:às|-)?\s*[0-9]{1,2}[:h][0-9]{2})?)"],
+        )
+    if not detail["auction_end_at"]:
+        detail["auction_end_at"] = _extract_datetime_by_patterns(
+            html,
+            [r"(?:Término|Encerramento|Fim|Fechamento|Data de encerramento|Encerra|Leilão encerra|Finaliza|Aberto até)\s*(?:em|:)?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*(?:às|-)?\s*[0-9]{1,2}[:h][0-9]{2})?)"],
+        )
+    detail["auction_start_at"] = detail["auction_start_at"] or _extract_datetime_from_embedded_json(
+        html, ["auctionStartAt", "startDate", "inicio", "dataInicio"]
+    )
+    detail["auction_end_at"] = detail["auction_end_at"] or _extract_datetime_from_embedded_json(
+        html, ["auctionEndAt", "endDate", "encerramento", "dataEncerramento"]
+    )
     detail["location"] = _sanitize_location_text(_extract_label_value(html, "Local") or _extract_label_value(html, "Pátio"))
     detail["city"] = _sanitize_location_text(_extract_label_value(html, "Cidade"))
     detail["state"] = _sanitize_uf(_extract_label_value(html, "UF"))
@@ -291,6 +340,10 @@ def apply_vip_detail(lot: NormalizedAuctionLot, detail: dict[str, Any]) -> Norma
                     continue
                 value = thumb[0]
         setattr(lot, key, value)
+    for dt_field in ("auction_start_at", "auction_end_at"):
+        new_value = detail.get(dt_field)
+        if isinstance(new_value, datetime):
+            setattr(lot, dt_field, new_value)
     if lot.images:
         lot.images = _filter_vip_lot_images(list(lot.images))
         if lot.images and (not lot.thumbnail_url or lot.thumbnail_url not in lot.images):

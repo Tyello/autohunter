@@ -1,8 +1,9 @@
 import asyncio
 import types
+from datetime import datetime, timezone
 
 from app.bot import handlers_admin
-from app.bot.renderers import render_admin_auctions_summary
+from app.bot.renderers import render_admin_auction_lot, render_admin_auctions_summary
 from app.services.auction_lot_service import upsert_lot
 
 
@@ -59,6 +60,48 @@ def test_admin_auctions_and_source_and_upcoming_and_motos(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions")))
     assert "Total de lotes: 2" in up.message.sent[-1]
+
+
+def test_admin_upcoming_orders_by_end_at_and_shows_sections(monkeypatch, db):
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "v1", "title": "A", "auction_end_at": datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc)})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "v2", "title": "B", "auction_end_at": datetime(2026, 5, 15, 12, 0, tzinfo=timezone.utc)})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "v3", "title": "C"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "upcoming")))
+    text = up.message.sent[-1]
+    assert "próximos encerramentos" in text
+    assert text.index("\nB\n") < text.index("\nA\n")
+    assert "Sem encerramento capturado:" in text
+
+
+def test_admin_upcoming_without_end_at_keeps_fallback(monkeypatch, db):
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "v1", "title": "A"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "upcoming")))
+    assert "Sem data de encerramento capturada nesta fase." in up.message.sent[-1]
+
+
+def test_render_admin_auction_lot_shows_start_and_end():
+    lot = types.SimpleNamespace(
+        title="X",
+        source="vip_auctions",
+        make="Fiat",
+        item_type="car",
+        status="open",
+        auction_start_at=datetime(2026, 5, 15, 10, 0, tzinfo=timezone.utc),
+        auction_end_at=datetime(2026, 5, 15, 12, 0, tzinfo=timezone.utc),
+        url="https://vip/l1",
+        extras={},
+    )
+    text = render_admin_auction_lot(lot)
+    assert "Início:" in text
+    assert "Encerra:" in text
 
 
 def test_admin_auctions_run_variants(monkeypatch, db):
