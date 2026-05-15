@@ -211,6 +211,22 @@ def test_admin_auctions_match_variants(monkeypatch, db):
     assert "Lance atual: -" in up.message.sent[-1]
 
 
+
+
+def test_admin_auctions_source_invalid_shows_registry_hint(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "invalida")))
+    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|copart"
+
+
+def test_admin_auctions_match_invalid_source_shows_error(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "fonte_invalida")))
+    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|copart"
 def test_admin_auctions_match_wishlist_invalid_id(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
