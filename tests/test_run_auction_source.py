@@ -29,7 +29,7 @@ def test_invalid_source_raises_clear_error(monkeypatch):
         run(source="invalid_source", limit=1, dry_run=True)
     except ValueError as exc:
         assert "Unsupported source" in str(exc)
-        assert "Use: vip|mega|win|copart" in str(exc)
+        assert "sodre" in str(exc)
     else:
         assert False, "Expected ValueError"
 
@@ -51,3 +51,9 @@ def test_run_dry_run_mega(monkeypatch):
     monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "mega_auctions")
     monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("mega_auctions", lambda limit: [NormalizedAuctionLot(source="mega_auctions", external_id="m1")], lambda: None, False))
     run(source="mega_auctions", limit=1, dry_run=True)
+
+
+def test_run_dry_run_sodre(monkeypatch):
+    monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "sodre_auctions")
+    monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("sodre_auctions", lambda limit: [NormalizedAuctionLot(source="sodre_auctions", external_id="s1")], lambda: None, False))
+    run(source="sodre", limit=1, dry_run=True)

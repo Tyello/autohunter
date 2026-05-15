@@ -124,6 +124,10 @@ def test_admin_auctions_run_variants(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "win", "--limit", "10")))
     assert "Rodando leilões win_auctions" in up.message.sent[-2]
 
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "sodre", "--limit", "10")))
+    assert "Rodando leilões sodre_auctions" in up.message.sent[-2]
+
+
 
 def test_admin_auctions_run_errors_and_lock(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
@@ -204,6 +208,12 @@ def test_admin_auctions_match_variants(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "win")))
     assert "source win_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=win_auctions" in up.message.sent[-1]
 
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "sodre")))
+    assert "source sodre_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=sodre_auctions" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "sodre")))
+    assert "matching (somente leitura)" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
+
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
     assert "🎯 Busca: civic 2015" in up.message.sent[-1]
     assert "Lance atual: R$ 91.000,00" in up.message.sent[-1]
@@ -218,7 +228,7 @@ def test_admin_auctions_source_invalid_shows_registry_hint(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "invalida")))
-    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|copart"
+    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|sodre|copart"
 
 
 def test_admin_auctions_match_invalid_source_shows_error(monkeypatch, db):
@@ -226,7 +236,7 @@ def test_admin_auctions_match_invalid_source_shows_error(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "fonte_invalida")))
-    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|copart"
+    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|sodre|copart"
 def test_admin_auctions_match_wishlist_invalid_id(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))

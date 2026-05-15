@@ -53,3 +53,22 @@ def test_run_auction_ingestion_rollback_on_error(monkeypatch):
     with pytest.raises(RuntimeError):
         svc.run_auction_ingestion("vip_auctions", limit=10, enrich_details=False)
     assert calls["rolled"] is True
+
+
+def test_run_auction_ingestion_sodre_without_enrich(monkeypatch):
+    called = {"enrich_used": False}
+
+    class FakeDB:
+        def commit(self): return None
+        def rollback(self): return None
+        def close(self): return None
+
+    def _fetch(limit):
+        called["enrich_used"] = False
+        return [NormalizedAuctionLot(source="sodre_auctions", external_id="s1")]
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("sodre_auctions", _fetch, lambda: None, False))
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("sodre_auctions", limit=10, enrich_details=True)
+    assert out["source"] == "sodre_auctions"
