@@ -162,3 +162,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Se a página VIP não expuser encerramento confiável no HTML atual, o fallback continua explícito no comando admin sem impacto para usuário final.
 - Matching com wishlists permanece fora de escopo nesta fase.
 - Sem login e sem bypass anti-bot nesta etapa; evolução para browser automation fica para fase posterior, se necessária.
+
+
+## Leilões (POC admin-only)
+- Além da source `vip_auctions`, a POC agora inclui `mega_auctions` (Mega Leilões), iniciando em motos (`/veiculos/motos`).
+- A ingestão de Mega alimenta `auction_lots` e roda via `/admin auctions run mega` (alias para `mega_auctions`).
+- A source também pode ser inspecionada por `/admin auctions source mega` e considerada em `/admin auctions match mega`.
+- Continua sem scheduler/notificação/usuário final neste estágio.

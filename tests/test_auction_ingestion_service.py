@@ -48,3 +48,21 @@ def test_run_auction_ingestion_rollback_on_error(monkeypatch):
     with pytest.raises(RuntimeError):
         svc.run_auction_ingestion("vip_auctions", limit=10, enrich_details=False)
     assert calls["rolled"] is True
+
+
+def test_run_auction_ingestion_mega(monkeypatch):
+    class FakeDB:
+        def commit(self):
+            return None
+        def rollback(self):
+            return None
+        def close(self):
+            return None
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(svc, "fetch_mega_lots", lambda limit: [NormalizedAuctionLot(source="mega_auctions", external_id="m1")])
+    monkeypatch.setattr(svc, "mega_reason", lambda: None)
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("mega_auctions", limit=10, enrich_details=False)
+    assert out["source"] == "mega_auctions"
+    assert out["inserted"] == 1

@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 from app.services.auction_ingestion_service import SUPPORTED_SOURCES, run_auction_ingestion
 from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
 from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
+from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_reason
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,6 +22,8 @@ def _fetch_source(source: str, limit: int, enrich_details: bool = False):
         return fetch_copart_lots(limit=limit), copart_reason()
     if source == "vip_auctions":
         return fetch_vip_lots(limit=limit, enrich=enrich_details), vip_reason()
+    if source == "mega_auctions":
+        return fetch_mega_lots(limit=limit), mega_reason()
     raise ValueError(f"Unsupported source: {source}. Available: {', '.join(sorted(SUPPORTED_SOURCES))}")
 
 

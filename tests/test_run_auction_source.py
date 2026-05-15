@@ -33,6 +33,7 @@ def test_invalid_source_raises_clear_error():
         assert "Unsupported source" in str(exc)
         assert "copart_auctions" in str(exc)
         assert "vip_auctions" in str(exc)
+        assert "mega_auctions" in str(exc)
     else:
         assert False, "Expected ValueError"
 
@@ -47,3 +48,8 @@ def test_run_enrich_details_passed_to_vip(monkeypatch):
     monkeypatch.setattr("scripts.run_auction_source.fetch_vip_lots", fake_fetch)
     run(source="vip_auctions", limit=1, dry_run=True, enrich_details=True)
     assert called["enrich"] is True
+
+
+def test_run_dry_run_mega(monkeypatch):
+    monkeypatch.setattr("scripts.run_auction_source.fetch_mega_lots", lambda limit: [NormalizedAuctionLot(source="mega_auctions", external_id="m1")])
+    run(source="mega_auctions", limit=1, dry_run=True)
