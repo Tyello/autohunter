@@ -490,6 +490,7 @@ def get_wishlist_summaries(db: Session, user_id):
             "wishlist_id": wl.id,
             "query": wl.query,
             "is_active": bool(getattr(wl, "is_active", True)),
+            "include_auctions": bool(getattr(wl, "include_auctions", False)),
             "filters_count": int(filter_counts.get(wl.id, 0) or 0),
             "filters": filters_by_wishlist.get(wl.id, []),
             "tracked_count": int(tracked_counts.get(wl.id, 0) or 0),
@@ -509,7 +510,7 @@ def set_wishlist_active_state(db: Session, user_id, wishlist_index: int, is_acti
     db.commit()
     return True, wl.query
 
-def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = True):
+def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = True, include_auctions: bool = False):
     """Cria wishlist e opcionalmente cria filtros de ano/preço se diretivas existirem."""
     try:
         db.rollback()
@@ -530,7 +531,13 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
     if cleaned_query.lower() in {"gte", "lte", "gt", "lt", "eq", "neq"}:
         return False, "Query inválida. Use um termo de busca (ex: civic touring)."
 
-    w = Wishlist(id=uuid.uuid4(), user_id=user_id, query=cleaned_query, is_active=True)
+    w = Wishlist(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        query=cleaned_query,
+        is_active=True,
+        include_auctions=bool(include_auctions),
+    )
     db.add(w)
 
     try:

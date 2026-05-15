@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Text, Boolean, ForeignKey
+from sqlalchemy import Text, Boolean, ForeignKey, false
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
@@ -13,6 +13,7 @@ class Wishlist(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    include_auctions: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
 
     user = relationship("User", back_populates="wishlists")
 

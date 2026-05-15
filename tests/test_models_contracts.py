@@ -79,6 +79,18 @@ def test_wishlist_filter_unique_constraint(db):
         db.commit()
 
 
+def test_wishlist_include_auctions_default_false(db):
+    user = _mk_user()
+    db.add(user)
+    db.commit()
+
+    w = Wishlist(user_id=user.id, query="gol")
+    db.add(w)
+    db.commit()
+    db.refresh(w)
+    assert w.include_auctions is False
+
+
 def test_source_state_unique_source_and_defaults(db):
     s1 = SourceState(source="olx")
     s2 = SourceState(source="olx")

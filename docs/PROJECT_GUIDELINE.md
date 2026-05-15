@@ -198,3 +198,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
   - copy de risco obrigatória em qualquer superfície de preview de leilão;
   - idealmente `auction_end_at` quando houver componente de urgência temporal.
 - O score de qualidade do comando admin é um semáforo operacional (não substitui validação de produto/compliance).
+
+## 17) Auction opt-in per wishlist
+- Leilões são **opt-in por busca** via campo persistente `wishlists.include_auctions`.
+- Valor padrão: `false` (incluindo buscas existentes e novas, salvo ativação explícita admin).
+- Nesta fase, o opt-in afeta apenas o matching admin de leilões (`/admin auctions match ...`).
+- Ainda **não** há notificação automática de leilões para usuário final.
+- Antes de notificar usuários finais, será criado fluxo de preview/admin de alerta e copy de risco operacional (edital/taxas/vistoria).

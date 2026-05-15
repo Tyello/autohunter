@@ -477,6 +477,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
         if sub == "match":
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 target_id = args[2].strip()
+                force = any(a.strip().lower() == "--force" for a in args[3:])
                 try:
                     wishlist_uuid = uuid.UUID(target_id)
                 except Exception:
@@ -485,11 +486,19 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 if not wishlist:
                     await update.message.reply_text("Wishlist não encontrada.")
                     return
+                if not force and not bool(getattr(wishlist, "include_auctions", False)):
+                    await update.message.reply_text(
+                        f"Esta busca não está habilitada para leilões. Use /admin auctions wishlist {wishlist.id} enable para habilitar."
+                    )
+                    return
                 matches = match_auction_lots_for_wishlist(db, wishlist, limit=10)
                 if not matches:
                     await update.message.reply_text("Sem leilões compatíveis para esta busca.")
                     return
                 await update.message.reply_text("\n".join(_render_admin_auction_matches(wishlist.query, matches)))
+                return
+            elif len(args) >= 2 and args[1].lower() == "wishlist":
+                await update.message.reply_text("Use: /admin auctions match wishlist <id> [--force]")
                 return
             elif len(args) >= 2:
                 source = resolve_auction_source_alias(args[1])
@@ -512,12 +521,41 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 lines.append("")
             await update.message.reply_text("\n".join(lines).strip())
             return
+        if sub == "wishlist":
+            if len(args) < 3:
+                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable>")
+                return
+            target_id = args[1].strip()
+            action = args[2].strip().lower()
+            try:
+                wishlist_uuid = uuid.UUID(target_id)
+            except Exception:
+                await update.message.reply_text("Wishlist não encontrada.")
+                return
+            wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_uuid).first()
+            if not wishlist:
+                await update.message.reply_text("Wishlist não encontrada.")
+                return
+            if action == "enable":
+                wishlist.include_auctions = True
+                db.add(wishlist)
+                db.commit()
+                await update.message.reply_text("✅ Leilões ativados para esta busca.")
+                return
+            if action == "disable":
+                wishlist.include_auctions = False
+                db.add(wishlist)
+                db.commit()
+                await update.message.reply_text("✅ Leilões desativados para esta busca.")
+                return
+            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable>")
+            return
 
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <id>]"
+        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions wishlist <wishlist_id> <enable|disable>"
     )
 
 
