@@ -7,8 +7,9 @@ from app.services.auction_lot_service import upsert_lot
 from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
 from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
 from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_reason
+from app.sources.auctions.win import fetch_win_lots, get_last_reason as win_reason
 
-SUPPORTED_SOURCES = {"copart_auctions", "vip_auctions", "mega_auctions"}
+SUPPORTED_SOURCES = {"copart_auctions", "vip_auctions", "mega_auctions", "win_auctions"}
 
 
 def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False) -> dict[str, Any]:
@@ -21,9 +22,12 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
     elif source == "vip_auctions":
         lots = fetch_vip_lots(limit=limit, enrich=enrich_details)
         reason = vip_reason()
-    else:
+    elif source == "mega_auctions":
         lots = fetch_mega_lots(limit=limit)
         reason = mega_reason()
+    else:
+        lots = fetch_win_lots(limit=limit)
+        reason = win_reason()
 
     summary: dict[str, Any] = {
         "source": source,

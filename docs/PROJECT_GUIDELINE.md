@@ -167,5 +167,7 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 ## Leilões (POC admin-only)
 - Além da source `vip_auctions`, a POC agora inclui `mega_auctions` (Mega Leilões), iniciando em motos (`/veiculos/motos`).
 - A ingestão de Mega alimenta `auction_lots` e roda via `/admin auctions run mega` (alias para `mega_auctions`).
+- A POC também inclui `win_auctions` (Win Leilões) como terceira source experimental via HTML público estático (home/listagens).
+- `win_auctions` permanece admin-only nesta fase: sem scheduler, sem notificação para usuário final, sem alteração de wishlist; objetivo é popular `auction_lots` e participar do matching via `/admin auctions match win`.
 - A source também pode ser inspecionada por `/admin auctions source mega` e considerada em `/admin auctions match mega`.
 - Continua sem scheduler/notificação/usuário final neste estágio.

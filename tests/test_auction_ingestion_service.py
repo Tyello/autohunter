@@ -66,3 +66,21 @@ def test_run_auction_ingestion_mega(monkeypatch):
     out = svc.run_auction_ingestion("mega_auctions", limit=10, enrich_details=False)
     assert out["source"] == "mega_auctions"
     assert out["inserted"] == 1
+
+
+def test_run_auction_ingestion_win(monkeypatch):
+    class FakeDB:
+        def commit(self):
+            return None
+        def rollback(self):
+            return None
+        def close(self):
+            return None
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(svc, "fetch_win_lots", lambda limit: [NormalizedAuctionLot(source="win_auctions", external_id="w1")])
+    monkeypatch.setattr(svc, "win_reason", lambda: None)
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("win_auctions", limit=10, enrich_details=False)
+    assert out["source"] == "win_auctions"
+    assert out["inserted"] == 1

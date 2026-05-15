@@ -185,7 +185,7 @@ _ADMIN_AUCTION_RUN_LOCK = asyncio.Lock()
 
 
 def _resolve_auction_source_alias(raw_source: str) -> str | None:
-    alias = {"vip": "vip_auctions", "vip_auctions": "vip_auctions", "mega": "mega_auctions", "mega_auctions": "mega_auctions", "copart": "copart_auctions", "copart_auctions": "copart_auctions"}
+    alias = {"vip": "vip_auctions", "vip_auctions": "vip_auctions", "mega": "mega_auctions", "mega_auctions": "mega_auctions", "copart": "copart_auctions", "copart_auctions": "copart_auctions", "win": "win_auctions", "win_auctions": "win_auctions"}
     return alias.get((raw_source or "").lower())
 
 
@@ -194,7 +194,7 @@ def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bo
         return None, None, False, "Use: /admin auctions run <source> [--limit N] [--enrich]"
     source = _resolve_auction_source_alias(args[1])
     if not source:
-        return None, None, False, "Source de leilão não suportada. Use: vip|mega|copart"
+        return None, None, False, "Source de leilão não suportada. Use: vip|mega|copart|win"
     limit = 10
     enrich = False
     idx = 2
@@ -348,7 +348,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if len(args) < 2:
                 await update.message.reply_text("Use: /admin auctions source <source>")
                 return
-            alias = {"vip": "vip_auctions", "mega": "mega_auctions", "copart": "copart_auctions"}
+            alias = {"vip": "vip_auctions", "mega": "mega_auctions", "copart": "copart_auctions", "win": "win_auctions"}
             source = alias.get(args[1].lower(), args[1].lower())
             lots = db.query(AuctionLot).filter(AuctionLot.source == source).order_by(AuctionLot.updated_at.desc()).limit(10).all()
             if not lots:
@@ -467,7 +467,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
 
         if sub == "match":
-            source_alias = {"vip": "vip_auctions", "mega": "mega_auctions", "copart": "copart_auctions"}
+            source_alias = {"vip": "vip_auctions", "mega": "mega_auctions", "copart": "copart_auctions", "win": "win_auctions"}
             if len(args) >= 2 and args[1].lower() in source_alias:
                 matches_by = match_auction_lots_for_all_wishlists(db, source=source_alias[args[1].lower()], limit_per_wishlist=5)
             elif len(args) >= 3 and args[1].lower() == "wishlist":
@@ -501,7 +501,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
-    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos | /admin auctions match [vip|mega|copart|wishlist <id>]")
+    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos | /admin auctions match [vip|mega|copart|win|wishlist <id>]")
 
 
 def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[str]:
