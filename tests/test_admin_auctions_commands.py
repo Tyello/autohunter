@@ -370,7 +370,11 @@ def test_render_auction_alert_preview_contract():
     text = render_auction_alert_preview(m)
     assert "Atenção:" in text
     assert "Lance atual: R$ 91.000,00" in text
-    assert "Preço" not in text
+    assert "Fonte: VIP Leilões" in text
+    assert "Lance atual:" in text
+    assert "Lance inicial:" in text
+    assert "preço final" not in text.lower()
+    assert "Lance não é valor final" in text
     assert "https://example/lote" in text
 
 

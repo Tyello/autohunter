@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import re
 from typing import Iterable
 
+from app.sources.auctions.registry import get_auction_source_definition
+
 
 def _format_int_safe(value: str) -> str | None:
     raw = str(value or "").strip().lower()
@@ -451,18 +453,11 @@ def render_admin_auction_quality_report(report: dict) -> str:
     return "\n".join(lines).strip()
 
 
-_AUCTION_SOURCE_FRIENDLY = {
-    "vip_auctions": "VIP Leilões",
-    "mega_auctions": "Mega Leilões",
-    "win_auctions": "Win Leilões",
-    "sodre_auctions": "Sodré Santoro",
-    "superbid_auctions": "Superbid",
-    "copart_auctions": "Copart",
-}
-
 
 def render_auction_alert_preview(match) -> str:
-    source = _AUCTION_SOURCE_FRIENDLY.get(str(getattr(match, "source", "") or "").strip(), getattr(match, "source", "-") or "-")
+    source_raw = str(getattr(match, "source", "") or "").strip()
+    source_def = get_auction_source_definition(source_raw)
+    source = source_def.label if source_def else (source_raw or "-")
     status = str(getattr(match, "status", "") or "-")
     title = str(getattr(match, "title", "") or "Sem título")
     query = str(getattr(match, "wishlist_query", "") or "-")
@@ -506,7 +501,7 @@ def render_auction_alert_preview(match) -> str:
     lines.extend([
         "",
         "Atenção:",
-        "Leilão não é preço final. Verifique edital, taxas, comissão, condição do lote, documentação e possibilidade de vistoria.",
+        "Lance não é valor final. Verifique edital, taxas, comissão, condição do lote, documentação e possibilidade de vistoria.",
         "",
         "Link:",
         url,
