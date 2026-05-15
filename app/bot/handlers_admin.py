@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -58,6 +58,10 @@ from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.auction_ingestion_service import run_auction_ingestion
 from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
 from app.services.auction_quality_service import build_auction_quality_report
+from app.services.auction_preview_service import (
+    build_auction_alert_previews_for_enabled_wishlists,
+    build_auction_alert_previews_for_wishlist,
+)
 from app.sources.auctions.registry import resolve_auction_source_alias, render_supported_auction_sources_hint
 
 
@@ -474,6 +478,32 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
+        if sub == "preview":
+            if len(args) >= 3 and args[1].lower() == "wishlist":
+                force = any(a.strip().lower() == "--force" for a in args[3:])
+                result = build_auction_alert_previews_for_wishlist(db, args[2], force=force, limit=5)
+                if result.warning:
+                    await update.message.reply_text(result.warning)
+                    return
+                matches = result.matches
+            elif len(args) >= 2:
+                source = resolve_auction_source_alias(args[1])
+                if not source:
+                    await update.message.reply_text(f"Source de leilão não suportada. {render_supported_auction_sources_hint()}")
+                    return
+                matches = build_auction_alert_previews_for_enabled_wishlists(db, source=source, limit=5)
+            else:
+                matches = build_auction_alert_previews_for_enabled_wishlists(db, limit=5)
+
+            if not matches:
+                await update.message.reply_text("Sem previews de leilão no momento.")
+                return
+            if len(matches) >= 5:
+                await update.message.reply_text("Mostrando os 5 primeiros previews.")
+            for m in matches[:5]:
+                await update.message.reply_text(render_auction_alert_preview(m), disable_web_page_preview=True)
+            return
+
         if sub == "match":
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 target_id = args[2].strip()
@@ -555,7 +585,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions wishlist <wishlist_id> <enable|disable>"
+        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions preview [{sources_hint}|wishlist <id> [--force]] | /admin auctions wishlist <wishlist_id> <enable|disable>"
     )
 
 

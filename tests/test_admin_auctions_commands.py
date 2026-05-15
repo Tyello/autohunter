@@ -346,3 +346,71 @@ def test_admin_auctions_wishlist_toggle_not_found(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "invalido", "enable")))
     assert up.message.sent[-1] == "Wishlist não encontrada."
+
+
+def test_render_auction_alert_preview_contract():
+    from app.bot.renderers import render_auction_alert_preview
+
+    m = types.SimpleNamespace(
+        source="vip_auctions",
+        title="Honda Civic SI - 2015",
+        wishlist_query="civic si 2015",
+        status="open",
+        current_bid=91000,
+        initial_bid=None,
+        total_bids=8,
+        year=2015,
+        mileage_km=98000,
+        city="São Paulo",
+        state="SP",
+        auction_end_at=datetime(2026, 5, 20, 18, 0, tzinfo=timezone.utc),
+        reasons=["ano compatível"],
+        url="https://example/lote",
+    )
+    text = render_auction_alert_preview(m)
+    assert "Atenção:" in text
+    assert "Lance atual: R$ 91.000,00" in text
+    assert "Preço" not in text
+    assert "https://example/lote" in text
+
+
+def test_admin_auctions_preview_variants(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+
+    u = User(id=uuid.uuid4(), telegram_chat_id=902, username="z")
+    db.add(u)
+    db.flush()
+    w_on = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    w_off = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=False)
+    db.add_all([w_on, w_off])
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "pv1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "current_bid": 91000, "url": "https://vip/pv1"})
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview")))
+    assert any("Preview — alerta de leilão" in s for s in up.message.sent)
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "vip")))
+    assert any("Fonte: VIP Leilões" in s for s in up.message.sent)
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "wishlist", str(w_off.id))))
+    assert "não está habilitada" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "wishlist", str(w_off.id), "--force")))
+    assert any("Preview — alerta de leilão" in s for s in up.message.sent)
+
+
+def test_admin_auctions_preview_invalid_source_and_not_found(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "invalida")))
+    assert "não suportada" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "wishlist", str(uuid.uuid4()))))
+    assert up.message.sent[-1] == "Wishlist não encontrada."

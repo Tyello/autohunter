@@ -205,3 +205,13 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Nesta fase, o opt-in afeta apenas o matching admin de leilões (`/admin auctions match ...`).
 - Ainda **não** há notificação automática de leilões para usuário final.
 - Antes de notificar usuários finais, será criado fluxo de preview/admin de alerta e copy de risco operacional (edital/taxas/vistoria).
+
+## Auction alert preview
+
+- O comando `/admin auctions preview` é **admin-only** e de **somente leitura**.
+- Objetivo: validar copy e qualidade do futuro alerta de leilão antes da notificação para usuário final.
+- O preview **não envia mensagem para usuário final**.
+- O preview **não cria Notification**.
+- Por padrão usa apenas buscas com `include_auctions=true`.
+- Para diagnóstico, `/admin auctions preview wishlist <id> --force` ignora esse opt-in sem persistir alteração.
+- Próximo passo (futuro): notificação controlada de leilões para usuários finais.
