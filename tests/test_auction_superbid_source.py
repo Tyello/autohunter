@@ -1,11 +1,12 @@
 import json
+from decimal import Decimal
 from pathlib import Path
 
 from app.sources.auctions import superbid
 
 
 def _fixture(name: str) -> str:
-    return Path("tests/fixtures/auctions") .joinpath(name).read_text(encoding="utf-8")
+    return Path("tests/fixtures/auctions").joinpath(name).read_text(encoding="utf-8")
 
 
 def test_allowlist_accept_and_reject():
@@ -36,13 +37,32 @@ def test_parse_listing_cards_extracts_fields_and_mappings():
     json.dumps(l1.extras)
 
 
-def test_anchor_fallback_and_dedupe_and_status_mapping():
-    html = _fixture("superbid_anchor_fallback.html") + _fixture("superbid_anchor_fallback.html")
+def test_anchor_fallback_extracts_distant_data_and_dedupes_same_href():
+    lots = superbid.parse_superbid_listing_html(_fixture("superbid_anchor_fallback.html"), listing_url="https://www.superbid.net/")
+    assert len(lots) == 1
+    lot = lots[0]
+    assert lot.title == "Honda CG 160 FAN - 2020"
+    assert lot.url == "https://www.superbid.net/eventos/honda-cg-160-fan-2020-98101"
+    assert lot.external_id == "98101"
+    assert lot.item_type == "motorcycle"
+    assert lot.city == "São Paulo" and lot.state == "SP" and lot.location == "São Paulo/SP"
+    assert lot.status == "open"
+    assert lot.current_bid == Decimal("9200.00")
+    assert lot.auction_end_at is not None
+    assert lot.lot_number == "101"
+
+
+def test_anchor_institutional_is_ignored():
+    html = """
+    <html><body>
+      <a href='/login'>Login</a>
+      <a href='/contato'>Contato</a>
+      <a href='/minha-conta'>Minha conta</a>
+      <a href='/termos'>Termos</a>
+    </body></html>
+    """
     lots = superbid.parse_superbid_listing_html(html, listing_url="https://www.superbid.net/")
-    assert len(lots) == 2
-    statuses = {x.status for x in lots}
-    assert "post_auction" in statuses or "buy_now" in statuses
-    assert "ended" in statuses
+    assert lots == []
 
 
 def test_fetch_sets_reason_for_invalid_and_js(monkeypatch):

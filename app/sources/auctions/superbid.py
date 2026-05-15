@@ -114,17 +114,23 @@ def _extract_superbid_candidate_blocks(html: str) -> list[str]:
         return class_blocks
 
     keywords = r"carros|motos|caminh|onibus|ônibus|leilao|leilão|lote|lotes|item|asset|event"
+    blocked = r"login|cadastro|ajuda|contato|sobre|privacidade|termos|pol[ií]tica|institucional|favoritos|minha-conta|account"
     blocks: list[str] = []
     seen: set[str] = set()
     for a in re.finditer(r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", html, flags=re.I | re.S):
         href = (a.group(1) or "").strip()
         anchor_text = _strip_html(a.group(2) or "")
-        if not re.search(keywords, f"{href} {anchor_text}", flags=re.I):
+        blob = f"{href} {anchor_text}"
+        if re.search(blocked, blob, flags=re.I):
+            continue
+        if not re.search(keywords, blob, flags=re.I):
             continue
         if href in seen:
             continue
         seen.add(href)
-        blocks.append(html[max(0, a.start() - 120): min(len(html), a.end() + 120)])
+        start = max(0, a.start() - 2000)
+        end = min(len(html), a.end() + 2000)
+        blocks.append(html[start:end])
     return blocks
 
 
@@ -132,8 +138,19 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
     blocks = _extract_superbid_candidate_blocks(html)
     lots: list[NormalizedAuctionLot] = []
     seen: set[str] = set()
+    blocked = r"login|cadastro|ajuda|contato|sobre|privacidade|termos|pol[ií]tica|institucional|favoritos|minha-conta|account"
+    href_signal = r"carros|motos|caminh|onibus|ônibus|leilao|leilão|lote|lotes|item|asset|event|\d{2,}"
     for card in blocks:
-        href = _first_group(r'href=["\']([^"\']+)["\']', card)
+        href = None
+        for candidate in re.findall(r'href=["\']([^"\']+)["\']', card, flags=re.I):
+            blob = candidate.lower()
+            if re.search(blocked, blob, flags=re.I):
+                continue
+            if re.search(href_signal, blob, flags=re.I):
+                href = candidate
+                break
+        if not href:
+            href = _first_group(r'href=["\']([^"\']+)["\']', card)
         if not href:
             continue
         url = urljoin(listing_url, href)
@@ -145,8 +162,11 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             continue
         seen.add(dedupe)
 
-        title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "") or _strip_html(_first_group(r"<a[^>]*>(.*?)</a>", card) or "")
+        title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "")
         full_text = _strip_html(card)
+        if not title:
+            inferred_title = _first_group(r"([A-Za-zÀ-ÿ0-9\-\s]{6,120}\b(?:19\d{2}|20\d{2})\b)", full_text)
+            title = _strip_html(inferred_title or "") or _strip_html(_first_group(r"<a[^>]*>(.*?)</a>", card) or "")
         category = _first_group(r"(?:categoria)\s*:?\s*([^<\n|]+)", card)
         modality = _first_group(r"(?:modalidade)\s*:?\s*([^<\n|]+)", card)
         raw_status = _first_group(r"(?:status)\s*:?\s*([^<\n|]+)", card) or _first_group(r"\b(Em andamento|Ao vivo|Leilão aberto|Pós-leilão|Mercado Balcão|Compre Já|Tomada de Preço|Encerrado)\b", full_text)
