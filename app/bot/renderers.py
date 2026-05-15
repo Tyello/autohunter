@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import re
 from typing import Iterable
 
+from app.sources.auctions.registry import get_auction_source_definition
+
 
 def _format_int_safe(value: str) -> str | None:
     raw = str(value or "").strip().lower()
@@ -448,4 +450,60 @@ def render_admin_auction_quality_report(report: dict) -> str:
         if idx < len(sources) - 1:
             lines.append("")
 
+    return "\n".join(lines).strip()
+
+
+
+def render_auction_alert_preview(match) -> str:
+    source_raw = str(getattr(match, "source", "") or "").strip()
+    source_def = get_auction_source_definition(source_raw)
+    source = source_def.label if source_def else (source_raw or "-")
+    status = str(getattr(match, "status", "") or "-")
+    title = str(getattr(match, "title", "") or "Sem título")
+    query = str(getattr(match, "wishlist_query", "") or "-")
+    year = getattr(match, "year", None)
+    mileage = _fmt_int_br(getattr(match, "mileage_km", None)) or "-"
+    current_bid = _fmt_money_br(getattr(match, "current_bid", None)) or "-"
+    initial_bid = _fmt_money_br(getattr(match, "initial_bid", None)) or "-"
+    total_bids = getattr(match, "total_bids", None)
+    total_bids_text = str(total_bids) if total_bids is not None else "-"
+    city = str(getattr(match, "city", "") or "").strip()
+    state = str(getattr(match, "state", "") or "").strip()
+    location = "/".join([x for x in [city, state] if x]) if (city or state) else "-"
+    ends_at = _fmt_dt_utc(getattr(match, "auction_end_at", None)) or "-"
+    reasons = [str(r).strip() for r in (getattr(match, "reasons", None) or []) if str(r).strip()]
+    url = str(getattr(match, "url", "") or "-")
+
+    lines = [
+        "🧪 Preview — alerta de leilão",
+        "",
+        "⚠️ Leilão compatível encontrado",
+        "",
+        f"Busca: {query}",
+        "",
+        title,
+        f"Fonte: {source}",
+        f"Status: {status}",
+        f"Lance atual: {current_bid}",
+        f"Lance inicial: {initial_bid}",
+        f"Lances: {total_bids_text}",
+        f"Ano: {year if year is not None else '-'}",
+        f"KM: {mileage}",
+        f"Local: {location}",
+        f"Encerra: {ends_at}",
+        "",
+        "Por que apareceu:",
+    ]
+    if reasons:
+        lines.extend([f"- {r}" for r in reasons])
+    else:
+        lines.append("- compatível com a busca")
+    lines.extend([
+        "",
+        "Atenção:",
+        "Lance não é valor final. Verifique edital, taxas, comissão, condição do lote, documentação e possibilidade de vistoria.",
+        "",
+        "Link:",
+        url,
+    ])
     return "\n".join(lines).strip()

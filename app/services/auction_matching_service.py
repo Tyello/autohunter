@@ -27,8 +27,13 @@ class AuctionWishlistMatch:
     year: int | None
     mileage_km: int | None
     current_bid: Decimal | None
+    initial_bid: Decimal | None
+    total_bids: int | None
     status: str | None
     auction_end_at: object | None
+    city: str | None
+    state: str | None
+    url: str | None
     score: int
     reasons: list[str]
     risk_label: str = "auction"
@@ -137,8 +142,13 @@ def match_auction_lots_for_wishlist(db: Session, wishlist: Wishlist, source: str
                 year=lot.year,
                 mileage_km=lot.mileage_km,
                 current_bid=lot.current_bid,
+                initial_bid=lot.initial_bid,
+                total_bids=lot.total_bids,
                 status=lot.status,
                 auction_end_at=lot.auction_end_at,
+                city=lot.city,
+                state=lot.state,
+                url=lot.url,
                 score=score,
                 reasons=reasons,
             )
