@@ -8,6 +8,7 @@ from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_r
 from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
 from app.sources.auctions.win import fetch_win_lots, get_last_reason as win_reason
 from app.sources.auctions.sodre import fetch_sodre_lots, get_last_reason as sodre_reason
+from app.sources.auctions.superbid import fetch_superbid_lots, get_last_reason as superbid_reason
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,15 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         label="Sodré Santoro",
         fetcher=fetch_sodre_lots,
         reason_getter=sodre_reason,
+        supports_enrich=False,
+        status="experimental",
+    ),
+    AuctionSourceDefinition(
+        key="superbid_auctions",
+        aliases=("superbid", "superbid_auctions"),
+        label="Superbid",
+        fetcher=fetch_superbid_lots,
+        reason_getter=superbid_reason,
         supports_enrich=False,
         status="experimental",
     ),

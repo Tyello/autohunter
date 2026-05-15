@@ -30,6 +30,7 @@ def test_invalid_source_raises_clear_error(monkeypatch):
     except ValueError as exc:
         assert "Unsupported source" in str(exc)
         assert "sodre" in str(exc)
+        assert "superbid" in str(exc)
     else:
         assert False, "Expected ValueError"
 
@@ -57,3 +58,9 @@ def test_run_dry_run_sodre(monkeypatch):
     monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "sodre_auctions")
     monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("sodre_auctions", lambda limit: [NormalizedAuctionLot(source="sodre_auctions", external_id="s1")], lambda: None, False))
     run(source="sodre", limit=1, dry_run=True)
+
+
+def test_run_dry_run_superbid(monkeypatch):
+    monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "superbid_auctions")
+    monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("superbid_auctions", lambda limit: [NormalizedAuctionLot(source="superbid_auctions", external_id="sb1")], lambda: None, False))
+    run(source="superbid", limit=1, dry_run=True)
