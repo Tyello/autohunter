@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from types import SimpleNamespace
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, _fmt_money_br
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -470,7 +471,11 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 matches_by = match_auction_lots_for_all_wishlists(db, source="vip_auctions", limit_per_wishlist=5)
             elif len(args) >= 3 and args[1].lower() == "wishlist":
                 target_id = args[2].strip()
-                wishlist = next((w for w in db.query(Wishlist).all() if str(w.id) == target_id), None)
+                try:
+                    wishlist_uuid = uuid.UUID(target_id)
+                except Exception:
+                    wishlist_uuid = None
+                wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_uuid).first() if wishlist_uuid else None
                 if not wishlist:
                     await update.message.reply_text("Wishlist não encontrada.")
                     return
@@ -505,7 +510,7 @@ def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[st
         lines.extend([
             f"⚠️ Leilão compatível — {src}",
             m.title or "(sem título)",
-            f"Lance atual: R$ {m.current_bid}" if m.current_bid is not None else "Lance atual: -",
+            f"Lance atual: {_fmt_money_br(m.current_bid)}" if m.current_bid is not None else "Lance atual: -",
             f"Score: {m.score}",
             "Razões:",
         ])

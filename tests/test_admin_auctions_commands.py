@@ -178,7 +178,8 @@ def test_admin_auctions_match_variants(monkeypatch, db):
     w = Wishlist(user_id=u.id, query="civic 2015", is_active=True)
     db.add(w)
     db.flush()
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "m1", "title": "Honda Civic 2015", "year": 2015, "status": "open"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "m1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "current_bid": 91000})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "m2", "title": "Honda Civic EX 2015", "year": 2015, "status": "open"})
     db.commit()
 
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
@@ -193,6 +194,17 @@ def test_admin_auctions_match_variants(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
     assert "🎯 Busca: civic 2015" in up.message.sent[-1]
+    assert "Lance atual: R$ 91.000,00" in up.message.sent[-1]
+    assert "Lance atual: R$ 91000.00" not in up.message.sent[-1]
+    assert "Lance atual: -" in up.message.sent[-1]
+
+
+def test_admin_auctions_match_wishlist_invalid_id(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", "invalido")))
+    assert up.message.sent[-1] == "Wishlist não encontrada."
 
 
 def test_admin_auctions_match_non_admin_and_empty(monkeypatch, db):
