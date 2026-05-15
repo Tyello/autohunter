@@ -420,10 +420,16 @@ def _candidate_operational(db: Session, now: datetime) -> List[FindingCandidate]
     hb = db.query(SystemLog).filter(SystemLog.component == "scheduler", SystemLog.message == "heartbeat").order_by(SystemLog.created_at.desc()).first()
     hb_at = _as_utc(hb.created_at) if hb else None
     source_runs_window_m = int(getattr(settings, "autopilot_source_runs_zero_window_minutes", 30) or 30)
-    sr_cut = now - timedelta(minutes=source_runs_window_m)
-    runs_recent = db.query(func.count(SourceRun.id)).filter(SourceRun.created_at >= sr_cut).scalar() or 0
+    sr_cut = _as_utc(now - timedelta(minutes=source_runs_window_m))
+    runs_recent = (
+        db.query(func.count(SourceRun.id))
+        .filter(SourceRun.status.in_(["success", "error"]))
+        .filter(SourceRun.created_at >= sr_cut)
+        .scalar()
+        or 0
+    )
     if hb_at and hb_at >= sr_cut and int(runs_recent) == 0:
-        out.append(FindingCandidate(kind="scheduler_heartbeat_without_runs", source=None, fingerprint=_sha1("scheduler_heartbeat_without_runs"), title="Scheduler heartbeat ativo, mas source_runs zerado na janela", severity="error", evidence={"heartbeat_at": hb_at.isoformat(), "window_minutes": source_runs_window_m, "source_runs_count": int(runs_recent)}, suggested_actions="Ações sugeridas: revisar scheduler tick/enqueue e conectividade do worker com o banco."))
+        out.append(FindingCandidate(kind="scheduler_heartbeat_without_runs", source=None, fingerprint=_sha1("scheduler_heartbeat_without_runs"), title="Scheduler heartbeat ativo, mas source_runs zerado na janela", severity="error", evidence={"last_heartbeat_at": hb_at.isoformat(), "source_runs_count_window": int(runs_recent), "window_minutes": source_runs_window_m, "checked_at": _as_utc(now).isoformat()}, suggested_actions="Ações sugeridas: revisar scheduler tick/enqueue e conectividade do worker com o banco."))
 
     sent_cut = now - timedelta(minutes=sender_idle_minutes)
     sent_recent = db.query(func.count(Notification.id)).filter(Notification.sent_at.isnot(None), Notification.sent_at >= sent_cut).scalar() or 0
@@ -491,10 +497,11 @@ def should_alert(row: AutopilotFinding, now: Optional[datetime] = None) -> bool:
     throttle_s = int(getattr(settings, "autopilot_alert_throttle_seconds", 1800) or 1800)
     throttle_s = max(60, min(throttle_s, 24 * 3600))
 
-    if not row.last_alert_at:
+    last_alert_at = _as_utc(row.last_alert_at)
+    if not last_alert_at:
         return True
 
-    return (now - row.last_alert_at).total_seconds() >= throttle_s
+    return (_as_utc(now) - last_alert_at).total_seconds() >= throttle_s
 
 
 def mark_alerted(db: Session, row: AutopilotFinding, now: Optional[datetime] = None) -> None:

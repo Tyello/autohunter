@@ -384,6 +384,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 await update.message.reply_text("Já existe uma execução de leilões em andamento. Aguarde finalizar.")
                 return
 
+            started_at = datetime.now(timezone.utc)
             await update.message.reply_text(f"⏳ Rodando leilões VIP com limit={limit} enrich={'true' if enrich_details else 'false'}...")
             logger.info(
                 "admin_auction_run_started",
@@ -405,6 +406,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 await update.message.reply_text("Falha ao rodar ingestão de leilões. Verifique logs.")
                 return
 
+            duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
             logger.info(
                 "admin_auction_run_finished",
                 extra={
@@ -416,6 +418,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     "inserted": summary.get("inserted", 0),
                     "updated": summary.get("updated", 0),
                     "errors": summary.get("errors", 0),
+                    "duration_ms": duration_ms,
                 },
             )
             lines = [
@@ -430,6 +433,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"- atualizados: {summary.get('updated', 0)}",
                 f"- ignorados: {summary.get('skipped', 0)}",
                 f"- erros: {summary.get('errors', 0)}",
+                f"- duração_ms: {duration_ms}",
             ]
             if (summary.get("fetched", 0) == 0) and summary.get("reason"):
                 lines.extend(["", f"Motivo: {summary.get('reason')}"])
