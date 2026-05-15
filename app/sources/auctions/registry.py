@@ -7,6 +7,7 @@ from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as co
 from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_reason
 from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
 from app.sources.auctions.win import fetch_win_lots, get_last_reason as win_reason
+from app.sources.auctions.sodre import fetch_sodre_lots, get_last_reason as sodre_reason
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,15 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         label="Win Leilões",
         fetcher=fetch_win_lots,
         reason_getter=win_reason,
+        supports_enrich=False,
+        status="experimental",
+    ),
+    AuctionSourceDefinition(
+        key="sodre_auctions",
+        aliases=("sodre", "sodre_auctions"),
+        label="Sodré Santoro",
+        fetcher=fetch_sodre_lots,
+        reason_getter=sodre_reason,
         supports_enrich=False,
         status="experimental",
     ),
