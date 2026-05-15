@@ -513,7 +513,12 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
-    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos | /admin auctions match [vip|mega|win|copart|wishlist <id>]")
+    sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
+    await update.message.reply_text(
+        "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
+        "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
+        f"| /admin auctions match [{sources_hint}|wishlist <id>]"
+    )
 
 
 def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[str]:

@@ -299,3 +299,12 @@ def test_admin_auctions_quality_invalid_and_non_admin(monkeypatch, db):
     up2 = _Update(chat_id=1)
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("auctions", "quality")))
     assert "Sem permissão" in up2.message.sent[-1]
+
+
+def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "acao_invalida")))
+    assert "vip|mega|win|sodre|superbid|copart" in up.message.sent[-1]
+    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id>]" in up.message.sent[-1]
