@@ -1,5 +1,6 @@
 import asyncio
 import types
+import uuid
 from datetime import datetime, timezone
 
 from app.bot import handlers_admin
@@ -165,3 +166,42 @@ def test_admin_auctions_run_exception_sends_friendly_error(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "5")))
     assert "Rodando leilões VIP" in up.message.sent[-2]
     assert "Falha ao rodar ingestão de leilões. Verifique logs." in up.message.sent[-1]
+
+
+def test_admin_auctions_match_variants(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+
+    u = User(id=uuid.uuid4(), telegram_chat_id=901, username="x")
+    db.add(u)
+    db.flush()
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True)
+    db.add(w)
+    db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "m1", "title": "Honda Civic 2015", "year": 2015, "status": "open"})
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match")))
+    assert "matching (somente leitura)" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "vip")))
+    assert "VIP" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
+    assert "🎯 Busca: civic 2015" in up.message.sent[-1]
+
+
+def test_admin_auctions_match_non_admin_and_empty(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=10)
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match")))
+    assert "Sem permissão" in up.message.sent[-1]
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match")))
+    assert "Sem leilões compatíveis" in up.message.sent[-1]

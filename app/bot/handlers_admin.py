@@ -55,6 +55,7 @@ from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.auction_ingestion_service import run_auction_ingestion
+from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
 
 
 @dataclass
@@ -464,7 +465,55 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
-    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos")
+        if sub == "match":
+            if len(args) >= 2 and args[1].lower() == "vip":
+                matches_by = match_auction_lots_for_all_wishlists(db, source="vip_auctions", limit_per_wishlist=5)
+            elif len(args) >= 3 and args[1].lower() == "wishlist":
+                target_id = args[2].strip()
+                wishlist = next((w for w in db.query(Wishlist).all() if str(w.id) == target_id), None)
+                if not wishlist:
+                    await update.message.reply_text("Wishlist não encontrada.")
+                    return
+                matches = match_auction_lots_for_wishlist(db, wishlist, limit=10)
+                if not matches:
+                    await update.message.reply_text("Sem leilões compatíveis para esta busca.")
+                    return
+                await update.message.reply_text("\n".join(_render_admin_auction_matches(wishlist.query, matches)))
+                return
+            else:
+                matches_by = match_auction_lots_for_all_wishlists(db, limit_per_wishlist=5)
+
+            if not matches_by:
+                await update.message.reply_text("Sem leilões compatíveis no momento.")
+                return
+            lines = ["⚠️ Admin Leilões — matching (somente leitura)", ""]
+            for _wid, matches in matches_by.items():
+                if not matches:
+                    continue
+                lines.extend(_render_admin_auction_matches(matches[0].wishlist_query, matches))
+                lines.append("")
+            await update.message.reply_text("\n".join(lines).strip())
+            return
+
+    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos | /admin auctions match [vip|wishlist <id>]")
+
+
+def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[str]:
+    lines = [f"🎯 Busca: {wishlist_query}"]
+    for m in matches:
+        src = "VIP" if m.source == "vip_auctions" else m.source
+        lines.extend([
+            f"⚠️ Leilão compatível — {src}",
+            m.title or "(sem título)",
+            f"Lance atual: R$ {m.current_bid}" if m.current_bid is not None else "Lance atual: -",
+            f"Score: {m.score}",
+            "Razões:",
+        ])
+        for r in (m.reasons or []):
+            lines.append(f"- {r}")
+        lines.append("")
+    lines.append("Atenção: leilão exige edital, taxas e vistoria.")
+    return lines
 
 
 async def _admin_premium(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_args: List[str]):
