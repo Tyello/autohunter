@@ -186,3 +186,15 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
   - `sodre_auctions`: `experimental`
   - `superbid_auctions`: `experimental`
   - `copart_auctions`: `needs_js_or_endpoint_study`
+
+## Auction quality report
+
+- Antes de qualquer ativação de leilões para usuário final, cada source deve ser avaliada via `/admin auctions quality` (todas) e `/admin auctions quality <source>` (detalhe por fonte).
+- Nesta etapa, leilões seguem **admin-only**: sem scheduler dedicado, sem notificação automática e sem inclusão direta na jornada de usuário final.
+- Critérios mínimos recomendados para uma source avançar de fase:
+  - cobertura alta de URL (idealmente próxima de 100%);
+  - cobertura suficiente de `title` e `year` para entendimento básico do item;
+  - presença de `current_bid` ou `initial_bid` para decisão econômica;
+  - copy de risco obrigatória em qualquer superfície de preview de leilão;
+  - idealmente `auction_end_at` quando houver componente de urgência temporal.
+- O score de qualidade do comando admin é um semáforo operacional (não substitui validação de produto/compliance).

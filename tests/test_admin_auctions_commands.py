@@ -264,3 +264,47 @@ def test_admin_auctions_match_non_admin_and_empty(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match")))
     assert "Sem leilões compatíveis" in up.message.sent[-1]
+
+
+def test_admin_auctions_quality_variants(monkeypatch, db):
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "v1", "title": "UNO", "year": 2011, "current_bid": 10, "url": "https://vip/1", "status": "open"})
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "m1", "title": "PALIO", "url": "https://mega/1"})
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "quality")))
+    assert "Admin Leilões — qualidade" in up.message.sent[-1]
+    assert "vip_auctions" in up.message.sent[-1]
+    assert "mega_auctions" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "quality", "vip")))
+    assert "vip_auctions" in up.message.sent[-1]
+    assert "mega_auctions" not in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "quality", "mega")))
+    assert "mega_auctions" in up.message.sent[-1]
+
+
+def test_admin_auctions_quality_invalid_and_non_admin(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "quality", "fonte_invalida")))
+    assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|sodre|superbid|copart"
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    up2 = _Update(chat_id=1)
+    asyncio.run(handlers_admin.cmd_admin(up2, _ctx("auctions", "quality")))
+    assert "Sem permissão" in up2.message.sent[-1]
+
+
+def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "acao_invalida")))
+    assert "vip|mega|win|sodre|superbid|copart" in up.message.sent[-1]
+    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id>]" in up.message.sent[-1]
