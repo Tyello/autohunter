@@ -365,13 +365,24 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 AuctionLot.auction_end_at.asc(),
                 AuctionLot.updated_at.desc(),
             ).limit(10).all()
-            lines = ["⚠️ Admin Leilões — upcoming", "Sem data de encerramento capturada nesta fase.", ""]
+            with_end = [lot for lot in lots if lot.auction_end_at is not None]
+            without_end = [lot for lot in lots if lot.auction_end_at is None]
+            if with_end:
+                lines = ["⚠️ Admin Leilões — próximos encerramentos", ""]
+            else:
+                lines = ["⚠️ Admin Leilões — upcoming", "Sem data de encerramento capturada nesta fase.", ""]
             if not lots:
                 lines.append("Nenhum lote persistido ainda.")
             else:
-                for lot in lots:
+                for lot in with_end or lots:
                     lines.append(render_admin_auction_lot(lot))
                     lines.append("")
+                if with_end and without_end:
+                    lines.append("Sem encerramento capturado:")
+                    lines.append("")
+                    for lot in without_end[:3]:
+                        lines.append(render_admin_auction_lot(lot))
+                        lines.append("")
             await update.message.reply_text("\n".join(lines).strip())
             return
 

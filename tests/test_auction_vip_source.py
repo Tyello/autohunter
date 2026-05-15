@@ -1,6 +1,8 @@
 from pathlib import Path
+from datetime import datetime, timezone
 
 from app.sources.auctions import vip
+from app.sources.auctions.parsing import parse_datetime_br
 
 FIXTURE_WITH_CARDS = Path("tests/fixtures/auctions/vip_listing_with_cards.html")
 FIXTURE_NO_CARDS = Path("tests/fixtures/auctions/vip_listing_without_cards.html")
@@ -208,3 +210,31 @@ def test_apply_vip_detail_does_not_overwrite_with_dirty_values():
     assert out.lot_number == "321"
     assert out.thumbnail_url.endswith("/good.jpg")
     assert out.to_payload()["image_count"] == 1
+
+
+def test_parse_datetime_br_supported_formats():
+    assert parse_datetime_br("15/05/2026 10:00") == datetime(2026, 5, 15, 13, 0, tzinfo=timezone.utc)
+    assert parse_datetime_br("15/05/2026 às 10:00") == datetime(2026, 5, 15, 13, 0, tzinfo=timezone.utc)
+    assert parse_datetime_br("15/05/2026 - 10:00") == datetime(2026, 5, 15, 13, 0, tzinfo=timezone.utc)
+    assert parse_datetime_br("15/05/26 10:00") == datetime(2026, 5, 15, 13, 0, tzinfo=timezone.utc)
+    assert parse_datetime_br("2026-05-15T10:00:00") == datetime(2026, 5, 15, 13, 0, tzinfo=timezone.utc)
+    assert parse_datetime_br("xpto") is None
+
+
+def test_parse_detail_extracts_end_at_from_labels_and_iso():
+    detail = vip.parse_vip_lot_detail_html("<div>Encerramento: 15/05/2026 18:30</div>")
+    assert detail["auction_end_at"] == datetime(2026, 5, 15, 21, 30, tzinfo=timezone.utc)
+    detail2 = vip.parse_vip_lot_detail_html("<div>Leilão encerra em 15/05/2026 às 18:30</div>")
+    assert detail2["auction_end_at"] == datetime(2026, 5, 15, 21, 30, tzinfo=timezone.utc)
+    detail3 = vip.parse_vip_lot_detail_html('<script>{"auctionEndAt":"2026-05-15T18:30:00"}</script>')
+    assert detail3["auction_end_at"] == datetime(2026, 5, 15, 21, 30, tzinfo=timezone.utc)
+
+
+def test_apply_vip_detail_preserves_existing_end_at_when_new_missing():
+    lot = vip.NormalizedAuctionLot(
+        source="vip_auctions",
+        external_id="1",
+        auction_end_at=datetime(2026, 5, 15, 21, 30, tzinfo=timezone.utc),
+    )
+    out = vip.apply_vip_detail(lot, {"current_bid": 1})
+    assert out.auction_end_at == datetime(2026, 5, 15, 21, 30, tzinfo=timezone.utc)

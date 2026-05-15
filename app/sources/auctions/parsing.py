@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 
 def parse_money_br(value: str | None) -> Decimal | None:
@@ -66,10 +67,26 @@ def normalize_status(text: str | None) -> str:
 def parse_datetime_br(value: str | None) -> datetime | None:
     if not value:
         return None
-    cleaned = value.strip()
-    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
+    cleaned = " ".join(value.strip().split())
+
+    try:
+        iso_candidate = cleaned.replace("Z", "+00:00")
+        iso_dt = datetime.fromisoformat(iso_candidate)
+        if iso_dt.tzinfo is None:
+            iso_dt = iso_dt.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        return iso_dt.astimezone(ZoneInfo("UTC"))
+    except ValueError:
+        pass
+
+    cleaned = re.sub(r"\s+às\s+", " ", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s*-\s*", " ", cleaned)
+    cleaned = re.sub(r"([0-9])h([0-9]{2})", r"\1:\2", cleaned, flags=re.I)
+
+    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y", "%d/%m/%y %H:%M", "%d/%m/%y"):
         try:
-            return datetime.strptime(cleaned, fmt)
+            parsed = datetime.strptime(cleaned, fmt)
+            parsed = parsed.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+            return parsed.astimezone(ZoneInfo("UTC"))
         except ValueError:
             continue
     return None
