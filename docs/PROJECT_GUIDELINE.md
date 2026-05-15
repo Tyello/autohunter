@@ -171,3 +171,13 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - `win_auctions` permanece admin-only nesta fase: sem scheduler, sem notificação para usuário final, sem alteração de wishlist; objetivo é popular `auction_lots` e participar do matching via `/admin auctions match win`.
 - A source também pode ser inspecionada por `/admin auctions source mega` e considerada em `/admin auctions match mega`.
 - Continua sem scheduler/notificação/usuário final neste estágio.
+
+## Auction source registry
+
+- Novas fontes de leilão devem ser registradas em `app/sources/auctions/registry.py`.
+- Handlers admin, runners e services não devem manter aliases manuais duplicados.
+- Status atual:
+  - `vip_auctions`: `active`
+  - `mega_auctions`: `experimental`
+  - `win_auctions`: `experimental`
+  - `copart_auctions`: `needs_js_or_endpoint_study`

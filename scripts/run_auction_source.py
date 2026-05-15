@@ -10,36 +10,43 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.auction_ingestion_service import SUPPORTED_SOURCES, run_auction_ingestion
-from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
-from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
-from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_reason
-from app.sources.auctions.win import fetch_win_lots, get_last_reason as win_reason
+from app.services.auction_ingestion_service import run_auction_ingestion
+from app.sources.auctions.registry import (
+    get_auction_source_definition,
+    render_supported_auction_sources_hint,
+    resolve_auction_source_alias,
+)
 
 logging.basicConfig(level=logging.INFO)
 
+
 def _fetch_source(source: str, limit: int, enrich_details: bool = False):
-    if source == "copart_auctions":
-        return fetch_copart_lots(limit=limit), copart_reason()
-    if source == "vip_auctions":
-        return fetch_vip_lots(limit=limit, enrich=enrich_details), vip_reason()
-    if source == "mega_auctions":
-        return fetch_mega_lots(limit=limit), mega_reason()
-    if source == "win_auctions":
-        return fetch_win_lots(limit=limit), win_reason()
-    raise ValueError(f"Unsupported source: {source}. Available: {', '.join(sorted(SUPPORTED_SOURCES))}")
+    definition = get_auction_source_definition(source)
+    if definition is None:
+        raise ValueError(f"Unsupported source: {source}. {render_supported_auction_sources_hint()}")
+
+    enrich_applied = bool(enrich_details and definition.supports_enrich)
+    if definition.supports_enrich:
+        lots = definition.fetcher(limit=limit, enrich=enrich_applied)
+    else:
+        lots = definition.fetcher(limit=limit)
+    return definition.key, lots, definition.reason_getter(), enrich_applied
 
 
 def run(source: str, limit: int, dry_run: bool, enrich_details: bool = False) -> int:
+    resolved = resolve_auction_source_alias(source)
+    if not resolved:
+        raise ValueError(f"Unsupported source: {source}. {render_supported_auction_sources_hint()}")
+
     if dry_run:
-        lots, reason = _fetch_source(source=source, limit=limit, enrich_details=enrich_details)
-        summary = {"source": source, "fetched": len(lots), "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": reason if not lots else None}
+        source_key, lots, reason, enrich_applied = _fetch_source(source=resolved, limit=limit, enrich_details=enrich_details)
+        summary = {"source": source_key, "fetched": len(lots), "inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "reason": reason if not lots else None, "enrich_applied": enrich_applied}
         for lot in lots:
             print(json.dumps(lot.to_payload(), default=str, ensure_ascii=False))
         print(json.dumps(summary, ensure_ascii=False))
         return 0
 
-    summary = run_auction_ingestion(source=source, limit=limit, enrich_details=enrich_details)
+    summary = run_auction_ingestion(source=resolved, limit=limit, enrich_details=enrich_details)
     print(json.dumps(summary, ensure_ascii=False))
     return 0
 
