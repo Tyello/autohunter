@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+import logging
+import re
+from typing import Iterable
+from urllib.parse import urljoin, urlparse
+
+import httpx
+
+from app.sources.auctions.base import NormalizedAuctionLot
+from app.sources.auctions.parsing import parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
+
+SOURCE_KEY = "mega_auctions"
+DEFAULT_LISTING_URL = "https://www.megaleiloes.com.br/veiculos/motos"
+ALLOWED_DOMAINS = {"megaleiloes.com.br", "www.megaleiloes.com.br"}
+
+VALID_UFS = {
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
+}
+
+logger = logging.getLogger(__name__)
+_LAST_REASON: str | None = None
+
+
+def get_last_reason() -> str | None:
+    return _LAST_REASON
+
+
+def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> bool:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {d.lower() for d in allowed_domains}
+
+
+def _strip_html(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text)).strip()
+
+
+def _first_group(pattern: str, text: str) -> str | None:
+    m = re.search(pattern, text, flags=re.I | re.S)
+    return m.group(1).strip() if m else None
+
+
+def normalize_mega_status(text: str | None) -> str:
+    val = (text or "").lower()
+    if "aberto para lances" in val:
+        return "open"
+    if "em breve" in val:
+        return "scheduled"
+    return "unknown"
+
+
+def parse_mega_praca_line(line: str | None) -> tuple[object | None, object | None]:
+    if not line:
+        return None, None
+    m = re.search(r"(\d{1,2}/\d{1,2}/\d{2,4}\s*(?:às\s*)?\d{1,2}:\d{2})", line, flags=re.I)
+    dt = parse_datetime_br(m.group(1)) if m else None
+    money_match = re.search(r"R\$\s*[0-9.]+,[0-9]{2}", line, flags=re.I)
+    value = parse_money_br(money_match.group(0) if money_match else line)
+    return dt, value
+
+
+def parse_mega_location(location: str | None) -> tuple[str | None, str | None, str | None]:
+    if not location:
+        return None, None, None
+    clean = " ".join(location.strip().split())
+    parts = [p.strip() for p in clean.split(",", 1)]
+    if len(parts) != 2:
+        return clean, None, clean
+    city, uf = parts
+    uf = uf.upper()
+    if uf in {"SI", "NI"} or city.lower() in {"sem informação", "não informando"}:
+        return None, None, clean
+    return city, (uf if uf in VALID_UFS else None), clean
+
+
+def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
+    cards = re.findall(r'<article[^>]*class="[^"]*(?:card|lot)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S)
+    if not cards:
+        cards = re.findall(r'<div[^>]*class="[^"]*(?:card|lot)[^"]*"[^>]*>(.*?)</div>', html, flags=re.I | re.S)
+
+    lots: list[NormalizedAuctionLot] = []
+    for card in cards[:limit]:
+        title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "") or None
+        href = _first_group(r'href=["\']([^"\']+)["\']', card)
+        url = urljoin(listing_url, href) if href else None
+        raw_code = _strip_html(_first_group(r"\b(J\d{4,})\b", card) or "") or None
+        external_id = raw_code or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or None
+        if not external_id:
+            continue
+
+        location_text = _strip_html(_first_group(r"(?:Local|Cidade)\s*:?\s*</?[^>]*>\s*([^<]+)", card) or _first_group(r"([A-Za-zÀ-ÿ\s]+,\s*[A-Za-z]{2})", card) or "") or None
+        city, state, location = parse_mega_location(location_text)
+        status_text = _strip_html(_first_group(r"(?:Status)\s*:?\s*</?[^>]*>\s*([^<]+)", card) or _first_group(r"(Aberto para lances|Em breve)", card) or "")
+        lot_number = parse_int_br(_first_group(r"Lote\s*(\d+)", card) or "")
+
+        first_line = _first_group(r"1ª\s*Praça\s*:?\s*([^<]+)", card)
+        second_line = _first_group(r"2ª\s*Praça\s*:?\s*([^<]+)", card)
+        first_at, first_value = parse_mega_praca_line(first_line)
+        second_at, second_value = parse_mega_praca_line(second_line)
+        end_at = second_at or first_at
+
+        make = _first_group(r"\bMoto\s+([A-Za-z]+)", title or "")
+        year = parse_year_from_title(title)
+        current_bid = parse_money_br(_first_group(r"(?:Valor atual|Lance atual|Valor)\s*:?\s*([^<]+)", card) or "")
+        extras = {
+            "first_praca_at": first_at,
+            "first_praca_value": first_value,
+            "second_praca_at": second_at,
+            "second_praca_value": second_value,
+            "judicial_type": _first_group(r"\b(Judicial|Extrajudicial)\b", card),
+            "raw_code": raw_code,
+            "views_count": parse_int_br(_first_group(r"(\d+)\s*visualiza", card) or ""),
+            "bids_count": parse_int_br(_first_group(r"(\d+)\s*lances", card) or ""),
+        }
+
+        lots.append(NormalizedAuctionLot(
+            source=SOURCE_KEY,
+            external_id=external_id,
+            url=url,
+            title=title,
+            item_type="motorcycle",
+            make=make,
+            year=year,
+            city=city,
+            state=state,
+            location=location,
+            status=normalize_mega_status(status_text),
+            lot_number=str(lot_number) if lot_number is not None else None,
+            auction_start_at=first_at,
+            auction_end_at=end_at,
+            initial_bid=first_value,
+            current_bid=current_bid,
+            extras={k: v for k, v in extras.items() if v is not None},
+            raw_payload={"html_card": card[:1000]},
+        ))
+    return lots
+
+
+def fetch_mega_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
+    global _LAST_REASON
+    _LAST_REASON = None
+    if not validate_auction_source_url(listing_url, ALLOWED_DOMAINS):
+        _LAST_REASON = "invalid_source_url"
+        return []
+    with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": "AutoHunter/1.0 (+experimental)"}) as client:
+        resp = client.get(listing_url)
+        resp.raise_for_status()
+    lots = parse_mega_listing_html(resp.text, limit=limit, listing_url=listing_url)
+    if lots:
+        return lots
+    _LAST_REASON = "no_public_lot_cards_found"
+    return []

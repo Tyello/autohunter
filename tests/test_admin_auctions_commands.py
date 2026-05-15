@@ -111,14 +111,14 @@ def test_admin_auctions_run_variants(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "run_auction_ingestion", lambda **kwargs: {"source": "vip_auctions", "fetched": 10, "inserted": 2, "updated": 8, "skipped": 0, "errors": 0, "reason": None})
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip")))
-    assert "Rodando leilões VIP" in up.message.sent[-2]
+    assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "limit: 10" in up.message.sent[-1]
     assert "duração_ms:" in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "5")))
-    assert "Rodando leilões VIP" in up.message.sent[-2]
+    assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "limit: 5" in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "10", "--enrich")))
-    assert "Rodando leilões VIP" in up.message.sent[-2]
+    assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "enrich: sim" in up.message.sent[-1]
 
 
@@ -126,7 +126,7 @@ def test_admin_auctions_run_errors_and_lock(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "copart")))
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "invalida")))
     assert "não suportada" in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "999")))
     assert "Limite inválido" in up.message.sent[-1]
@@ -164,7 +164,7 @@ def test_admin_auctions_run_exception_sends_friendly_error(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "run_auction_ingestion", _raise)
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "5")))
-    assert "Rodando leilões VIP" in up.message.sent[-2]
+    assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "Falha ao rodar ingestão de leilões. Verifique logs." in up.message.sent[-1]
 
 
@@ -191,6 +191,9 @@ def test_admin_auctions_match_variants(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "vip")))
     assert "VIP" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "mega")))
+    assert "source mega_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=mega_auctions" in up.message.sent[-1]
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
     assert "🎯 Busca: civic 2015" in up.message.sent[-1]
