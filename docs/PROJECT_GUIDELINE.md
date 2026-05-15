@@ -169,9 +169,11 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - A ingestão de Mega alimenta `auction_lots` e roda via `/admin auctions run mega` (alias para `mega_auctions`).
 - A POC também inclui `win_auctions` (Win Leilões) como terceira source experimental via HTML público estático (home/listagens).
 - A POC inclui também `sodre_auctions` (Sodré Santoro) como source experimental via HTML público estático quando houver cards/lotes disponíveis.
+- A POC inclui `superbid_auctions` (Superbid) como source experimental via HTML público estático quando disponível.
 - `win_auctions` permanece admin-only nesta fase: sem scheduler, sem notificação para usuário final, sem alteração de wishlist; objetivo é popular `auction_lots` e participar do matching via `/admin auctions match win`.
 - A source também pode ser inspecionada por `/admin auctions source mega` e considerada em `/admin auctions match mega`.
 - Continua sem scheduler/notificação/usuário final neste estágio; a frente de leilões permanece admin-only.
+- Leilões seguem admin-only, sem notificação para usuário final nesta etapa.
 
 ## Auction source registry
 
@@ -182,4 +184,5 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
   - `mega_auctions`: `experimental`
   - `win_auctions`: `experimental`
   - `sodre_auctions`: `experimental`
+  - `superbid_auctions`: `experimental`
   - `copart_auctions`: `needs_js_or_endpoint_study`

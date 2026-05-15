@@ -72,3 +72,16 @@ def test_run_auction_ingestion_sodre_without_enrich(monkeypatch):
     monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
     out = svc.run_auction_ingestion("sodre_auctions", limit=10, enrich_details=True)
     assert out["source"] == "sodre_auctions"
+
+
+def test_run_auction_ingestion_superbid_without_enrich(monkeypatch):
+    class FakeDB:
+        def commit(self): return None
+        def rollback(self): return None
+        def close(self): return None
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("superbid_auctions", lambda limit: [NormalizedAuctionLot(source="superbid_auctions", external_id="sb1")], lambda: None, False))
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("superbid_auctions", limit=10, enrich_details=True)
+    assert out["source"] == "superbid_auctions"
