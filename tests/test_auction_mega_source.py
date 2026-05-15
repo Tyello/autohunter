@@ -1,3 +1,6 @@
+from datetime import datetime
+from decimal import Decimal
+
 from pathlib import Path
 
 from app.sources.auctions import mega
@@ -31,7 +34,14 @@ def test_parse_mega_listing_fields():
     assert first.auction_start_at is not None
     assert first.auction_end_at is not None
     assert first.initial_bid is not None and str(first.initial_bid) == "6215.00"
-    assert first.extras["second_praca_value"] is not None and str(first.extras["second_praca_value"]) == "3729.00"
+    assert first.extras["second_praca_value"] == "3729.00"
+
+    assert isinstance(first.extras["first_praca_at"], str)
+    assert isinstance(first.extras["first_praca_value"], str)
+    assert isinstance(first.extras["second_praca_at"], str)
+    assert isinstance(first.extras["second_praca_value"], str)
+    assert not isinstance(first.extras["first_praca_at"], datetime)
+    assert not isinstance(first.extras["first_praca_value"], Decimal)
 
     second = lots[1]
     assert second.status == "scheduled"

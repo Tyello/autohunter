@@ -104,10 +104,10 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
         year = parse_year_from_title(title)
         current_bid = parse_money_br(_first_group(r"(?:Valor atual|Lance atual|Valor)\s*:?\s*([^<]+)", card) or "")
         extras = {
-            "first_praca_at": first_at,
-            "first_praca_value": first_value,
-            "second_praca_at": second_at,
-            "second_praca_value": second_value,
+            "first_praca_at": first_at.isoformat() if first_at else None,
+            "first_praca_value": str(first_value) if first_value is not None else None,
+            "second_praca_at": second_at.isoformat() if second_at else None,
+            "second_praca_value": str(second_value) if second_value is not None else None,
             "judicial_type": _first_group(r"\b(Judicial|Extrajudicial)\b", card),
             "raw_code": raw_code,
             "views_count": parse_int_br(_first_group(r"(\d+)\s*visualiza", card) or ""),
