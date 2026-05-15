@@ -14,6 +14,7 @@ from app.services.auction_ingestion_service import SUPPORTED_SOURCES, run_auctio
 from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
 from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
 from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_reason
+from app.sources.auctions.win import fetch_win_lots, get_last_reason as win_reason
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,6 +25,8 @@ def _fetch_source(source: str, limit: int, enrich_details: bool = False):
         return fetch_vip_lots(limit=limit, enrich=enrich_details), vip_reason()
     if source == "mega_auctions":
         return fetch_mega_lots(limit=limit), mega_reason()
+    if source == "win_auctions":
+        return fetch_win_lots(limit=limit), win_reason()
     raise ValueError(f"Unsupported source: {source}. Available: {', '.join(sorted(SUPPORTED_SOURCES))}")
 
 

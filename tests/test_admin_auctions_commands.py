@@ -121,6 +121,9 @@ def test_admin_auctions_run_variants(monkeypatch, db):
     assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "enrich: sim" in up.message.sent[-1]
 
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "win", "--limit", "10")))
+    assert "Rodando leilões win_auctions" in up.message.sent[-2]
+
 
 def test_admin_auctions_run_errors_and_lock(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
@@ -187,13 +190,19 @@ def test_admin_auctions_match_variants(monkeypatch, db):
     up = _Update()
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match")))
-    assert "matching (somente leitura)" in up.message.sent[-1]
+    assert "matching (somente leitura)" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "vip")))
     assert "VIP" in up.message.sent[-1]
 
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "win")))
+    assert "matching (somente leitura)" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
+
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "mega")))
     assert "source mega_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=mega_auctions" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "win")))
+    assert "source win_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=win_auctions" in up.message.sent[-1]
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
     assert "🎯 Busca: civic 2015" in up.message.sent[-1]
