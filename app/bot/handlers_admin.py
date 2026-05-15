@@ -57,6 +57,7 @@ from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.auction_ingestion_service import run_auction_ingestion
 from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
+from app.sources.auctions.registry import resolve_auction_source_alias, render_supported_auction_sources_hint
 
 
 @dataclass
@@ -184,17 +185,12 @@ def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
 _ADMIN_AUCTION_RUN_LOCK = asyncio.Lock()
 
 
-def _resolve_auction_source_alias(raw_source: str) -> str | None:
-    alias = {"vip": "vip_auctions", "vip_auctions": "vip_auctions", "mega": "mega_auctions", "mega_auctions": "mega_auctions", "copart": "copart_auctions", "copart_auctions": "copart_auctions", "win": "win_auctions", "win_auctions": "win_auctions"}
-    return alias.get((raw_source or "").lower())
-
-
 def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
     if len(args) < 2:
         return None, None, False, "Use: /admin auctions run <source> [--limit N] [--enrich]"
-    source = _resolve_auction_source_alias(args[1])
+    source = resolve_auction_source_alias(args[1])
     if not source:
-        return None, None, False, "Source de leilão não suportada. Use: vip|mega|copart|win"
+        return None, None, False, f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
     limit = 10
     enrich = False
     idx = 2
@@ -501,7 +497,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
-    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos | /admin auctions match [vip|mega|copart|win|wishlist <id>]")
+    await update.message.reply_text("Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] | /admin auctions upcoming | /admin auctions motos | /admin auctions match [vip|mega|win|copart|wishlist <id>]")
 
 
 def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[str]:

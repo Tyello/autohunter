@@ -4,30 +4,27 @@ from typing import Any
 
 from app.db.session import SessionLocal
 from app.services.auction_lot_service import upsert_lot
-from app.sources.auctions.copart import fetch_copart_lots, get_last_reason as copart_reason
-from app.sources.auctions.vip import fetch_vip_lots, get_last_reason as vip_reason
-from app.sources.auctions.mega import fetch_mega_lots, get_last_reason as mega_reason
-from app.sources.auctions.win import fetch_win_lots, get_last_reason as win_reason
+from app.sources.auctions.registry import (
+    get_auction_source_definition,
+    list_supported_auction_source_keys,
+    render_supported_auction_sources_hint,
+)
 
-SUPPORTED_SOURCES = {"copart_auctions", "vip_auctions", "mega_auctions", "win_auctions"}
+SUPPORTED_SOURCES = list_supported_auction_source_keys()
 
 
 def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False) -> dict[str, Any]:
-    if source not in SUPPORTED_SOURCES:
-        raise ValueError(f"Unsupported source: {source}. Available: {', '.join(sorted(SUPPORTED_SOURCES))}")
+    definition = get_auction_source_definition(source)
+    if definition is None:
+        raise ValueError(f"Unsupported source: {source}. {render_supported_auction_sources_hint()}")
 
-    if source == "copart_auctions":
-        lots = fetch_copart_lots(limit=limit)
-        reason = copart_reason()
-    elif source == "vip_auctions":
-        lots = fetch_vip_lots(limit=limit, enrich=enrich_details)
-        reason = vip_reason()
-    elif source == "mega_auctions":
-        lots = fetch_mega_lots(limit=limit)
-        reason = mega_reason()
+    source = definition.key
+    enrich_applied = bool(enrich_details and definition.supports_enrich)
+    if definition.supports_enrich:
+        lots = definition.fetcher(limit=limit, enrich=enrich_applied)
     else:
-        lots = fetch_win_lots(limit=limit)
-        reason = win_reason()
+        lots = definition.fetcher(limit=limit)
+    reason = definition.reason_getter()
 
     summary: dict[str, Any] = {
         "source": source,
@@ -37,6 +34,7 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
         "skipped": 0,
         "errors": 0,
         "reason": reason if not lots else None,
+        "enrich_applied": enrich_applied,
     }
 
     db = SessionLocal()
