@@ -234,3 +234,7 @@ Regras práticas:
 - candidatos fracos (URL inválida, título institucional, sem sinais mínimos de lote) não devem ser persistidos;
 - o summary de ingestão pode incluir `skipped_reasons` para diagnosticar rapidamente o parser por source;
 - somente sources com qualidade mínima de dados devem avançar para etapas posteriores (matching/notify).
+
+- Quality gate v2 de leilões: títulos institucionais/genéricos (ex.: home/categoria/footer) e URLs institucionais/PDF/blog devem ser rejeitados antes da persistência.
+- Para `win_auctions` e `superbid_auctions`, city/state sozinhos não qualificam lote; é obrigatório ao menos um sinal forte (`year`, `current_bid`, `initial_bid`, `auction_end_at` ou `lot_number`).
+- `sodre_auctions` com HTTP 403 deve ser tratado como bloqueio controlado (`forbidden_403`), classificado como `needs_study` operacional sem ruído de falha inesperada.

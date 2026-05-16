@@ -3,6 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from app.sources.auctions import win
+from app.sources.auctions.quality import validate_normalized_auction_lot_candidate
 
 
 def _read(name: str) -> str:
@@ -66,3 +67,14 @@ def test_win_blocks_institutional_and_parses_initial_bid():
     assert len(lots) == 1
     assert lots[0].title is None
     assert lots[0].initial_bid == Decimal('600000.00')
+    assert validate_normalized_auction_lot_candidate(lots[0]).reason == "missing_title"
+
+
+def test_win_only_accepts_item_detalhes_urls():
+    html = """
+    <article class="card"><a href="/leilao/123/lotes">Lotes</a><h3>Honda CG 160 2020</h3></article>
+    <article class="card"><a href="/item/3739/detalhes">Detalhes</a><h3>Honda CG 160 2020</h3><div>Lance Inicial: R$ 12.000,00</div></article>
+    """
+    lots = win.parse_win_listing_html(html, limit=10)
+    assert len(lots) == 1
+    assert lots[0].url.endswith("/item/3739/detalhes")

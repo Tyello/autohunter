@@ -103,5 +103,31 @@ def test_superbid_blocks_navigation_and_categoria_urls():
 def test_superbid_event_without_signals_rejected_by_gate():
     html = "<article class=\"card\"><a href=\"/evento/787062\">evento</a></article>"
     lots = superbid.parse_superbid_listing_html(html, listing_url='https://www.superbid.net/')
+    assert lots == []
+
+
+def test_superbid_rejects_institutional_titles_and_urls():
+    html = """
+    <article class='card'><a href='/evento/1'>x</a><h3>Canais</h3></article>
+    <article class='card'><a href='/evento/2'>x</a><h3>Sobre Nós</h3></article>
+    <article class='card'><a href='/todos-eventos'>Eventos</a><h3>Honda CG 160 2020</h3></article>
+    <article class='card'><a href='https://blog.superbid.net/post'>Blog</a><h3>Honda CG 160 2020</h3></article>
+    <article class='card'><a href='/files/institucional.pdf'>PDF</a><h3>Honda CG 160 2020</h3></article>
+    <article class='card'><a href='/evento/3'>x</a><h3>Superbid Exchange - Leilões de Motos, Carros, Caminhões</h3></article>
+    """
+    lots = superbid.parse_superbid_listing_html(html, listing_url="https://www.superbid.net/")
+    assert lots == []
+
+
+def test_superbid_event_with_title_and_strong_signal_is_accepted():
+    html = """
+    <article class='card'>
+      <a href='/evento/787062'>evento</a>
+      <h3>Honda CG 160 FAN 2021</h3>
+      <div>Lance atual: R$ 9.200,00</div>
+      <div>Encerra: 16/05/2026 14:00</div>
+    </article>
+    """
+    lots = superbid.parse_superbid_listing_html(html, listing_url="https://www.superbid.net/")
     assert len(lots) == 1
-    assert validate_normalized_auction_lot_candidate(lots[0]).reason == "insufficient_lot_signals"
+    assert validate_normalized_auction_lot_candidate(lots[0]).ok is True

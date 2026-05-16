@@ -37,6 +37,8 @@ _BLOCKED_URL_PARTS = {
     "/leiloes/venda-direta",
     "/categorias/",
     "/leilao/todos",
+    "/todos-eventos",
+    "/wp-content/",
     "/account",
     "/favoritos",
 }
@@ -69,6 +71,8 @@ def validate_normalized_auction_lot_candidate(lot: NormalizedAuctionLot) -> Auct
     normalized_url = _normalize(lot.url)
     if any(part in normalized_url for part in _BLOCKED_URL_PARTS):
         return AuctionLotQualityResult(ok=False, reason="institutional_url")
+    if ".pdf" in normalized_url or "blog.superbid.net" in normalized_url:
+        return AuctionLotQualityResult(ok=False, reason="pdf_or_blog_url")
 
     normalized_title = _normalize(lot.title)
     if not normalized_title:
@@ -79,20 +83,40 @@ def validate_normalized_auction_lot_candidate(lot: NormalizedAuctionLot) -> Auct
 
     if any(term in normalized_title for term in _INSTITUTIONAL_TITLE_TERMS):
         return AuctionLotQualityResult(ok=False, reason="institutional_title")
+    if normalized_title in {"canais", "sobre nós", "sobre nos"}:
+        return AuctionLotQualityResult(ok=False, reason="institutional_title")
+    if normalized_title.startswith("lance inicial:"):
+        return AuctionLotQualityResult(ok=False, reason="title_is_bid_label")
+    if any(
+        term in normalized_title
+        for term in (
+            "superbid exchange - leilões",
+            "superbid exchange - leiloes",
+            "leilões de motos, carros, caminhões",
+            "leiloes de motos, carros, caminhoes",
+            "os melhores especialistas em trade",
+        )
+    ):
+        return AuctionLotQualityResult(ok=False, reason="institutional_title")
 
-    has_useful_signal = any(
+    has_strong_signal = any(
         [
             lot.year is not None,
             lot.current_bid is not None,
             lot.initial_bid is not None,
             lot.auction_end_at is not None,
-            bool((lot.city or "").strip()),
-            bool((lot.state or "").strip()),
-            lot.mileage_km is not None,
             bool((lot.lot_number or "").strip()),
         ]
     )
-    if not has_useful_signal:
+    allow_city_state_only = (lot.source or "").strip() in {"vip_auctions", "mega_auctions"}
+    has_city_state_support = any(
+        [
+            bool((lot.city or "").strip()),
+            bool((lot.state or "").strip()),
+            lot.mileage_km is not None,
+        ]
+    )
+    if not has_strong_signal and not (allow_city_state_only and has_city_state_support):
         return AuctionLotQualityResult(ok=False, reason="insufficient_lot_signals")
 
     return AuctionLotQualityResult(ok=True)
