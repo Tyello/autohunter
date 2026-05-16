@@ -215,11 +215,18 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - O preview **não cria Notification**.
 - Por padrão usa apenas buscas com `include_auctions=true`.
 - Para diagnóstico, `/admin auctions preview wishlist <id> --force` ignora esse opt-in sem persistir alteração.
+- Nos comandos admin, `wishlist <id>` também aceita `wishlist <index>` da lista do próprio chat admin.
+- Use `/admin auctions wishlists [texto]` para listar índices e UUIDs (com filtro textual opcional por contains/ILIKE).
 - Próximo passo (futuro): notificação controlada de leilões para usuários finais.
 
 ## Controlled auction notification
 
 - O comando `/admin auctions notify ...` é **admin-only** e **manual** (sem scheduler).
+- Comandos com alvo de wishlist aceitam `<wishlist_id|index>`:
+  - `/admin auctions wishlist <wishlist_id|index> <enable|disable>`
+  - `/admin auctions match wishlist <wishlist_id|index> [--force]`
+  - `/admin auctions preview wishlist <wishlist_id|index> [--force]`
+  - `/admin auctions notify wishlist <wishlist_id|index> ...`
 - Por padrão, alerta real/manual (`notify --confirm`) só envia match com `current_bid` ou `initial_bid`.
 - Quando nenhum match tiver lance, o envio padrão é bloqueado com mensagem de elegibilidade.
 - `--allow-no-bid` libera uso diagnóstico (dry-run e envio real com `--confirm`) para lotes sem lance.
