@@ -483,3 +483,41 @@ def test_admin_auctions_notify_non_admin_and_force(monkeypatch, db):
     assert "não está habilitada" in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--force")))
     assert "Alertas enviados" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_lock_guard(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    async def _run():
+        await handlers_admin._ADMIN_AUCTION_NOTIFY_LOCK.acquire()
+        try:
+            await handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4())))
+        finally:
+            handlers_admin._ADMIN_AUCTION_NOTIFY_LOCK.release()
+
+    asyncio.run(_run())
+    assert up.message.sent[-1] == "Já existe um envio de alerta de leilão em andamento. Aguarde finalizar."
+
+
+def test_admin_auctions_notify_error_shows_summary(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+
+    async def _fake_send(*_args, **_kwargs):
+        return {
+            "sent": 0,
+            "skipped_duplicate": 0,
+            "skipped_no_match": 0,
+            "skipped_missing_chat_id": 0,
+            "errors": 1,
+            "messages": ["Falha ao enviar alerta: timeout"],
+        }
+
+    monkeypatch.setattr(handlers_admin, "send_auction_notifications_for_wishlist", _fake_send)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4()))))
+    assert "Erros: 1" in up.message.sent[-1]
+    assert "Detalhe: Falha ao enviar alerta: timeout" in up.message.sent[-1]

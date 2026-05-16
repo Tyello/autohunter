@@ -189,6 +189,7 @@ def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
 
 
 _ADMIN_AUCTION_RUN_LOCK = asyncio.Lock()
+_ADMIN_AUCTION_NOTIFY_LOCK = asyncio.Lock()
 
 
 def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
@@ -515,11 +516,12 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if limit < 1 or limit > MAX_NOTIFY_LIMIT:
                 await update.message.reply_text("Limite inválido. Use inteiro entre 1 e 3.")
                 return
-            await update.message.reply_text(f"Enviando até {limit} alerta(s) de leilão para a busca {target_id}...")
-            result = await send_auction_notifications_for_wishlist(db, update.get_bot(), target_id, source=source, limit=limit, force=force)
-            if result.get("errors") and result.get("messages"):
-                await update.message.reply_text(result["messages"][0])
+            if _ADMIN_AUCTION_NOTIFY_LOCK.locked():
+                await update.message.reply_text("Já existe um envio de alerta de leilão em andamento. Aguarde finalizar.")
                 return
+            async with _ADMIN_AUCTION_NOTIFY_LOCK:
+                await update.message.reply_text(f"Enviando até {limit} alerta(s) de leilão para a busca {target_id}...")
+                result = await send_auction_notifications_for_wishlist(db, update.get_bot(), target_id, source=source, limit=limit, force=force)
             lines = [
                 f"✅ Alertas enviados: {result.get('sent', 0)}",
                 f"Duplicados ignorados: {result.get('skipped_duplicate', 0)}",
@@ -527,6 +529,8 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"Sem chat id: {result.get('skipped_missing_chat_id', 0)}",
                 f"Erros: {result.get('errors', 0)}",
             ]
+            if result.get("messages"):
+                lines.append(f"Detalhe: {result['messages'][0]}")
             await update.message.reply_text("\n".join(lines))
             return
 
