@@ -112,6 +112,40 @@ def test_cwl_create_auctions_opt_in_persists_true(monkeypatch):
     assert called["include"] is True
 
 
+def test_cwl_auctions_yes_keeps_create_button_and_shows_risk_copy():
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_draft_filters": []})
+    q = _CallbackQuery("CWL:AUCTIONS:YES")
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert "Leilões: ativado" in q.edits[-1]["text"]
+    assert "Lance não é valor final" in q.edits[-1]["text"]
+    labels = [btn.text for row in q.edits[-1]["reply_markup"].inline_keyboard for btn in row]
+    assert "✅ Criar mesmo assim" in labels
+
+
+def test_cwl_auctions_no_keeps_create_button():
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_draft_filters": []})
+    q = _CallbackQuery("CWL:AUCTIONS:NO")
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
+    assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
+    assert "Leilões: desativado" in q.edits[-1]["text"]
+    labels = [btn.text for row in q.edits[-1]["reply_markup"].inline_keyboard for btn in row]
+    assert "✅ Criar mesmo assim" in labels
+
+
+def test_cwl_create_auctions_opt_out_persists_false(monkeypatch):
+    _patch_user(monkeypatch)
+    called = {}
+    def _add(_db, _uid, _query, **kwargs):
+        called["include"] = kwargs.get("include_auctions")
+        return True, "ok"
+    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_include_auctions": False})
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
+    assert state == ConversationHandler.END
+    assert called["include"] is False
+
+
 def test_cwl_create_filters_enters_draft_without_creation(monkeypatch):
     _patch_user(monkeypatch)
     monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))

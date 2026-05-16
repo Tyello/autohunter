@@ -134,6 +134,40 @@ def _render_draft_filters(filters_draft: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_create_wishlist_summary_screen(query: str, filters_draft: list[dict], include_auctions: bool) -> tuple[str, InlineKeyboardMarkup]:
+    has_filters = bool(filters_draft)
+    create_label = "✅ Criar busca" if has_filters else "✅ Criar mesmo assim"
+    auctions_status = _render_auctions_status(include_auctions)
+    filters_text = _render_draft_filters(filters_draft)
+    if has_filters:
+        text = (
+            f"Entendi sua busca:\n\nCarro: {query}\n"
+            f"Filtros detectados:\n{filters_text}\n\n"
+            f"Leilões: {auctions_status}\n\n"
+            "Quer adicionar mais filtros antes de ativar?\n\n"
+            "Quer incluir oportunidades de leilão nessa busca?"
+        )
+    else:
+        text = (
+            f"Entendi: {query}\n\n"
+            "Essa busca ainda está bem aberta.\n"
+            "Para receber alertas melhores, recomendo adicionar pelo menos preço, ano ou região.\n\n"
+            f"Leilões: {auctions_status}\n\n"
+            "Quer incluir oportunidades de leilão nessa busca?"
+        )
+    if include_auctions:
+        text += "\n\nLeilão pode ter taxas, comissão, edital e vistoria. Lance não é valor final."
+    toggle_label = "❌ Não, apenas anúncios tradicionais" if include_auctions else "✅ Sim, incluir leilões"
+    toggle_cb = "CWL:AUCTIONS:NO" if include_auctions else "CWL:AUCTIONS:YES"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
+        [InlineKeyboardButton(create_label, callback_data="CWL:CREATE")],
+        [InlineKeyboardButton(toggle_label, callback_data=toggle_cb)],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
+    ])
+    return text, kb
+
+
 def _draft_filters_menu_markup(filters_draft: list[dict]) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("➕ Adicionar filtro", callback_data="CWLF:ACTION:add")],
@@ -158,6 +192,20 @@ async def _show_draft_filters_screen(update: Update, context: ContextTypes.DEFAU
         await _safe_edit_or_send(update, text, reply_markup=_draft_filters_menu_markup(filters_draft))
     else:
         await reply_text(update, text, reply_markup=_draft_filters_menu_markup(filters_draft))
+    return MENU_CREATE_WISHLIST_QUERY
+
+
+async def _show_create_wishlist_summary_screen(update: Update, context: ContextTypes.DEFAULT_TYPE, feedback: str | None = None):
+    query = context.user_data.get("menu_create_wishlist_query") or "(sem busca)"
+    filters_draft = context.user_data.get("menu_create_wishlist_draft_filters") or []
+    include_auctions = bool(context.user_data.get("menu_create_wishlist_include_auctions", False))
+    text, markup = _build_create_wishlist_summary_screen(query, filters_draft, include_auctions)
+    if feedback:
+        text = f"{feedback}\n\n{text}"
+    if update.callback_query:
+        await _safe_edit_or_send(update, text, reply_markup=markup)
+    else:
+        await reply_text(update, text, reply_markup=markup)
     return MENU_CREATE_WISHLIST_QUERY
 
 def _wishlist_help_text() -> str:
@@ -815,38 +863,7 @@ async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEF
     context.user_data["menu_create_wishlist_query"] = parsed.cleaned_query
     context.user_data["menu_create_wishlist_draft_filters"] = build_draft_filter_groups(parsed.filters)
     context.user_data["menu_create_wishlist_include_auctions"] = False
-    draft = context.user_data["menu_create_wishlist_draft_filters"]
-    if draft:
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
-            [InlineKeyboardButton("✅ Criar busca", callback_data="CWL:CREATE")],
-            [InlineKeyboardButton("✅ Sim, incluir leilões", callback_data="CWL:AUCTIONS:YES")],
-            [InlineKeyboardButton("❌ Não, apenas anúncios tradicionais", callback_data="CWL:AUCTIONS:NO")],
-            [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
-        ])
-        text = (
-            f"Entendi sua busca:\n\nCarro: {parsed.cleaned_query}\n"
-            f"Filtros detectados:\n{_render_draft_filters(draft)}\n\n"
-            "Quer adicionar mais filtros antes de ativar?\n\n"
-            "Quer incluir oportunidades de leilão nessa busca?"
-        )
-    else:
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Adicionar filtros", callback_data="CWL:CREATE_FILTERS")],
-            [InlineKeyboardButton("✅ Criar mesmo assim", callback_data="CWL:CREATE")],
-            [InlineKeyboardButton("✅ Sim, incluir leilões", callback_data="CWL:AUCTIONS:YES")],
-            [InlineKeyboardButton("❌ Não, apenas anúncios tradicionais", callback_data="CWL:AUCTIONS:NO")],
-            [InlineKeyboardButton("❌ Cancelar", callback_data="CWL:CANCEL")],
-        ])
-        text = (
-            f"Entendi: {parsed.cleaned_query}\n\n"
-            "Essa busca ainda está bem aberta.\n"
-            "Para receber alertas melhores, recomendo adicionar pelo menos preço, ano ou região.\n\n"
-            "O que você quer fazer?\n\n"
-            "Quer incluir oportunidades de leilão nessa busca?"
-        )
-    await reply_text(update, text, reply_markup=kb)
-    return MENU_CREATE_WISHLIST_QUERY
+    return await _show_create_wishlist_summary_screen(update, context)
 
 
 
@@ -864,9 +881,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
     if data in {"CWL:AUCTIONS:YES", "CWL:AUCTIONS:NO"}:
         include_auctions = data.endswith(":YES")
         context.user_data["menu_create_wishlist_include_auctions"] = include_auctions
-        status = "ativado" if include_auctions else "desativado"
-        await _safe_edit_or_send(update, f"Leilões: {status}.\n\nAgora toque em ✅ Criar busca para concluir.")
-        return MENU_CREATE_WISHLIST_QUERY
+        return await _show_create_wishlist_summary_screen(update, context)
 
     if data == "CWL:CREATE":
         if context.user_data.get("menu_create_wishlist_creating") or context.user_data.get("menu_create_wishlist_completed"):
@@ -967,7 +982,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         return MENU_CREATE_WISHLIST_QUERY
     if data == "CWLF:BACK":
         context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
-        return await _show_draft_filters_screen(update, context)
+        return await _show_create_wishlist_summary_screen(update, context)
 
     if data == "CWLF:ACTION:list":
         return await _show_draft_filters_screen(update, context)
