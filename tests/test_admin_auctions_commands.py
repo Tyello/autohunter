@@ -892,3 +892,32 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
     assert "Link: https://x" in msg
     assert "10." in msg
     assert "11." not in msg
+
+def test_admin_auctions_readiness_renders_status_and_is_read_only(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+    called = {"job": 0}
+
+    async def _fake_job(*_args, **_kwargs):
+        called["job"] += 1
+        return {}
+
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
+
+    baseline_kv = db.query(AppKV).count()
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "readiness")))
+    text = up.message.sent[-1]
+    assert "Admin Leilões — readiness" in text
+    assert "Envio real automático não recomendado" in text
+    assert called["job"] == 0
+    assert db.query(AppKV).count() == baseline_kv
+
+
+def test_admin_auctions_readiness_non_admin_blocked(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=10)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "readiness")))
+    assert "Sem permissão" in up.message.sent[-1]
