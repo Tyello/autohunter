@@ -629,6 +629,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
 
         if sub == "notify-run":
+            if _ADMIN_AUCTION_NOTIFY_LOCK.locked():
+                await update.message.reply_text("Já existe uma execução de notify-run de leilões em andamento. Aguarde finalizar.")
+                return
             confirm = any(a.strip().lower() == "--confirm" for a in args[1:])
             has_dry_run = any(a.strip().lower() == "--dry-run" for a in args[1:])
             if confirm and has_dry_run:
@@ -672,15 +675,16 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if source and not is_auction_source_user_eligible(db, source):
                 await update.message.reply_text("Source não elegível para envio ao usuário.")
                 return
-            result = await run_auction_notification_job(
-                db,
-                bot=None if dry_run else (update.get_bot() if hasattr(update, "get_bot") else None),
-                dry_run=dry_run,
-                max_wishlists=limit_wishlists,
-                max_per_wishlist=limit_per_wishlist,
-                max_per_user_per_day=settings.auction_notifications_max_per_user_per_day,
-                source=source,
-            )
+            async with _ADMIN_AUCTION_NOTIFY_LOCK:
+                result = await run_auction_notification_job(
+                    db,
+                    bot=None if dry_run else (update.get_bot() if hasattr(update, "get_bot") else None),
+                    dry_run=dry_run,
+                    max_wishlists=limit_wishlists,
+                    max_per_wishlist=limit_per_wishlist,
+                    max_per_user_per_day=settings.auction_notifications_max_per_user_per_day,
+                    source=source,
+                )
             lines = [
                 "⚠️ Admin Leilões — notify-run",
                 f"Modo: {'dry-run' if dry_run else 'envio real'}",

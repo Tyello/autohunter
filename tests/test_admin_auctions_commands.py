@@ -746,3 +746,27 @@ def test_admin_auctions_notify_run_confirm(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run", "--confirm")))
     assert "Alertas enviados: 1" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_run_lock_guard(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    called = {"job": 0}
+
+    async def _fake_job(*_a, **_k):
+        called["job"] += 1
+        return {"wishlists_scanned": 0, "wishlists_with_matches": 0, "previews": 0, "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "errors": 0}
+
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
+    up = _Update()
+
+    async def _run_locked():
+        await handlers_admin._ADMIN_AUCTION_NOTIFY_LOCK.acquire()
+        try:
+            await handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run"))
+        finally:
+            handlers_admin._ADMIN_AUCTION_NOTIFY_LOCK.release()
+
+    asyncio.run(_run_locked())
+    assert "Já existe uma execução de notify-run de leilões em andamento. Aguarde finalizar." in up.message.sent[-1]
+    assert called["job"] == 0
