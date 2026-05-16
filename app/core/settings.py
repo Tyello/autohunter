@@ -149,6 +149,7 @@ class Settings(BaseSettings):
     auction_notifications_max_wishlists_per_run: int = 20
     auction_notifications_max_per_wishlist: int = 1
     auction_notifications_max_per_user_per_day: int = 3
+    auction_notifications_scheduler_minutes: int = 60
 
     # Logging
     log_level: str = "info"
