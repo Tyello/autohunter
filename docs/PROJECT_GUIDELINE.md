@@ -267,6 +267,16 @@ Regras práticas:
 - Alertas dependem de source elegível para usuário, lote com dados mínimos (ex.: lance inicial/atual), dedupe e limites operacionais.
 - Toda copy user-facing de leilão deve incluir aviso de risco (edital, taxas, comissão, documentação e vistoria).
 
+## Auction alert user-facing copy
+
+- Todo alerta de leilão para usuário final deve ser claramente diferente de anúncio tradicional.
+- A abertura recomendada é explícita para leilão (ex.: `⚠️ Oportunidade em leilão encontrada`).
+- O aviso de risco é obrigatório e deve conter literalmente: `Lance não é preço final.`.
+- A mesma seção de atenção deve orientar verificação de edital, taxas/comissão, documentação e vistoria antes de participar.
+- Quando existir label amigável da source, ele deve ser usado no texto (ex.: `VIP Leilões`), evitando expor chave técnica.
+- Se não houver label amigável, a chave técnica pode ser usada apenas como fallback operacional.
+- O texto deve mostrar somente campos existentes (sem `None`/placeholders técnicos) e manter tamanho compacto para Telegram.
+
 ## Auction notification pilot job
 
 - Existe um job piloto de notificação de leilões com defaults seguros e **desligado por padrão** (`auction_notifications_enabled=false`).

@@ -373,10 +373,15 @@ def test_render_auction_alert_preview_contract():
     assert "Atenção:" in text
     assert "Lance atual: R$ 91.000,00" in text
     assert "Fonte: VIP Leilões" in text
-    assert "Lance atual:" in text
-    assert "Lance inicial:" in text
-    assert "preço final" not in text.lower()
-    assert "Lance não é valor final" in text
+    assert "Oportunidade em leilão" in text
+    assert "Lance inicial:" not in text
+    assert "Lance não é preço final" in text
+    assert "edital" in text.lower()
+    assert ("taxas" in text.lower()) or ("comissão" in text.lower())
+    assert "None" not in text
+    assert "Encerra:" in text
+    assert "Local: São Paulo/SP" in text
+    assert "Ano/KM: 2015/98.000" in text
     assert "https://example/lote" in text
 
 
@@ -426,10 +431,18 @@ def test_render_auction_alert_contract_real():
     m = types.SimpleNamespace(source="vip_auctions", title="Civic", wishlist_query="civic", status="open", current_bid=100, initial_bid=90, total_bids=1, year=2015, mileage_km=1000, city="SP", state="SP", auction_end_at=datetime(2026, 5, 20, 18, 0, tzinfo=timezone.utc), reasons=["ok"], url="https://example/lote")
     text = render_auction_alert(m)
     assert "Preview" not in text
-    assert "Lance não é valor final" in text
-    assert "preço final" not in text.lower()
+    assert "Lance não é preço final" in text
+    assert "Oportunidade em leilão encontrada" in text
     assert "Lance atual" in text and "Lance inicial" in text
     assert "https://example/lote" in text
+
+
+def test_render_auction_alert_initial_bid_without_current_bid():
+    from app.bot.renderers import render_auction_alert
+    m = types.SimpleNamespace(source="vip_auctions", title="Civic", wishlist_query="civic", status="open", current_bid=None, initial_bid=90, total_bids=1, year=2015, mileage_km=1000, city="SP", state="SP", auction_end_at=datetime(2026, 5, 20, 18, 0, tzinfo=timezone.utc), reasons=["ok"], url="https://example/lote")
+    text = render_auction_alert(m)
+    assert "Lance atual:" not in text
+    assert "Lance inicial: R$ 90,00" in text
 
 
 def test_admin_auctions_notify_variants(monkeypatch, db):
