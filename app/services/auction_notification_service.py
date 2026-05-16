@@ -11,7 +11,7 @@ from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.user import User
 from app.models.wishlist import Wishlist
-from app.services.auction_matching_service import _BAD_STATUSES, match_auction_lots_for_wishlist
+from app.services.auction_matching_service import _BAD_STATUSES, match_auction_lots_for_wishlist, sort_auction_matches_for_alerting
 
 MAX_NOTIFY_LIMIT = 3
 
@@ -42,6 +42,7 @@ def build_auction_notifications_for_wishlist(
     limit: int = 1,
     force: bool = False,
     eligible_sources: set[str] | None = None,
+    allow_no_bid: bool = False,
 ) -> dict:
     out = {
         "wishlist_id": str(wishlist_id), "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0,
@@ -81,6 +82,8 @@ def build_auction_notifications_for_wishlist(
     matches = match_auction_lots_for_wishlist(
         db, wishlist, source=source, limit=_normalize_limit(limit) * 4, eligible_sources=eligible_sources
     )
+    matches = sort_auction_matches_for_alerting(matches)
+
     if not matches:
         out["skipped_no_match"] += 1
         out["messages"].append("Sem leilões compatíveis para esta busca.")
@@ -91,6 +94,9 @@ def build_auction_notifications_for_wishlist(
         if out["sent"] >= want:
             break
         if not getattr(m, "url", None):
+            continue
+        has_bid = getattr(m, "current_bid", None) is not None or getattr(m, "initial_bid", None) is not None
+        if not allow_no_bid and not has_bid:
             continue
         status = str(getattr(m, "status", "") or "").strip().lower()
         if not force and status in _BAD_STATUSES:
@@ -110,7 +116,10 @@ def build_auction_notifications_for_wishlist(
 
     if out["sent"] == 0 and out["skipped_duplicate"] == 0:
         out["skipped_no_match"] += 1
-        out["messages"].append("Sem lotes elegíveis para envio.")
+        if not allow_no_bid:
+            out["messages"].append("Sem lotes elegíveis para envio: nenhum match com lance atual ou lance inicial.")
+        else:
+            out["messages"].append("Sem lotes elegíveis para envio.")
     return out
 
 
@@ -122,9 +131,10 @@ async def send_auction_notifications_for_wishlist(
     limit: int = 1,
     force: bool = False,
     eligible_sources: set[str] | None = None,
+    allow_no_bid: bool = False,
 ) -> dict:
     result = build_auction_notifications_for_wishlist(
-        db, wishlist_id, source=source, limit=limit, force=force, eligible_sources=eligible_sources
+        db, wishlist_id, source=source, limit=limit, force=force, eligible_sources=eligible_sources, allow_no_bid=allow_no_bid
     )
     sent = 0
     for item in result.get("items", []):

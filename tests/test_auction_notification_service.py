@@ -41,7 +41,7 @@ def test_send_and_dedupe_and_filters(db):
     db.add(w); db.flush()
     upsert_lot(db, {"source": "vip_auctions", "external_id": "a1", "title": "Honda Civic 2015", "year": 2015, "status": "ended", "url": "https://lot/a1"})
     upsert_lot(db, {"source": "vip_auctions", "external_id": "a2", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": None})
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "a3", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://lot/a3"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "a3", "title": "Honda Civic 2015", "year": 2015, "status": "open", "current_bid": 120000, "url": "https://lot/a3"})
     db.commit()
 
     sent_msgs = []
@@ -67,7 +67,7 @@ def test_build_dry_run_does_not_send_or_persist(db):
     db.add(u); db.flush()
     w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
     db.add(w); db.flush()
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "dry1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://lot/dry1"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "dry1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "initial_bid": 80000, "url": "https://lot/dry1"})
     db.commit()
 
     res = build_auction_notifications_for_wishlist(db, w.id, limit=1)
@@ -96,3 +96,30 @@ def test_notify_source_filter_with_eligible_sources(db):
     assert blocked["sent"] == 0
     allowed = build_auction_notifications_for_wishlist(db, w.id, source="mega_auctions", eligible_sources=None)
     assert allowed["sent"] >= 0
+
+
+def test_notify_prefers_bid_when_score_ties(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=777, username="rank")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "t1", "title": "Honda Civic", "status": "open", "url": "https://lot/t1"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "t2", "title": "Honda Civic", "status": "open", "current_bid": 1000, "url": "https://lot/t2"})
+    db.commit()
+    res = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert res["sent"] == 1
+    assert "https://lot/t2" in res["items"][0]["text"]
+
+
+def test_notify_blocks_no_bid_by_default_and_allow_no_bid(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=778, username="nobid")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "nb1", "title": "Honda Civic", "status": "open", "url": "https://lot/nb1"})
+    db.commit()
+    blocked = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert blocked["sent"] == 0
+    assert "nenhum match com lance atual ou lance inicial" in blocked["messages"][0]
+    allowed = build_auction_notifications_for_wishlist(db, w.id, limit=1, allow_no_bid=True)
+    assert allowed["sent"] == 1

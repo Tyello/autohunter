@@ -52,3 +52,16 @@ def test_preview_service_default_only_eligible_sources(db):
     matches = build_auction_alert_previews_for_enabled_wishlists(db, eligible_sources={"vip_auctions"})
     assert matches
     assert all(m.source == "vip_auctions" for m in matches)
+
+
+def test_preview_sorts_bid_first_on_tie(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=1004, username="p")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "pp1", "title": "Honda Civic", "status": "open", "url": "https://vip/pp1"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "pp2", "title": "Honda Civic", "status": "open", "current_bid": 95000, "url": "https://vip/pp2"})
+    db.commit()
+    result = build_auction_alert_previews_for_wishlist(db, str(w.id), force=False)
+    assert result.matches
+    assert result.matches[0].current_bid is not None
