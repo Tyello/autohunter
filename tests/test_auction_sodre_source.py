@@ -117,3 +117,30 @@ def test_fetch_empty_listing_with_js_signals_sets_requires_js_reason(monkeypatch
     lots = sodre.fetch_sodre_lots(limit=10)
     assert lots == []
     assert sodre.get_last_reason() == 'requires_js_or_internal_endpoint'
+
+
+def test_fetch_403_sets_forbidden_reason(monkeypatch):
+    class _Resp:
+        status_code = 403
+        text = ""
+
+        def raise_for_status(self):
+            raise AssertionError("should not raise for 403 controlled reason")
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def get(self, _url):
+            return _Resp()
+
+    monkeypatch.setattr(sodre.httpx, "Client", _Client)
+    lots = sodre.fetch_sodre_lots(limit=10)
+    assert lots == []
+    assert sodre.get_last_reason() == "forbidden_403"

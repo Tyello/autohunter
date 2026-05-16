@@ -155,7 +155,12 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             continue
         url = urljoin(listing_url, href)
         lower_url = url.lower()
-        if "/categorias/" in lower_url or "/leilao/todos" in lower_url:
+        if any(
+            blocked_url in lower_url
+            for blocked_url in ("/categorias/", "/leilao/todos", "/todos-eventos", "/wp-content/", "/lotes/search", "/leiloes/venda-direta")
+        ):
+            continue
+        if ".pdf" in lower_url or "blog.superbid.net" in lower_url:
             continue
         ext = extract_superbid_external_id(url)
         if not ext:
@@ -176,7 +181,17 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             "navegue pelas modalidades de vendas",
         }
         lower_title = (title or "").strip().lower()
-        if any(blocked in lower_title for blocked in blocked_titles) or "superbid exchange - leilões de motos" in lower_title:
+        if any(blocked in lower_title for blocked in blocked_titles) or any(
+            blocked in lower_title
+            for blocked in (
+                "superbid exchange - leilões",
+                "superbid exchange - leiloes",
+                "canais",
+                "sobre nós",
+                "sobre nos",
+                "os melhores especialistas em trade",
+            )
+        ):
             continue
         category = _first_group(r"(?:categoria)\s*:?\s*([^<\n|]+)", card)
         modality = _first_group(r"(?:modalidade)\s*:?\s*([^<\n|]+)", card)
@@ -191,11 +206,12 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
         lot_number = _first_group(r"\bLote\s*: ?\s*(\d+)\b", card) or _first_group(r"\bLote\s+(\d+)\b", card)
         if "/evento/" in lower_url:
             has_event_signal = any([
-                bool(lower_title),
                 bool(start_raw or end_raw),
                 bool(initial_raw or current_raw),
                 bool(raw_status),
                 bool(raw_location),
+                bool(parse_year_from_title(title)),
+                bool(lot_number),
             ])
             if not has_event_signal:
                 continue

@@ -215,6 +215,9 @@ def fetch_sodre_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) ->
         return []
     with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": "AutoHunter/1.0 (+experimental)"}) as client:
         resp = client.get(listing_url)
+        if getattr(resp, "status_code", None) == 403:
+            _LAST_REASON = "forbidden_403"
+            return []
         resp.raise_for_status()
     lots = parse_sodre_listing_html(resp.text, limit=limit, listing_url=listing_url)
     if lots:

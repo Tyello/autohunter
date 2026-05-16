@@ -105,6 +105,8 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
             for block in ("/licitante/cadastro/login", "/lotes/search", "/leiloes/venda-direta", "/login", "/cadastro")
         ) and "/item/" not in low_url:
             continue
+        # Prefer canonical item detail URLs when available, but keep compatibility
+        # with legacy cards while still blocking known institutional/navigation paths.
         if "/leilao/" in low_url and "/lotes" in low_url and "/item/" not in low_url:
             continue
         external_id = extract_win_external_id(url)
