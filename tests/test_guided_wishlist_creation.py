@@ -73,6 +73,7 @@ def test_create_flow_query_text_groups_mixed_implicit_filters():
     assert "Ano a partir de 2018" in text
     assert "Preço até R$ 120.000" in text
     assert "Ano entre 2018 e 120000" not in text
+    assert "Quer incluir oportunidades de leilão nessa busca?" in text
 
 
 def test_create_flow_query_text_parses_implicit_single_year():
@@ -88,7 +89,7 @@ def test_create_flow_query_text_parses_implicit_single_year():
 def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     _patch_user(monkeypatch)
     called = {}
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda _db, _uid, q: (called.setdefault("q", q) or True, "ok"))
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda _db, _uid, q, **kwargs: (called.setdefault("q", q) or True, "ok"))
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
     q = _CallbackQuery("CWL:CREATE")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -99,6 +100,16 @@ def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     buttons = q.edits[-1]["reply_markup"].inline_keyboard
     assert buttons[0][0].text == "🎯 Ver minhas buscas"
     assert buttons[1][0].text == "➕ Criar outra busca"
+
+
+def test_cwl_create_auctions_opt_in_persists_true(monkeypatch):
+    _patch_user(monkeypatch)
+    called = {}
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda _db, _uid, q, **kwargs: (called.setdefault("include", kwargs.get("include_auctions")) or True, "ok"))
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_include_auctions": True})
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
+    assert state == ConversationHandler.END
+    assert called["include"] is True
 
 
 def test_cwl_create_filters_enters_draft_without_creation(monkeypatch):
@@ -141,7 +152,7 @@ def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     _patch_user(monkeypatch)
     called = {}
 
-    def _create(_db, _uid, query, filters):
+    def _create(_db, _uid, query, filters, **kwargs):
         called["query"] = query
         called["filters"] = filters
         return True, "ok", "wid"
@@ -204,7 +215,7 @@ def test_cwl_create_with_mixed_implicit_filters_calls_create_with_filters(monkey
     _patch_user(monkeypatch)
     called = {}
     monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", lambda _db, _uid, q, fs: (called.setdefault("query", q) or True, called.setdefault("filters", fs) or "ok", "wid"))
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", lambda _db, _uid, q, fs, **kwargs: (called.setdefault("query", q) or True, called.setdefault("filters", fs) or "ok", "wid"))
     ctx = types.SimpleNamespace(user_data={})
     asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("corolla a partir de 2018 até 120000")), ctx))
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
@@ -218,7 +229,7 @@ def test_cwl_create_is_idempotent_for_repeated_callback(monkeypatch):
     _patch_user(monkeypatch)
     calls = {"count": 0}
 
-    def _create(_db, _uid, query, filters):
+    def _create(_db, _uid, query, filters, **kwargs):
         calls["count"] += 1
         return True, "ok", "wid"
 
@@ -238,7 +249,7 @@ def test_cwl_create_is_idempotent_for_repeated_callback(monkeypatch):
 
 def test_cwl_create_plan_limit_shows_only_business_message(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (False, "Você atingiu o limite do plano Free..."))
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_, **__: (False, "Você atingiu o limite do plano Free..."))
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
     q = _CallbackQuery("CWL:CREATE")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -252,7 +263,7 @@ def test_cwl_create_plan_limit_does_not_lock_idempotency_key(monkeypatch):
     _patch_user(monkeypatch)
     calls = {"count": 0}
 
-    def _add(*_args):
+    def _add(*_args, **_kwargs):
         calls["count"] += 1
         return False, "Você atingiu o limite do plano Free..."
 
@@ -277,7 +288,7 @@ def test_cwl_create_partial_enqueue_message_still_confirms_and_is_idempotent(mon
     _patch_user(monkeypatch)
     calls = {"count": 0}
 
-    def _add(*_args):
+    def _add(*_args, **_kwargs):
         calls["count"] += 1
         return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
 
@@ -304,7 +315,7 @@ def test_cwlf_done_is_idempotent_for_repeated_callback(monkeypatch):
     _patch_user(monkeypatch)
     calls = {"count": 0}
 
-    def _create(_db, _uid, query, filters):
+    def _create(_db, _uid, query, filters, **kwargs):
         calls["count"] += 1
         return True, "ok", "wid"
 

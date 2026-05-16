@@ -259,3 +259,10 @@ Regras práticas:
 
 - Auction sources: `app/sources/auctions/registry.py` define implementação técnica; `source_configs` define disponibilidade operacional (`enabled`, `user_eligible`, `admin_only`, `status`, `source_type=auction`).
 - Usuário final continua sem escolher source específica: apenas `include_auctions`; administração controla via comandos `/admin auctions sources` e `/admin auctions source-config ...`.
+
+## User-facing auction opt-in
+- O usuário decide **por busca** se aceita oportunidades de leilão (campo persistente `wishlists.include_auctions`).
+- Sources/leiloeiras são detalhe operacional de backoffice e continuam sob controle admin (`source_configs` e comandos `/admin auctions ...`).
+- `include_auctions=true` **não garante alerta**: habilita elegibilidade da busca para fluxos que respeitam opt-in.
+- Alertas dependem de source elegível para usuário, lote com dados mínimos (ex.: lance inicial/atual), dedupe e limites operacionais.
+- Toda copy user-facing de leilão deve incluir aviso de risco (edital, taxas, comissão, documentação e vistoria).
