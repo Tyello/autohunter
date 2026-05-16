@@ -308,7 +308,7 @@ def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "acao_invalida")))
     assert "vip|mega|win|sodre|superbid|copart" in up.message.sent[-1]
-    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id>]" in up.message.sent[-1]
+    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id> [--force] [--all-sources]]" in up.message.sent[-1]
 
 
 def test_admin_auctions_wishlist_toggle_and_match_force(monkeypatch, db):
@@ -548,3 +548,24 @@ def test_admin_auctions_notify_dry_run_never_sends(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "send_auction_notifications_for_wishlist", _fake_send)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
     assert called["send"] == 0
+
+
+def test_admin_auctions_notify_experimental_requires_allow(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=911, username="exp")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "exp1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://mega/exp1"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "mega")))
+    assert "Source não elegível" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "mega", "--allow-experimental")))
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]

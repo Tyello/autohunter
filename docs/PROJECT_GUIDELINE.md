@@ -238,3 +238,10 @@ Regras práticas:
 - Quality gate v2 de leilões: títulos institucionais/genéricos (ex.: home/categoria/footer) e URLs institucionais/PDF/blog devem ser rejeitados antes da persistência.
 - Para `win_auctions` e `superbid_auctions`, city/state sozinhos não qualificam lote; é obrigatório ao menos um sinal forte (`year`, `current_bid`, `initial_bid`, `auction_end_at` ou `lot_number`).
 - `sodre_auctions` com HTTP 403 deve ser tratado como bloqueio controlado (`forbidden_403`), classificado como `needs_study` operacional sem ruído de falha inesperada.
+
+## Auction source eligibility policy
+
+- Sources com status `active` entram no fluxo padrão voltado ao usuário (match/preview/notify).
+- Sources `experimental` só devem ser usadas em diagnóstico admin explícito (ex.: `--all-sources` / `--allow-experimental`).
+- Sources `needs_study`/bloqueadas não devem chegar ao usuário final por padrão.
+- Estado atual no runtime: apenas `vip_auctions` (alias `vip`) é elegível por padrão para preview e envio.

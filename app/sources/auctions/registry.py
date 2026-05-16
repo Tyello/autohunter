@@ -57,7 +57,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         fetcher=fetch_sodre_lots,
         reason_getter=sodre_reason,
         supports_enrich=False,
-        status="experimental",
+        status="needs_study",
     ),
     AuctionSourceDefinition(
         key="superbid_auctions",
@@ -105,3 +105,17 @@ def get_auction_source_definition(source_or_alias: str) -> AuctionSourceDefiniti
 def render_supported_auction_sources_hint() -> str:
     aliases = [item.aliases[0] for item in _AUCTION_SOURCES]
     return f"Use: {'|'.join(aliases)}"
+
+
+def is_auction_source_user_eligible(source: str) -> bool:
+    definition = get_auction_source_definition(source)
+    return bool(definition and definition.status == "active")
+
+
+def list_user_eligible_auction_source_keys() -> set[str]:
+    return {item.key for item in _AUCTION_SOURCES if item.status == "active"}
+
+
+def render_user_eligible_auction_sources_hint() -> str:
+    labels = [item.aliases[0] for item in _AUCTION_SOURCES if item.status == "active"]
+    return f"Sources elegíveis: {'|'.join(labels)}"

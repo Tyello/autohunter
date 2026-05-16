@@ -15,8 +15,12 @@ class AuctionPreviewResult:
     warning: str | None = None
 
 
-def build_auction_alert_previews_for_enabled_wishlists(db: Session, source: str | None = None, limit: int = 5) -> list[AuctionWishlistMatch]:
-    by = match_auction_lots_for_all_wishlists(db, source=source, limit_per_wishlist=limit, include_auctions_only=True)
+def build_auction_alert_previews_for_enabled_wishlists(
+    db: Session, source: str | None = None, limit: int = 5, eligible_sources: set[str] | None = None
+) -> list[AuctionWishlistMatch]:
+    by = match_auction_lots_for_all_wishlists(
+        db, source=source, limit_per_wishlist=limit, include_auctions_only=True, eligible_sources=eligible_sources
+    )
     all_matches: list[AuctionWishlistMatch] = []
     for matches in by.values():
         all_matches.extend(matches)
@@ -30,6 +34,7 @@ def build_auction_alert_previews_for_wishlist(
     force: bool = False,
     source: str | None = None,
     limit: int = 5,
+    eligible_sources: set[str] | None = None,
 ) -> AuctionPreviewResult:
     try:
         target_id = wishlist_id if isinstance(wishlist_id, uuid.UUID) else uuid.UUID(str(wishlist_id))
@@ -47,5 +52,5 @@ def build_auction_alert_previews_for_wishlist(
                 "ou rode com --force para diagnóstico."
             ),
         )
-    matches = match_auction_lots_for_wishlist(db, wishlist, source=source, limit=limit)
+    matches = match_auction_lots_for_wishlist(db, wishlist, source=source, limit=limit, eligible_sources=eligible_sources)
     return AuctionPreviewResult(matches=matches, warning=None)

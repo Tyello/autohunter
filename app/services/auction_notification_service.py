@@ -35,7 +35,14 @@ def _dedupe_key(wishlist_id: str, source: str, lot_external_id: str) -> str:
     return f"auction:{wishlist_id}:{source}:{lot_external_id}"
 
 
-def build_auction_notifications_for_wishlist(db: Session, wishlist_id, source: str | None = None, limit: int = 1, force: bool = False) -> dict:
+def build_auction_notifications_for_wishlist(
+    db: Session,
+    wishlist_id,
+    source: str | None = None,
+    limit: int = 1,
+    force: bool = False,
+    eligible_sources: set[str] | None = None,
+) -> dict:
     out = {
         "wishlist_id": str(wishlist_id), "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0,
         "skipped_missing_chat_id": 0, "errors": 0, "messages": [], "items": []
@@ -71,7 +78,9 @@ def build_auction_notifications_for_wishlist(db: Session, wishlist_id, source: s
         )
         return out
 
-    matches = match_auction_lots_for_wishlist(db, wishlist, source=source, limit=_normalize_limit(limit) * 4)
+    matches = match_auction_lots_for_wishlist(
+        db, wishlist, source=source, limit=_normalize_limit(limit) * 4, eligible_sources=eligible_sources
+    )
     if not matches:
         out["skipped_no_match"] += 1
         out["messages"].append("Sem leilões compatíveis para esta busca.")
@@ -105,8 +114,18 @@ def build_auction_notifications_for_wishlist(db: Session, wishlist_id, source: s
     return out
 
 
-async def send_auction_notifications_for_wishlist(db: Session, bot, wishlist_id, source: str | None = None, limit: int = 1, force: bool = False) -> dict:
-    result = build_auction_notifications_for_wishlist(db, wishlist_id, source=source, limit=limit, force=force)
+async def send_auction_notifications_for_wishlist(
+    db: Session,
+    bot,
+    wishlist_id,
+    source: str | None = None,
+    limit: int = 1,
+    force: bool = False,
+    eligible_sources: set[str] | None = None,
+) -> dict:
+    result = build_auction_notifications_for_wishlist(
+        db, wishlist_id, source=source, limit=limit, force=force, eligible_sources=eligible_sources
+    )
     sent = 0
     for item in result.get("items", []):
         try:

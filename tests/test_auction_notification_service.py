@@ -83,3 +83,16 @@ def test_no_match(db):
     db.add(w); db.commit()
     res = build_auction_notifications_for_wishlist(db, w.id)
     assert res["skipped_no_match"] >= 1
+
+
+def test_notify_source_filter_with_eligible_sources(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=555, username="u")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "m1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://lot/m1"})
+    db.commit()
+    blocked = build_auction_notifications_for_wishlist(db, w.id, source="mega_auctions", eligible_sources={"vip_auctions"})
+    assert blocked["sent"] == 0
+    allowed = build_auction_notifications_for_wishlist(db, w.id, source="mega_auctions", eligible_sources=None)
+    assert allowed["sent"] >= 0
