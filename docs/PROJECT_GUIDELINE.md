@@ -276,3 +276,15 @@ Regras práticas:
 - Dedupe reaproveita a chave `auction:{wishlist_id}:{source}:{lot_external_id}` para evitar repetição.
 - Limite diário por usuário reduz ruído operacional (`auction_notifications_max_per_user_per_day`).
 - Envio automático só deve ser habilitado após validação operacional (`auction_notifications_enabled=true` e `auction_notifications_dry_run=false`).
+
+## Auction notification scheduler hook
+
+- O scheduler central registra um hook recorrente para notificações de leilão (`auction_notification_scheduler_job`) com frequência configurável via `AUCTION_NOTIFICATIONS_SCHEDULER_MINUTES` (padrão: 60 minutos).
+- O comportamento padrão é seguro: nasce desabilitado com `AUCTION_NOTIFICATIONS_ENABLED=false`.
+- Envio automático real só ocorre quando **ambos** estiverem ativos: `AUCTION_NOTIFICATIONS_ENABLED=true` e `AUCTION_NOTIFICATIONS_DRY_RUN=false`.
+- Com `AUCTION_NOTIFICATIONS_ENABLED=true` e `AUCTION_NOTIFICATIONS_DRY_RUN=true`, o hook roda em simulação (dry-run) para validar volume sem envio.
+- O hook respeita os limites operacionais (`max_wishlists`, `max_per_wishlist`, `max_per_user_per_day`), lock de execução única por processo e logs de tick (started/skipped/finished/failed).
+- As fontes continuam DB-driven por `source_configs` e filtro de elegibilidade (`user_eligible`).
+- O usuário só entra no fluxo quando `include_auctions=true`.
+- Dedupe por wishlist/source/lote e limite diário por usuário continuam obrigatórios.
+- Lotes sem lance continuam bloqueados por padrão.
