@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.models.wishlist import Wishlist
-from app.services.auction_matching_service import AuctionWishlistMatch, match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
+from app.services.auction_matching_service import (
+    AuctionWishlistMatch,
+    match_auction_lots_for_all_wishlists,
+    match_auction_lots_for_wishlist,
+    sort_auction_matches_for_alerting,
+)
 
 
 @dataclass(frozen=True)
@@ -24,8 +29,7 @@ def build_auction_alert_previews_for_enabled_wishlists(
     all_matches: list[AuctionWishlistMatch] = []
     for matches in by.values():
         all_matches.extend(matches)
-    all_matches.sort(key=lambda m: m.score, reverse=True)
-    return all_matches[:limit]
+    return sort_auction_matches_for_alerting(all_matches)[:limit]
 
 
 def build_auction_alert_previews_for_wishlist(
@@ -53,4 +57,4 @@ def build_auction_alert_previews_for_wishlist(
             ),
         )
     matches = match_auction_lots_for_wishlist(db, wishlist, source=source, limit=limit, eligible_sources=eligible_sources)
-    return AuctionPreviewResult(matches=matches, warning=None)
+    return AuctionPreviewResult(matches=sort_auction_matches_for_alerting(matches), warning=None)

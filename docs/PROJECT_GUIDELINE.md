@@ -211,6 +211,7 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - O comando `/admin auctions preview` é **admin-only** e de **somente leitura**.
 - Objetivo: validar copy e qualidade do futuro alerta de leilão antes da notificação para usuário final.
 - O preview **não envia mensagem para usuário final**.
+- O preview pode exibir lotes sem lance para diagnóstico, porém ordena priorizando matches com lance.
 - O preview **não cria Notification**.
 - Por padrão usa apenas buscas com `include_auctions=true`.
 - Para diagnóstico, `/admin auctions preview wishlist <id> --force` ignora esse opt-in sem persistir alteração.
@@ -219,6 +220,9 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 ## Controlled auction notification
 
 - O comando `/admin auctions notify ...` é **admin-only** e **manual** (sem scheduler).
+- Por padrão, alerta real/manual (`notify --confirm`) só envia match com `current_bid` ou `initial_bid`.
+- Quando nenhum match tiver lance, o envio padrão é bloqueado com mensagem de elegibilidade.
+- `--allow-no-bid` libera uso diagnóstico (dry-run e envio real com `--confirm`) para lotes sem lance.
 - Envio real exige `--confirm` explícito.
 - Sem `--confirm`, o comando roda em **dry-run**: mostra resumo/prévia e **não envia mensagem real**.
 - `--force` isolado **não envia**; para ignorar opt-in (`include_auctions=false`) e enviar real, é obrigatório usar `--force --confirm`.

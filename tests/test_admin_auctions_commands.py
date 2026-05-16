@@ -439,7 +439,7 @@ def test_admin_auctions_notify_variants(monkeypatch, db):
     db.add(u); db.flush()
     w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
     db.add(w); db.flush()
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "n1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://vip/n1"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "n1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "current_bid": 95000, "url": "https://vip/n1"})
     db.commit()
 
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
@@ -448,7 +448,7 @@ def test_admin_auctions_notify_variants(monkeypatch, db):
     up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
-    assert "Dry-run: nenhum alerta foi enviado." in up.message.sent[-3]
+    assert any("Dry-run: nenhum alerta foi enviado." in msg for msg in up.message.sent)
     assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip", "--limit", "2", "--confirm")))
@@ -599,3 +599,23 @@ def test_admin_auctions_notify_allow_experimental_requires_source(monkeypatch, d
     assert up.message.sent[-1] == "Use --source <alias> junto com --allow-experimental para evitar envio amplo por fontes experimentais."
     assert sent_calls["n"] == 0
     assert db.query(AppKV).count() == before_appkv
+
+
+def test_admin_notify_allow_no_bid_variants(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=913, username="allow")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "anb1", "title": "Honda Civic", "status": "open", "url": "https://vip/anb1"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip")))
+    assert "nenhum match com lance atual ou lance inicial" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip", "--allow-no-bid")))
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]

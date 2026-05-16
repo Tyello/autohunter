@@ -512,4 +512,7 @@ def render_auction_alert(match) -> str:
 
 
 def render_auction_alert_preview(match) -> str:
-    return "🧪 Preview — alerta de leilão\n\n" + _render_auction_alert_body(match)
+    note = ""
+    if getattr(match, "current_bid", None) is None and getattr(match, "initial_bid", None) is None:
+        note = "⚠️ Sem lance capturado — não elegível para envio automático/manual padrão.\n\n"
+    return "🧪 Preview — alerta de leilão\n\n" + note + _render_auction_alert_body(match)

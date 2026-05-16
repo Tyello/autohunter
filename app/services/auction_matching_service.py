@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -37,6 +38,40 @@ class AuctionWishlistMatch:
     score: int
     reasons: list[str]
     risk_label: str = "auction"
+
+
+def _auction_alert_rank_score(match: AuctionWishlistMatch) -> int:
+    bonus = 0
+    if getattr(match, "current_bid", None) is not None:
+        bonus += 10
+    if getattr(match, "initial_bid", None) is not None:
+        bonus += 5
+    if getattr(match, "auction_end_at", None) is not None:
+        bonus += 3
+    return int(getattr(match, "score", 0) or 0) + bonus
+
+
+def _dt_value(value: object | None) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    return datetime.min
+
+
+def sort_auction_matches_for_alerting(matches: list[AuctionWishlistMatch]) -> list[AuctionWishlistMatch]:
+    return sorted(
+        matches,
+        key=lambda m: (
+            _auction_alert_rank_score(m),
+            1 if getattr(m, "current_bid", None) is not None else 0,
+            1 if getattr(m, "initial_bid", None) is not None else 0,
+            1 if getattr(m, "auction_end_at", None) is not None else 0,
+            _dt_value(getattr(m, "auction_end_at", None)),
+            1 if bool(getattr(m, "url", None)) else 0,
+            _dt_value(getattr(m, "updated_at", None)),
+            _dt_value(getattr(m, "created_at", None)),
+        ),
+        reverse=True,
+    )
 
 
 _BAD_STATUSES = {"ended", "sold", "cancelled"}
@@ -162,7 +197,7 @@ def match_auction_lots_for_wishlist(
             )
         )
 
-    out.sort(key=lambda m: m.score, reverse=True)
+    out = sort_auction_matches_for_alerting(out)
     return out[:limit]
 
 
