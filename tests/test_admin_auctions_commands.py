@@ -726,7 +726,7 @@ def test_admin_auctions_notify_run_default_dry_run(monkeypatch, db):
 
     async def _fake_job(*_a, **kwargs):
         assert kwargs["dry_run"] is True
-        return {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "sent": 0, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "errors": 0}
+        return {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "sent": 0, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0}
 
     monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
     up = _Update()
@@ -740,7 +740,7 @@ def test_admin_auctions_notify_run_confirm(monkeypatch, db):
 
     async def _fake_job(*_a, **kwargs):
         assert kwargs["dry_run"] is False
-        return {"wishlists_scanned": 1, "wishlists_with_matches": 1, "previews": 0, "sent": 1, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "errors": 0}
+        return {"wishlists_scanned": 1, "wishlists_with_matches": 1, "previews": 0, "sent": 1, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0}
 
     monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
     up = _Update()
@@ -755,7 +755,7 @@ def test_admin_auctions_notify_run_lock_guard(monkeypatch, db):
 
     async def _fake_job(*_a, **_k):
         called["job"] += 1
-        return {"wishlists_scanned": 0, "wishlists_with_matches": 0, "previews": 0, "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "errors": 0}
+        return {"wishlists_scanned": 0, "wishlists_with_matches": 0, "previews": 0, "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0}
 
     monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
     up = _Update()
@@ -794,7 +794,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
             "last_skipped_no_match": 0,
             "last_skipped_duplicate": 0,
             "last_skipped_daily_limit": 0,
-            "last_errors": 0,
+            "last_skipped_score_below_min": 1, "last_skipped_stale_lot": 2, "last_skipped_missing_lot_updated_at": 0, "last_errors": 0,
         },
     )
     up = _Update()
@@ -862,7 +862,7 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
         "build_auction_notification_samples",
         lambda _db, limit=10: {
             "created_at": "2026-05-16 21:10 UTC",
-            "summary": {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_daily_limit": 0, "errors": 0},
+            "summary": {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0},
             "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "initial_bid": "88000.00", "url": "https://x"}] * 12,
         },
     )

@@ -305,3 +305,19 @@ Regras práticas:
 - Amostras de dry-run **não** são dedupe operacional.
 - Amostras de dry-run **não** significam envio real ao usuário final.
 - O envio automático real continua condicionado a `auction_notifications_enabled=true` e `auction_notifications_dry_run=false`.
+
+
+### Auction notification eligibility gates
+
+Para reduzir ruído operacional, notify/scheduler de leilões aplicam gates adicionais de elegibilidade antes de montar itens de envio:
+
+- `score` do match deve ser maior ou igual ao mínimo configurado.
+- O lote precisa ter atualização recente dentro da janela máxima de idade.
+- Se não houver `updated_at` confiável para o lote/match e o gate de idade estiver habilitado, o item é rejeitado.
+
+Defaults seguros:
+
+- `auction_notifications_min_score=60`
+- `auction_notifications_max_lot_age_hours=48`
+
+Observação operacional: `/admin auctions match` e `/admin auctions preview` continuam intencionalmente mais amplos para diagnóstico; os gates mais restritivos se aplicam ao pipeline de notificação (`notify`, `notify-run`, scheduler e amostras de dry-run).

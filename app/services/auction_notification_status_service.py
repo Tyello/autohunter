@@ -22,6 +22,8 @@ def _base_status(db) -> dict:
         "max_wishlists": int(getattr(settings, "auction_notifications_max_wishlists_per_run", 20) or 20),
         "max_per_wishlist": int(getattr(settings, "auction_notifications_max_per_wishlist", 1) or 1),
         "max_per_user_per_day": int(getattr(settings, "auction_notifications_max_per_user_per_day", 3) or 3),
+        "min_score": int(getattr(settings, "auction_notifications_min_score_safe", 60) or 60),
+        "max_lot_age_hours": int(getattr(settings, "auction_notifications_max_lot_age_hours_safe", 48) or 0),
         "eligible_sources": sorted(list_user_eligible_auction_sources(db)),
         "last_run_at": "-",
         "last_status": "unknown",
@@ -31,6 +33,9 @@ def _base_status(db) -> dict:
         "last_skipped_no_match": 0,
         "last_skipped_duplicate": 0,
         "last_skipped_daily_limit": 0,
+        "last_skipped_score_below_min": 0,
+        "last_skipped_stale_lot": 0,
+        "last_skipped_missing_lot_updated_at": 0,
         "last_errors": 0,
     }
 
@@ -54,6 +59,9 @@ def build_auction_notification_status(db) -> dict:
     out["last_skipped_no_match"] = int(payload.get("skipped_no_match", 0) or 0)
     out["last_skipped_duplicate"] = int(payload.get("skipped_duplicate", 0) or 0)
     out["last_skipped_daily_limit"] = int(payload.get("skipped_daily_limit", 0) or 0)
+    out["last_skipped_score_below_min"] = int(payload.get("skipped_score_below_min", 0) or 0)
+    out["last_skipped_stale_lot"] = int(payload.get("skipped_stale_lot", 0) or 0)
+    out["last_skipped_missing_lot_updated_at"] = int(payload.get("skipped_missing_lot_updated_at", 0) or 0)
     out["last_errors"] = int(payload.get("errors", 0) or 0)
 
     if row.message == "auction_notification_scheduler_tick_failed":

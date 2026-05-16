@@ -19,7 +19,7 @@ def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
     monkeypatch.setattr(
         "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
-        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a", "source": "vip_auctions", "external_id": "161895", "title": "SONG PLUS", "current_bid": "91000.00", "initial_bid": None, "score": 76, "url": "https://vip/161895"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []},
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a", "source": "vip_auctions", "external_id": "161895", "title": "SONG PLUS", "current_bid": "91000.00", "initial_bid": None, "score": 76, "url": "https://vip/161895"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
     )
 
     import asyncio
@@ -49,7 +49,7 @@ def test_job_dry_run_limits_samples_to_10(monkeypatch, db):
     monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
     monkeypatch.setattr(
         "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
-        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": f"auction:{i}", "title": f"title {i}"} for i in range(12)], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []},
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": f"auction:{i}", "title": f"title {i}"} for i in range(12)], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
     )
 
     import asyncio
@@ -75,7 +75,7 @@ def test_job_real_sends_and_respects_daily_limit(monkeypatch, db):
     monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
     monkeypatch.setattr(
         "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
-        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []},
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
     )
 
     import asyncio

@@ -13,7 +13,7 @@ def test_samples_returns_limited_data(db):
         "auction_last_dry_run_samples",
         {
             "created_at": "2026-05-16T21:10:00+00:00",
-            "summary": {"previews": 12},
+            "summary": {"previews": 12, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3},
             "samples": [{"title": f"x{i}"} for i in range(12)],
         },
     )

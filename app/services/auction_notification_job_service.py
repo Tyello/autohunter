@@ -61,6 +61,9 @@ async def run_auction_notification_job(
         "skipped_no_match": 0,
         "skipped_duplicate": 0,
         "skipped_missing_chat_id": 0,
+        "skipped_score_below_min": 0,
+        "skipped_stale_lot": 0,
+        "skipped_missing_lot_updated_at": 0,
         "skipped_daily_limit": 0,
         "errors": 0,
         "messages": [],
@@ -95,6 +98,9 @@ async def run_auction_notification_job(
             out["skipped_duplicate"] += int(built.get("skipped_duplicate", 0) or 0)
             out["skipped_no_match"] += int(built.get("skipped_no_match", 0) or 0)
             out["skipped_missing_chat_id"] += int(built.get("skipped_missing_chat_id", 0) or 0)
+            out["skipped_score_below_min"] += int(built.get("skipped_score_below_min", 0) or 0)
+            out["skipped_stale_lot"] += int(built.get("skipped_stale_lot", 0) or 0)
+            out["skipped_missing_lot_updated_at"] += int(built.get("skipped_missing_lot_updated_at", 0) or 0)
             out["errors"] += int(built.get("errors", 0) or 0)
             if built.get("messages"):
                 out["messages"].extend([str(m) for m in built["messages"][:2]])
@@ -139,6 +145,9 @@ async def run_auction_notification_job(
         "previews": out.get("previews", 0),
         "skipped_duplicate": out.get("skipped_duplicate", 0),
         "skipped_no_match": out.get("skipped_no_match", 0),
+        "skipped_score_below_min": out.get("skipped_score_below_min", 0),
+        "skipped_stale_lot": out.get("skipped_stale_lot", 0),
+        "skipped_missing_lot_updated_at": out.get("skipped_missing_lot_updated_at", 0),
         "skipped_daily_limit": out.get("skipped_daily_limit", 0),
         "errors": out.get("errors", 0),
     }
