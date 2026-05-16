@@ -143,6 +143,12 @@ class Settings(BaseSettings):
     tracking_price_drop_alert_min_amount: int = 500
     tracking_price_drop_alert_min_pct: float = 1.0
 
+    # Auction notification pilot job (safe defaults)
+    auction_notifications_enabled: bool = False
+    auction_notifications_dry_run: bool = True
+    auction_notifications_max_wishlists_per_run: int = 20
+    auction_notifications_max_per_wishlist: int = 1
+    auction_notifications_max_per_user_per_day: int = 3
 
     # Logging
     log_level: str = "info"
