@@ -454,7 +454,7 @@ def render_admin_auction_quality_report(report: dict) -> str:
 
 
 
-def render_auction_alert_preview(match) -> str:
+def _render_auction_alert_body(match) -> str:
     source_raw = str(getattr(match, "source", "") or "").strip()
     source_def = get_auction_source_definition(source_raw)
     source = source_def.label if source_def else (source_raw or "-")
@@ -475,8 +475,6 @@ def render_auction_alert_preview(match) -> str:
     url = str(getattr(match, "url", "") or "-")
 
     lines = [
-        "🧪 Preview — alerta de leilão",
-        "",
         "⚠️ Leilão compatível encontrado",
         "",
         f"Busca: {query}",
@@ -507,3 +505,11 @@ def render_auction_alert_preview(match) -> str:
         url,
     ])
     return "\n".join(lines).strip()
+
+
+def render_auction_alert(match) -> str:
+    return _render_auction_alert_body(match)
+
+
+def render_auction_alert_preview(match) -> str:
+    return "🧪 Preview — alerta de leilão\n\n" + _render_auction_alert_body(match)
