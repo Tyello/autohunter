@@ -21,6 +21,10 @@ class SourceConfig(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     source: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False, default="classified")
+    user_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    admin_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sched_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)

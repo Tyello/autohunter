@@ -706,3 +706,16 @@ def test_admin_notify_allow_no_bid_variants(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip", "--allow-no-bid")))
     assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
+
+def test_admin_auctions_sources_and_toggles(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "sources")))
+    assert "vip_auctions" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "mega", "disable")))
+    assert "source=mega_auctions" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "mega", "user-enable")))
+    assert "Não é possível user-enable" in up.message.sent[-1]
