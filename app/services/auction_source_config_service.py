@@ -42,7 +42,7 @@ def ensure_auction_source_configs(db: Session) -> int:
         else:
             new_row = False
         d = DEFAULTS[item.key]
-        if new_row or getattr(cfg, "source_type", None) in (None, ""):
+        if new_row:
             cfg.is_enabled = d.enabled
             cfg.user_eligible = d.user_eligible
             cfg.admin_only = d.admin_only
@@ -50,8 +50,8 @@ def ensure_auction_source_configs(db: Session) -> int:
             cfg.source_type = d.source_type
             changed += 1
             continue
-        if getattr(cfg, "source_type", None) in (None, ""):
-            cfg.source_type = d.source_type; changed += 1
+        if getattr(cfg, "source_type", None) != "auction":
+            cfg.source_type = "auction"; changed += 1
         if getattr(cfg, "status", None) in (None, ""):
             cfg.status = d.status; changed += 1
         if getattr(cfg, "admin_only", None) is None:
