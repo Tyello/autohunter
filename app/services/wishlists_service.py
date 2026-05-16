@@ -966,7 +966,9 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
         return False, "Filtro já existe (duplicado) ou erro ao salvar."
 
 
-def create_wishlist_with_filters(db: Session, user_id, query: str, filters: list[dict | tuple]) -> tuple[bool, str, Optional[uuid.UUID]]:
+def create_wishlist_with_filters(
+    db: Session, user_id, query: str, filters: list[dict | tuple], include_auctions: bool = False
+) -> tuple[bool, str, Optional[uuid.UUID]]:
     normalized_filters: list[NormalizedWishlistFilter] = []
     seen: set[tuple[str, str, str]] = set()
     for item in filters or []:
@@ -984,7 +986,7 @@ def create_wishlist_with_filters(db: Session, user_id, query: str, filters: list
         seen.add(key)
         normalized_filters.append(n)
 
-    ok, msg = add_wishlist(db, user_id, query, enqueue_initial_run=False)
+    ok, msg = add_wishlist(db, user_id, query, enqueue_initial_run=False, include_auctions=include_auctions)
     if not ok:
         return False, msg, None
 
