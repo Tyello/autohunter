@@ -252,7 +252,7 @@ def test_admin_auctions_match_wishlist_invalid_id(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", "invalido")))
-    assert up.message.sent[-1] == "Wishlist não encontrada."
+    assert "Use /admin auctions wishlists" in up.message.sent[-1]
 
 
 def test_admin_auctions_match_non_admin_and_empty(monkeypatch, db):
@@ -346,7 +346,42 @@ def test_admin_auctions_wishlist_toggle_not_found(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "invalido", "enable")))
-    assert up.message.sent[-1] == "Wishlist não encontrada."
+    assert "Use /admin auctions wishlists" in up.message.sent[-1]
+
+
+def test_admin_auctions_wishlists_and_index_resolution(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=1111, username="idx")
+    u2 = User(id=uuid.uuid4(), telegram_chat_id=2222, username="other")
+    db.add_all([u, u2]); db.flush()
+    w1 = Wishlist(user_id=u.id, query="civic si", is_active=True, include_auctions=False)
+    w2 = Wishlist(user_id=u.id, query="song pro gs dm", is_active=True, include_auctions=False)
+    w_other = Wishlist(user_id=u2.id, query="a4 avant", is_active=True, include_auctions=True)
+    db.add_all([w1, w2, w_other]); db.flush(); db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=1111)
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlists")))
+    assert "⚠️ Admin Leilões — buscas" in up.message.sent[-1]
+    assert f"ID: {w1.id}" in up.message.sent[-1]
+    assert "Leilões: desativado" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlists", "song")))
+    assert "song pro gs dm" in up.message.sent[-1].lower()
+    assert "civic si" not in up.message.sent[-1].lower()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "1", "enable")))
+    assert up.message.sent[-1] == "✅ Leilões ativados para esta busca."
+    assert bool(db.query(Wishlist).filter(Wishlist.id == w1.id).first().include_auctions) is True
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "1", "disable")))
+    assert up.message.sent[-1] == "✅ Leilões desativados para esta busca."
+    assert bool(db.query(Wishlist).filter(Wishlist.id == w1.id).first().include_auctions) is False
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "3", "enable")))
+    assert "Busca não encontrada para este índice" in up.message.sent[-1]
 
 
 def test_render_auction_alert_preview_contract():

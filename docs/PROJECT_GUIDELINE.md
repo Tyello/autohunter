@@ -213,7 +213,9 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - O preview **não envia mensagem para usuário final**.
 - O preview **não cria Notification**.
 - Por padrão usa apenas buscas com `include_auctions=true`.
-- Para diagnóstico, `/admin auctions preview wishlist <id> --force` ignora esse opt-in sem persistir alteração.
+- Para diagnóstico, `/admin auctions preview wishlist <id|index> --force` ignora esse opt-in sem persistir alteração.
+- Em comandos admin de leilão por wishlist, `<id|index>` aceita UUID ou índice numérico da lista do admin atual (chat atual).
+- Para descobrir IDs e índices com segurança, use `/admin auctions wishlists [query]`.
 - Próximo passo (futuro): notificação controlada de leilões para usuários finais.
 
 ## Controlled auction notification

@@ -15,7 +15,14 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview
+from app.bot.renderers import (
+    render_admin_auctions_summary,
+    render_admin_auction_lot,
+    render_admin_auction_quality_report,
+    _fmt_money_br,
+    render_auction_alert_preview,
+    _friendly_wishlist_filters,
+)
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -54,7 +61,7 @@ from app.bot.admin_handlers_sources import (
 )
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
-from app.services.wishlists_service import get_user_plan_snapshot
+from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries
 from app.services.auction_ingestion_service import run_auction_ingestion
 from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
 from app.services.auction_quality_service import build_auction_quality_report
@@ -117,6 +124,41 @@ def _short(s: Optional[str], n: int = 140) -> str:
         return "-"
     s = " ".join(s.split())
     return s if len(s) <= n else s[: max(0, n - 3)] + "..."
+
+
+def _resolve_wishlist_id_or_index(db, chat_id: int, raw: str):
+    target = (raw or "").strip()
+    try:
+        return str(uuid.UUID(target))
+    except Exception:
+        pass
+    if not target.isdigit():
+        return None
+    idx = int(target)
+    if idx < 1:
+        return None
+    user = db.query(User).filter(User.telegram_chat_id == int(chat_id)).first()
+    if not user:
+        return None
+    summaries = get_wishlist_summaries(db, user.id)
+    if idx > len(summaries):
+        return None
+    return str(summaries[idx - 1]["wishlist_id"])
+
+
+def _render_admin_auction_wishlists(summaries: list[dict]) -> str:
+    lines = ["⚠️ Admin Leilões — buscas", ""]
+    for item in summaries:
+        filters = _friendly_wishlist_filters(item.get("filters", []))
+        lines.extend([
+            f"{item['index']}. {item['query']}",
+            f"ID: {item['wishlist_id']}",
+            f"Leilões: {'ativado' if item.get('include_auctions') else 'desativado'}",
+            f"Status: {'ativa' if item.get('is_active', True) else 'pausada'}",
+            f"Filtros: {filters[0] if filters else 'Nenhum filtro'}",
+            "",
+        ])
+    return "\n".join(lines).strip()
 
 
 def _fmt_diag(diag: Optional[dict]) -> str:
@@ -494,11 +536,31 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
+        if sub == "wishlists":
+            user = db.query(User).filter(User.telegram_chat_id == int(update.effective_chat.id)).first()
+            if not user:
+                await update.message.reply_text("Usuário não encontrado para este chat admin.")
+                return
+            summaries = get_wishlist_summaries(db, user.id)
+            if len(args) >= 2:
+                q = args[1].lower()
+                summaries = [s for s in summaries if q in str(s.get("query", "")).lower()]
+            if not summaries:
+                await update.message.reply_text("Nenhuma busca encontrada para este filtro.")
+                return
+            if len(summaries) > 20:
+                await update.message.reply_text("Mostrando as 20 primeiras buscas.")
+            await update.message.reply_text(_render_admin_auction_wishlists(summaries[:20]))
+            return
+
         if sub == "notify":
             if len(args) < 3 or args[1].lower() != "wishlist":
                 await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]")
                 return
-            target_id = args[2].strip()
+            target_id = _resolve_wishlist_id_or_index(db, int(update.effective_chat.id), args[2].strip())
+            if not target_id:
+                await update.message.reply_text("Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices.")
+                return
             force = any(a.strip().lower() == "--force" for a in args[3:])
             confirm = any(a.strip().lower() == "--confirm" for a in args[3:])
             source = None
@@ -575,7 +637,11 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
         if sub == "preview":
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 force = any(a.strip().lower() == "--force" for a in args[3:])
-                result = build_auction_alert_previews_for_wishlist(db, args[2], force=force, limit=5)
+                target_id = _resolve_wishlist_id_or_index(db, int(update.effective_chat.id), args[2])
+                if not target_id:
+                    await update.message.reply_text("Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices.")
+                    return
+                result = build_auction_alert_previews_for_wishlist(db, target_id, force=force, limit=5)
                 if result.warning:
                     await update.message.reply_text(result.warning)
                     return
@@ -600,7 +666,10 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
 
         if sub == "match":
             if len(args) >= 3 and args[1].lower() == "wishlist":
-                target_id = args[2].strip()
+                target_id = _resolve_wishlist_id_or_index(db, int(update.effective_chat.id), args[2].strip())
+                if not target_id:
+                    await update.message.reply_text("Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices.")
+                    return
                 force = any(a.strip().lower() == "--force" for a in args[3:])
                 try:
                     wishlist_uuid = uuid.UUID(target_id)
@@ -622,7 +691,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 await update.message.reply_text("\n".join(_render_admin_auction_matches(wishlist.query, matches)))
                 return
             elif len(args) >= 2 and args[1].lower() == "wishlist":
-                await update.message.reply_text("Use: /admin auctions match wishlist <id> [--force]")
+                await update.message.reply_text("Use: /admin auctions match wishlist <wishlist_id|index> [--force]")
                 return
             elif len(args) >= 2:
                 source = resolve_auction_source_alias(args[1])
@@ -647,9 +716,12 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
         if sub == "wishlist":
             if len(args) < 3:
-                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]")
+                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]")
                 return
-            target_id = args[1].strip()
+            target_id = _resolve_wishlist_id_or_index(db, int(update.effective_chat.id), args[1].strip())
+            if not target_id:
+                await update.message.reply_text("Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices.")
+                return
             action = args[2].strip().lower()
             try:
                 wishlist_uuid = uuid.UUID(target_id)
@@ -672,14 +744,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 db.commit()
                 await update.message.reply_text("✅ Leilões desativados para esta busca.")
                 return
-            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]")
+            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]")
             return
 
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions preview [{sources_hint}|wishlist <id> [--force]] | /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]"
+        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions preview [{sources_hint}|wishlist <id> [--force]] | /admin auctions wishlists [query] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--confirm|--dry-run]"
     )
 
 
