@@ -40,3 +40,35 @@ def test_status_reads_finished_with_sent_and_previews(db):
     assert out["last_status"] == "sent"
     assert out["last_sent"] == 2
     assert out["last_previews"] == 3
+
+
+def test_status_reads_skipped_already_running(db):
+    db.add(SystemLog(level="info", component="scheduler", message="auction_notification_scheduler_tick_skipped", payload={"skipped": True, "reason": "already_running"}))
+    db.commit()
+    out = build_auction_notification_status(db)
+    assert out["last_status"] == "skipped"
+    assert out["last_reason"] == "already_running"
+
+
+def test_status_reads_skipped_bot_unavailable(db):
+    db.add(SystemLog(level="warn", component="scheduler", message="auction_notification_scheduler_tick_skipped", payload={"skipped": True, "reason": "bot_unavailable_for_real_send"}))
+    db.commit()
+    out = build_auction_notification_status(db)
+    assert out["last_status"] == "skipped"
+    assert out["last_reason"] == "bot_unavailable_for_real_send"
+
+
+def test_status_reads_failed_as_error(db):
+    db.add(SystemLog(level="error", component="scheduler", message="auction_notification_scheduler_tick_failed", payload={"errors": 1, "reason": "error"}))
+    db.commit()
+    out = build_auction_notification_status(db)
+    assert out["last_status"] == "error"
+    assert out["last_errors"] == 1
+
+
+def test_status_reads_finished_dry_run(db):
+    db.add(SystemLog(level="info", component="scheduler", message="auction_notification_scheduler_tick_finished", payload={"skipped": False, "dry_run": True, "sent": 0, "previews": 4}))
+    db.commit()
+    out = build_auction_notification_status(db)
+    assert out["last_status"] == "dry_run"
+    assert out["last_previews"] == 4

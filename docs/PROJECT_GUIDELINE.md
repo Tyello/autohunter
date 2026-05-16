@@ -292,6 +292,7 @@ Regras práticas:
 ## Auction notification status
 
 - O comando `/admin auctions notify-status` é admin-only, somente leitura, e mostra configuração atual + último resultado do scheduler/job de notificações.
+- O status da última execução pode aparecer como `unknown`, `disabled`, `skipped`, `dry_run`, `sent` ou `error`, conforme o último evento operacional registrado.
 - Esse comando deve ser usado antes de qualquer ativação automática para validar prontidão operacional no Telegram sem depender de journal/system_logs manualmente.
 - `enabled=false` é o estado padrão seguro e deve ser tratado como baseline de produção nesta fase.
 - `dry_run=true` permite medir volume operacional sem envio real para usuário final.

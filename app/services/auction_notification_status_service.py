@@ -59,7 +59,7 @@ def build_auction_notification_status(db) -> dict:
     if row.message == "auction_notification_scheduler_tick_failed":
         out["last_status"] = "error"
     elif bool(payload.get("skipped")):
-        out["last_status"] = "disabled" if payload.get("reason") == "disabled" else "dry_run"
+        out["last_status"] = "disabled" if payload.get("reason") == "disabled" else "skipped"
     elif out["last_sent"] > 0:
         out["last_status"] = "sent"
     elif bool(payload.get("dry_run")):
