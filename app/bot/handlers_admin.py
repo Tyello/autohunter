@@ -539,6 +539,11 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if limit < 1 or limit > MAX_NOTIFY_LIMIT:
                 await update.message.reply_text("Limite inválido. Use inteiro entre 1 e 3.")
                 return
+            if allow_experimental and source is None:
+                await update.message.reply_text(
+                    "Use --source <alias> junto com --allow-experimental para evitar envio amplo por fontes experimentais."
+                )
+                return
             if source and not is_auction_source_user_eligible(source) and not allow_experimental:
                 await update.message.reply_text(
                     "Source não elegível para envio ao usuário. Use --allow-experimental para diagnóstico controlado."
