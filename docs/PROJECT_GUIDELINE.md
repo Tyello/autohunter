@@ -256,3 +256,6 @@ Regras práticas:
 - Sources `experimental` só devem ser usadas em diagnóstico admin explícito (ex.: `--all-sources` / `--allow-experimental`).
 - Sources `needs_study`/bloqueadas não devem chegar ao usuário final por padrão.
 - Estado atual no runtime: apenas `vip_auctions` (alias `vip`) é elegível por padrão para preview e envio.
+
+- Auction sources: `app/sources/auctions/registry.py` define implementação técnica; `source_configs` define disponibilidade operacional (`enabled`, `user_eligible`, `admin_only`, `status`, `source_type=auction`).
+- Usuário final continua sem escolher source específica: apenas `include_auctions`; administração controla via comandos `/admin auctions sources` e `/admin auctions source-config ...`.
