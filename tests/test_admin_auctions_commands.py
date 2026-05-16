@@ -418,3 +418,106 @@ def test_admin_auctions_preview_invalid_source_and_not_found(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "wishlist", str(uuid.uuid4()))))
     assert up.message.sent[-1] == "Wishlist não encontrada."
+
+def test_render_auction_alert_contract_real():
+    from app.bot.renderers import render_auction_alert
+    m = types.SimpleNamespace(source="vip_auctions", title="Civic", wishlist_query="civic", status="open", current_bid=100, initial_bid=90, total_bids=1, year=2015, mileage_km=1000, city="SP", state="SP", auction_end_at=datetime(2026, 5, 20, 18, 0, tzinfo=timezone.utc), reasons=["ok"], url="https://example/lote")
+    text = render_auction_alert(m)
+    assert "Preview" not in text
+    assert "Lance não é valor final" in text
+    assert "preço final" not in text.lower()
+    assert "Lance atual" in text and "Lance inicial" in text
+    assert "https://example/lote" in text
+
+
+def test_admin_auctions_notify_variants(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=909, username="n")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "n1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://vip/n1"})
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
+    assert "Enviando até 1 alerta" in up.message.sent[-2]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip", "--limit", "2")))
+    assert "Alertas enviados" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "vip")))
+    assert "Alertas enviados" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "foo")))
+    assert "não suportada" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--limit", "9")))
+    assert "Limite inválido" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_non_admin_and_force(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=910, username="n2")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="gol", is_active=True, include_auctions=False)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "n2", "title": "VW Gol", "status": "open", "url": "https://vip/n2"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+    up = _Update(chat_id=10)
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
+    assert "Sem permissão" in up.message.sent[-1]
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
+    assert "não está habilitada" in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--force")))
+    assert "Alertas enviados" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_lock_guard(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    async def _run():
+        await handlers_admin._ADMIN_AUCTION_NOTIFY_LOCK.acquire()
+        try:
+            await handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4())))
+        finally:
+            handlers_admin._ADMIN_AUCTION_NOTIFY_LOCK.release()
+
+    asyncio.run(_run())
+    assert up.message.sent[-1] == "Já existe um envio de alerta de leilão em andamento. Aguarde finalizar."
+
+
+def test_admin_auctions_notify_error_shows_summary(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+
+    async def _fake_send(*_args, **_kwargs):
+        return {
+            "sent": 0,
+            "skipped_duplicate": 0,
+            "skipped_no_match": 0,
+            "skipped_missing_chat_id": 0,
+            "errors": 1,
+            "messages": ["Falha ao enviar alerta: timeout"],
+        }
+
+    monkeypatch.setattr(handlers_admin, "send_auction_notifications_for_wishlist", _fake_send)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4()))))
+    assert "Erros: 1" in up.message.sent[-1]
+    assert "Detalhe: Falha ao enviar alerta: timeout" in up.message.sent[-1]

@@ -58,6 +58,7 @@ from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.auction_ingestion_service import run_auction_ingestion
 from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
 from app.services.auction_quality_service import build_auction_quality_report
+from app.services.auction_notification_service import send_auction_notifications_for_wishlist, MAX_NOTIFY_LIMIT
 from app.services.auction_preview_service import (
     build_auction_alert_previews_for_enabled_wishlists,
     build_auction_alert_previews_for_wishlist,
@@ -188,6 +189,7 @@ def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
 
 
 _ADMIN_AUCTION_RUN_LOCK = asyncio.Lock()
+_ADMIN_AUCTION_NOTIFY_LOCK = asyncio.Lock()
 
 
 def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
@@ -478,6 +480,60 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
+        if sub == "notify":
+            if len(args) < 3 or args[1].lower() != "wishlist":
+                await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force]")
+                return
+            target_id = args[2].strip()
+            force = any(a.strip().lower() == "--force" for a in args[3:])
+            source = None
+            limit = 1
+            extra = args[3:]
+            if extra and not extra[0].startswith("--"):
+                source = resolve_auction_source_alias(extra[0])
+                if not source:
+                    await update.message.reply_text(f"Source de leilão não suportada. {render_supported_auction_sources_hint()}")
+                    return
+            i = 0
+            while i < len(extra):
+                token = extra[i].lower().strip()
+                if token == "--source" and i + 1 < len(extra):
+                    source = resolve_auction_source_alias(extra[i + 1])
+                    if not source:
+                        await update.message.reply_text(f"Source de leilão não suportada. {render_supported_auction_sources_hint()}")
+                        return
+                    i += 2
+                    continue
+                if token == "--limit" and i + 1 < len(extra):
+                    try:
+                        limit = int(extra[i + 1])
+                    except Exception:
+                        await update.message.reply_text("Limite inválido. Use inteiro entre 1 e 3.")
+                        return
+                    i += 2
+                    continue
+                i += 1
+            if limit < 1 or limit > MAX_NOTIFY_LIMIT:
+                await update.message.reply_text("Limite inválido. Use inteiro entre 1 e 3.")
+                return
+            if _ADMIN_AUCTION_NOTIFY_LOCK.locked():
+                await update.message.reply_text("Já existe um envio de alerta de leilão em andamento. Aguarde finalizar.")
+                return
+            async with _ADMIN_AUCTION_NOTIFY_LOCK:
+                await update.message.reply_text(f"Enviando até {limit} alerta(s) de leilão para a busca {target_id}...")
+                result = await send_auction_notifications_for_wishlist(db, update.get_bot(), target_id, source=source, limit=limit, force=force)
+            lines = [
+                f"✅ Alertas enviados: {result.get('sent', 0)}",
+                f"Duplicados ignorados: {result.get('skipped_duplicate', 0)}",
+                f"Sem match elegível: {result.get('skipped_no_match', 0)}",
+                f"Sem chat id: {result.get('skipped_missing_chat_id', 0)}",
+                f"Erros: {result.get('errors', 0)}",
+            ]
+            if result.get("messages"):
+                lines.append(f"Detalhe: {result['messages'][0]}")
+            await update.message.reply_text("\n".join(lines))
+            return
+
         if sub == "preview":
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 force = any(a.strip().lower() == "--force" for a in args[3:])
@@ -553,7 +609,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
         if sub == "wishlist":
             if len(args) < 3:
-                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable>")
+                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force]")
                 return
             target_id = args[1].strip()
             action = args[2].strip().lower()
@@ -578,14 +634,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 db.commit()
                 await update.message.reply_text("✅ Leilões desativados para esta busca.")
                 return
-            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable>")
+            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force]")
             return
 
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions preview [{sources_hint}|wishlist <id> [--force]] | /admin auctions wishlist <wishlist_id> <enable|disable>"
+        f"| /admin auctions match [{sources_hint}|wishlist <id>] | /admin auctions preview [{sources_hint}|wishlist <id> [--force]] | /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force]"
     )
 
 

@@ -215,3 +215,11 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Por padrão usa apenas buscas com `include_auctions=true`.
 - Para diagnóstico, `/admin auctions preview wishlist <id> --force` ignora esse opt-in sem persistir alteração.
 - Próximo passo (futuro): notificação controlada de leilões para usuários finais.
+
+## Controlled auction notification
+
+- Envio real de alerta de leilão está em modo manual: **admin-triggered** por comando `/admin auctions notify wishlist <id>`.
+- Não existe scheduler automático de notificação de leilões nesta fase.
+- Por padrão, só envia para busca com `include_auctions=true`; `--force` existe apenas para diagnóstico/admin.
+- Há dedupe por lote para a mesma busca, evitando reenvio do mesmo `auction_lot` para a mesma wishlist.
+- Próximo passo futuro (fora do escopo atual): scheduler controlado, condicionado à qualidade das sources.
