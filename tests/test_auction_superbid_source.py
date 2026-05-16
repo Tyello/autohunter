@@ -3,6 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from app.sources.auctions import superbid
+from app.sources.auctions.quality import validate_normalized_auction_lot_candidate
 
 
 def _fixture(name: str) -> str:
@@ -89,3 +90,18 @@ def test_fetch_sets_reason_for_invalid_and_js(monkeypatch):
     out = superbid.fetch_superbid_lots(listing_url="https://exchange.superbid.net/")
     assert out == []
     assert superbid.get_last_reason() in {"requires_js_or_internal_endpoint", "no_public_lot_cards_found"}
+
+def test_superbid_blocks_navigation_and_categoria_urls():
+    html = """
+    <article class='card'><a href='/categorias/motos'>Navegue pelas categorias</a></article>
+    <article class='card'><a href='/leilao/todos'>Navegue pelas modalidades de vendas</a></article>
+    """
+    lots = superbid.parse_superbid_listing_html(html, listing_url='https://www.superbid.net/')
+    assert lots == []
+
+
+def test_superbid_event_without_signals_rejected_by_gate():
+    html = "<article class=\"card\"><a href=\"/evento/787062\">evento</a></article>"
+    lots = superbid.parse_superbid_listing_html(html, listing_url='https://www.superbid.net/')
+    assert len(lots) == 1
+    assert validate_normalized_auction_lot_candidate(lots[0]).reason == "insufficient_lot_signals"

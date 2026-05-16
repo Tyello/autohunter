@@ -54,3 +54,15 @@ def test_fetch_empty_sets_reason(monkeypatch):
     lots = win.fetch_win_lots(limit=5)
     assert lots == []
     assert win.get_last_reason() == "no_public_lot_cards_found"
+
+def test_win_blocks_institutional_and_parses_initial_bid():
+    html = """
+    <article class=\"card\"><a href=\"/licitante/cadastro/login\">Login</a></article>
+    <article class=\"card\"><a href=\"/lotes/search\">search</a></article>
+    <article class=\"card\"><a href=\"/leiloes/venda-direta\">venda direta</a></article>
+    <article class=\"card\"><a href=\"/item/3739/detalhes\">item</a><h3>Lance Inicial: R$600.000,00</h3><div>Lance Inicial: R$ 600.000,00</div></article>
+    """
+    lots = win.parse_win_listing_html(html, limit=10)
+    assert len(lots) == 1
+    assert lots[0].title is None
+    assert lots[0].initial_bid == Decimal('600000.00')

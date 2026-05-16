@@ -99,9 +99,19 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
         url = urljoin(listing_url, href) if href else None
         if not url:
             continue
+        low_url = url.lower()
+        if any(
+            block in low_url
+            for block in ("/licitante/cadastro/login", "/lotes/search", "/leiloes/venda-direta", "/login", "/cadastro")
+        ) and "/item/" not in low_url:
+            continue
+        if "/leilao/" in low_url and "/lotes" in low_url and "/item/" not in low_url:
+            continue
         external_id = extract_win_external_id(url)
         if not external_id:
             continue
+        if title and re.search(r"^\s*lance\s+inicial\s*:", title, flags=re.I):
+            title = None
         loc_candidates = re.findall(r"\b([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s]{1,40}/[A-Za-z]{2})\b", card, flags=re.I)
         location_text = None
         for cand in loc_candidates:

@@ -4,6 +4,7 @@ from typing import Any
 
 from app.db.session import SessionLocal
 from app.services.auction_lot_service import upsert_lot
+from app.sources.auctions.quality import validate_normalized_auction_lot_candidate
 from app.sources.auctions.registry import (
     get_auction_source_definition,
     list_supported_auction_source_keys,
@@ -34,17 +35,27 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
         "skipped": 0,
         "errors": 0,
         "reason": reason if not lots else None,
+        "skipped_reasons": {},
         "enrich_applied": enrich_applied,
     }
 
     db = SessionLocal()
     try:
         for lot in lots:
+            quality = validate_normalized_auction_lot_candidate(lot)
+            if not quality.ok:
+                summary["skipped"] += 1
+                reason_key = quality.reason or "quality_rejected"
+                skipped_reasons: dict[str, int] = summary["skipped_reasons"]
+                skipped_reasons[reason_key] = skipped_reasons.get(reason_key, 0) + 1
+                continue
             _, created = upsert_lot(db, lot.to_payload())
             if created:
                 summary["inserted"] += 1
             else:
                 summary["updated"] += 1
+        if not summary["skipped_reasons"]:
+            summary.pop("skipped_reasons", None)
         db.commit()
         return summary
     except Exception:

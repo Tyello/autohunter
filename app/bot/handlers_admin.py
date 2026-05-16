@@ -429,12 +429,17 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         limit=limit,
                         enrich_details=enrich_details,
                     )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "admin_auction_run_failed",
                     extra={"source": source, "limit": limit, "enrich_details": enrich_details, "chat_id": update.effective_chat.id},
                 )
-                await update.message.reply_text("Falha ao rodar ingestão de leilões. Verifique logs.")
+                msg = str(exc).strip().replace("\n", " ")
+                if len(msg) > 180:
+                    msg = f"{msg[:177]}..."
+                await update.message.reply_text(
+                    f"Falha ao rodar ingestão de leilões: {type(exc).__name__} — {msg or 'erro sem mensagem'}"
+                )
                 return
 
             duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
@@ -468,6 +473,11 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             ]
             if (summary.get("fetched", 0) == 0) and summary.get("reason"):
                 lines.extend(["", f"Motivo: {summary.get('reason')}"])
+            skipped_reasons = summary.get("skipped_reasons") or {}
+            if skipped_reasons:
+                lines.extend(["", "Ignorados:"])
+                for reason_key, count in sorted(skipped_reasons.items()):
+                    lines.append(f"- {reason_key}: {count}")
             lines.extend(["", "Próximo passo:", f"/admin auctions source {source}"])
             await update.message.reply_text("\n".join(lines))
             return

@@ -83,11 +83,18 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
     for card in cards[:limit]:
         title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "") or None
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
-        url = urljoin(listing_url, href) if href else None
+        url = urljoin(listing_url, href) if href and href.strip() != "-" else None
+        if not url or url == "-":
+            continue
         raw_code = _strip_html(_first_group(r"\b(J\d{4,})\b", card) or "") or None
-        external_id = raw_code or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or None
+        external_id = raw_code or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or _first_group(r"/([A-Z]\d{4,})/?$", url) or url
         if not external_id:
             continue
+        if not title:
+            slug = (urlparse(url).path.rstrip("/").split("/")[-1] if url else "")
+            guess = re.sub(r"[-_]+", " ", slug).strip()
+            if re.search(r"(moto|honda|yamaha|suzuki|kawasaki|bmw|ducati)", guess, flags=re.I):
+                title = guess.title()
 
         location_text = _strip_html(_first_group(r"(?:Local|Cidade)\s*:?\s*</?[^>]*>\s*([^<]+)", card) or _first_group(r"([A-Za-zÀ-ÿ\s]+,\s*[A-Za-z]{2})", card) or "") or None
         city, state, location = parse_mega_location(location_text)
