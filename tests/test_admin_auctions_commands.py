@@ -309,7 +309,7 @@ def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "acao_invalida")))
     assert "vip|mega|win|sodre|superbid|copart" in up.message.sent[-1]
-    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id> [--force] [--all-sources]]" in up.message.sent[-1]
+    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <wishlist_id|index> [--force] [--all-sources]]" in up.message.sent[-1]
 
 
 def test_admin_auctions_wishlist_toggle_and_match_force(monkeypatch, db):
@@ -490,6 +490,86 @@ def test_admin_auctions_notify_non_admin_and_force(monkeypatch, db):
     assert "Alertas enviados" in up.message.sent[-1]
 
 
+def test_admin_auctions_wishlists_list_and_filter_and_index_resolution(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    from app.services.wishlists_service import add_filter
+
+    owner = User(id=uuid.uuid4(), telegram_chat_id=777, username="owner")
+    other = User(id=uuid.uuid4(), telegram_chat_id=778, username="other")
+    db.add_all([owner, other]); db.flush()
+    w1 = Wishlist(user_id=owner.id, query="civic si", is_active=True, include_auctions=False)
+    w2 = Wishlist(user_id=owner.id, query="song pro gs dm", is_active=True, include_auctions=False)
+    w_other = Wishlist(user_id=other.id, query="a4 avant", is_active=True, include_auctions=False)
+    db.add_all([w1, w2, w_other]); db.flush()
+    add_filter(db, w1.id, "year", "gte", "2014")
+    add_filter(db, w1.id, "year", "lte", "2015")
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=777)
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlists")))
+    text = up.message.sent[-1]
+    assert "Admin Leilões — buscas" in text
+    assert str(w1.id) in text and str(w2.id) in text
+    assert "Ano entre 2014 e 2015" in text
+    assert "Leilões: desativado" in text
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlists", "song")))
+    assert "song pro gs dm" in up.message.sent[-1].lower()
+    assert "civic si" not in up.message.sent[-1].lower()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "1", "enable")))
+    db.refresh(w1)
+    assert up.message.sent[-1] == "✅ Leilões ativados para esta busca."
+    assert w1.include_auctions is True
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "1", "disable")))
+    db.refresh(w1)
+    assert up.message.sent[-1] == "✅ Leilões desativados para esta busca."
+    assert w1.include_auctions is False
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "3", "enable")))
+    assert up.message.sent[-1] == "Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices."
+
+
+def test_admin_auctions_match_preview_notify_accept_index_and_do_not_cross_user(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+
+    owner = User(id=uuid.uuid4(), telegram_chat_id=880, username="o")
+    other = User(id=uuid.uuid4(), telegram_chat_id=881, username="p")
+    db.add_all([owner, other]); db.flush()
+    w1 = Wishlist(user_id=owner.id, query="gol", is_active=True, include_auctions=True)
+    w_other = Wishlist(user_id=other.id, query="civic", is_active=True, include_auctions=True)
+    db.add_all([w1, w_other]); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "idx1", "title": "VW Gol", "status": "open", "url": "https://vip/idx1"})
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=880)
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", "1", "--force")))
+    assert "🎯 Busca: gol" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "wishlist", "1", "--force")))
+    assert any("Preview — alerta de leilão" in s for s in up.message.sent)
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", "1")))
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w1.id), "--force")))
+    assert "🎯 Busca: gol" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
+
+    up_other = _Update(chat_id=880)
+    asyncio.run(handlers_admin.cmd_admin(up_other, _ctx("auctions", "wishlist", "2", "enable")))
+    assert up_other.message.sent[-1] == "Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices."
+
+
 def test_admin_auctions_notify_lock_guard(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
@@ -507,10 +587,17 @@ def test_admin_auctions_notify_lock_guard(monkeypatch, db):
 
 
 def test_admin_auctions_notify_error_shows_summary(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+    u = User(id=uuid.uuid4(), telegram_chat_id=999, username="err")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="uno", is_active=True, include_auctions=True)
+    db.add(w); db.commit()
 
     async def _fake_send(*_args, **_kwargs):
         return {
@@ -523,7 +610,7 @@ def test_admin_auctions_notify_error_shows_summary(monkeypatch, db):
         }
 
     monkeypatch.setattr(handlers_admin, "send_auction_notifications_for_wishlist", _fake_send)
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4()), "--confirm")))
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--confirm")))
     assert "Erros: 1" in up.message.sent[-1]
     assert "Detalhe: Falha ao enviar alerta: timeout" in up.message.sent[-1]
 

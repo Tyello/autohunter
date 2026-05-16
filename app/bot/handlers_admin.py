@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview, _friendly_wishlist_filters
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -54,7 +54,7 @@ from app.bot.admin_handlers_sources import (
 )
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
-from app.services.wishlists_service import get_user_plan_snapshot
+from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries
 from app.services.auction_ingestion_service import run_auction_ingestion
 from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
 from app.services.auction_quality_service import build_auction_quality_report
@@ -201,6 +201,39 @@ def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
 _ADMIN_AUCTION_RUN_LOCK = asyncio.Lock()
 _ADMIN_AUCTION_NOTIFY_LOCK = asyncio.Lock()
 _AUCTION_NON_ELIGIBLE_WARNING = "Fonte experimental/não elegível para usuário final."
+
+
+def _admin_user_by_chat(db, chat_id: int | None) -> User | None:
+    if chat_id is None:
+        return None
+    return db.query(User).filter(User.telegram_chat_id == int(chat_id)).first()
+
+
+def _resolve_admin_wishlist_id_or_index(db, *, chat_id: int | None, raw_target: str) -> tuple[Wishlist | None, str | None]:
+    target = str(raw_target or "").strip()
+    try:
+        wishlist_uuid = uuid.UUID(target)
+    except Exception:
+        wishlist_uuid = None
+    if wishlist_uuid:
+        wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_uuid).first()
+        return wishlist, None if wishlist else "Wishlist não encontrada."
+
+    if target.isdigit():
+        user = _admin_user_by_chat(db, chat_id)
+        if not user:
+            return None, "Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices."
+        summaries = get_wishlist_summaries(db, user.id)
+        idx = int(target)
+        if idx < 1 or idx > len(summaries):
+            return None, "Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices."
+        wishlist_id = summaries[idx - 1]["wishlist_id"]
+        wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
+        if not wishlist:
+            return None, "Wishlist não encontrada."
+        return wishlist, None
+
+    return None, "Wishlist não encontrada."
 
 
 def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
@@ -501,11 +534,52 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines).strip())
             return
 
+        if sub == "wishlists":
+            chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
+            user = _admin_user_by_chat(db, chat_id)
+            if not user:
+                await update.message.reply_text("Nenhum usuário associado ao chat atual para listar buscas.")
+                return
+            query = " ".join(args[1:]).strip().lower() if len(args) > 1 else ""
+            summaries = get_wishlist_summaries(db, user.id)
+            if query:
+                summaries = [s for s in summaries if query in str(s.get("query") or "").lower()]
+            if not summaries:
+                await update.message.reply_text("Nenhuma busca encontrada para este filtro.")
+                return
+            max_items = 10
+            lines = ["⚠️ Admin Leilões — buscas", ""]
+            for item in summaries[:max_items]:
+                labels = _friendly_wishlist_filters(item.get("filters", []))
+                lines.extend([
+                    f"{item['index']}. {item['query']}",
+                    f"ID: {item['wishlist_id']}",
+                    f"Leilões: {'ativado' if item.get('include_auctions', False) else 'desativado'}",
+                    f"Status: {'ativa' if item.get('is_active', True) else 'pausada'}",
+                    f"Filtros: {labels[0] if labels else 'Nenhum filtro'}",
+                    "",
+                ])
+            if len(summaries) > max_items:
+                lines.append(f"Mostrando {max_items} de {len(summaries)} buscas. Use /admin auctions wishlists <texto> para filtrar.")
+            await update.message.reply_text("\n".join(lines).strip())
+            return
+
         if sub == "notify":
             if len(args) < 3 or args[1].lower() != "wishlist":
-                await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
+                await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
                 return
-            target_id = args[2].strip()
+            if _ADMIN_AUCTION_NOTIFY_LOCK.locked():
+                await update.message.reply_text("Já existe um envio de alerta de leilão em andamento. Aguarde finalizar.")
+                return
+            resolved_wishlist, err = _resolve_admin_wishlist_id_or_index(
+                db,
+                chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
+                raw_target=args[2].strip(),
+            )
+            if not resolved_wishlist:
+                await update.message.reply_text(err or "Wishlist não encontrada.")
+                return
+            target_id = str(resolved_wishlist.id)
             force = any(a.strip().lower() == "--force" for a in args[3:])
             confirm = any(a.strip().lower() == "--confirm" for a in args[3:])
             source = None
@@ -554,9 +628,6 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 await update.message.reply_text("Use apenas um modo: --confirm (envio real) ou --dry-run (simulação).")
                 return
             dry_run = not confirm
-            if _ADMIN_AUCTION_NOTIFY_LOCK.locked():
-                await update.message.reply_text("Já existe um envio de alerta de leilão em andamento. Aguarde finalizar.")
-                return
             async with _ADMIN_AUCTION_NOTIFY_LOCK:
                 if dry_run:
                     await update.message.reply_text("Dry-run: nenhum alerta foi enviado.")
@@ -612,8 +683,16 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 force = any(a.strip().lower() == "--force" for a in args[3:])
                 all_sources = any(a.strip().lower() == "--all-sources" for a in args[3:])
+                resolved_wishlist, err = _resolve_admin_wishlist_id_or_index(
+                    db,
+                    chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
+                    raw_target=args[2],
+                )
+                if not resolved_wishlist:
+                    await update.message.reply_text(err or "Wishlist não encontrada.")
+                    return
                 result = build_auction_alert_previews_for_wishlist(
-                    db, args[2], force=force, limit=5, eligible_sources=None if all_sources else list_user_eligible_auction_source_keys()
+                    db, str(resolved_wishlist.id), force=force, limit=5, eligible_sources=None if all_sources else list_user_eligible_auction_source_keys()
                 )
                 if result.warning:
                     await update.message.reply_text(result.warning)
@@ -643,13 +722,13 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 target_id = args[2].strip()
                 force = any(a.strip().lower() == "--force" for a in args[3:])
-                try:
-                    wishlist_uuid = uuid.UUID(target_id)
-                except Exception:
-                    wishlist_uuid = None
-                wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_uuid).first() if wishlist_uuid else None
+                wishlist, err = _resolve_admin_wishlist_id_or_index(
+                    db,
+                    chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
+                    raw_target=target_id,
+                )
                 if not wishlist:
-                    await update.message.reply_text("Wishlist não encontrada.")
+                    await update.message.reply_text(err or "Wishlist não encontrada.")
                     return
                 if not force and not bool(getattr(wishlist, "include_auctions", False)):
                     await update.message.reply_text(
@@ -666,7 +745,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 await update.message.reply_text("\n".join(_render_admin_auction_matches(wishlist.query, matches)))
                 return
             elif len(args) >= 2 and args[1].lower() == "wishlist":
-                await update.message.reply_text("Use: /admin auctions match wishlist <id> [--force]")
+                await update.message.reply_text("Use: /admin auctions match wishlist <wishlist_id|index> [--force]")
                 return
             elif len(args) >= 2:
                 source = resolve_auction_source_alias(args[1])
@@ -695,18 +774,17 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
         if sub == "wishlist":
             if len(args) < 3:
-                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
+                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
                 return
             target_id = args[1].strip()
             action = args[2].strip().lower()
-            try:
-                wishlist_uuid = uuid.UUID(target_id)
-            except Exception:
-                await update.message.reply_text("Wishlist não encontrada.")
-                return
-            wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_uuid).first()
+            wishlist, err = _resolve_admin_wishlist_id_or_index(
+                db,
+                chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
+                raw_target=target_id,
+            )
             if not wishlist:
-                await update.message.reply_text("Wishlist não encontrada.")
+                await update.message.reply_text(err or "Wishlist não encontrada.")
                 return
             if action == "enable":
                 wishlist.include_auctions = True
@@ -720,14 +798,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 db.commit()
                 await update.message.reply_text("✅ Leilões desativados para esta busca.")
                 return
-            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
+            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
             return
 
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <id> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <id> [--force] [--all-sources]] | /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]\n{render_user_eligible_auction_sources_hint()}"
+        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]\n{render_user_eligible_auction_sources_hint()}"
     )
 
 
