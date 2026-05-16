@@ -105,3 +105,17 @@ def get_auction_source_definition(source_or_alias: str) -> AuctionSourceDefiniti
 def render_supported_auction_sources_hint() -> str:
     aliases = [item.aliases[0] for item in _AUCTION_SOURCES]
     return f"Use: {'|'.join(aliases)}"
+
+
+def is_auction_source_user_eligible(source_or_alias: str) -> bool:
+    d = get_auction_source_definition(source_or_alias)
+    return bool(d and d.status == "active")
+
+
+def list_user_eligible_auction_source_keys() -> list[str]:
+    return [item.key for item in _AUCTION_SOURCES if item.status == "active"]
+
+
+def render_user_eligible_auction_sources_hint() -> str:
+    aliases = [item.aliases[0] for item in _AUCTION_SOURCES if item.status == "active"]
+    return f"Sources elegíveis: {'|'.join(aliases) if aliases else '-'}"

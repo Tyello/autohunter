@@ -119,10 +119,20 @@ def _score_match(wishlist: Wishlist, lot: AuctionLot) -> tuple[int, list[str]]:
     return max(0, min(100, score)), reasons
 
 
-def match_auction_lots_for_wishlist(db: Session, wishlist: Wishlist, source: str | None = None, limit: int = 10) -> list[AuctionWishlistMatch]:
+def match_auction_lots_for_wishlist(
+    db: Session,
+    wishlist: Wishlist,
+    source: str | None = None,
+    eligible_sources: list[str] | None = None,
+    limit: int = 10,
+) -> list[AuctionWishlistMatch]:
     q = db.query(AuctionLot)
     if source:
         q = q.filter(AuctionLot.source == source)
+    elif eligible_sources is not None:
+        if not eligible_sources:
+            return []
+        q = q.filter(AuctionLot.source.in_(eligible_sources))
     lots = q.order_by(AuctionLot.updated_at.desc()).limit(max(20, limit * 8)).all()
 
     out: list[AuctionWishlistMatch] = []

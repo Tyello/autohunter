@@ -77,8 +77,9 @@ from app.services.auction_preview_service import (
 from app.sources.auctions.registry import (
     resolve_auction_source_alias,
     render_supported_auction_sources_hint,
-    get_auction_source_definition,
-    list_auction_sources,
+    is_auction_source_user_eligible,
+    list_user_eligible_auction_source_keys,
+    render_user_eligible_auction_sources_hint,
 )
 
 
@@ -164,11 +165,6 @@ def _render_admin_auction_wishlists(summaries: list[dict]) -> str:
             "",
         ])
     return "\n".join(lines).strip()
-
-
-def _is_eligible_auction_source(source: str) -> bool:
-    d = get_auction_source_definition(source)
-    return bool(d and getattr(d, "status", "") == "active")
 
 
 def _fmt_diag(diag: Optional[dict]) -> str:
@@ -607,7 +603,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if allow_experimental and not source:
                 await update.message.reply_text("Use --allow-experimental apenas com --source <alias>.")
                 return
-            if source and not _is_eligible_auction_source(source) and not allow_experimental:
+            if source and not is_auction_source_user_eligible(source) and not allow_experimental:
                 await update.message.reply_text("Source experimental bloqueada. Use --allow-experimental com --source para diagnóstico.")
                 return
             if any(a.strip().lower() == "--dry-run" for a in args[3:]) and confirm:
@@ -659,7 +655,15 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 if not target_id:
                     await update.message.reply_text("Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices.")
                     return
-                result = build_auction_alert_previews_for_wishlist(db, target_id, source=None if all_sources else "vip_auctions", force=force, limit=5)
+                eligible_sources = None if all_sources else list_user_eligible_auction_source_keys()
+                result = build_auction_alert_previews_for_wishlist(
+                    db,
+                    target_id,
+                    source=None,
+                    eligible_sources=eligible_sources,
+                    force=force,
+                    limit=5,
+                )
                 if result.warning:
                     await update.message.reply_text(result.warning)
                     return
@@ -703,7 +707,8 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         f"Esta busca não está habilitada para leilões. Use /admin auctions wishlist {wishlist.id} enable para habilitar."
                     )
                     return
-                matches = match_auction_lots_for_wishlist(db, wishlist, source=None if all_sources else "vip_auctions", limit=10)
+                eligible_sources = None if all_sources else list_user_eligible_auction_source_keys()
+                matches = match_auction_lots_for_wishlist(db, wishlist, source=None, eligible_sources=eligible_sources, limit=10)
                 if not matches:
                     await update.message.reply_text("Sem leilões compatíveis para esta busca.")
                     return
@@ -767,11 +772,10 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
 
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
-    eligible_aliases = [s.aliases[0] for s in list_auction_sources() if s.status == "active"]
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <id> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <id> [--force] [--all-sources]] | /admin auctions wishlists [query] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-experimental] [--confirm|--dry-run]\nSources elegíveis: {','.join(eligible_aliases) or 'nenhuma'}"
+        f"| /admin auctions match [{sources_hint}|wishlist <id> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <id> [--force] [--all-sources]] | /admin auctions wishlists [query] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-experimental] [--confirm|--dry-run]\n{render_user_eligible_auction_sources_hint()}"
     )
 
 

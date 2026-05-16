@@ -29,6 +29,7 @@ def build_auction_alert_previews_for_wishlist(
     wishlist_id,
     force: bool = False,
     source: str | None = None,
+    eligible_sources: list[str] | None = None,
     limit: int = 5,
 ) -> AuctionPreviewResult:
     try:
@@ -47,5 +48,5 @@ def build_auction_alert_previews_for_wishlist(
                 "ou rode com --force para diagnóstico."
             ),
         )
-    matches = match_auction_lots_for_wishlist(db, wishlist, source=source, limit=limit)
+    matches = match_auction_lots_for_wishlist(db, wishlist, source=source, eligible_sources=eligible_sources, limit=limit)
     return AuctionPreviewResult(matches=matches, warning=None)

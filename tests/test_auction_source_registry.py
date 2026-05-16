@@ -1,7 +1,10 @@
 from app.sources.auctions.registry import (
     get_auction_source_definition,
+    is_auction_source_user_eligible,
     list_supported_auction_source_keys,
+    list_user_eligible_auction_source_keys,
     render_supported_auction_sources_hint,
+    render_user_eligible_auction_sources_hint,
     resolve_auction_source_alias,
 )
 
@@ -30,3 +33,10 @@ def test_supported_source_keys_and_enrich_flags():
 def test_render_hint():
     assert "sodre" in render_supported_auction_sources_hint()
     assert "superbid" in render_supported_auction_sources_hint()
+
+
+def test_user_eligibility_helpers():
+    assert is_auction_source_user_eligible("vip") is True
+    assert is_auction_source_user_eligible("mega") is False
+    assert list_user_eligible_auction_source_keys() == ["vip_auctions"]
+    assert "vip" in render_user_eligible_auction_sources_hint()
