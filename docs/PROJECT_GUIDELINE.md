@@ -288,3 +288,11 @@ Regras práticas:
 - O usuário só entra no fluxo quando `include_auctions=true`.
 - Dedupe por wishlist/source/lote e limite diário por usuário continuam obrigatórios.
 - Lotes sem lance continuam bloqueados por padrão.
+
+## Auction notification status
+
+- O comando `/admin auctions notify-status` é admin-only, somente leitura, e mostra configuração atual + último resultado do scheduler/job de notificações.
+- Esse comando deve ser usado antes de qualquer ativação automática para validar prontidão operacional no Telegram sem depender de journal/system_logs manualmente.
+- `enabled=false` é o estado padrão seguro e deve ser tratado como baseline de produção nesta fase.
+- `dry_run=true` permite medir volume operacional sem envio real para usuário final.
+- Envio automático real (`enabled=true` + `dry_run=false`) só deve ser ativado após validação operacional completa.

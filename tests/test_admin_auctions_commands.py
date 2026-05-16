@@ -770,3 +770,67 @@ def test_admin_auctions_notify_run_lock_guard(monkeypatch, db):
     asyncio.run(_run_locked())
     assert "Já existe uma execução de notify-run de leilões em andamento. Aguarde finalizar." in up.message.sent[-1]
     assert called["job"] == 0
+
+
+def test_admin_auctions_notify_status_variants(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_status",
+        lambda _db: {
+            "enabled": False,
+            "dry_run": True,
+            "scheduler_minutes": 60,
+            "max_wishlists": 20,
+            "max_per_wishlist": 1,
+            "max_per_user_per_day": 3,
+            "eligible_sources": ["vip_auctions"],
+            "last_run_at": "-",
+            "last_status": "unknown",
+            "last_reason": "-",
+            "last_sent": 0,
+            "last_previews": 0,
+            "last_skipped_no_match": 0,
+            "last_skipped_duplicate": 0,
+            "last_skipped_daily_limit": 0,
+            "last_errors": 0,
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
+    assert "Envio automático desligado. Seguro para produção." in up.message.sent[-1]
+    assert "Sources elegíveis:" in up.message.sent[-1]
+    assert "- vip_auctions" in up.message.sent[-1]
+
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_status",
+        lambda _db: {"enabled": True, "dry_run": True, "scheduler_minutes": 60, "max_wishlists": 20, "max_per_wishlist": 1, "max_per_user_per_day": 3, "eligible_sources": ["vip_auctions"], "last_run_at": "2026-05-16 17:45 UTC", "last_status": "dry_run", "last_reason": "-", "last_sent": 0, "last_previews": 1, "last_skipped_no_match": 0, "last_skipped_duplicate": 0, "last_skipped_daily_limit": 0, "last_errors": 0},
+    )
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
+    assert "Simulação automática ativa. Nenhum alerta real é enviado." in up.message.sent[-1]
+
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_status",
+        lambda _db: {"enabled": True, "dry_run": False, "scheduler_minutes": 60, "max_wishlists": 20, "max_per_wishlist": 1, "max_per_user_per_day": 3, "eligible_sources": ["vip_auctions"], "last_run_at": "2026-05-16 17:45 UTC", "last_status": "sent", "last_reason": "-", "last_sent": 1, "last_previews": 0, "last_skipped_no_match": 0, "last_skipped_duplicate": 0, "last_skipped_daily_limit": 0, "last_errors": 0},
+    )
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
+    assert "🚨 Envio automático real ativo" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_status_non_admin(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    called = {"status": 0}
+
+    def _status(_db):
+        called["status"] += 1
+        return {}
+
+    monkeypatch.setattr(handlers_admin, "build_auction_notification_status", _status)
+    up = _Update(chat_id=111)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
+    assert "Sem permissão" in up.message.sent[-1]
+    assert called["status"] == 0
