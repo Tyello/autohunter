@@ -19,7 +19,7 @@ def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
     monkeypatch.setattr(
         "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
-        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []},
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a", "source": "vip_auctions", "external_id": "161895", "title": "SONG PLUS", "current_bid": "91000.00", "initial_bid": None, "score": 76, "url": "https://vip/161895"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []},
     )
 
     import asyncio
@@ -28,6 +28,13 @@ def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     samples = db.query(AppKV).filter(AppKV.key == "auction_last_dry_run_samples").first()
     assert samples is not None
     assert len(samples.value.get("samples", [])) == 1
+    first = samples.value["samples"][0]
+    assert first["source"] == "vip_auctions"
+    assert first["external_id"] == "161895"
+    assert first["title"] == "SONG PLUS"
+    assert first["current_bid"] == "91000.00"
+    assert first["score"] == 76
+    assert first["url"] == "https://vip/161895"
     assert db.query(AppKV).filter(AppKV.key.like("auction:%")).count() == 0
 
 

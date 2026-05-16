@@ -863,7 +863,7 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
         lambda _db, limit=10: {
             "created_at": "2026-05-16 21:10 UTC",
             "summary": {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_daily_limit": 0, "errors": 0},
-            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "url": "https://x"}] * 12,
+            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "initial_bid": "88000.00", "url": "https://x"}] * 12,
         },
     )
     up = _Update()
@@ -871,5 +871,11 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
     msg = up.message.sent[-1]
     assert "últimas amostras dry-run" in msg
     assert "1. SONG PRO" in msg
+    assert "SONG PLUS" in msg
+    assert "Source: vip_auctions" in msg
+    assert "Score: 76" in msg
+    assert "Lance atual: R$ 91.000,00" in msg
+    assert "Lance inicial: R$ 88.000,00" in msg
+    assert "Link: https://x" in msg
     assert "10." in msg
     assert "11." not in msg

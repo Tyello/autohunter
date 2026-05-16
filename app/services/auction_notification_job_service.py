@@ -33,9 +33,9 @@ def _build_sample(wishlist: Wishlist, item: dict) -> dict:
         "source": item.get("source") or lot.get("source") or lot.get("source_name") or "-",
         "external_id": item.get("external_id") or lot.get("external_id"),
         "title": _truncate(item.get("title") or lot.get("title"), 120),
-        "current_bid": item.get("current_bid") or lot.get("current_bid"),
-        "initial_bid": item.get("initial_bid") or lot.get("initial_bid"),
-        "score": item.get("score") or lot.get("score"),
+        "current_bid": item.get("current_bid") if item.get("current_bid") is not None else lot.get("current_bid"),
+        "initial_bid": item.get("initial_bid") if item.get("initial_bid") is not None else lot.get("initial_bid"),
+        "score": item.get("score") if item.get("score") is not None else lot.get("score"),
         "url": item.get("url") or lot.get("url"),
         "dedupe_key": item.get("dedupe_key"),
     }

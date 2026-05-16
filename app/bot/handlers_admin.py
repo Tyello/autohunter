@@ -796,6 +796,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     f"Source: {sample.get('source') or '-'}",
                     f"Score: {sample.get('score') if sample.get('score') is not None else '-'}",
                     f"Lance atual: {_fmt_money_br(sample.get('current_bid')) if sample.get('current_bid') is not None else '-'}",
+                    f"Lance inicial: {_fmt_money_br(sample.get('initial_bid')) if sample.get('initial_bid') is not None else '-'}",
                     f"Link: {sample.get('url') or '-'}",
                 ])
             await update.message.reply_text("\n".join(lines))
