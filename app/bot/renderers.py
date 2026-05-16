@@ -455,56 +455,80 @@ def render_admin_auction_quality_report(report: dict) -> str:
 
 
 def _render_auction_alert_body(match) -> str:
+    def _has_value(value) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
     source_raw = str(getattr(match, "source", "") or "").strip()
-    source_def = get_auction_source_definition(source_raw)
-    source = source_def.label if source_def else (source_raw or "-")
-    status = str(getattr(match, "status", "") or "-")
+    source = render_auction_source_label(source_raw)
     title = str(getattr(match, "title", "") or "Sem título")
-    query = str(getattr(match, "wishlist_query", "") or "-")
+    query = str(getattr(match, "wishlist_query", "") or "").strip()
     year = getattr(match, "year", None)
-    mileage = _fmt_int_br(getattr(match, "mileage_km", None)) or "-"
-    current_bid = _fmt_money_br(getattr(match, "current_bid", None)) or "-"
-    initial_bid = _fmt_money_br(getattr(match, "initial_bid", None)) or "-"
+    mileage = _fmt_int_br(getattr(match, "mileage_km", None))
+    current_bid = _fmt_money_br(getattr(match, "current_bid", None))
+    initial_bid = _fmt_money_br(getattr(match, "initial_bid", None))
     total_bids = getattr(match, "total_bids", None)
-    total_bids_text = str(total_bids) if total_bids is not None else "-"
     city = str(getattr(match, "city", "") or "").strip()
     state = str(getattr(match, "state", "") or "").strip()
-    location = "/".join([x for x in [city, state] if x]) if (city or state) else "-"
-    ends_at = _fmt_dt_utc(getattr(match, "auction_end_at", None)) or "-"
-    reasons = [str(r).strip() for r in (getattr(match, "reasons", None) or []) if str(r).strip()]
-    url = str(getattr(match, "url", "") or "-")
+    location = "/".join([x for x in [city, state] if x]) if (city or state) else None
+    ends_at = _fmt_dt_utc(getattr(match, "auction_end_at", None))
+    url = str(getattr(match, "url", "") or "").strip()
+    score = getattr(match, "score", None)
+    score_text = f"{float(score):.2f}" if isinstance(score, (int, float)) else (str(score).strip() if _has_value(score) else None)
 
     lines = [
-        "⚠️ Leilão compatível encontrado",
-        "",
-        f"Busca: {query}",
+        "⚠️ Oportunidade em leilão encontrada",
         "",
         title,
-        f"Fonte: {source}",
-        f"Status: {status}",
-        f"Lance atual: {current_bid}",
-        f"Lance inicial: {initial_bid}",
-        f"Lances: {total_bids_text}",
-        f"Ano: {year if year is not None else '-'}",
-        f"KM: {mileage}",
-        f"Local: {location}",
-        f"Encerra: {ends_at}",
-        "",
-        "Por que apareceu:",
     ]
-    if reasons:
-        lines.extend([f"- {r}" for r in reasons])
-    else:
-        lines.append("- compatível com a busca")
-    lines.extend([
-        "",
-        "Atenção:",
-        "Lance não é valor final. Verifique edital, taxas, comissão, condição do lote, documentação e possibilidade de vistoria.",
-        "",
-        "Link:",
-        url,
-    ])
+
+    if query:
+        lines.append("")
+        lines.append(f"Busca: {query}")
+    lines.extend(["", f"Fonte: {source}"])
+    if score_text:
+        lines.append(f"Score: {score_text}")
+    lines.append("")
+    if current_bid:
+        lines.append(f"Lance atual: {current_bid}")
+    if initial_bid:
+        lines.append(f"Lance inicial: {initial_bid}")
+    if _has_value(total_bids):
+        lines.append(f"Lances: {total_bids}")
+    if ends_at:
+        lines.append(f"Encerra: {ends_at}")
+    if location:
+        lines.append(f"Local: {location}")
+    if _has_value(year) or mileage:
+        year_text = str(year) if _has_value(year) else "-"
+        km_text = mileage or "-"
+        lines.append(f"Ano/KM: {year_text}/{km_text}")
+    lines.extend(["", "Atenção:", "Lance não é preço final. Verifique edital, taxas/comissão, documentação e vistoria antes de participar."])
+    if url:
+        lines.extend(["", "Link:", url])
+
     return "\n".join(lines).strip()
+
+
+def render_auction_source_label(source_key: str) -> str:
+    source = str(source_key or "").strip()
+    labels = {
+        "vip_auctions": "VIP Leilões",
+        "mega_auctions": "Mega Leilões",
+        "win_auctions": "Win Leilões",
+        "sodre_auctions": "Sodré Santoro",
+        "superbid_auctions": "Superbid",
+        "copart_auctions": "Copart",
+    }
+    if source in labels:
+        return labels[source]
+    source_def = get_auction_source_definition(source)
+    if source_def and source_def.label:
+        return source_def.label
+    return source or "-"
 
 
 def render_auction_alert(match) -> str:
