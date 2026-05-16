@@ -225,3 +225,12 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 - Não existe envio automático de leilões nesta fase.
 - Há dedupe por lote para a mesma busca, evitando reenvio do mesmo `auction_lot` para a mesma wishlist.
 - Recurso experimental/controlado para operação assistida por admin.
+
+## Auction ingestion quality gate
+
+Fontes experimentais de leilão podem capturar HTML ruidoso (páginas institucionais, navegação e resultados de busca). Para evitar poluir `auction_lots`, a ingestão aplica um quality gate central antes do upsert.
+
+Regras práticas:
+- candidatos fracos (URL inválida, título institucional, sem sinais mínimos de lote) não devem ser persistidos;
+- o summary de ingestão pode incluir `skipped_reasons` para diagnosticar rapidamente o parser por source;
+- somente sources com qualidade mínima de dados devem avançar para etapas posteriores (matching/notify).

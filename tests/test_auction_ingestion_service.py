@@ -22,7 +22,7 @@ def test_run_auction_ingestion_vip_enrich_and_summary(monkeypatch):
 
     def _fetch(limit, enrich=False):
         calls["enrich"] = enrich
-        return [NormalizedAuctionLot(source="vip_auctions", external_id="1")]
+        return [NormalizedAuctionLot(source="vip_auctions", external_id="1", title="Honda", url="https://x/item/1", year=2020)]
 
     monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
     monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("vip_auctions", _fetch, lambda: "x", True))
@@ -44,7 +44,7 @@ def test_run_auction_ingestion_rollback_on_error(monkeypatch):
         def close(self): return None
 
     monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
-    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("vip_auctions", lambda limit, enrich=False: [NormalizedAuctionLot(source="vip_auctions", external_id="1")], lambda: None, True))
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("vip_auctions", lambda limit, enrich=False: [NormalizedAuctionLot(source="vip_auctions", external_id="1", title="Honda", url="https://x/item/1", year=2020)], lambda: None, True))
 
     def boom(_db, _payload):
         raise RuntimeError("x")
@@ -65,7 +65,7 @@ def test_run_auction_ingestion_sodre_without_enrich(monkeypatch):
 
     def _fetch(limit):
         called["enrich_used"] = False
-        return [NormalizedAuctionLot(source="sodre_auctions", external_id="s1")]
+        return [NormalizedAuctionLot(source="sodre_auctions", external_id="s1", title="Yamaha", url="https://x/item/s1", year=2020)]
 
     monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
     monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("sodre_auctions", _fetch, lambda: None, False))
@@ -81,7 +81,34 @@ def test_run_auction_ingestion_superbid_without_enrich(monkeypatch):
         def close(self): return None
 
     monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
-    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("superbid_auctions", lambda limit: [NormalizedAuctionLot(source="superbid_auctions", external_id="sb1")], lambda: None, False))
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("superbid_auctions", lambda limit: [NormalizedAuctionLot(source="superbid_auctions", external_id="sb1", title="Yamaha", url="https://x/item/sb1", year=2020)], lambda: None, False))
     monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
     out = svc.run_auction_ingestion("superbid_auctions", limit=10, enrich_details=True)
     assert out["source"] == "superbid_auctions"
+
+
+def test_run_auction_ingestion_skips_invalid_and_counts_reasons(monkeypatch):
+    class FakeDB:
+        def commit(self): return None
+        def rollback(self): return None
+        def close(self): return None
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(
+        svc,
+        "get_auction_source_definition",
+        lambda _s: _Def(
+            "vip_auctions",
+            lambda limit, enrich=False: [
+                NormalizedAuctionLot(source="vip_auctions", external_id="1", title="Sem título", url="-"),
+                NormalizedAuctionLot(source="vip_auctions", external_id="2", title="Honda CG", url="https://ok/item/2", year=2022),
+            ],
+            lambda: None,
+            True,
+        ),
+    )
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("vip_auctions", limit=10, enrich_details=False)
+    assert out["inserted"] == 1
+    assert out["skipped"] == 1
+    assert out["skipped_reasons"]["invalid_url"] == 1

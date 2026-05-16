@@ -69,3 +69,17 @@ def test_fetch_empty_sets_reason(monkeypatch):
     lots = mega.fetch_mega_lots(limit=5)
     assert lots == []
     assert mega.get_last_reason() == "no_public_lot_cards_found"
+
+def test_parse_mega_ignores_dash_url_and_infers_title_from_slug():
+    html = """
+    <article class=\"card\">
+      <a href=\"-\">Sem link</a><h3>Sem título</h3><span>J123456</span>
+    </article>
+    <article class=\"card\">
+      <a href=\"/lote/moto-honda-cg-160-start-2022-J123457\">ver</a><span>J123457</span>
+    </article>
+    """
+    lots = mega.parse_mega_listing_html(html, limit=10)
+    assert len(lots) == 1
+    assert lots[0].url and lots[0].url != "-"
+    assert lots[0].title is not None
