@@ -7,6 +7,7 @@ from app.models.source_config import SourceConfig
 from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
 from app.models.user import User
+from app.services import auction_notification_readiness_service as readiness_service
 from app.services.auction_notification_readiness_service import build_auction_notification_readiness
 
 
@@ -54,3 +55,50 @@ def test_readiness_scheduler_missing_warn(db):
     _seed_source(db, eligible=True)
     out = build_auction_notification_readiness(db)
     assert any(c["key"] == "scheduler_last_execution" and c["status"] == "warn" for c in out["checks"])
+
+
+def test_readiness_real_send_enabled_is_fail(db, monkeypatch):
+    _seed_source(db, eligible=True)
+    monkeypatch.setattr(readiness_service.settings, "auction_notifications_enabled", True)
+    monkeypatch.setattr(readiness_service.settings, "auction_notifications_dry_run", False)
+
+    out = build_auction_notification_readiness(db)
+
+    assert out["status"] == "fail"
+    safe = next(c for c in out["checks"] if c["key"] == "safe_config")
+    assert safe["status"] == "fail"
+
+
+def test_readiness_quality_gate_warnings(db, monkeypatch):
+    _seed_source(db, eligible=True)
+    monkeypatch.setattr(readiness_service.settings, "auction_notifications_min_score", 40)
+    monkeypatch.setattr(readiness_service.settings, "auction_notifications_max_lot_age_hours", 96)
+    monkeypatch.setattr(readiness_service.settings, "auction_notifications_max_per_user_per_day", 5)
+
+    out = build_auction_notification_readiness(db)
+
+    quality = next(c for c in out["checks"] if c["key"] == "quality_gates")
+    assert quality["status"] == "warn"
+    assert "min_score < 50" in quality["detail"]
+    assert "max_lot_age_hours fora de (0,72]" in quality["detail"]
+    assert "max_per_user_per_day > 3" in quality["detail"]
+
+
+def test_readiness_samples_missing_warn(db):
+    _seed_source(db, eligible=True)
+
+    out = build_auction_notification_readiness(db)
+
+    samples = next(c for c in out["checks"] if c["key"] == "dry_run_samples")
+    assert samples["status"] == "warn"
+
+
+def test_readiness_samples_present_ok(db):
+    _seed_source(db, eligible=True)
+    db.add(AppKV(key="auction_last_dry_run_samples", value={"samples": [{"id": 1}]}))
+    db.commit()
+
+    out = build_auction_notification_readiness(db)
+
+    samples = next(c for c in out["checks"] if c["key"] == "dry_run_samples")
+    assert samples["status"] == "ok"
