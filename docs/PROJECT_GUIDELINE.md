@@ -266,3 +266,13 @@ Regras práticas:
 - `include_auctions=true` **não garante alerta**: habilita elegibilidade da busca para fluxos que respeitam opt-in.
 - Alertas dependem de source elegível para usuário, lote com dados mínimos (ex.: lance inicial/atual), dedupe e limites operacionais.
 - Toda copy user-facing de leilão deve incluir aviso de risco (edital, taxas, comissão, documentação e vistoria).
+
+## Auction notification pilot job
+
+- Existe um job piloto de notificação de leilões com defaults seguros e **desligado por padrão** (`auction_notifications_enabled=false`).
+- O job considera apenas buscas ativas com `include_auctions=true`.
+- O envio usa apenas sources de leilão com `enabled=true` e `user_eligible=true`.
+- Lotes sem `current_bid` e sem `initial_bid` são ignorados por padrão.
+- Dedupe reaproveita a chave `auction:{wishlist_id}:{source}:{lot_external_id}` para evitar repetição.
+- Limite diário por usuário reduz ruído operacional (`auction_notifications_max_per_user_per_day`).
+- Envio automático só deve ser habilitado após validação operacional (`auction_notifications_enabled=true` e `auction_notifications_dry_run=false`).

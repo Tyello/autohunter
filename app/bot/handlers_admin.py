@@ -63,6 +63,7 @@ from app.services.auction_notification_service import (
     send_auction_notifications_for_wishlist,
     MAX_NOTIFY_LIMIT,
 )
+from app.services.auction_notification_job_service import run_auction_notification_job
 from app.services.auction_preview_service import (
     build_auction_alert_previews_for_enabled_wishlists,
     build_auction_alert_previews_for_wishlist,
@@ -625,6 +626,81 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if len(summaries) > max_items:
                 lines.append(f"Mostrando {max_items} de {len(summaries)} buscas. Use /admin auctions wishlists <texto> para filtrar.")
             await update.message.reply_text("\n".join(lines).strip())
+            return
+
+        if sub == "notify-run":
+            confirm = any(a.strip().lower() == "--confirm" for a in args[1:])
+            has_dry_run = any(a.strip().lower() == "--dry-run" for a in args[1:])
+            if confirm and has_dry_run:
+                await update.message.reply_text("Use apenas um modo: --confirm (envio real) ou --dry-run (simulação).")
+                return
+            dry_run = not confirm
+            source = None
+            limit_wishlists = settings.auction_notifications_max_wishlists_per_run
+            limit_per_wishlist = settings.auction_notifications_max_per_wishlist
+            extra = args[1:]
+            i = 0
+            while i < len(extra):
+                token = extra[i].strip().lower()
+                if token == "--source" and i + 1 < len(extra):
+                    source = resolve_auction_source_alias(extra[i + 1])
+                    if not source:
+                        await update.message.reply_text(f"Source de leilão não suportada. {render_supported_auction_sources_hint()}")
+                        return
+                    i += 2
+                    continue
+                if token == "--limit-wishlists" and i + 1 < len(extra):
+                    try:
+                        limit_wishlists = int(extra[i + 1])
+                    except Exception:
+                        await update.message.reply_text("Limite de buscas inválido. Use inteiro positivo.")
+                        return
+                    i += 2
+                    continue
+                if token == "--limit-per-wishlist" and i + 1 < len(extra):
+                    try:
+                        limit_per_wishlist = int(extra[i + 1])
+                    except Exception:
+                        await update.message.reply_text("Limite por busca inválido. Use inteiro positivo.")
+                        return
+                    i += 2
+                    continue
+                i += 1
+            if limit_wishlists < 1 or limit_per_wishlist < 1:
+                await update.message.reply_text("Limites inválidos. Use inteiros positivos.")
+                return
+            if source and not is_auction_source_user_eligible(db, source):
+                await update.message.reply_text("Source não elegível para envio ao usuário.")
+                return
+            result = await run_auction_notification_job(
+                db,
+                bot=None if dry_run else (update.get_bot() if hasattr(update, "get_bot") else None),
+                dry_run=dry_run,
+                max_wishlists=limit_wishlists,
+                max_per_wishlist=limit_per_wishlist,
+                max_per_user_per_day=settings.auction_notifications_max_per_user_per_day,
+                source=source,
+            )
+            lines = [
+                "⚠️ Admin Leilões — notify-run",
+                f"Modo: {'dry-run' if dry_run else 'envio real'}",
+            ]
+            if dry_run:
+                lines.append("Nenhum alerta foi enviado.")
+            else:
+                lines.append(f"Alertas enviados: {result.get('sent', 0)}")
+            lines.extend([
+                "",
+                f"Buscas avaliadas: {result.get('wishlists_scanned', 0)}",
+                f"Buscas com match: {result.get('wishlists_with_matches', 0)}",
+                f"Prévias: {result.get('previews', 0)}",
+                f"Duplicados ignorados: {result.get('skipped_duplicate', 0)}",
+                f"Sem match: {result.get('skipped_no_match', 0)}",
+                f"Sem chat id: {result.get('skipped_missing_chat_id', 0)}",
+                f"Limite diário: {result.get('skipped_daily_limit', 0)}",
+                f"Erros: {result.get('errors', 0)}",
+            ])
+            await update.message.reply_text("\n".join(lines))
             return
 
         if sub == "notify":
