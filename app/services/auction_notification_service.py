@@ -12,6 +12,7 @@ from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.user import User
 from app.models.wishlist import Wishlist
+from app.services.auction_source_categories_service import is_auction_item_type_allowed, normalize_item_type
 from app.services.auction_matching_service import _BAD_STATUSES, match_auction_lots_for_wishlist, sort_auction_matches_for_alerting
 
 MAX_NOTIFY_LIMIT = 3
@@ -74,7 +75,7 @@ def build_auction_notifications_for_wishlist(
 ) -> dict:
     out = {
         "wishlist_id": str(wishlist_id), "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0,
-        "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "errors": 0, "messages": [], "items": []
+        "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "skipped_item_type_not_allowed": 0, "skipped_missing_item_type": 0, "errors": 0, "messages": [], "items": []
     }
 
     target_id = _to_uuid(wishlist_id)
@@ -136,6 +137,13 @@ def build_auction_notifications_for_wishlist(
             continue
         lot = db.query(AuctionLot).filter(AuctionLot.id == lot_id).first()
         if not lot or not getattr(lot, "external_id", None):
+            continue
+        lot_item_type = normalize_item_type(getattr(lot, "item_type", None))
+        if lot_item_type is None:
+            out["skipped_missing_item_type"] += 1
+            continue
+        if not is_auction_item_type_allowed(db, m.source, lot_item_type):
+            out["skipped_item_type_not_allowed"] += 1
             continue
         eligible, reason = _is_auction_match_notification_eligible(m, lot, min_score=min_score, max_age_hours=max_age_hours)
         if not eligible:
