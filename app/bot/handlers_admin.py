@@ -65,6 +65,7 @@ from app.services.auction_notification_service import (
 )
 from app.services.auction_notification_job_service import run_auction_notification_job
 from app.services.auction_notification_status_service import build_auction_notification_status
+from app.services.auction_notification_samples_service import build_auction_notification_samples
 from app.services.auction_preview_service import (
     build_auction_alert_previews_for_enabled_wishlists,
     build_auction_alert_previews_for_wishlist,
@@ -753,7 +754,50 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 "Próximo passo:",
                 "Para validar volume sem envio real, use:",
                 "/admin auctions notify-run --source vip --limit-wishlists 5",
+                "",
+                "Para ver amostras do último dry-run:",
+                "/admin auctions notify-samples",
             ])
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        if sub == "notify-samples":
+            data = build_auction_notification_samples(db, limit=10)
+            samples = data.get("samples") or []
+            if not samples:
+                await update.message.reply_text(
+                    "⚠️ Admin Leilões — últimas amostras dry-run\n\n"
+                    "Ainda não há amostras de dry-run.\n"
+                    "Rode:\n/admin auctions notify-run --source vip --limit-wishlists 5"
+                )
+                return
+            summary = data.get("summary") or {}
+            lines = [
+                "⚠️ Admin Leilões — últimas amostras dry-run",
+                "",
+                f"Gerado em: {data.get('created_at', '-')}",
+                "",
+                "Resumo:",
+                f"- buscas avaliadas: {summary.get('wishlists_scanned', 0)}",
+                f"- buscas com match: {summary.get('wishlists_with_matches', 0)}",
+                f"- prévias: {summary.get('previews', 0)}",
+                f"- duplicados: {summary.get('skipped_duplicate', 0)}",
+                f"- sem match: {summary.get('skipped_no_match', 0)}",
+                f"- limite diário: {summary.get('skipped_daily_limit', 0)}",
+                f"- erros: {summary.get('errors', 0)}",
+                "",
+                "Amostras:",
+            ]
+            for idx, sample in enumerate(samples[:10], start=1):
+                lines.extend([
+                    "",
+                    f"{idx}. {sample.get('wishlist_query') or '-'}",
+                    str(sample.get("title") or "Sem título"),
+                    f"Source: {sample.get('source') or '-'}",
+                    f"Score: {sample.get('score') if sample.get('score') is not None else '-'}",
+                    f"Lance atual: {_fmt_money_br(sample.get('current_bid')) if sample.get('current_bid') is not None else '-'}",
+                    f"Link: {sample.get('url') or '-'}",
+                ])
             await update.message.reply_text("\n".join(lines))
             return
 
@@ -998,7 +1042,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions notify-status\n{_render_user_eligible_auction_sources_hint(db)}"
+        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions notify-status | /admin auctions notify-samples\n{_render_user_eligible_auction_sources_hint(db)}"
     )
 
 

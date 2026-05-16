@@ -297,3 +297,11 @@ Regras práticas:
 - `enabled=false` é o estado padrão seguro e deve ser tratado como baseline de produção nesta fase.
 - `dry_run=true` permite medir volume operacional sem envio real para usuário final.
 - Envio automático real (`enabled=true` + `dry_run=false`) só deve ser ativado após validação operacional completa.
+
+## Auction dry-run samples
+
+- O dry-run do scheduler/job de notificações pode persistir amostras operacionais de auditoria em `AppKV` (`auction_last_dry_run_samples`).
+- Essas amostras servem para avaliar qualidade antes da ativação real: busca, source, título, lance, score e link do lote.
+- Amostras de dry-run **não** são dedupe operacional.
+- Amostras de dry-run **não** significam envio real ao usuário final.
+- O envio automático real continua condicionado a `auction_notifications_enabled=true` e `auction_notifications_dry_run=false`.

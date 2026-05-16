@@ -800,6 +800,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "Envio automático desligado. Seguro para produção." in up.message.sent[-1]
+    assert "/admin auctions notify-samples" in up.message.sent[-1]
     assert "Sources elegíveis:" in up.message.sent[-1]
     assert "- vip_auctions" in up.message.sent[-1]
 
@@ -834,3 +835,41 @@ def test_admin_auctions_notify_status_non_admin(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "Sem permissão" in up.message.sent[-1]
     assert called["status"] == 0
+
+
+def test_admin_auctions_notify_samples_empty(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "build_auction_notification_samples", lambda _db, limit=10: {"created_at": "-", "summary": {}, "samples": []})
+    called = {"job": 0}
+
+    async def _job(*_a, **_k):
+        called["job"] += 1
+        return {}
+
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _job)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    assert "Ainda não há amostras de dry-run." in up.message.sent[-1]
+    assert called["job"] == 0
+
+
+def test_admin_auctions_notify_samples_render(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {
+            "created_at": "2026-05-16 21:10 UTC",
+            "summary": {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_daily_limit": 0, "errors": 0},
+            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "url": "https://x"}] * 12,
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    msg = up.message.sent[-1]
+    assert "últimas amostras dry-run" in msg
+    assert "1. SONG PRO" in msg
+    assert "10." in msg
+    assert "11." not in msg

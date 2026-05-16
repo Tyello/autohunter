@@ -8,7 +8,7 @@ from app.models.wishlist import Wishlist
 from app.services.auction_notification_job_service import run_auction_notification_job
 
 
-def test_job_dry_run_does_not_send_or_write_appkv(monkeypatch, db):
+def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     u = User(id=uuid.uuid4(), telegram_chat_id=123)
     db.add(u)
     db.flush()
@@ -25,7 +25,30 @@ def test_job_dry_run_does_not_send_or_write_appkv(monkeypatch, db):
     import asyncio
     out = asyncio.run(run_auction_notification_job(db, bot=None, dry_run=True))
     assert out["previews"] == 1
-    assert db.query(AppKV).count() == 0
+    samples = db.query(AppKV).filter(AppKV.key == "auction_last_dry_run_samples").first()
+    assert samples is not None
+    assert len(samples.value.get("samples", [])) == 1
+    assert db.query(AppKV).filter(AppKV.key.like("auction:%")).count() == 0
+
+
+def test_job_dry_run_limits_samples_to_10(monkeypatch, db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=123)
+    db.add(u)
+    db.flush()
+    w = Wishlist(user_id=u.id, query="civic", is_active=True, include_auctions=True)
+    db.add(w)
+    db.commit()
+
+    monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
+    monkeypatch.setattr(
+        "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": f"auction:{i}", "title": f"title {i}"} for i in range(12)], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []},
+    )
+
+    import asyncio
+    asyncio.run(run_auction_notification_job(db, bot=None, dry_run=True))
+    samples = db.query(AppKV).filter(AppKV.key == "auction_last_dry_run_samples").first()
+    assert len(samples.value.get("samples", [])) == 10
 
 
 def test_job_real_sends_and_respects_daily_limit(monkeypatch, db):
