@@ -150,6 +150,8 @@ class Settings(BaseSettings):
     auction_notifications_max_per_wishlist: int = 1
     auction_notifications_max_per_user_per_day: int = 3
     auction_notifications_scheduler_minutes: int = 60
+    auction_notifications_min_score: int = 60
+    auction_notifications_max_lot_age_hours: int = 48
 
     # Logging
     log_level: str = "info"
@@ -289,6 +291,25 @@ class Settings(BaseSettings):
             allowed = {item.strip().lower() for item in self.use_new_scraper_sources.split(",") if item.strip()}
             return src in allowed
         return None
+
+
+    @property
+    def auction_notifications_min_score_safe(self) -> int:
+        try:
+            value = int(self.auction_notifications_min_score)
+        except Exception:
+            value = 60
+        return max(0, min(100, value))
+
+    @property
+    def auction_notifications_max_lot_age_hours_safe(self) -> int:
+        try:
+            value = int(self.auction_notifications_max_lot_age_hours)
+        except Exception:
+            value = 48
+        if value <= 0:
+            return 0
+        return max(1, min(720, value))
 
     def ensure_playwright_browsers_env(self) -> None:
         browsers_path = Path(self.playwright_browsers_dir).expanduser().resolve()

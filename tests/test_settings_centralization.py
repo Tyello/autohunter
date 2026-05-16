@@ -72,3 +72,12 @@ def test_settings_requires_database_url(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_settings_auction_notification_gates_clamped() -> None:
+    cfg = Settings(_env_file=None, database_url="sqlite:///tmp.db", auction_notifications_min_score=120, auction_notifications_max_lot_age_hours=900)
+    assert cfg.auction_notifications_min_score_safe == 100
+    assert cfg.auction_notifications_max_lot_age_hours_safe == 720
+    cfg2 = Settings(_env_file=None, database_url="sqlite:///tmp.db", auction_notifications_min_score=-2, auction_notifications_max_lot_age_hours=0)
+    assert cfg2.auction_notifications_min_score_safe == 0
+    assert cfg2.auction_notifications_max_lot_age_hours_safe == 0

@@ -32,7 +32,7 @@ def test_status_reads_finished_with_sent_and_previews(db):
         level="info",
         component="scheduler",
         message="auction_notification_scheduler_tick_finished",
-        payload={"skipped": False, "sent": 2, "previews": 3, "skipped_no_match": 1, "skipped_duplicate": 1, "skipped_daily_limit": 0, "errors": 0},
+        payload={"skipped": False, "sent": 2, "previews": 3, "skipped_no_match": 1, "skipped_duplicate": 1, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 1, "skipped_missing_lot_updated_at": 1, "errors": 0},
     )
     db.add(row)
     db.commit()
@@ -72,3 +72,11 @@ def test_status_reads_finished_dry_run(db):
     out = build_auction_notification_status(db)
     assert out["last_status"] == "dry_run"
     assert out["last_previews"] == 4
+
+
+def test_status_reads_new_skip_counters(db):
+    db.add(SystemLog(level="info", component="scheduler", message="auction_notification_scheduler_tick_finished", payload={"skipped": False, "dry_run": True, "sent": 0, "previews": 1, "skipped_score_below_min": 2, "skipped_stale_lot": 3, "skipped_missing_lot_updated_at": 4}))
+    db.commit()
+    out = build_auction_notification_status(db)
+    assert out["last_skipped_score_below_min"] == 2
+    assert out["last_skipped_stale_lot"] == 3

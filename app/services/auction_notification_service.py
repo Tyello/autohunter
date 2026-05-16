@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.bot.renderers import render_auction_alert
+from app.core.settings import settings
 from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.user import User
@@ -35,6 +36,33 @@ def _dedupe_key(wishlist_id: str, source: str, lot_external_id: str) -> str:
     return f"auction:{wishlist_id}:{source}:{lot_external_id}"
 
 
+def _is_auction_match_notification_eligible(match, lot, *, min_score: int, max_age_hours: int, now: datetime | None = None) -> tuple[bool, str]:
+    score = getattr(match, "score", 0)
+    try:
+        score_v = int(score if score is not None else 0)
+    except Exception:
+        score_v = 0
+    if score_v < int(min_score):
+        return False, "score_below_min"
+
+    if int(max_age_hours) <= 0:
+        return True, "ok"
+
+    updated_at = (
+        getattr(lot, "updated_at", None)
+        or getattr(match, "updated_at", None)
+        or getattr(lot, "created_at", None)
+    )
+    if updated_at is None:
+        return False, "missing_lot_updated_at"
+    if getattr(updated_at, "tzinfo", None) is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    now_ref = now or datetime.now(timezone.utc)
+    if (now_ref - updated_at).total_seconds() > int(max_age_hours) * 3600:
+        return False, "stale_lot"
+    return True, "ok"
+
+
 def build_auction_notifications_for_wishlist(
     db: Session,
     wishlist_id,
@@ -46,7 +74,7 @@ def build_auction_notifications_for_wishlist(
 ) -> dict:
     out = {
         "wishlist_id": str(wishlist_id), "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0,
-        "skipped_missing_chat_id": 0, "errors": 0, "messages": [], "items": []
+        "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "errors": 0, "messages": [], "items": []
     }
 
     target_id = _to_uuid(wishlist_id)
@@ -90,6 +118,8 @@ def build_auction_notifications_for_wishlist(
         return out
 
     want = _normalize_limit(limit)
+    min_score = settings.auction_notifications_min_score_safe
+    max_age_hours = settings.auction_notifications_max_lot_age_hours_safe
     for m in matches:
         if out["sent"] >= want:
             break
@@ -106,6 +136,15 @@ def build_auction_notifications_for_wishlist(
             continue
         lot = db.query(AuctionLot).filter(AuctionLot.id == lot_id).first()
         if not lot or not getattr(lot, "external_id", None):
+            continue
+        eligible, reason = _is_auction_match_notification_eligible(m, lot, min_score=min_score, max_age_hours=max_age_hours)
+        if not eligible:
+            if reason == "score_below_min":
+                out["skipped_score_below_min"] += 1
+            elif reason == "stale_lot":
+                out["skipped_stale_lot"] += 1
+            elif reason == "missing_lot_updated_at":
+                out["skipped_missing_lot_updated_at"] += 1
             continue
         dkey = _dedupe_key(str(wishlist.id), m.source, str(lot.external_id))
         if db.query(AppKV).filter(AppKV.key == dkey).first():
@@ -130,7 +169,10 @@ def build_auction_notifications_for_wishlist(
 
     if out["sent"] == 0 and out["skipped_duplicate"] == 0:
         out["skipped_no_match"] += 1
-        if not allow_no_bid:
+        quality_skips = int(out.get("skipped_score_below_min", 0) or 0) + int(out.get("skipped_stale_lot", 0) or 0) + int(out.get("skipped_missing_lot_updated_at", 0) or 0)
+        if quality_skips > 0:
+            out["messages"].append("Sem lotes elegíveis para envio após filtros de qualidade: score mínimo ou atualização recente.")
+        elif not allow_no_bid:
             out["messages"].append("Sem lotes elegíveis para envio: nenhum match com lance atual ou lance inicial.")
         else:
             out["messages"].append("Sem lotes elegíveis para envio.")
