@@ -62,6 +62,20 @@ def test_send_and_dedupe_and_filters(db):
     assert any(isinstance(x, AppKV) for x in db.query(AppKV).all())
 
 
+def test_build_dry_run_does_not_send_or_persist(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=444, username="u")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "dry1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://lot/dry1"})
+    db.commit()
+
+    res = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert res["sent"] == 1
+    assert len(res.get("items", [])) == 1
+    assert db.query(AppKV).count() == 0
+
+
 def test_no_match(db):
     u = User(id=uuid.uuid4(), telegram_chat_id=333, username="u")
     db.add(u); db.flush()

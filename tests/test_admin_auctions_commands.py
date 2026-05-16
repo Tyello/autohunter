@@ -446,13 +446,14 @@ def test_admin_auctions_notify_variants(monkeypatch, db):
     up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
-    assert "Enviando até 1 alerta" in up.message.sent[-2]
+    assert "Dry-run: nenhum alerta foi enviado." in up.message.sent[-3]
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip", "--limit", "2")))
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "vip", "--limit", "2", "--confirm")))
     assert "Alertas enviados" in up.message.sent[-1]
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "vip")))
-    assert "Alertas enviados" in up.message.sent[-1]
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--source", "foo")))
     assert "não suportada" in up.message.sent[-1]
@@ -482,6 +483,8 @@ def test_admin_auctions_notify_non_admin_and_force(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
     assert "não está habilitada" in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--force")))
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id), "--force", "--confirm")))
     assert "Alertas enviados" in up.message.sent[-1]
 
 
@@ -518,6 +521,29 @@ def test_admin_auctions_notify_error_shows_summary(monkeypatch, db):
         }
 
     monkeypatch.setattr(handlers_admin, "send_auction_notifications_for_wishlist", _fake_send)
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4()))))
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(uuid.uuid4()), "--confirm")))
     assert "Erros: 1" in up.message.sent[-1]
     assert "Detalhe: Falha ao enviar alerta: timeout" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_dry_run_never_sends(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=999, username="dry")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "dry2", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://vip/dry2"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    called = {"send": 0}
+
+    async def _fake_send(*_args, **_kwargs):
+        called["send"] += 1
+        return {"sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "errors": 0, "messages": []}
+
+    monkeypatch.setattr(handlers_admin, "send_auction_notifications_for_wishlist", _fake_send)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", str(w.id))))
+    assert called["send"] == 0
