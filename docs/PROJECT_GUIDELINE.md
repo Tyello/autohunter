@@ -218,8 +218,10 @@ Há coexistência de caminhos de compatibilidade (v1/v2/dual e UX antiga/nova) q
 
 ## Controlled auction notification
 
-- Envio real de alerta de leilão está em modo manual: **admin-triggered** por comando `/admin auctions notify wishlist <id>`.
-- Não existe scheduler automático de notificação de leilões nesta fase.
-- Por padrão, só envia para busca com `include_auctions=true`; `--force` existe apenas para diagnóstico/admin.
+- O comando `/admin auctions notify ...` é **admin-only** e **manual** (sem scheduler).
+- Envio real exige `--confirm` explícito.
+- Sem `--confirm`, o comando roda em **dry-run**: mostra resumo/prévia e **não envia mensagem real**.
+- `--force` isolado **não envia**; para ignorar opt-in (`include_auctions=false`) e enviar real, é obrigatório usar `--force --confirm`.
+- Não existe envio automático de leilões nesta fase.
 - Há dedupe por lote para a mesma busca, evitando reenvio do mesmo `auction_lot` para a mesma wishlist.
-- Próximo passo futuro (fora do escopo atual): scheduler controlado, condicionado à qualidade das sources.
+- Recurso experimental/controlado para operação assistida por admin.
