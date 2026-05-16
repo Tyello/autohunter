@@ -169,7 +169,10 @@ def build_auction_notifications_for_wishlist(
 
     if out["sent"] == 0 and out["skipped_duplicate"] == 0:
         out["skipped_no_match"] += 1
-        if not allow_no_bid:
+        quality_skips = int(out.get("skipped_score_below_min", 0) or 0) + int(out.get("skipped_stale_lot", 0) or 0) + int(out.get("skipped_missing_lot_updated_at", 0) or 0)
+        if quality_skips > 0:
+            out["messages"].append("Sem lotes elegíveis para envio após filtros de qualidade: score mínimo ou atualização recente.")
+        elif not allow_no_bid:
             out["messages"].append("Sem lotes elegíveis para envio: nenhum match com lance atual ou lance inicial.")
         else:
             out["messages"].append("Sem lotes elegíveis para envio.")

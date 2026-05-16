@@ -170,3 +170,33 @@ def test_notify_disable_age_filter_when_non_positive(monkeypatch, db):
     db.commit()
     out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
     assert out["sent"] == 1
+
+
+def test_notify_quality_message_for_low_score_with_bid(monkeypatch, db):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 101)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 0)
+    u = User(id=uuid.uuid4(), telegram_chat_id=1001, username="low-score")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "ls1", "title": "Honda Civic", "status": "open", "current_bid": 1000, "url": "https://lot/ls1"})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert out["sent"] == 0
+    assert out["skipped_score_below_min"] >= 1
+    assert "após filtros de qualidade" in out["messages"][0]
+
+
+def test_notify_quality_message_for_stale_lot_with_bid(monkeypatch, db):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 0)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 1)
+    u = User(id=uuid.uuid4(), telegram_chat_id=1002, username="stale")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "st1", "title": "Honda Civic", "status": "open", "current_bid": 1000, "url": "https://lot/st1", "updated_at": datetime(2020, 1, 1, tzinfo=timezone.utc)})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert out["sent"] == 0
+    assert out["skipped_stale_lot"] >= 1
+    assert "após filtros de qualidade" in out["messages"][0]
