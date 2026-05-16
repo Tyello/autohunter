@@ -331,3 +331,10 @@ Defaults seguros:
 - `auction_notifications_max_lot_age_hours=48`
 
 Observação operacional: `/admin auctions match` e `/admin auctions preview` continuam intencionalmente mais amplos para diagnóstico; os gates mais restritivos se aplicam ao pipeline de notificação (`notify`, `notify-run`, scheduler e amostras de dry-run).
+
+## Auction dry-run readiness
+
+Use `/admin auctions readiness` antes de ligar o scheduler de leilões em modo automático dry-run.
+O comando é somente leitura: não envia alertas e não altera configuração.
+Ele reporta status `ok|warn|fail` com checks operacionais para dry-run.
+O envio real automático continua fora da recomendação nesta fase, até validação das amostras de dry-run.
