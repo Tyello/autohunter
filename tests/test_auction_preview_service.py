@@ -39,3 +39,16 @@ def test_preview_service_wishlist_force_and_block(db):
     forced = build_auction_alert_previews_for_wishlist(db, str(w.id), force=True)
     assert forced.warning is None
     assert forced.matches
+
+
+def test_preview_service_default_only_eligible_sources(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=1003, username="z")
+    db.add(u); db.flush()
+    w_on = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
+    db.add(w_on); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "p3", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://vip/l3"})
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "p4", "title": "Honda Civic 2015", "year": 2015, "status": "open", "url": "https://mega/l4"})
+    db.commit()
+    matches = build_auction_alert_previews_for_enabled_wishlists(db, eligible_sources={"vip_auctions"})
+    assert matches
+    assert all(m.source == "vip_auctions" for m in matches)
