@@ -308,7 +308,9 @@ def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "acao_invalida")))
     assert "vip|mega|win|sodre|superbid|copart" in up.message.sent[-1]
-    assert "/admin auctions match [vip|mega|win|sodre|superbid|copart|wishlist <id>]" in up.message.sent[-1]
+    assert "--all-sources" in up.message.sent[-1]
+    assert "--allow-experimental" in up.message.sent[-1]
+    assert "Sources elegíveis: vip" in up.message.sent[-1]
 
 
 def test_admin_auctions_wishlist_toggle_and_match_force(monkeypatch, db):
@@ -382,6 +384,38 @@ def test_admin_auctions_wishlists_and_index_resolution(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "wishlist", "3", "enable")))
     assert "Busca não encontrada para este índice" in up.message.sent[-1]
+
+
+def test_admin_auctions_index_with_all_sources_and_notify_rules(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+    u = User(id=uuid.uuid4(), telegram_chat_id=1414, username="idx2")
+    db.add(u); db.flush()
+    for i in range(3):
+        db.add(Wishlist(user_id=u.id, query=f"q{i}", is_active=True, include_auctions=True))
+    w = Wishlist(user_id=u.id, query="song", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "x1", "title": "song", "status": "open", "url": "https://vip/x1"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=1414)
+    up.get_bot = lambda: types.SimpleNamespace(send_message=(lambda **kwargs: asyncio.sleep(0)))
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", "4", "--all-sources")))
+    assert "🎯 Busca:" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview", "wishlist", "4", "--all-sources")))
+    assert any("Preview — alerta de leilão" in s for s in up.message.sent) or "Sem previews de leilão no momento." in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", "4", "--source", "vip")))
+    assert "Dry-run: nenhum alerta foi enviado. Para enviar de verdade, rode com --confirm." in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", "4", "--allow-experimental")))
+    assert "Use --allow-experimental apenas com --source" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify", "wishlist", "4", "--source", "mega")))
+    assert "Source experimental bloqueada" in up.message.sent[-1]
 
 
 def test_render_auction_alert_preview_contract():
