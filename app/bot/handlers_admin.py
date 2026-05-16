@@ -503,7 +503,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
 
         if sub == "notify":
             if len(args) < 3 or args[1].lower() != "wishlist":
-                await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--confirm|--dry-run]")
+                await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
                 return
             target_id = args[2].strip()
             force = any(a.strip().lower() == "--force" for a in args[3:])
@@ -695,7 +695,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
         if sub == "wishlist":
             if len(args) < 3:
-                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--confirm|--dry-run]")
+                await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
                 return
             target_id = args[1].strip()
             action = args[2].strip().lower()
@@ -720,7 +720,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 db.commit()
                 await update.message.reply_text("✅ Leilões desativados para esta busca.")
                 return
-            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--confirm|--dry-run]")
+            await update.message.reply_text("Use: /admin auctions wishlist <wishlist_id> <enable|disable> | /admin auctions notify wishlist <wishlist_id> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
             return
 
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
