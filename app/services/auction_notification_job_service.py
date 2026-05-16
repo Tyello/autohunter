@@ -8,10 +8,37 @@ from sqlalchemy.orm import Session
 
 from app.models.app_kv import AppKV
 from app.models.wishlist import Wishlist
+from app.services.app_kv_service import set_kv
 from app.services.auction_notification_service import build_auction_notifications_for_wishlist
 from app.services.auction_source_config_service import list_user_eligible_auction_sources
 
 logger = logging.getLogger(__name__)
+_DRY_RUN_SAMPLES_KEY = "auction_last_dry_run_samples"
+_MAX_SAMPLES = 10
+
+
+def _truncate(v: str | None, limit: int = 140) -> str | None:
+    if not v:
+        return v
+    s = str(v).strip()
+    return s if len(s) <= limit else f"{s[: max(0, limit - 1)]}…"
+
+
+def _build_sample(wishlist: Wishlist, item: dict) -> dict:
+    lot = item.get("lot") if isinstance(item.get("lot"), dict) else {}
+    return {
+        "wishlist_id": str(wishlist.id),
+        "wishlist_query": _truncate(getattr(wishlist, "query", None), 80),
+        "user_id": str(getattr(wishlist, "user_id", "")),
+        "source": item.get("source") or lot.get("source") or lot.get("source_name") or "-",
+        "external_id": item.get("external_id") or lot.get("external_id"),
+        "title": _truncate(item.get("title") or lot.get("title"), 120),
+        "current_bid": item.get("current_bid") if item.get("current_bid") is not None else lot.get("current_bid"),
+        "initial_bid": item.get("initial_bid") if item.get("initial_bid") is not None else lot.get("initial_bid"),
+        "score": item.get("score") if item.get("score") is not None else lot.get("score"),
+        "url": item.get("url") or lot.get("url"),
+        "dedupe_key": item.get("dedupe_key"),
+    }
 
 
 async def run_auction_notification_job(
@@ -38,6 +65,7 @@ async def run_auction_notification_job(
         "errors": 0,
         "messages": [],
     }
+    dry_run_samples: list[dict] = []
     if not dry_run and bot is None:
         raise ValueError("bot é obrigatório para envio real")
     if source and source not in eligible_sources:
@@ -76,6 +104,10 @@ async def run_auction_notification_job(
             out["wishlists_with_matches"] += 1
             if dry_run:
                 out["previews"] += len(items)
+                for item in items:
+                    if len(dry_run_samples) >= _MAX_SAMPLES:
+                        break
+                    dry_run_samples.append(_build_sample(wl, item))
                 continue
             key = f"auction_daily_sent:{wl.user_id}:{day}"
             row = db.query(AppKV).filter(AppKV.key == key).first()
@@ -101,5 +133,24 @@ async def run_auction_notification_job(
         out["messages"].append(str(exc))
         logger.exception("auction_notification_job_failed")
     duration_ms = int((perf_counter() - started) * 1000)
+    summary = {
+        "wishlists_scanned": out.get("wishlists_scanned", 0),
+        "wishlists_with_matches": out.get("wishlists_with_matches", 0),
+        "previews": out.get("previews", 0),
+        "skipped_duplicate": out.get("skipped_duplicate", 0),
+        "skipped_no_match": out.get("skipped_no_match", 0),
+        "skipped_daily_limit": out.get("skipped_daily_limit", 0),
+        "errors": out.get("errors", 0),
+    }
+    if dry_run:
+        set_kv(
+            db,
+            _DRY_RUN_SAMPLES_KEY,
+            {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "samples": dry_run_samples[:_MAX_SAMPLES],
+                "summary": summary,
+            },
+        )
     logger.info("auction_notification_job_finished", extra={**out, "max_wishlists": max_wishlists, "max_per_wishlist": max_per_wishlist, "eligible_sources": sorted(eligible_sources), "duration_ms": duration_ms})
     return out

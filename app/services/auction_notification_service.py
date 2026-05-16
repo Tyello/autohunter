@@ -111,7 +111,21 @@ def build_auction_notifications_for_wishlist(
         if db.query(AppKV).filter(AppKV.key == dkey).first():
             out["skipped_duplicate"] += 1
             continue
-        out["items"].append({"chat_id": int(user.telegram_chat_id), "text": render_auction_alert(m), "dedupe_key": dkey})
+        out["items"].append(
+            {
+                "chat_id": int(user.telegram_chat_id),
+                "text": render_auction_alert(m),
+                "dedupe_key": dkey,
+                "source": getattr(m, "source", None),
+                "external_id": str(getattr(lot, "external_id", "") or ""),
+                "title": getattr(m, "title", None) or getattr(lot, "title", None),
+                "current_bid": getattr(m, "current_bid", None),
+                "initial_bid": getattr(m, "initial_bid", None),
+                "score": getattr(m, "score", None),
+                "url": getattr(m, "url", None),
+                "lot_id": str(getattr(lot, "id", "") or ""),
+            }
+        )
         out["sent"] += 1
 
     if out["sent"] == 0 and out["skipped_duplicate"] == 0:

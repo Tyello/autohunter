@@ -73,6 +73,15 @@ def test_build_dry_run_does_not_send_or_persist(db):
     res = build_auction_notifications_for_wishlist(db, w.id, limit=1)
     assert res["sent"] == 1
     assert len(res.get("items", [])) == 1
+    item = res["items"][0]
+    assert item["source"] == "vip_auctions"
+    assert item["external_id"] == "dry1"
+    assert item["title"] == "Honda Civic 2015"
+    assert item["current_bid"] is None
+    assert item["initial_bid"] == 80000
+    assert item["score"] is not None
+    assert item["url"] == "https://lot/dry1"
+    assert item["lot_id"]
     assert db.query(AppKV).count() == 0
 
 
