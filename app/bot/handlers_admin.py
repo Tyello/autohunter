@@ -56,7 +56,11 @@ from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries
 from app.services.auction_ingestion_service import run_auction_ingestion
-from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
+from app.services.auction_matching_service import (
+    debug_auction_lot_candidates_for_wishlist,
+    match_auction_lots_for_all_wishlists,
+    match_auction_lots_for_wishlist,
+)
 from app.services.auction_quality_service import build_auction_quality_report
 from app.services.auction_notification_service import (
     build_auction_notifications_for_wishlist,
@@ -770,6 +774,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"Limite diário: {result.get('skipped_daily_limit', 0)}",
                 f"Erros: {result.get('errors', 0)}",
             ])
+            rejections = list(result.get("rejections") or [])[:5]
+            if rejections:
+                lines.extend(["", "Rejeições principais:"])
+                for rej in rejections:
+                    reason = str(rej.get("reason") or "-")
+                    title = str(rej.get("title") or "Sem título")
+                    detail = str(rej.get("detail") or "-")
+                    lines.append(f"- {reason}: {title} — {detail}")
             await update.message.reply_text("\n".join(lines))
             return
 
@@ -968,7 +980,29 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
         if sub == "notify-samples":
             data = build_auction_notification_samples(db, limit=10)
             samples = data.get("samples") or []
+            rejections = data.get("rejections") or []
             if not samples:
+                if rejections:
+                    lines = [
+                        "⚠️ Admin Leilões — últimas amostras dry-run",
+                        "",
+                        "Ainda não houve alerta elegível.",
+                        "",
+                        "Rejeições recentes:",
+                    ]
+                    for idx, rej in enumerate(rejections[:5], start=1):
+                        lines.extend([
+                            f"{idx}. {rej.get('wishlist_query') or '-'} / {str(rej.get('source') or '-').replace('_auctions', '').upper()}",
+                            f"Título: {rej.get('title') or '-'}",
+                            f"Motivo: {rej.get('reason') or '-'}",
+                            f"Atualizado em: {rej.get('updated_at') or '-'}",
+                            f"Score: {rej.get('score') if rej.get('score') is not None else '-'}",
+                            f"Lance atual: {_fmt_money_br(rej.get('current_bid')) if rej.get('current_bid') is not None else '-'}",
+                            "",
+                        ])
+                    lines.extend(["Próximo passo:", "- rode /admin auctions match wishlist <id|index> --debug", "- ou revise filtros/query da busca"])
+                    await update.message.reply_text("\n".join(lines).strip())
+                    return
                 await update.message.reply_text(
                     "⚠️ Admin Leilões — últimas amostras dry-run\n\n"
                     "Ainda não há amostras de dry-run.\n"
@@ -1167,6 +1201,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if len(args) >= 3 and args[1].lower() == "wishlist":
                 target_id = args[2].strip()
                 force = any(a.strip().lower() == "--force" for a in args[3:])
+                debug = any(a.strip().lower() == "--debug" for a in args[3:])
                 wishlist, err = _resolve_admin_wishlist_id_or_index(
                     db,
                     chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
@@ -1181,16 +1216,41 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     )
                     return
                 all_sources = any(a.strip().lower() == "--all-sources" for a in args[3:])
+                eligible_sources = None if all_sources else list_user_eligible_auction_sources(db)
                 matches = match_auction_lots_for_wishlist(
-                    db, wishlist, limit=10, eligible_sources=None if all_sources else list_user_eligible_auction_sources(db)
+                    db, wishlist, limit=10, eligible_sources=eligible_sources
                 )
+                if debug:
+                    candidates = debug_auction_lot_candidates_for_wishlist(
+                        db, wishlist, limit=10, eligible_sources=eligible_sources
+                    )
+                    lines = [
+                        "⚠️ Admin Leilões — match debug",
+                        f"Wishlist: {wishlist.id}",
+                        f"Query: {wishlist.query}",
+                        f"include_auctions: {'sim' if wishlist.include_auctions else 'não'}",
+                        f"Filtros: {', '.join(_friendly_wishlist_filters(getattr(wishlist, 'filters', []) or [])) or 'nenhum'}",
+                        f"Sources elegíveis: {', '.join(sorted(eligible_sources or [])) if eligible_sources is not None else 'todas'}",
+                        "",
+                        "Candidatos recentes:",
+                    ]
+                    if not candidates:
+                        lines.append("Nenhum lote recente encontrado nas sources elegíveis.")
+                    for c in candidates:
+                        lines.append(
+                            f"- {c.get('title') or '-'} | source={c.get('source') or '-'} | tipo={c.get('item_type') or '-'} | "
+                            f"ano={c.get('year') or '-'} | lance={c.get('current_bid') or '-'} | updated_at={c.get('updated_at') or '-'} | "
+                            f"filtros={'ok' if c.get('passes_filters') else 'não'} | score={c.get('score')} | motivo={c.get('reject_reason')}"
+                        )
+                    await update.message.reply_text("\n".join(lines))
+                    return
                 if not matches:
                     await update.message.reply_text("Sem leilões compatíveis para esta busca.")
                     return
                 await update.message.reply_text("\n".join(_render_admin_auction_matches(wishlist.query, matches)))
                 return
             elif len(args) >= 2 and args[1].lower() == "wishlist":
-                await update.message.reply_text("Use: /admin auctions match wishlist <wishlist_id|index> [--force]")
+                await update.message.reply_text("Use: /admin auctions match wishlist <wishlist_id|index> [--force] [--debug]")
                 return
             elif len(args) >= 2:
                 source = resolve_auction_source_alias(args[1])

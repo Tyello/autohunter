@@ -16,6 +16,7 @@ from app.services.auction_source_categories_service import is_auction_item_type_
 from app.services.auction_matching_service import _BAD_STATUSES, match_auction_lots_for_wishlist, sort_auction_matches_for_alerting
 
 MAX_NOTIFY_LIMIT = 3
+MAX_REJECTIONS_PER_WISHLIST = 5
 
 
 def _to_uuid(value: Any):
@@ -75,8 +76,27 @@ def build_auction_notifications_for_wishlist(
 ) -> dict:
     out = {
         "wishlist_id": str(wishlist_id), "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 0,
-        "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "skipped_item_type_not_allowed": 0, "skipped_missing_item_type": 0, "errors": 0, "messages": [], "items": []
+        "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "skipped_item_type_not_allowed": 0, "skipped_missing_item_type": 0, "errors": 0, "messages": [], "items": [], "rejections": []
     }
+    def _add_rejection(match, lot, reason: str, detail: str):
+        if len(out["rejections"]) >= MAX_REJECTIONS_PER_WISHLIST:
+            return
+        lot_obj = lot or match
+        out["rejections"].append({
+            "wishlist_id": str(out.get("wishlist_id") or wishlist_id),
+            "wishlist_query": getattr(wishlist, "query", None) if "wishlist" in locals() else None,
+            "source": getattr(match, "source", None) if match is not None else getattr(lot_obj, "source", None),
+            "lot_id": str(getattr(lot, "id", "") or getattr(match, "lot_id", "") or ""),
+            "external_id": str(getattr(lot, "external_id", "") or ""),
+            "title": getattr(match, "title", None) or getattr(lot, "title", None),
+            "item_type": normalize_item_type(getattr(lot_obj, "item_type", None)),
+            "year": getattr(lot_obj, "year", None),
+            "current_bid": getattr(lot_obj, "current_bid", None),
+            "updated_at": getattr(lot_obj, "updated_at", None).isoformat() if getattr(lot_obj, "updated_at", None) else None,
+            "score": getattr(match, "score", None) if match is not None else None,
+            "reason": reason,
+            "detail": detail,
+        })
 
     target_id = _to_uuid(wishlist_id)
     if not target_id:
@@ -129,6 +149,7 @@ def build_auction_notifications_for_wishlist(
             continue
         has_bid = getattr(m, "current_bid", None) is not None or getattr(m, "initial_bid", None) is not None
         if not allow_no_bid and not has_bid:
+            _add_rejection(m, None, "no_bid", "sem lance atual/inicial")
             continue
         status = str(getattr(m, "status", "") or "").strip().lower()
         if not force and status in _BAD_STATUSES:
@@ -142,22 +163,28 @@ def build_auction_notifications_for_wishlist(
         lot_item_type = normalize_item_type(getattr(lot, "item_type", None))
         if lot_item_type is None:
             out["skipped_missing_item_type"] += 1
+            _add_rejection(m, lot, "missing_item_type", "item_type ausente")
             continue
         if not is_auction_item_type_allowed(db, m.source, lot_item_type):
             out["skipped_item_type_not_allowed"] += 1
+            _add_rejection(m, lot, "item_type_not_allowed", f"tipo {lot_item_type} bloqueado para source")
             continue
         eligible, reason = _is_auction_match_notification_eligible(m, lot, min_score=min_score, max_age_hours=max_age_hours)
         if not eligible:
             if reason == "score_below_min":
                 out["skipped_score_below_min"] += 1
+                _add_rejection(m, lot, "score_below_min", f"score={getattr(m, 'score', 0)} abaixo de min_score={min_score}")
             elif reason == "stale_lot":
                 out["skipped_stale_lot"] += 1
+                _add_rejection(m, lot, "stale_lot", f"updated_at fora da janela {max_age_hours}h")
             elif reason == "missing_lot_updated_at":
                 out["skipped_missing_lot_updated_at"] += 1
+                _add_rejection(m, lot, "missing_lot_updated_at", "updated_at ausente")
             continue
         dkey = _dedupe_key(str(wishlist.id), m.source, str(lot.external_id))
         if db.query(AppKV).filter(AppKV.key == dkey).first():
             out["skipped_duplicate"] += 1
+            _add_rejection(m, lot, "dedupe", "alerta já enviado para lote/source/busca")
             continue
         out["items"].append(
             {

@@ -5,7 +5,11 @@ from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.notification import Notification
 from app.services.auction_lot_service import upsert_lot
-from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
+from app.services.auction_matching_service import (
+    debug_auction_lot_candidates_for_wishlist,
+    match_auction_lots_for_all_wishlists,
+    match_auction_lots_for_wishlist,
+)
 
 
 def _mk_wishlist(db, query: str):
@@ -80,3 +84,40 @@ def test_match_for_all_wishlists_can_ignore_include_auctions_filter(db):
 
     forced_matches = match_auction_lots_for_all_wishlists(db, source="vip_auctions", limit_per_wishlist=5, include_auctions_only=False)
     assert str(w.id) in forced_matches
+
+
+def test_debug_candidates_reports_filters_not_matched(db):
+    w = _mk_wishlist(db, "civic")
+    from app.services.wishlists_service import add_filter
+    add_filter(db, w.id, "state", "eq", "SP")
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d1", "title": "Honda Civic", "status": "open", "state": "RJ"})
+    db.commit()
+    out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
+    assert out
+    assert any(x["reject_reason"] == "filters_not_matched" for x in out)
+
+
+def test_debug_candidates_reports_text_score_zero(db):
+    w = _mk_wishlist(db, "porsche")
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d2", "title": "Fiat Uno", "status": "open"})
+    db.commit()
+    out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
+    assert any(x["reject_reason"] == "text_score_zero" for x in out)
+
+
+def test_debug_candidates_reports_ok(db):
+    w = _mk_wishlist(db, "honda civic")
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d3", "title": "Honda Civic", "status": "open"})
+    db.commit()
+    out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
+    assert any(x["reject_reason"] == "ok" for x in out)
+
+
+def test_debug_candidates_respects_eligible_sources(db):
+    w = _mk_wishlist(db, "honda")
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d4", "title": "Honda City", "status": "open"})
+    upsert_lot(db, {"source": "copart_auctions", "external_id": "d5", "title": "Honda Fit", "status": "open"})
+    db.commit()
+    out = debug_auction_lot_candidates_for_wishlist(db, w, eligible_sources={"vip_auctions"}, limit=10)
+    assert out
+    assert all(x["source"] == "vip_auctions" for x in out)

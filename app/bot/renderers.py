@@ -447,6 +447,16 @@ def render_admin_auction_quality_report(report: dict) -> str:
             f"Open/live: {int(item.get('open_or_live_count', 0) or 0)}",
             f"Último update: {_fmt_dt(item.get('latest_updated_at'))}",
         ])
+        types = item.get("item_type_counts") or {}
+        lines.extend([
+            "Tipos:",
+            f"- car: {int(types.get('car', 0) or 0)}",
+            f"- motorcycle: {int(types.get('motorcycle', 0) or 0)}",
+            f"- truck: {int(types.get('truck', 0) or 0)}",
+            f"- real_estate: {int(types.get('real_estate', 0) or 0)}",
+            f"- other: {int(types.get('other', 0) or 0)}",
+            f"- missing: {int(types.get(None, 0) or 0)}",
+        ])
         if idx < len(sources) - 1:
             lines.append("")
 

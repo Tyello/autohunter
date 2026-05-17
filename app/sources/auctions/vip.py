@@ -206,9 +206,24 @@ def _normalize_status_vip(text: str | None) -> str:
 
 
 def _infer_item_type(title: str | None, make: str | None, mileage_km: int | None, card_text: str) -> str:
-    text = f"{title or ''} {card_text}".lower()
-    moto_tokens = ("moto", "motocicleta", " cg ", " biz ", " fan ", " twister", " xre")
-    if any(token in f" {text} " for token in moto_tokens):
+    text = f" {title or ''} {card_text} ".lower()
+    make_l = f" {(make or '').lower()} "
+    moto_tokens = (" cg ", " fan ", " titan ", " biz ", " pop ", " bros ", " factor ", " fazer ", " xre ", " mt-", " nmax ", " pcx ", " scooter ", " moto ", " xy200", " xy ", " shi ")
+    moto_brands_strong = (" shineray ", " dafra ", " haojue ", " kawasaki ", " ktm ")
+    moto_brand_terms = {
+        " honda ": (" cg ", " biz ", " bros ", " fan ", " titan ", " xre ", " pop ", " 160 "),
+        " yamaha ": (" fazer ", " factor ", " mt-", " nmax "),
+        " suzuki ": (" yes ", " intruder ", " burgman ", " gsx ", " moto "),
+    }
+    if any(token in text for token in moto_brands_strong):
+        return "motorcycle"
+    if any(token in text for token in moto_tokens):
+        return "motorcycle"
+    for brand, terms in moto_brand_terms.items():
+        if brand in make_l or brand in text:
+            if any(term in text for term in terms):
+                return "motorcycle"
+    if " shineray " in make_l or " dafra " in make_l or " haojue " in make_l:
         return "motorcycle"
     truck_tokens = ("axor", "caminh", "carreta", "truck", "bau", "baú", "cavalo mec")
     if any(token in text for token in truck_tokens):
