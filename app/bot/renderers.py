@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import re
 from typing import Iterable
 
@@ -269,7 +270,15 @@ def _fmt_money_br(value) -> str | None:
     if value is None:
         return None
     try:
-        return f"R$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        if isinstance(value, Decimal):
+            parsed = value
+        elif isinstance(value, str):
+            parsed = Decimal(value.strip())
+        else:
+            parsed = Decimal(str(value))
+        return f"R$ {parsed:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (InvalidOperation, ValueError, TypeError):
+        return None
     except Exception:
         return None
 
