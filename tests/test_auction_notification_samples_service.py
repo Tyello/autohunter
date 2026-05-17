@@ -4,7 +4,7 @@ from app.services.auction_notification_samples_service import build_auction_noti
 
 def test_samples_empty_when_missing(db):
     out = build_auction_notification_samples(db)
-    assert out == {"created_at": "-", "summary": {}, "samples": []}
+    assert out == {"created_at": "-", "summary": {}, "samples": [], "rejections": []}
 
 
 def test_samples_returns_limited_data(db):
@@ -20,3 +20,9 @@ def test_samples_returns_limited_data(db):
     out = build_auction_notification_samples(db, limit=10)
     assert out["summary"]["previews"] == 12
     assert len(out["samples"]) == 10
+
+
+def test_samples_includes_rejections(db):
+    set_kv(db, "auction_last_dry_run_samples", {"rejections": [{"reason": "stale_lot"} for _ in range(8)]})
+    out = build_auction_notification_samples(db)
+    assert len(out["rejections"]) == 5

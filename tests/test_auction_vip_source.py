@@ -238,3 +238,16 @@ def test_apply_vip_detail_preserves_existing_end_at_when_new_missing():
     )
     out = vip.apply_vip_detail(lot, {"current_bid": 1})
     assert out.auction_end_at == datetime(2026, 5, 15, 21, 30, tzinfo=timezone.utc)
+
+
+def test_infer_item_type_motorcycle_heuristics():
+    assert vip._infer_item_type("CG 160 Start", "Honda", None, "") == "motorcycle"
+    assert vip._infer_item_type("SHI 175 2024/2024", "Shineray", None, "") == "motorcycle"
+    assert vip._infer_item_type("XY200GY-04", "Shineray", None, "") == "motorcycle"
+    assert vip._infer_item_type("Yamaha Fazer 250", "Yamaha", None, "") == "motorcycle"
+    assert vip._infer_item_type("Dafra Next 300", "Dafra", None, "") == "motorcycle"
+
+
+def test_infer_item_type_keeps_honda_cars_as_car():
+    assert vip._infer_item_type("Honda Civic EXL 2020", "Honda", 10000, "") == "car"
+    assert vip._infer_item_type("Honda HR-V EX 2021", "Honda", 20000, "") == "car"

@@ -15,6 +15,7 @@ from app.services.auction_source_config_service import list_user_eligible_auctio
 logger = logging.getLogger(__name__)
 _DRY_RUN_SAMPLES_KEY = "auction_last_dry_run_samples"
 _MAX_SAMPLES = 10
+_MAX_REJECTIONS = 5
 
 
 def _truncate(v: str | None, limit: int = 140) -> str | None:
@@ -71,6 +72,7 @@ async def run_auction_notification_job(
         "messages": [],
     }
     dry_run_samples: list[dict] = []
+    dry_run_rejections: list[dict] = []
     if not dry_run and bot is None:
         raise ValueError("bot é obrigatório para envio real")
     if source and source not in eligible_sources:
@@ -108,6 +110,10 @@ async def run_auction_notification_job(
             out["errors"] += int(built.get("errors", 0) or 0)
             if built.get("messages"):
                 out["messages"].extend([str(m) for m in built["messages"][:2]])
+            for rej in list(built.get("rejections", [])):
+                if len(dry_run_rejections) >= _MAX_REJECTIONS:
+                    break
+                dry_run_rejections.append(rej)
             items = list(built.get("items", []))
             if not items:
                 continue
@@ -164,6 +170,7 @@ async def run_auction_notification_job(
             {
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "samples": dry_run_samples[:_MAX_SAMPLES],
+                "rejections": dry_run_rejections[:_MAX_REJECTIONS],
                 "summary": summary,
             },
         )

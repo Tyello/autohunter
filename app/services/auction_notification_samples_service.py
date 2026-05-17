@@ -10,8 +10,12 @@ def build_auction_notification_samples(db, limit: int = 10) -> dict:
     samples = payload.get("samples") if isinstance(payload, dict) else []
     if not isinstance(samples, list):
         samples = []
+    rejections = payload.get("rejections") if isinstance(payload, dict) else []
+    if not isinstance(rejections, list):
+        rejections = []
     return {
         "created_at": (payload.get("created_at") if isinstance(payload, dict) else None) or "-",
         "summary": (payload.get("summary") if isinstance(payload, dict) and isinstance(payload.get("summary"), dict) else {}),
         "samples": samples[: max(0, int(limit))],
+        "rejections": rejections[:5],
     }
