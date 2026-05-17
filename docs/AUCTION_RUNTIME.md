@@ -1,64 +1,80 @@
 # Garagem Alvo / AutoHunter — Auction Runtime
 
-Este documento descreve o estado operacional atual da frente de leilões.
+Este guia descreve o estado atual da frente de leilões no AutoHunter.
 
-## 1) Estado atual
+## 1) Objetivo
 
-Leilões já saíram da POC puramente admin-only, mas ainda estão em piloto controlado.
+Leilões são uma expansão controlada do produto Garagem Alvo para oportunidades automotivas especiais.
 
-O usuário final pode escolher por busca se aceita oportunidades de leilão (`wishlists.include_auctions`). O usuário **não** escolhe leiloeira/source técnica.
+O usuário final não escolhe leiloeira/source. Ele escolhe apenas, por busca, se aceita oportunidades em leilão. A operação decide quais sources e categorias podem chegar ao usuário.
 
-O admin controla:
+## 2) Estado atual
 
-- quais sources de leilão existem e estão habilitadas;
-- quais sources são elegíveis para usuário final (`user_eligible`);
-- quais categorias por source podem entrar no notify;
-- settings runtime de scheduler/notificação;
-- readiness, status e samples do dry-run.
+- Leilões têm dados próprios em `auction_lots`.
+- Sources de leilão ficam no registry técnico em `app/sources/auctions/registry.py`.
+- Operação de sources é DB-driven via `source_configs`.
+- O usuário opta por leilões por wishlist via `wishlists.include_auctions`.
+- Runtime de notificação de leilões tem scheduler, dry-run, samples, readiness e settings em AppKV.
+- Envio automático real continua bloqueado via comando admin nesta fase.
 
-## 2) Modelo mental
+## 3) Modelo mental
 
 ```text
 Usuário:
-  busca/wishlist + include_auctions=true|false
+  busca aceita leilões? sim/não
 
 Admin:
-  source enabled/user_eligible
+  source ligada/desligada
+  source elegível para usuário? sim/não
   categorias permitidas por source
-  runtime settings de notify/scheduler
+  settings runtime de notify/scheduler
 
 Sistema:
-  auction_lots -> matching -> gates -> dry-run/samples -> notify controlado
+  source elegível
+  + categoria permitida
+  + wishlist opt-in
+  + lance
+  + score mínimo
+  + lote recente
+  + dedupe
+  + limite diário
+  => alerta elegível
 ```
 
-## 3) Sources de leilão
+## 4) Sources de leilão
 
-Registry técnico: `app/sources/auctions/registry.py`.
+Registry técnico atual:
 
-Config operacional: `source_configs`.
+- `vip_auctions` — VIP Leilões — ativa/elegível no piloto.
+- `mega_auctions` — Mega Leilões — experimental.
+- `win_auctions` — Win Leilões — experimental.
+- `sodre_auctions` — Sodré Santoro — experimental/needs study conforme disponibilidade.
+- `superbid_auctions` — Superbid — experimental.
+- `copart_auctions` — Copart — needs JS/internal endpoint study.
 
-Campos relevantes:
+O registry define implementação. `source_configs` define operação.
 
-- `source`: chave técnica (`vip_auctions`, `mega_auctions`, etc.);
-- `source_type='auction'`;
-- `is_enabled`: source operacionalmente ligada/desligada;
-- `user_eligible`: pode chegar ao usuário final;
-- `admin_only`: apoio operacional;
-- `status`: `active`, `experimental`, `needs_study`, etc.;
-- `extra.allowed_item_types`: categorias permitidas no notify.
+## 5) Controle unificado de sources
 
-Sources registradas no estado atual:
+Comandos principais:
 
-- `vip_auctions` — ativa/elegível no piloto quando configurada assim no banco;
-- `mega_auctions` — experimental;
-- `win_auctions` — experimental;
-- `sodre_auctions` — experimental/needs study conforme bloqueio;
-- `superbid_auctions` — experimental;
-- `copart_auctions` — needs JS/internal endpoint study.
+```text
+/admin sources
+/admin source vip enable
+/admin source vip disable
+/admin source vip user-enable
+/admin source vip user-disable
+```
 
-O estado real em produção depende de `source_configs`, não só do registry.
+Aliases aceitos para leilões incluem `vip`, `mega`, `win`, `sodre`, `superbid`, `copart`.
 
-## 4) Categorias de leilão
+Regras:
+
+- `disable` também deve remover `user_eligible`.
+- `user-enable` exige source enabled.
+- Source experimental pode estar enabled para diagnóstico, mas não deve ser user_eligible por padrão.
+
+## 6) Categorias permitidas
 
 Categorias canônicas:
 
@@ -69,98 +85,40 @@ Categorias canônicas:
 - `real_estate`
 - `other`
 
-Default seguro: se uma auction source não tiver `extra.allowed_item_types`, o sistema assume apenas `car`.
+No piloto atual, apenas `car` deve ser permitido para usuário final.
 
-No piloto atual, somente `car` deve chegar ao usuário final. Motos, caminhões/pesados, imóveis e outros ficam bloqueados por padrão no notify.
-
-Exemplos:
+Comandos:
 
 ```text
 /admin source vip categories
 /admin source vip categories set car
-/admin source vip categories set car,motorcycle
+/admin source vip categories add motorcycle
 /admin source vip categories remove motorcycle
 ```
 
-Regra operacional atual: `car` apenas, salvo diagnóstico explícito.
+Compatibilidade:
 
-## 5) Opt-in por wishlist
+```text
+/admin auctions source-config vip categories set car
+```
 
-Campo: `wishlists.include_auctions`.
+Default seguro: auction source sem configuração explícita permite apenas `car`.
 
-- Default: `false`.
-- Pode ser escolhido pelo usuário na criação da busca.
-- Pode ser alterado em ajustes de filtros.
-- Admin também consegue listar/alterar em comandos de leilão.
+`item_type` ausente ou desconhecido deve ser bloqueado no pipeline de notificação, salvo configuração explícita que permita `other`.
 
-`include_auctions=true` não garante alerta. Ele apenas torna a busca elegível. O alerta ainda depende de source/categoria/gates/dedupe/limites.
+## 7) Runtime settings de notificações
 
-## 6) Gates de notificação
-
-Um alerta de leilão só deve ser montado se passar por todos os gates:
-
-1. wishlist ativa;
-2. `include_auctions=true`;
-3. source com `source_type='auction'`;
-4. source `is_enabled=true`;
-5. source `user_eligible=true`;
-6. categoria do lote permitida para a source;
-7. lote com `item_type` conhecido;
-8. lote com `url` válida;
-9. lote com `current_bid` ou `initial_bid`;
-10. status não finalizado/cancelado/vendido, salvo força diagnóstica;
-11. score mínimo;
-12. lote atualizado dentro da janela configurada;
-13. dedupe ainda não enviado para a mesma wishlist/lote;
-14. limite diário por usuário permite.
-
-Contadores relevantes:
-
-- `skipped_item_type_not_allowed`
-- `skipped_missing_item_type`
-- `skipped_score_below_min`
-- `skipped_stale_lot`
-- `skipped_missing_lot_updated_at`
-- `skipped_duplicate`
-- `skipped_daily_limit`
-- `skipped_missing_chat_id`
-
-## 7) Runtime settings
-
-Config runtime em AppKV:
+As configs operacionais de notificação de leilão ficam em AppKV:
 
 ```text
 auction_notification_settings
 ```
 
-Campos:
-
-- `enabled`
-- `dry_run`
-- `scheduler_minutes`
-- `max_wishlists_per_run`
-- `max_per_wishlist`
-- `max_per_user_per_day`
-- `min_score`
-- `max_lot_age_hours`
-- `updated_at`
-- `updated_by`
-
-Fallback por campo: `app.core.settings` / `.env`.
-
-Kill switch via env:
-
-```text
-AUCTION_NOTIFICATIONS_KILL_SWITCH=true
-```
-
-Quando ativo, força `enabled=false` no valor efetivo, mesmo que o runtime esteja `enabled=true`.
-
 Comandos:
 
 ```text
 /admin auctions settings
-/admin auctions settings set enabled true
+/admin auctions settings set enabled true|false
 /admin auctions settings set dry_run true
 /admin auctions settings set scheduler_minutes 60
 /admin auctions settings set min_score 60
@@ -172,113 +130,209 @@ Comandos:
 /admin auctions settings reset-all
 ```
 
-Nesta fase, o comando admin bloqueia `dry_run=false`.
+`.env` continua como fallback e kill switch. AppKV é a superfície operacional runtime.
 
-## 8) Scheduler de leilões
-
-Job: `auction_notification_scheduler_job`.
-
-O scheduler lê runtime settings efetivas.
-
-Estados seguros:
-
-- `enabled=false`: não executa notify; registra skip.
-- `enabled=true` + `dry_run=true`: simula, gera summaries/samples, não envia mensagem real.
-- `enabled=true` + `dry_run=false`: caminho técnico existe, mas não deve ser liberado operacionalmente nesta fase; o comando admin bloqueia esse valor.
-- `kill_switch=true`: força `enabled=false`.
-
-`*scheduler_minutes*` é lido no registro do scheduler. Mudança de intervalo pode exigir restart do scheduler para reprogramar o job.
-
-## 9) Comandos admin principais
-
-Sources/categorias:
+### Defaults recomendados no piloto
 
 ```text
-/admin sources
-/admin source vip enable
-/admin source vip disable
-/admin source vip user-enable
-/admin source vip user-disable
-/admin source vip categories
-/admin source vip categories set car
-/admin auctions sources
-/admin auctions source-config vip categories set car
+enabled=true
+dry_run=true
+scheduler_minutes=60
+min_score=60
+max_lot_age_hours=48
+max_wishlists_per_run=20
+max_per_wishlist=1
+max_per_user_per_day=3
 ```
 
-Ingestão/matching/preview:
+### Envio real automático
+
+`dry_run=false` é bloqueado pelo comando admin nesta fase.
+
+Para liberar envio real automático no futuro, deve haver PR específica, revisão explícita e novos guardrails.
+
+## 8) Gates de elegibilidade para notify
+
+O pipeline de notificação de leilão só deve montar item se todos os gates passarem:
+
+1. Wishlist ativa.
+2. `include_auctions=true`.
+3. Source `enabled=true`.
+4. Source `user_eligible=true`.
+5. Categoria do lote permitida para a source.
+6. Lote com URL válida.
+7. Lote com `current_bid` ou `initial_bid`.
+8. Score do match >= `min_score` runtime.
+9. Lote atualizado dentro de `max_lot_age_hours` runtime, exceto quando `0` desabilita o filtro.
+10. Dedupe ainda não enviado para a mesma wishlist/source/lote.
+11. Limite diário por usuário não atingido.
+
+Contadores operacionais relevantes:
+
+- `skipped_score_below_min`
+- `skipped_stale_lot`
+- `skipped_missing_lot_updated_at`
+- `skipped_item_type_not_allowed`
+- `skipped_missing_item_type`
+- `skipped_duplicate`
+- `skipped_daily_limit`
+- `skipped_no_match`
+
+## 9) Comandos de operação
+
+### Ingestão manual
 
 ```text
+/admin auctions run vip --limit 10
 /admin auctions run vip --limit 10 --enrich
-/admin auctions quality
+```
+
+### Qualidade/source
+
+```text
+/admin auctions sources
 /admin auctions source vip
+/admin auctions quality
+/admin auctions quality vip
+/admin auctions upcoming
+```
+
+### Matching/preview diagnóstico
+
+```text
 /admin auctions match vip
+/admin auctions match wishlist <id|index>
 /admin auctions preview vip
-/admin auctions wishlists
-/admin auctions wishlist <id|index> enable|disable
+/admin auctions preview wishlist <id|index>
 ```
 
-Notify/status:
+### Opt-in por wishlist
 
 ```text
-/admin auctions notify wishlist <id|index> [--confirm]
+/admin auctions wishlists [texto]
+/admin auctions wishlist <id|index> enable
+/admin auctions wishlist <id|index> disable
+```
+
+### Notify manual/job
+
+```text
+/admin auctions notify wishlist <id|index> [--source vip] [--limit N] [--confirm]
+/admin auctions notify-run
 /admin auctions notify-run --source vip --limit-wishlists 5
-/admin auctions notify-status
-/admin auctions notify-samples
-/admin auctions readiness
+```
+
+Sem `--confirm`, notify manual roda em dry-run.
+
+### Observabilidade
+
+```text
 /admin auctions settings
-```
-
-## 10) Copy user-facing obrigatória
-
-Todo alerta de leilão para usuário final deve ser distinto de anúncio tradicional.
-
-Requisitos:
-
-- abrir como oportunidade em leilão;
-- usar source label amigável quando disponível (`VIP Leilões`, etc.);
-- nunca mostrar `None`;
-- mostrar só campos existentes;
-- conter literalmente: `Lance não é preço final.`;
-- orientar verificação de edital, taxas/comissão, documentação e vistoria.
-
-## 11) Procedimento recomendado para ativar dry-run automático
-
-1. Garantir deploy atualizado.
-2. Configurar runtime:
-
-```text
-/admin auctions settings set enabled true
-/admin auctions settings set dry_run true
-/admin auctions settings set min_score 60
-/admin auctions settings set max_lot_age_hours 48
-/admin auctions settings set max_wishlists_per_run 20
-/admin auctions settings set max_per_wishlist 1
-/admin auctions settings set max_per_user_per_day 3
-```
-
-3. Garantir source/categoria:
-
-```text
-/admin source vip enable
-/admin source vip user-enable
-/admin source vip categories set car
-```
-
-4. Validar:
-
-```text
 /admin auctions readiness
 /admin auctions notify-status
 /admin auctions notify-samples
 ```
 
-5. Aguardar ciclo do scheduler e revisar samples.
+## 10) Readiness operacional
 
-Não ativar envio real automático nesta fase.
+Antes de ativar scheduler dry-run automático, rodar:
 
-## 12) Próximas evoluções prováveis
+```text
+/admin auctions readiness
+```
 
-- Digest operacional de dry-run 24h.
-- Painel mais compacto de decisão: manter dry-run, ajustar gates ou preparar piloto manual.
-- Hardening adicional de categorias/normalização por source.
-- Futuro caminho de envio real automático somente com nova revisão, nova trava e validação explícita.
+Interpretação:
+
+- `ok`: pronto para dry-run automático.
+- `warn`: pronto com ressalvas; avaliar avisos.
+- `fail`: não ativar.
+
+Checks esperados:
+
+- envio real automático não ativo;
+- source elegível disponível;
+- VIP operacional no piloto;
+- existem wishlists opt-in;
+- existem lotes recentes com lance;
+- scheduler registrou execução;
+- samples de dry-run existem;
+- gates de qualidade seguros;
+- categorias user_eligible permanecem somente `car`.
+
+## 11) Dry-run e samples
+
+Dry-run pode persistir amostras em AppKV:
+
+```text
+auction_last_dry_run_samples
+```
+
+As amostras servem para auditar qualidade do que seria enviado:
+
+- wishlist/query;
+- source;
+- título;
+- lance atual/inicial;
+- score;
+- link;
+- summary de skips.
+
+Amostras de dry-run não são dedupe e não significam envio real.
+
+## 12) Copy obrigatória de alerta
+
+Todo alerta user-facing de leilão deve ser diferente de anúncio tradicional.
+
+Deve conter:
+
+```text
+Lance não é preço final.
+```
+
+E orientar verificação de:
+
+- edital;
+- taxas/comissão;
+- documentação;
+- vistoria;
+- regras do leiloeiro.
+
+Usar label amigável da source quando houver, por exemplo `VIP Leilões`, evitando expor `vip_auctions` ao usuário final.
+
+## 13) Sequência operacional recomendada
+
+1. Deploy/restart.
+2. Garantir source/categoria:
+   ```text
+   /admin source vip enable
+   /admin source vip user-enable
+   /admin source vip categories set car
+   ```
+3. Configurar runtime:
+   ```text
+   /admin auctions settings set enabled true
+   /admin auctions settings set dry_run true
+   /admin auctions settings set min_score 60
+   /admin auctions settings set max_lot_age_hours 48
+   ```
+4. Validar:
+   ```text
+   /admin auctions readiness
+   /admin auctions notify-status
+   ```
+5. Aguardar ciclo do scheduler.
+6. Auditar:
+   ```text
+   /admin auctions notify-samples
+   /admin auctions readiness
+   ```
+7. Não liberar envio real automático sem nova decisão/PR.
+
+## 14) O que não fazer
+
+- Não liberar `dry_run=false` por ajuste manual fora do fluxo revisado.
+- Não colocar source experimental como `user_eligible` sem validação de qualidade.
+- Não permitir `motorcycle`, `truck`, `heavy`, `real_estate` ou `other` no piloto sem decisão explícita.
+- Não remover o disclosure de risco do alerta.
+- Não tratar lance como preço final.
+- Não depender apenas de `.env` para knobs operacionais runtime.
