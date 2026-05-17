@@ -26,3 +26,9 @@ def test_samples_includes_rejections(db):
     set_kv(db, "auction_last_dry_run_samples", {"rejections": [{"reason": "stale_lot"} for _ in range(8)]})
     out = build_auction_notification_samples(db)
     assert len(out["rejections"]) == 5
+
+
+def test_samples_keep_string_current_bid_in_rejections(db):
+    set_kv(db, "auction_last_dry_run_samples", {"rejections": [{"current_bid": "8500.00", "reason": "score_below_min"}]})
+    out = build_auction_notification_samples(db)
+    assert out["rejections"][0]["current_bid"] == "8500.00"

@@ -82,6 +82,7 @@ def build_auction_notifications_for_wishlist(
         if len(out["rejections"]) >= MAX_REJECTIONS_PER_WISHLIST:
             return
         lot_obj = lot or match
+        current_bid = getattr(lot_obj, "current_bid", None)
         out["rejections"].append({
             "wishlist_id": str(out.get("wishlist_id") or wishlist_id),
             "wishlist_query": getattr(wishlist, "query", None) if "wishlist" in locals() else None,
@@ -91,7 +92,7 @@ def build_auction_notifications_for_wishlist(
             "title": getattr(match, "title", None) or getattr(lot, "title", None),
             "item_type": normalize_item_type(getattr(lot_obj, "item_type", None)),
             "year": getattr(lot_obj, "year", None),
-            "current_bid": getattr(lot_obj, "current_bid", None),
+            "current_bid": str(current_bid) if current_bid is not None else None,
             "updated_at": getattr(lot_obj, "updated_at", None).isoformat() if getattr(lot_obj, "updated_at", None) else None,
             "score": getattr(match, "score", None) if match is not None else None,
             "reason": reason,

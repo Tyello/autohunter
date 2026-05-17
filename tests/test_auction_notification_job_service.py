@@ -84,3 +84,58 @@ def test_job_real_sends_and_respects_daily_limit(monkeypatch, db):
     assert sent
     out2 = asyncio.run(run_auction_notification_job(db, bot=Bot(), dry_run=False, max_per_user_per_day=1))
     assert out2["skipped_daily_limit"] == 1
+
+
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from uuid import uuid4
+
+from app.services.auction_notification_job_service import _json_safe
+
+
+def test_json_safe_converts_nested_types():
+    payload = {
+        "decimal": Decimal("8500.00"),
+        "datetime": datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc),
+        "date": date(2026, 5, 17),
+        "uuid": uuid4(),
+        "nested": [{"v": Decimal("1.23")}, (Decimal("2.34"),)],
+        "int": 1,
+        "bool": True,
+        "none": None,
+    }
+
+    out = _json_safe(payload)
+    assert out["decimal"] == "8500.00"
+    assert out["datetime"] == "2026-05-17T12:00:00+00:00"
+    assert out["date"] == "2026-05-17"
+    assert isinstance(out["uuid"], str)
+    assert out["nested"][0]["v"] == "1.23"
+    assert out["nested"][1][0] == "2.34"
+
+
+def test_job_dry_run_persists_rejections_with_decimal_current_bid(monkeypatch, db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=123)
+    db.add(u)
+    db.flush()
+    w = Wishlist(user_id=u.id, query="civic", is_active=True, include_auctions=True)
+    db.add(w)
+    db.commit()
+
+    monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
+    monkeypatch.setattr(
+        "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
+        lambda *_a, **_k: {
+            "items": [],
+            "rejections": [{"reason": "score_below_min", "current_bid": Decimal("8500.00"), "updated_at": datetime(2026, 5, 17, tzinfo=timezone.utc)}],
+            "skipped_duplicate": 0, "skipped_no_match": 1, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "errors": 0, "messages": []
+        },
+    )
+
+    import asyncio
+    out = asyncio.run(run_auction_notification_job(db, bot=None, dry_run=True))
+    assert out["errors"] == 0
+    row = db.query(AppKV).filter(AppKV.key == "auction_last_dry_run_samples").first()
+    assert row is not None
+    assert row.value["rejections"][0]["current_bid"] == "8500.00"
+    assert row.value["rejections"][0]["updated_at"] == "2026-05-17T00:00:00+00:00"

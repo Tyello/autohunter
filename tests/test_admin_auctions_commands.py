@@ -1056,3 +1056,23 @@ def test_admin_source_legacy_and_categories_paths_still_work(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "categories", "set", "car")))
     assert up.message.sent[-1] == "✅ source=vip_auctions enabled=sim user_eligible=sim"
+
+
+def test_admin_auctions_notify_samples_render_rejections_with_string_bid(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {
+            "created_at": "2026-05-16 21:10 UTC",
+            "summary": {},
+            "samples": [],
+            "rejections": [{"wishlist_query": "Civic", "source": "vip_auctions", "title": "Honda Civic", "reason": "score_below_min", "updated_at": "2026-05-16T21:10:00+00:00", "score": 75, "current_bid": "8500.00"}],
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    msg = up.message.sent[-1]
+    assert "Rejeições recentes:" in msg
+    assert "Lance atual: R$ 8.500,00" in msg

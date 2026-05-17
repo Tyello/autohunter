@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from time import perf_counter
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,21 @@ logger = logging.getLogger(__name__)
 _DRY_RUN_SAMPLES_KEY = "auction_last_dry_run_samples"
 _MAX_SAMPLES = 10
 _MAX_REJECTIONS = 5
+
+def _json_safe(value):
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return str(value)
 
 
 def _truncate(v: str | None, limit: int = 140) -> str | None:
@@ -164,15 +181,16 @@ async def run_auction_notification_job(
         "errors": out.get("errors", 0),
     }
     if dry_run:
+        payload = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "samples": dry_run_samples[:_MAX_SAMPLES],
+            "rejections": dry_run_rejections[:_MAX_REJECTIONS],
+            "summary": summary,
+        }
         set_kv(
             db,
             _DRY_RUN_SAMPLES_KEY,
-            {
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "samples": dry_run_samples[:_MAX_SAMPLES],
-                "rejections": dry_run_rejections[:_MAX_REJECTIONS],
-                "summary": summary,
-            },
+            _json_safe(payload),
         )
     logger.info("auction_notification_job_finished", extra={**out, "max_wishlists": max_wishlists, "max_per_wishlist": max_per_wishlist, "eligible_sources": sorted(eligible_sources), "duration_ms": duration_ms})
     return out

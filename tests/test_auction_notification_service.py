@@ -358,3 +358,17 @@ def test_rejections_limited_to_five(db, monkeypatch):
     db.commit()
     out = build_auction_notifications_for_wishlist(db, w.id, limit=3)
     assert len(out["rejections"]) == 5
+
+
+def test_rejection_current_bid_is_string(monkeypatch, db):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 999)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 0)
+    u = User(id=uuid.uuid4(), telegram_chat_id=4001, username="rej")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rej1", "title": "Honda Civic", "status": "open", "item_type": "car", "current_bid": 8500, "url": "https://lot/rej1"})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert out["rejections"]
+    assert out["rejections"][0]["current_bid"] == "8500.00"
