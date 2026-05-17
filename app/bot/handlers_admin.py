@@ -1237,10 +1237,13 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     if not candidates:
                         lines.append("Nenhum lote recente encontrado nas sources elegíveis.")
                     for c in candidates:
+                        soft_block = ""
+                        if c.get("reject_reason") == "ok" and c.get("passes_filters") and int(c.get("score") or 0) < 60:
+                            soft_block = " | aviso=passa matching, mas pode cair no notify por min_score"
                         lines.append(
                             f"- {c.get('title') or '-'} | source={c.get('source') or '-'} | tipo={c.get('item_type') or '-'} | "
                             f"ano={c.get('year') or '-'} | lance={c.get('current_bid') or '-'} | updated_at={c.get('updated_at') or '-'} | "
-                            f"filtros={'ok' if c.get('passes_filters') else 'não'} | score={c.get('score')} | motivo={c.get('reject_reason')}"
+                            f"filtros={'ok' if c.get('passes_filters') else 'não'} | score={c.get('score')} | motivo={c.get('reject_reason')}{soft_block}"
                         )
                     await update.message.reply_text("\n".join(lines))
                     return

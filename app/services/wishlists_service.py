@@ -45,24 +45,26 @@ DEFAULT_MAX_WISHLISTS_PER_USER = 2
 #  - "até 2004" / "ate 2004" / "ano<=2004"
 #  - "a partir de 2014" / "ano>=2014"
 #  - "entre 2014 e 2020" / "2014 até 2020" / "2014-2020"
+_FULL_YEAR_TOKEN = r"(?<!\d)((?:19|20)\d{2})(?!\d)"
+
 _YEAR_MAX_PATTERNS = [
-    re.compile(r"(?:\bate\b|\baté\b)\s+(\d{4})", re.IGNORECASE),
-    re.compile(r"(?:\bate\b|\baté\b)\s+ano\s+(\d{4})", re.IGNORECASE),
-    re.compile(r"\bano\s*(?:<=|=<|≤)\s*(\d{4})", re.IGNORECASE),
-    re.compile(r"\byear\s*(?:<=|=<|≤)\s*(\d{4})", re.IGNORECASE),
+    re.compile(rf"(?:\bate\b|\baté\b)\s+{_FULL_YEAR_TOKEN}", re.IGNORECASE),
+    re.compile(rf"(?:\bate\b|\baté\b)\s+ano\s+{_FULL_YEAR_TOKEN}", re.IGNORECASE),
+    re.compile(rf"\bano\s*(?:<=|=<|≤)\s*{_FULL_YEAR_TOKEN}", re.IGNORECASE),
+    re.compile(rf"\byear\s*(?:<=|=<|≤)\s*{_FULL_YEAR_TOKEN}", re.IGNORECASE),
 ]
 
 _YEAR_MIN_PATTERNS = [
-    re.compile(r"\b(?:a\s+partir\s+de|apartir\s+de|desde)\s+(\d{4})\b", re.IGNORECASE),
-    re.compile(r"\bano\s*(?:>=|=>|≥)\s*(\d{4})\b", re.IGNORECASE),
-    re.compile(r"\byear\s*(?:>=|=>|≥)\s*(\d{4})\b", re.IGNORECASE),
+    re.compile(rf"\b(?:a\s+partir\s+de|apartir\s+de|desde)\s+{_FULL_YEAR_TOKEN}", re.IGNORECASE),
+    re.compile(rf"\bano\s*(?:>=|=>|≥)\s*{_FULL_YEAR_TOKEN}", re.IGNORECASE),
+    re.compile(rf"\byear\s*(?:>=|=>|≥)\s*{_FULL_YEAR_TOKEN}", re.IGNORECASE),
 ]
 
 _YEAR_RANGE_PATTERNS = [
-    re.compile(r"\bentre\s+(\d{4})\s+e\s+(\d{4})\b", re.IGNORECASE),
-    re.compile(r"\bde\s+(\d{4})\s+a\s+(\d{4})\b", re.IGNORECASE),
-    re.compile(r"\b(\d{4})\s*(?:\bate\b|\baté\b)\s*(\d{4})\b", re.IGNORECASE),
-    re.compile(r"\b(\d{4})\s*(?:-|–|—)\s*(\d{4})\b", re.IGNORECASE),
+    re.compile(rf"\bentre\s+{_FULL_YEAR_TOKEN}\s+e\s+{_FULL_YEAR_TOKEN}\b", re.IGNORECASE),
+    re.compile(rf"\bde\s+{_FULL_YEAR_TOKEN}\s+a\s+{_FULL_YEAR_TOKEN}\b", re.IGNORECASE),
+    re.compile(rf"\b{_FULL_YEAR_TOKEN}\s*(?:\bate\b|\baté\b)\s*{_FULL_YEAR_TOKEN}\b", re.IGNORECASE),
+    re.compile(rf"\b{_FULL_YEAR_TOKEN}\s*(?:-|–|—)\s*{_FULL_YEAR_TOKEN}\b", re.IGNORECASE),
 ]
 _YEAR_STANDALONE_PATTERN = re.compile(r"(?:\bano\s+)?(\d{4})\b$", re.IGNORECASE)
 
