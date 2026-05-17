@@ -59,13 +59,19 @@ def _render_filter_label(field: str, operator: str, value: str) -> str:
     return fallback
 
 
+def _filter_attr(f, key: str, default=None):
+    if isinstance(f, dict):
+        return f.get(key, default)
+    return getattr(f, key, default)
+
+
 def _friendly_wishlist_filters(filters: list[dict]) -> list[str]:
     by_field: dict[str, dict[str, str]] = defaultdict(dict)
     passthrough: list[str] = []
     for f in filters or []:
-        field = str(f.get("field") or "").strip()
-        operator = str(f.get("operator") or "").strip()
-        value = str(f.get("value") or "").strip()
+        field = str(_filter_attr(f, "field") or "").strip()
+        operator = str(_filter_attr(f, "operator") or "").strip()
+        value = str(_filter_attr(f, "value") or "").strip()
         if not (field and operator):
             continue
         if field in {"price", "year"} and operator in {"gte", "lte"}:

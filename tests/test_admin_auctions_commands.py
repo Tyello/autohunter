@@ -611,6 +611,12 @@ def test_admin_auctions_match_wishlist_debug_shows_recent_candidates_without_mat
     db.add(owner); db.flush()
     w1 = Wishlist(user_id=owner.id, query="gol", is_active=True, include_auctions=True)
     db.add(w1); db.commit()
+    from app.models.wishlist_filter import WishlistFilter
+    db.add_all([
+        WishlistFilter(wishlist_id=w1.id, field="year", operator="gte", value="2018"),
+        WishlistFilter(wishlist_id=w1.id, field="state", operator="eq", value="SP"),
+    ])
+    db.commit()
 
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
@@ -626,6 +632,8 @@ def test_admin_auctions_match_wishlist_debug_shows_recent_candidates_without_mat
     up = _Update(chat_id=990)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", "1", "--debug")))
     msg = up.message.sent[-1]
+    assert "Filtros:" in msg
+    assert "Ano" in msg or "Estado: SP" in msg
     assert "Candidatos recentes:" in msg
     assert "motivo=filters_not_matched" in msg
     assert "motivo=text_score_zero" in msg

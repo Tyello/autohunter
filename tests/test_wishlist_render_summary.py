@@ -102,3 +102,26 @@ def test_render_user_wishlists_legacy_format_still_supported():
     text = render_user_wishlists([_WL()])
     assert text.startswith("Minhas buscas:")
     assert "1. legacy" in text
+
+
+def test_render_user_wishlists_filters_accept_object_shape():
+    text = render_user_wishlists([
+        {"index": 1, "query": "obj", "filters": [
+            SimpleNamespace(field="year", operator="gte", value="2018"),
+            SimpleNamespace(field="year", operator="lte", value="2020"),
+            SimpleNamespace(field="state", operator="eq", value="SP"),
+            SimpleNamespace(value="broken"),
+        ], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
+    ])
+    assert "Ano entre 2018 e 2020" in text
+    assert "Estado: SP" in text
+
+
+def test_render_user_wishlists_filters_mixed_dict_and_object():
+    text = render_user_wishlists([
+        {"index": 1, "query": "mixed", "filters": [
+            {"field": "year", "operator": "gte", "value": "2018"},
+            SimpleNamespace(field="year", operator="lte", value="2020"),
+        ], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
+    ])
+    assert "Ano entre 2018 e 2020" in text
