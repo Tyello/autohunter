@@ -56,7 +56,11 @@ from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries
 from app.services.auction_ingestion_service import run_auction_ingestion
-from app.services.auction_matching_service import match_auction_lots_for_all_wishlists, match_auction_lots_for_wishlist
+from app.services.auction_matching_service import (
+    debug_auction_lot_candidates_for_wishlist,
+    match_auction_lots_for_all_wishlists,
+    match_auction_lots_for_wishlist,
+)
 from app.services.auction_quality_service import build_auction_quality_report
 from app.services.auction_notification_service import (
     build_auction_notifications_for_wishlist,
@@ -1217,6 +1221,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     db, wishlist, limit=10, eligible_sources=eligible_sources
                 )
                 if debug:
+                    candidates = debug_auction_lot_candidates_for_wishlist(
+                        db, wishlist, limit=10, eligible_sources=eligible_sources
+                    )
                     lines = [
                         "⚠️ Admin Leilões — match debug",
                         f"Wishlist: {wishlist.id}",
@@ -1225,11 +1232,16 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         f"Filtros: {', '.join(_friendly_wishlist_filters(getattr(wishlist, 'filters', []) or [])) or 'nenhum'}",
                         f"Sources elegíveis: {', '.join(sorted(eligible_sources or [])) if eligible_sources is not None else 'todas'}",
                         "",
+                        "Candidatos recentes:",
                     ]
-                    for m in matches[:10]:
-                        lines.append(f"- {m.title or '-'} | score={m.score} | tipo={getattr(m, 'item_type', '-') if hasattr(m, 'item_type') else '-'} | bid={m.current_bid or m.initial_bid or '-'} | status={m.status or '-'}")
-                    if not matches:
-                        lines.append("Sem candidatos com score/filtros elegíveis.")
+                    if not candidates:
+                        lines.append("Nenhum lote recente encontrado nas sources elegíveis.")
+                    for c in candidates:
+                        lines.append(
+                            f"- {c.get('title') or '-'} | source={c.get('source') or '-'} | tipo={c.get('item_type') or '-'} | "
+                            f"ano={c.get('year') or '-'} | lance={c.get('current_bid') or '-'} | updated_at={c.get('updated_at') or '-'} | "
+                            f"filtros={'ok' if c.get('passes_filters') else 'não'} | score={c.get('score')} | motivo={c.get('reject_reason')}"
+                        )
                     await update.message.reply_text("\n".join(lines))
                     return
                 if not matches:

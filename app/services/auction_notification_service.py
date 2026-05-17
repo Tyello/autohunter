@@ -179,7 +179,7 @@ def build_auction_notifications_for_wishlist(
                 _add_rejection(m, lot, "stale_lot", f"updated_at fora da janela {max_age_hours}h")
             elif reason == "missing_lot_updated_at":
                 out["skipped_missing_lot_updated_at"] += 1
-                _add_rejection(m, lot, "stale_lot", "updated_at ausente")
+                _add_rejection(m, lot, "missing_lot_updated_at", "updated_at ausente")
             continue
         dkey = _dedupe_key(str(wishlist.id), m.source, str(lot.external_id))
         if db.query(AppKV).filter(AppKV.key == dkey).first():

@@ -603,6 +603,34 @@ def test_admin_auctions_match_preview_notify_accept_index_and_do_not_cross_user(
     assert up_other.message.sent[-1] == "Busca não encontrada para este índice. Use /admin auctions wishlists para ver IDs e índices."
 
 
+def test_admin_auctions_match_wishlist_debug_shows_recent_candidates_without_matches(monkeypatch, db):
+    from app.models.user import User
+    from app.models.wishlist import Wishlist
+
+    owner = User(id=uuid.uuid4(), telegram_chat_id=990, username="dbg")
+    db.add(owner); db.flush()
+    w1 = Wishlist(user_id=owner.id, query="gol", is_active=True, include_auctions=True)
+    db.add(w1); db.commit()
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "match_auction_lots_for_wishlist", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        handlers_admin,
+        "debug_auction_lot_candidates_for_wishlist",
+        lambda *_a, **_k: [
+            {"title": "Gol 1.0", "source": "vip_auctions", "item_type": "car", "year": 2019, "current_bid": 10000, "updated_at": "2026-05-17T00:00:00+00:00", "passes_filters": False, "score": 0, "reject_reason": "filters_not_matched"},
+            {"title": "Gol Track", "source": "vip_auctions", "item_type": "car", "year": 2020, "current_bid": 12000, "updated_at": "2026-05-17T01:00:00+00:00", "passes_filters": True, "score": 0, "reject_reason": "text_score_zero"},
+        ],
+    )
+    up = _Update(chat_id=990)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", "1", "--debug")))
+    msg = up.message.sent[-1]
+    assert "Candidatos recentes:" in msg
+    assert "motivo=filters_not_matched" in msg
+    assert "motivo=text_score_zero" in msg
+
+
 def test_admin_auctions_notify_lock_guard(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
@@ -813,6 +841,21 @@ def test_admin_auctions_notify_run_confirm(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run", "--confirm")))
     assert "Alertas enviados: 1" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_run_renders_rejections(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+    async def _fake_job(*_a, **kwargs):
+        assert kwargs["dry_run"] is True
+        return {"wishlists_scanned": 1, "wishlists_with_matches": 0, "previews": 0, "sent": 0, "skipped_duplicate": 0, "skipped_no_match": 1, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 1, "skipped_missing_lot_updated_at": 0, "errors": 0, "rejections": [{"reason": "stale_lot", "title": "Lote X", "detail": "updated_at fora da janela 48h"}]}
+
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run")))
+    assert "Rejeições principais:" in up.message.sent[-1]
+    assert "stale_lot: Lote X" in up.message.sent[-1]
 
 
 def test_admin_auctions_notify_run_lock_guard(monkeypatch, db):

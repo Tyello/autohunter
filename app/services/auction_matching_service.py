@@ -201,6 +201,49 @@ def match_auction_lots_for_wishlist(
     return out[:limit]
 
 
+def debug_auction_lot_candidates_for_wishlist(
+    db: Session,
+    wishlist: Wishlist,
+    *,
+    source: str | None = None,
+    eligible_sources: set[str] | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    q = db.query(AuctionLot)
+    if source:
+        q = q.filter(AuctionLot.source == source)
+    if eligible_sources is not None:
+        q = q.filter(AuctionLot.source.in_(sorted(eligible_sources)))
+    lots = q.order_by(AuctionLot.updated_at.desc()).limit(max(20, limit * 8)).all()
+
+    rows: list[dict] = []
+    for lot in lots:
+        passes_filters = _wishlist_passes_on_lot(wishlist, lot)
+        score, reasons = _score_match(wishlist, lot)
+        if not passes_filters:
+            reject_reason = "filters_not_matched"
+        elif score <= 0:
+            reject_reason = "text_score_zero"
+        else:
+            reject_reason = "ok"
+        rows.append(
+            {
+                "source": lot.source,
+                "external_id": lot.external_id,
+                "title": lot.title,
+                "item_type": lot.item_type,
+                "year": lot.year,
+                "current_bid": lot.current_bid,
+                "updated_at": lot.updated_at,
+                "passes_filters": passes_filters,
+                "score": score,
+                "reasons": reasons,
+                "reject_reason": reject_reason,
+            }
+        )
+    return rows[: max(1, limit)]
+
+
 def match_auction_lots_for_all_wishlists(
     db: Session,
     source: str | None = None,

@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.models.app_kv import AppKV
+from app.models.auction_lot import AuctionLot
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.services.auction_lot_service import upsert_lot
@@ -289,3 +290,71 @@ def test_notify_job_summary_includes_category_skip_counters(db, monkeypatch):
     out = asyncio.run(run_auction_notification_job(db, bot=None, dry_run=True))
     assert out["skipped_item_type_not_allowed"] == 2
     assert out["skipped_missing_item_type"] == 1
+
+
+def test_rejection_reason_stale_lot(db, monkeypatch):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 0)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 1)
+    u = User(id=uuid.uuid4(), telegram_chat_id=9001, username="r1")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rr1", "title": "Honda Civic", "item_type": "car", "status": "open", "current_bid": 10, "url": "https://lot/rr1", "updated_at": datetime(2020, 1, 1, tzinfo=timezone.utc)})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id)
+    assert any(r["reason"] == "stale_lot" for r in out["rejections"])
+
+
+def test_rejection_reason_missing_updated_at(db, monkeypatch):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 0)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 1)
+    u = User(id=uuid.uuid4(), telegram_chat_id=9002, username="r2")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rr2", "title": "Honda Civic", "item_type": "car", "status": "open", "current_bid": 10, "url": "https://lot/rr2"})
+    db.commit()
+    monkeypatch.setattr(
+        "app.services.auction_notification_service._is_auction_match_notification_eligible",
+        lambda *_a, **_k: (False, "missing_lot_updated_at"),
+    )
+    out = build_auction_notifications_for_wishlist(db, w.id)
+    assert any(r["reason"] == "missing_lot_updated_at" for r in out["rejections"])
+
+
+def test_rejection_reason_score_below_min(db, monkeypatch):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 101)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 0)
+    u = User(id=uuid.uuid4(), telegram_chat_id=9003, username="r3")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rr3", "title": "Honda Civic", "item_type": "car", "status": "open", "current_bid": 10, "url": "https://lot/rr3"})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id)
+    assert any(r["reason"] == "score_below_min" for r in out["rejections"])
+
+
+def test_rejection_reason_item_type_not_allowed(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=9004, username="r4")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="moto", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rr4", "title": "Moto Honda", "item_type": "motorcycle", "status": "open", "current_bid": 10, "url": "https://lot/rr4"})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id)
+    assert any(r["reason"] == "item_type_not_allowed" for r in out["rejections"])
+
+
+def test_rejections_limited_to_five(db, monkeypatch):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 0)
+    monkeypatch.setattr(settings, "auction_notifications_max_lot_age_hours", 1)
+    u = User(id=uuid.uuid4(), telegram_chat_id=9005, username="r5")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    for i in range(8):
+        upsert_lot(db, {"source": "vip_auctions", "external_id": f"rr5-{i}", "title": "Honda Civic", "item_type": "car", "status": "open", "current_bid": 10, "url": f"https://lot/rr5-{i}", "updated_at": datetime(2020, 1, 1, tzinfo=timezone.utc)})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=3)
+    assert len(out["rejections"]) == 5
