@@ -76,6 +76,17 @@ def test_create_flow_query_text_groups_mixed_implicit_filters():
     assert "Quer incluir oportunidades de leilão nessa busca?" in text
 
 
+def test_create_flow_query_text_treats_ate_20000_as_price_not_year():
+    msg = _Message("touareg até 20000")
+    ctx = types.SimpleNamespace(user_data={})
+    asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=msg), ctx))
+    text = msg.sent[-1]["text"]
+    assert "Carro: touareg" in text
+    assert "Preço até R$ 20.000" in text
+    assert "Ano até 2000" not in text
+    assert "touareg 0" not in text
+
+
 def test_create_flow_query_text_parses_implicit_single_year():
     msg = _Message("a4 avant 2019")
     ctx = types.SimpleNamespace(user_data={})

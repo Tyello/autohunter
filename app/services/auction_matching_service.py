@@ -75,6 +75,18 @@ def sort_auction_matches_for_alerting(matches: list[AuctionWishlistMatch]) -> li
 
 
 _BAD_STATUSES = {"ended", "sold", "cancelled"}
+_GENERIC_SINGLE_TERM_TOKENS = {
+    "carro",
+    "carros",
+    "automatico",
+    "automatic",
+    "manual",
+    "completo",
+    "basico",
+    "flex",
+    "1.0",
+    "2.0",
+}
 
 
 def _lot_city_state(lot: AuctionLot) -> tuple[str | None, str | None]:
@@ -118,6 +130,12 @@ def _score_match(wishlist: Wishlist, lot: AuctionLot) -> tuple[int, list[str]]:
     if token_hits:
         score += min(60, token_hits * 18)
         reasons.append(f"título contém {token_hits} termo(s) da busca")
+        has_strong_text = True
+
+    non_generic_single_term = len(non_year_q) == 1 and non_year_q[0] not in _GENERIC_SINGLE_TERM_TOKENS
+    if non_generic_single_term and non_year_q[0] in title_tokens:
+        score = max(score, 60)
+        reasons.append("match forte de modelo/termo único")
         has_strong_text = True
 
     years = [int(t) for t in q_tokens if len(t) == 4 and t.isdigit()]

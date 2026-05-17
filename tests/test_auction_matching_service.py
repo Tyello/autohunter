@@ -13,7 +13,7 @@ from app.services.auction_matching_service import (
 
 
 def _mk_wishlist(db, query: str):
-    u = User(id=uuid.uuid4(), telegram_chat_id=70001, username="admin")
+    u = User(id=uuid.uuid4(), telegram_chat_id=70000 + (uuid.uuid4().int % 100000), username="admin")
     db.add(u)
     db.flush()
     w = Wishlist(user_id=u.id, query=query, is_active=True, include_auctions=True)
@@ -111,6 +111,37 @@ def test_debug_candidates_reports_ok(db):
     db.commit()
     out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
     assert any(x["reject_reason"] == "ok" for x in out)
+
+
+def test_single_model_term_gets_strong_score(db):
+    scenarios = [
+        ("touareg", "TOUAREG V8"),
+        ("kicks", "KICKS S CVT"),
+        ("ranger", "RANGER XL CD4 22C"),
+        ("civic", "Honda Civic EXL"),
+    ]
+    for idx, (query, title) in enumerate(scenarios, start=1):
+        w = _mk_wishlist(db, query)
+        upsert_lot(
+            db,
+            {"source": "vip_auctions", "external_id": f"strong-{idx}", "title": title, "status": "open", "current_bid": Decimal("10000")},
+        )
+        db.commit()
+        out = match_auction_lots_for_wishlist(db, w, source="vip_auctions", limit=5)
+        assert out, (query, title)
+        assert out[0].score >= 60, (query, title, out[0].score)
+
+
+def test_generic_single_terms_do_not_force_strong_match(db):
+    generic_cases = [("carro", "Honda Civic"), ("1.0", "HB20 1.0M")]
+    for idx, (query, title) in enumerate(generic_cases, start=1):
+        w = _mk_wishlist(db, query)
+        upsert_lot(db, {"source": "vip_auctions", "external_id": f"generic-{idx}", "title": title, "status": "open", "current_bid": Decimal("10000")})
+        db.commit()
+        out = debug_auction_lot_candidates_for_wishlist(db, w, source="vip_auctions", limit=10)
+        assert out
+        row = next(x for x in out if x["external_id"] == f"generic-{idx}")
+        assert "match forte de modelo/termo único" not in (row.get("reasons") or [])
 
 
 def test_debug_candidates_respects_eligible_sources(db):
