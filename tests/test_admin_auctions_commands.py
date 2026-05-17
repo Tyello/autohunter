@@ -975,3 +975,41 @@ def test_admin_auctions_readiness_non_admin_blocked(monkeypatch, db):
     up = _Update(chat_id=10)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "readiness")))
     assert "Sem permissão" in up.message.sent[-1]
+
+def test_admin_source_unified_handles_detached_after_commit(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+
+    class _DetachSessionWrap(_SessionWrap):
+        def __exit__(self, *_):
+            try:
+                self.db.expire_all()
+            finally:
+                self.db.close()
+            return False
+
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DetachSessionWrap(db))
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "enable")))
+    assert "✅ source=vip_auctions enabled=sim" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "user-enable")))
+    assert up.message.sent[-1] == "✅ source=vip_auctions enabled=sim user_eligible=sim"
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "disable")))
+    assert up.message.sent[-1] == "✅ source=vip_auctions enabled=não user_eligible=não"
+
+
+def test_admin_source_legacy_and_categories_paths_still_work(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "vip", "enable")))
+    assert "✅ source=vip_auctions enabled=sim" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "vip", "user-enable")))
+    assert up.message.sent[-1] == "✅ source=vip_auctions enabled=sim user_eligible=sim"
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "categories", "set", "car")))
+    assert up.message.sent[-1] == "✅ source=vip_auctions enabled=sim user_eligible=sim"
