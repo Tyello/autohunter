@@ -44,6 +44,15 @@ class _Update:
 
 
 class _Session:
+    def add(self, _obj):
+        return None
+
+    def commit(self):
+        return None
+
+    def refresh(self, _obj):
+        return None
+
     def __enter__(self):
         return self
 
@@ -327,3 +336,95 @@ def test_callback_menu_filters_flow_opens_selection_and_filter_screen(monkeypatc
     state = asyncio.run(handlers_core.cb_menu(_Update(q2), ctx))
     assert state == handlers_core.MENU_FILTER_SELECT_VALUE
     assert "⚙️ Ajustar filtros" in q2.edits[-1]
+
+
+def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
+    _patch_user(monkeypatch)
+    wl = types.SimpleNamespace(id="w1", query="civic", include_auctions=False)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [wl])
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    ctx = types.SimpleNamespace(user_data={})
+
+    q1 = _CallbackQuery("WL:FILTERS_ID:w1")
+    state1 = asyncio.run(handlers_core.cb_menu(_Update(q1), ctx))
+    assert state1 == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "Leilões: desativado" in q1.edits[-1]
+    callbacks_1 = [b.callback_data for row in q1.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    assert "WL:FILTER:AUCTIONS:TOGGLE" in callbacks_1
+
+    q2 = _CallbackQuery("WL:FILTER:AUCTIONS:TOGGLE")
+    state2 = asyncio.run(handlers_core.cb_menu(_Update(q2), ctx))
+    assert state2 == handlers_core.MENU_FILTER_SELECT_VALUE
+    callbacks_2 = [b.callback_data for row in q2.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    assert "WL:AUCTIONS:ENABLE" in callbacks_2
+    assert "WL:FILTERS_ID:w1" in callbacks_2
+
+    q3 = _CallbackQuery("WL:AUCTIONS:ENABLE")
+    state3 = asyncio.run(handlers_core.cb_menu(_Update(q3), ctx))
+    assert state3 == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert wl.include_auctions is True
+    assert "✅ Leilões ativados para esta busca." in q3.edits[-1]
+    assert "Leilões: ativado" in q3.edits[-1]
+
+    q4 = _CallbackQuery("WL:FILTER:AUCTIONS:TOGGLE")
+    asyncio.run(handlers_core.cb_menu(_Update(q4), ctx))
+    callbacks_4 = [b.callback_data for row in q4.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    assert "WL:AUCTIONS:DISABLE" in callbacks_4
+
+    q5 = _CallbackQuery("WL:AUCTIONS:DISABLE")
+    state5 = asyncio.run(handlers_core.cb_menu(_Update(q5), ctx))
+    assert state5 == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert wl.include_auctions is False
+    assert "✅ Leilões desativados para esta busca." in q5.edits[-1]
+    assert "Leilões: desativado" in q5.edits[-1]
+
+
+def test_menu_filter_auctions_back_to_filters_callback(monkeypatch):
+    _patch_user(monkeypatch)
+    wl = types.SimpleNamespace(id="w9", query="corolla", include_auctions=True)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [wl])
+    monkeypatch.setattr(handlers_core, "list_filters", lambda *_: [])
+    ctx = types.SimpleNamespace(user_data={"menu_filter_wishlist_id": "w9"})
+
+    q1 = _CallbackQuery("WL:FILTER:AUCTIONS:TOGGLE")
+    asyncio.run(handlers_core.cb_menu(_Update(q1), ctx))
+    callbacks = [b.callback_data for row in q1.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    assert "WL:FILTERS_ID:w9" in callbacks
+
+    q2 = _CallbackQuery("WL:FILTERS_ID:w9")
+    state = asyncio.run(handlers_core.cb_menu(_Update(q2), ctx))
+    assert state == handlers_core.MENU_FILTER_SELECT_VALUE
+    assert "⚙️ Ajustar filtros" in q2.edits[-1]
+    assert "Leilões: ativado" in q2.edits[-1]
+
+
+def test_menu_filter_conversation_routes_wl_callbacks():
+    conv = handlers_core.menu_filter_conversation()
+    handlers = conv.states[handlers_core.MENU_FILTER_SELECT_VALUE]
+    wl_handler = handlers[0]
+    pattern = wl_handler.pattern.pattern
+    assert "WL:FILTER:AUCTIONS:TOGGLE" in pattern
+    assert "WL:AUCTIONS:(?:ENABLE|DISABLE)" in pattern
+    assert "WL:FILTERS_ID:[^:]+" in pattern
+
+
+def test_menu_callback_data_have_known_handlers():
+    wl = types.SimpleNamespace(include_auctions=False)
+    _, create_markup = handlers_core._build_create_wishlist_summary_screen("civic", [], include_auctions=False)
+    markups = [
+        handlers_core._menu_keyboard(),
+        handlers_core._build_filters_adjust_keyboard(wl),
+        handlers_core._draft_filters_menu_markup([]),
+        create_markup,
+    ]
+
+    callbacks = [btn.callback_data for markup in markups for row in markup.inline_keyboard for btn in row if btn.callback_data]
+    allowed_prefixes = ("MENU:", "WL:", "FILTER:", "CWL:", "CWLF:", "UPGRADE", "TRACK:")
+    assert callbacks
+    for cb in callbacks:
+        assert cb.startswith(allowed_prefixes), cb
+
+    conv_pattern = handlers_core.menu_filter_conversation().states[handlers_core.MENU_FILTER_SELECT_VALUE][0].pattern.pattern
+    assert "WL:FILTER:AUCTIONS:TOGGLE" in conv_pattern
+    assert "WL:AUCTIONS:(?:ENABLE|DISABLE)" in conv_pattern
+    assert "WL:FILTERS_ID:[^:]+" in conv_pattern

@@ -458,13 +458,16 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wl.include_auctions = enable
             db.add(wl)
             db.commit()
-        msg = (
-            "Leilões ativados para esta busca.\n\nVocê poderá receber oportunidades de leilão quando houver fonte elegível e lote com dados mínimos, como lance atual ou inicial.\n\nLembrete: lance não é valor final. Verifique edital, taxas, comissão, documentação e vistoria."
-            if enable else
-            "Leilões desativados para esta busca. Ela continuará monitorando anúncios tradicionais."
-        )
-        await _safe_edit_or_send(update, msg)
-        return ConversationHandler.END
+            db.refresh(wl)
+            fs = list_filters(db, wl.id)
+            feedback = (
+                "✅ Leilões ativados para esta busca.\n\nLembrete: lance não é valor final. Verifique edital, taxas, comissão, documentação e vistoria."
+                if enable
+                else "✅ Leilões desativados para esta busca."
+            )
+            text = f"{feedback}\n\n{_build_filters_adjust_text(wl, fs)}"
+        await _safe_edit_or_send(update, text, reply_markup=_build_filters_adjust_keyboard(wl))
+        return MENU_FILTER_SELECT_VALUE
     if data == "WL:BACK":
         await _safe_edit_or_send(update, "🎯 Garagem Alvo\n\nO que você quer fazer?", reply_markup=_main_menu_markup_for_user(update))
         return
@@ -1115,6 +1118,10 @@ def menu_filter_conversation() -> ConversationHandler:
         ],
         states={
             MENU_FILTER_SELECT_VALUE: [
+                CallbackQueryHandler(
+                    cb_menu,
+                    pattern=r"^(WL:FILTER:AUCTIONS:TOGGLE|WL:AUCTIONS:(?:ENABLE|DISABLE)|WL:FILTERS_ID:[^:]+|WL:FILTERS_MENU|MENU:WISHLISTS)$",
+                ),
                 CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|ACTION:(?:add|list)|RM:[^:]+:\d+|BACK|CANCEL)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_filter_on_value),
             ],
