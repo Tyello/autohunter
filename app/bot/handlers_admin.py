@@ -2090,9 +2090,14 @@ async def _admin_source_unified(update: Update, args: List[str]):
             cfg.is_enabled = action == "enable"
             if action == "disable":
                 cfg.user_eligible = False
+            snap = {
+                "source": cfg.source,
+                "enabled": bool(cfg.is_enabled),
+                "user_eligible": bool(cfg.user_eligible),
+            }
             db.add(cfg)
             db.commit()
-        await update.message.reply_text(f"✅ source={mapped} enabled={'sim' if cfg.is_enabled else 'não'} user_eligible={'sim' if cfg.user_eligible else 'não'}")
+        await update.message.reply_text(f"✅ source={snap['source']} enabled={'sim' if snap['enabled'] else 'não'} user_eligible={'sim' if snap['user_eligible'] else 'não'}")
         return
     if action in {"enable", "disable"}:
         return await _admin_sources_set_simple(update, mapped, "is_enabled", "true" if action == "enable" else "false")
@@ -2110,9 +2115,14 @@ async def _admin_source_unified(update: Update, args: List[str]):
                 await update.message.reply_text("Não é possível user-enable com source disabled.")
                 return
             cfg.user_eligible = action == "user-enable"
+            snap = {
+                "source": cfg.source,
+                "enabled": bool(cfg.is_enabled),
+                "user_eligible": bool(cfg.user_eligible),
+            }
             db.add(cfg)
             db.commit()
-        await update.message.reply_text(f"✅ source={mapped} enabled={'sim' if cfg.is_enabled else 'não'} user_eligible={'sim' if cfg.user_eligible else 'não'}")
+        await update.message.reply_text(f"✅ source={snap['source']} enabled={'sim' if snap['enabled'] else 'não'} user_eligible={'sim' if snap['user_eligible'] else 'não'}")
         return
     if action == "categories":
         return await _admin_auctions(update, ["source-config", mapped, "categories", *args[2:]])
