@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import timezone
 
-from app.core.settings import settings
 from app.models.system_log import SystemLog
+from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.auction_source_config_service import list_user_eligible_auction_sources
 
 _STATUS_EVENTS = {
@@ -15,15 +15,18 @@ _STATUS_EVENTS = {
 
 
 def _base_status(db) -> dict:
+    cfg = get_auction_notification_runtime_settings(db)
     return {
-        "enabled": bool(getattr(settings, "auction_notifications_enabled", False)),
-        "dry_run": bool(getattr(settings, "auction_notifications_dry_run", True)),
-        "scheduler_minutes": int(getattr(settings, "auction_notifications_scheduler_minutes", 60) or 60),
-        "max_wishlists": int(getattr(settings, "auction_notifications_max_wishlists_per_run", 20) or 20),
-        "max_per_wishlist": int(getattr(settings, "auction_notifications_max_per_wishlist", 1) or 1),
-        "max_per_user_per_day": int(getattr(settings, "auction_notifications_max_per_user_per_day", 3) or 3),
-        "min_score": int(getattr(settings, "auction_notifications_min_score_safe", 60) or 60),
-        "max_lot_age_hours": int(getattr(settings, "auction_notifications_max_lot_age_hours_safe", 48) or 0),
+        "enabled": bool(cfg["enabled"]),
+        "dry_run": bool(cfg["dry_run"]),
+        "scheduler_minutes": int(cfg["scheduler_minutes"]),
+        "max_wishlists": int(cfg["max_wishlists_per_run"]),
+        "max_per_wishlist": int(cfg["max_per_wishlist"]),
+        "max_per_user_per_day": int(cfg["max_per_user_per_day"]),
+        "min_score": int(cfg["min_score"]),
+        "max_lot_age_hours": int(cfg["max_lot_age_hours"]),
+        "source": cfg.get("source", {}),
+        "kill_switch": bool(cfg.get("kill_switch", False)),
         "eligible_sources": sorted(list_user_eligible_auction_sources(db)),
         "last_run_at": "-",
         "last_status": "unknown",

@@ -152,6 +152,7 @@ class Settings(BaseSettings):
     auction_notifications_scheduler_minutes: int = 60
     auction_notifications_min_score: int = 60
     auction_notifications_max_lot_age_hours: int = 48
+    auction_notifications_kill_switch: bool = False
 
     # Logging
     log_level: str = "info"

@@ -4,26 +4,28 @@ import asyncio
 import threading
 from time import perf_counter
 
-from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.services.auction_notification_job_service import run_auction_notification_job
+from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.system_logs_service import log
 
 _AUCTION_NOTIFICATION_SCHEDULER_LOCK = threading.Lock()
 
 
-def _base_payload() -> dict:
+def _base_payload(db) -> dict:
+    cfg = get_auction_notification_runtime_settings(db)
     return {
-        "enabled": bool(getattr(settings, "auction_notifications_enabled", False)),
-        "dry_run": bool(getattr(settings, "auction_notifications_dry_run", True)),
-        "max_wishlists": int(getattr(settings, "auction_notifications_max_wishlists_per_run", 20) or 20),
-        "max_per_wishlist": int(getattr(settings, "auction_notifications_max_per_wishlist", 1) or 1),
-        "max_per_user_per_day": int(getattr(settings, "auction_notifications_max_per_user_per_day", 3) or 3),
+        "enabled": bool(cfg["enabled"]),
+        "dry_run": bool(cfg["dry_run"]),
+        "max_wishlists": int(cfg["max_wishlists_per_run"]),
+        "max_per_wishlist": int(cfg["max_per_wishlist"]),
+        "max_per_user_per_day": int(cfg["max_per_user_per_day"]),
+        "kill_switch": bool(cfg.get("kill_switch", False)),
     }
 
 
 def run_scheduled_auction_notification_job(db, bot=None) -> dict:
-    payload = _base_payload()
+    payload = _base_payload(db)
     t0 = perf_counter()
     if not _AUCTION_NOTIFICATION_SCHEDULER_LOCK.acquire(blocking=False):
         out = {"skipped": True, "reason": "already_running", "sent": 0}

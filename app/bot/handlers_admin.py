@@ -67,6 +67,12 @@ from app.services.auction_notification_job_service import run_auction_notificati
 from app.services.auction_notification_status_service import build_auction_notification_status
 from app.services.auction_notification_samples_service import build_auction_notification_samples
 from app.services.auction_notification_readiness_service import build_auction_notification_readiness
+from app.services.auction_notification_settings_service import (
+    get_auction_notification_runtime_settings,
+    set_runtime_setting,
+    reset_runtime_setting,
+    reset_all_runtime_settings,
+)
 from app.services.auction_preview_service import (
     build_auction_alert_previews_for_enabled_wishlists,
     build_auction_alert_previews_for_wishlist,
@@ -126,6 +132,25 @@ def _get_int_setting(attr: Optional[str], default: Optional[int] = None) -> Opti
         return int(v) if v is not None else None
     except Exception:
         return default
+
+
+_AUCTION_SETTINGS_LIMITS = {
+    "scheduler_minutes": (15, 1440),
+    "max_wishlists_per_run": (1, 200),
+    "max_per_wishlist": (1, 3),
+    "max_per_user_per_day": (1, 10),
+    "min_score": (0, 100),
+    "max_lot_age_hours": (0, 720),
+}
+
+
+def _parse_admin_bool(raw: str) -> bool | None:
+    v = str(raw or "").strip().lower()
+    if v in {"true", "1", "sim", "yes", "on"}:
+        return True
+    if v in {"false", "0", "nao", "não", "no", "off"}:
+        return False
+    return None
 
 def _short(s: Optional[str], n: int = 140) -> str:
     s = (s or "").strip()
@@ -674,8 +699,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 return
             dry_run = not confirm
             source = None
-            limit_wishlists = settings.auction_notifications_max_wishlists_per_run
-            limit_per_wishlist = settings.auction_notifications_max_per_wishlist
+            cfg = get_auction_notification_runtime_settings(db)
+            limit_wishlists = cfg["max_wishlists_per_run"]
+            limit_per_wishlist = cfg["max_per_wishlist"]
             extra = args[1:]
             i = 0
             while i < len(extra):
@@ -717,7 +743,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     dry_run=dry_run,
                     max_wishlists=limit_wishlists,
                     max_per_wishlist=limit_per_wishlist,
-                    max_per_user_per_day=settings.auction_notifications_max_per_user_per_day,
+                    max_per_user_per_day=cfg["max_per_user_per_day"],
                     source=source,
                 )
             lines = [
@@ -743,6 +769,87 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"Sem chat id: {result.get('skipped_missing_chat_id', 0)}",
                 f"Limite diário: {result.get('skipped_daily_limit', 0)}",
                 f"Erros: {result.get('errors', 0)}",
+            ])
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        if sub == "settings":
+            cfg = get_auction_notification_runtime_settings(db)
+            extra = args[1:]
+            actor = str(getattr(getattr(update, "effective_chat", None), "id", "-"))
+            if extra and extra[0].lower() == "set":
+                if len(extra) < 3:
+                    await update.message.reply_text("Use: /admin auctions settings set <key> <value>")
+                    return
+                key = extra[1].strip().lower()
+                raw_value = extra[2].strip()
+                if key in {"enabled", "dry_run"}:
+                    parsed = _parse_admin_bool(raw_value)
+                    if parsed is None:
+                        await update.message.reply_text("Valor inválido. Use true|false.")
+                        return
+                    set_runtime_setting(db, key, parsed, updated_by=actor)
+                elif key in _AUCTION_SETTINGS_LIMITS:
+                    try:
+                        parsed_int = int(raw_value)
+                    except Exception:
+                        await update.message.reply_text("Valor inválido. Use inteiro.")
+                        return
+                    low, high = _AUCTION_SETTINGS_LIMITS[key]
+                    if parsed_int < low or parsed_int > high:
+                        await update.message.reply_text(f"Valor fora da faixa para {key}: {low}..{high}.")
+                        return
+                    set_runtime_setting(db, key, parsed_int, updated_by=actor)
+                else:
+                    await update.message.reply_text("Chave inválida.")
+                    return
+                cfg = get_auction_notification_runtime_settings(db)
+            elif extra and extra[0].lower() == "reset":
+                if len(extra) < 2:
+                    await update.message.reply_text("Use: /admin auctions settings reset <key>")
+                    return
+                key = extra[1].strip().lower()
+                if key not in {"enabled", "dry_run", *list(_AUCTION_SETTINGS_LIMITS.keys())}:
+                    await update.message.reply_text("Chave inválida para reset.")
+                    return
+                reset_runtime_setting(db, key, updated_by=actor)
+                cfg = get_auction_notification_runtime_settings(db)
+            elif extra and extra[0].lower() == "reset-all":
+                reset_all_runtime_settings(db)
+                cfg = get_auction_notification_runtime_settings(db)
+
+            lines = [
+                "⚙️ Admin Leilões — settings",
+                "",
+                "Efetivo:",
+                f"- enabled: {'sim' if cfg['enabled'] else 'não'}",
+                f"- dry_run: {'sim' if cfg['dry_run'] else 'não'}",
+                f"- scheduler: {cfg['scheduler_minutes']} min",
+                f"- max buscas/run: {cfg['max_wishlists_per_run']}",
+                f"- max por busca: {cfg['max_per_wishlist']}",
+                f"- max usuário/dia: {cfg['max_per_user_per_day']}",
+                f"- score mínimo: {cfg['min_score']}",
+                f"- idade máxima lote: {cfg['max_lot_age_hours']}h",
+                "",
+                "Origem:",
+            ]
+            for key in ["enabled", "dry_run", "scheduler_minutes", "max_wishlists_per_run", "max_per_wishlist", "max_per_user_per_day", "min_score", "max_lot_age_hours"]:
+                lines.append(f"- {key}: {cfg.get('source', {}).get(key, '-')}")
+            if cfg.get("kill_switch"):
+                lines.extend(["", "⚠️ kill_switch ativo via env (enabled efetivo forçado para não)."])
+            lines.extend([
+                "",
+                "Comandos:",
+                "/admin auctions settings set enabled true|false",
+                "/admin auctions settings set dry_run true|false",
+                "/admin auctions settings set scheduler_minutes 60",
+                "/admin auctions settings set min_score 60",
+                "/admin auctions settings set max_lot_age_hours 48",
+                "/admin auctions settings set max_wishlists_per_run 20",
+                "/admin auctions settings set max_per_wishlist 1",
+                "/admin auctions settings set max_per_user_per_day 3",
+                "/admin auctions settings reset <key>",
+                "/admin auctions settings reset-all",
             ])
             await update.message.reply_text("\n".join(lines))
             return
@@ -798,7 +905,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
 
         if sub == "notify-status":
             status = build_auction_notification_status(db)
-            if not status["enabled"]:
+            if status.get("kill_switch"):
+                health_line = "kill_switch ativo via env. Envio real bloqueado."
+            elif not status["enabled"]:
                 health_line = "Envio automático desligado. Seguro para produção."
             elif status["dry_run"]:
                 health_line = "Simulação automática ativa. Nenhum alerta real é enviado."
@@ -1138,7 +1247,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples\n{_render_user_eligible_auction_sources_hint(db)}"
+        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples\n{_render_user_eligible_auction_sources_hint(db)}"
     )
 
 
