@@ -8,6 +8,7 @@ from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
 from app.models.user import User
 from app.services import auction_notification_readiness_service as readiness_service
+from app.services.app_kv_service import set_kv
 from app.services.auction_notification_readiness_service import build_auction_notification_readiness
 
 
@@ -122,3 +123,20 @@ def test_readiness_allowed_categories_safe_warn(db):
     out = build_auction_notification_readiness(db)
     check = next(c for c in out["checks"] if c["key"] == "auction_allowed_categories_safe")
     assert check["status"] == "warn"
+
+
+def test_readiness_uses_runtime_min_score_and_age(db):
+    _seed_source(db, eligible=True)
+    set_kv(db, "auction_notification_settings", {"min_score": 40, "max_lot_age_hours": 96, "max_per_user_per_day": 5})
+    out = build_auction_notification_readiness(db)
+    quality = next(c for c in out["checks"] if c["key"] == "quality_gates")
+    assert quality["status"] == "warn"
+    assert "min_score < 50" in quality["detail"]
+
+
+def test_readiness_shows_kill_switch(db, monkeypatch):
+    _seed_source(db, eligible=True)
+    monkeypatch.setattr("app.services.auction_notification_settings_service.settings.auction_notifications_kill_switch", True)
+    out = build_auction_notification_readiness(db)
+    ks = next(c for c in out["checks"] if c["key"] == "kill_switch")
+    assert ks["status"] == "warn"

@@ -9,6 +9,7 @@ from app.services.auction_notification_service import build_auction_notification
 from app.services.auction_notification_job_service import run_auction_notification_job
 from app.models.source_config import SourceConfig
 from app.core.settings import settings
+from app.services.app_kv_service import set_kv
 
 
 import pytest
@@ -201,6 +202,44 @@ def test_notify_quality_message_for_stale_lot_with_bid(monkeypatch, db):
     assert out["sent"] == 0
     assert out["skipped_stale_lot"] >= 1
     assert "após filtros de qualidade" in out["messages"][0]
+
+
+def test_runtime_min_score_overrides_env(db, monkeypatch):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 60)
+    u = User(id=uuid.uuid4(), telegram_chat_id=3001, username="runtime-score")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rs1", "title": "Honda Civic", "status": "open", "item_type": "car", "current_bid": 1000, "url": "https://lot/rs1"})
+    db.commit()
+    set_kv(db, "auction_notification_settings", {"min_score": 90})
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert out["sent"] == 0
+    assert out["skipped_score_below_min"] >= 1
+
+
+def test_runtime_max_lot_age_zero_disables_age_filter(db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=3002, username="runtime-age")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "ra1", "title": "Honda Civic", "status": "open", "item_type": "car", "initial_bid": 1000, "url": "https://lot/ra1", "updated_at": datetime(2020,1,1,tzinfo=timezone.utc)})
+    db.commit()
+    set_kv(db, "auction_notification_settings", {"max_lot_age_hours": 0, "min_score": 0})
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert out["sent"] == 1
+
+
+def test_runtime_fallback_to_env_when_no_appkv(db, monkeypatch):
+    monkeypatch.setattr(settings, "auction_notifications_min_score", 99)
+    u = User(id=uuid.uuid4(), telegram_chat_id=3003, username="runtime-fallback")
+    db.add(u); db.flush()
+    w = Wishlist(user_id=u.id, query="honda civic", is_active=True, include_auctions=True)
+    db.add(w); db.flush()
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "rf1", "title": "Honda Civic", "status": "open", "item_type": "car", "current_bid": 1000, "url": "https://lot/rf1"})
+    db.commit()
+    out = build_auction_notifications_for_wishlist(db, w.id, limit=1)
+    assert out["sent"] == 0
 
 
 def test_category_gate_blocks_non_car_and_missing_type_by_default(db):

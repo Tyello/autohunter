@@ -788,6 +788,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     if parsed is None:
                         await update.message.reply_text("Valor inválido. Use true|false.")
                         return
+                    if key == "dry_run" and parsed is False:
+                        await update.message.reply_text("Envio real automático ainda não é permitido por este comando.")
+                        return
                     set_runtime_setting(db, key, parsed, updated_by=actor)
                 elif key in _AUCTION_SETTINGS_LIMITS:
                     try:
