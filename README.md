@@ -1,41 +1,59 @@
 # Garagem Alvo
 
-Garagem Alvo é a marca pública do produto.
-AutoHunter é o nome interno/técnico do runtime e deste repositório.
+Garagem Alvo é a marca pública do produto. AutoHunter é o nome interno/técnico do runtime e deste repositório.
 
-Garagem Alvo é uma plataforma **Telegram-first** para entusiastas monitorarem anúncios de carros especiais, versões raras e boas bases de projeto/preparação.
+Garagem Alvo é uma plataforma **Telegram-first** para entusiastas monitorarem oportunidades automotivas: anúncios tradicionais, carros especiais, versões raras, boas bases de projeto e, no piloto atual, oportunidades em leilão com opt-in por busca.
 
 > Produto principal hoje: bot no Telegram + runtime contínuo (scheduler, filas, workers, matching e envio de notificações).
 >
-> A API FastAPI existe como superfície **auxiliar/operacional/integrativa** (healthchecks, listagem simples e fluxo Facebook Agent), não como jornada principal do usuário final.
+> A API FastAPI existe como superfície **auxiliar/operacional/integrativa** (healthchecks, listagem simples e fluxos auxiliares), não como jornada principal do usuário final.
 
 ## O que o produto é hoje
 
-- Usuário final cria e gerencia wishlists pelo Telegram.
-- O sistema roda continuamente para monitorar fontes e encontrar anúncios novos.
-- Listings são normalizados, deduplicados e avaliados por matching.
-- Notificações são enfileiradas e enviadas no Telegram.
-- Há trilha operacional: backoff, monitoramento admin, health e digest.
+- Usuário final cria e gerencia buscas/wishlists pelo Telegram.
+- O sistema roda continuamente para monitorar fontes e encontrar oportunidades novas.
+- Listings tradicionais são normalizados, deduplicados, avaliados por matching e enviados por Telegram.
+- Leilões existem em piloto controlado: o usuário escolhe por busca se aceita leilões, mas sources, categorias, scheduler e limites são controlados por admin.
+- Há trilha operacional: source configs, backoff, monitoramento admin, health, readiness, samples e digest.
 
-Fluxo resumido (runtime):
+Fluxo resumido (classified runtime):
 
 `wishlist -> scheduler tick -> scrape_jobs -> workers http/browser -> scrape+normalização+ingestão -> dedupe -> matching -> notifications -> sender Telegram`
+
+Fluxo resumido (auction runtime):
+
+`wishlist com include_auctions -> auction_lots -> source_configs + categorias -> matching -> gates de notificação -> dry-run/samples -> notify controlado`
 
 ## Superfícies do sistema
 
 - **Principal (produto):** Telegram (`app/bot/`).
 - **Núcleo operacional:** scheduler + workers + serviços (`app/scheduler/`, `app/services/`).
+- **Sources tradicionais:** plugins em `app/sources/` e scrapers/adapters relacionados.
+- **Sources de leilão:** registry técnico em `app/sources/auctions/` e dados em `auction_lots`.
 - **Auxiliar:** API FastAPI (`app/main.py`, `app/web/`).
 
-## Estado das sources (importante)
+## Configuração operacional
 
-As fontes implementadas ficam em `app/sources/builtins.py`, mas o estado efetivo de operação (enabled, cadência, backoff, browser fallback etc.) é **DB-driven** por `source_configs` e `source_states`.
+O estado efetivo de operação é runtime/DB-driven:
 
-Ou seja: “fonte ativa” depende do banco/runtime atual, não só de flag em documento.
+- `source_configs`: habilita/desabilita sources, cadência, backoff, proxy/browser flags, `source_type`, `user_eligible`, `status` e `extra`.
+- `source_states`: saúde/backoff/últimos estados das sources tradicionais.
+- `AppKV`: configurações runtime de notificações de leilão e amostras de dry-run.
+- `.env`: fallback seguro, bootstrapping e kill switches; não deve ser a única superfície operacional para knobs de produto.
+
+## Leilões no estado atual
+
+- Usuário final decide apenas **se aceita leilões por busca** (`include_auctions=true|false`).
+- Admin decide quais sources de leilão são elegíveis e quais categorias podem chegar ao usuário.
+- No piloto, apenas `car` fica permitido por padrão; motos, caminhões/pesados, imóveis e outros ficam bloqueados para notificação.
+- Notificações automáticas reais de leilão continuam protegidas: `dry_run=false` não é liberado via comando admin nesta fase.
+- O caminho operacional recomendado é validar com `/admin auctions readiness`, `/admin auctions notify-status` e `/admin auctions notify-samples`.
 
 ## Leitura recomendada
 
 - [`AGENTS.md`](AGENTS.md) — mapa mental curto para pessoas técnicas e IAs.
 - [`docs/PROJECT_GUIDELINE.md`](docs/PROJECT_GUIDELINE.md) — documentação viva do runtime atual.
+- [`docs/AUCTION_RUNTIME.md`](docs/AUCTION_RUNTIME.md) — guia operacional específico de leilões.
+- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md) — runbook operacional curto.
 - [`docs/LEGACY_INVENTORY.md`](docs/LEGACY_INVENTORY.md) — inventário de legado/compatibilidade e risco de remoção.
-- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md) — runbook operacional curto (saúde, diagnóstico, recovery).
+- [`docs/BACKUP_RESTORE.md`](docs/BACKUP_RESTORE.md) — backup/restore operacional mínimo.
