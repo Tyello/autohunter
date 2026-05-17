@@ -318,7 +318,10 @@ def start_scheduler() -> BackgroundScheduler:
 
     from app.scheduler.sender_job import job_send_notifications
     from app.scheduler.auction_notification_job import job_scheduled_auction_notification
+    from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
     from app.bot.sender import telegram_sender
+    with SessionLocal() as db:
+        auction_cfg = get_auction_notification_runtime_settings(db)
     sched.add_job(
         job_send_notifications,
         "interval",
@@ -330,7 +333,7 @@ def start_scheduler() -> BackgroundScheduler:
     sched.add_job(
         lambda: job_scheduled_auction_notification(bot=telegram_sender),
         "interval",
-        minutes=max(15, int(getattr(settings, "auction_notifications_scheduler_minutes", 60) or 60)),
+        minutes=max(15, int(auction_cfg.get("scheduler_minutes", 60) or 60)),
         id="auction_notification_scheduler_job",
         replace_existing=True,
         executor="sender",

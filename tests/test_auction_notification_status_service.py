@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.services.app_kv_service import set_kv
 from app.models.system_log import SystemLog
 from app.services.auction_notification_status_service import build_auction_notification_status
 
@@ -80,3 +81,11 @@ def test_status_reads_new_skip_counters(db):
     out = build_auction_notification_status(db)
     assert out["last_skipped_score_below_min"] == 2
     assert out["last_skipped_stale_lot"] == 3
+
+
+def test_status_exposes_runtime_source_and_kill_switch(db, monkeypatch):
+    set_kv(db, "auction_notification_settings", {"dry_run": True})
+    monkeypatch.setattr("app.services.auction_notification_settings_service.settings.auction_notifications_kill_switch", True)
+    out = build_auction_notification_status(db)
+    assert out["source"]["dry_run"] == "runtime"
+    assert out["kill_switch"] is True

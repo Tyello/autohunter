@@ -10,6 +10,7 @@ from app.models.auction_lot import AuctionLot
 from app.models.source_config import SourceConfig
 from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
+from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.auction_source_categories_service import get_auction_allowed_item_types
 
 _SCHEDULER_EVENTS = (
@@ -24,15 +25,19 @@ def _check(key: str, status: str, label: str, detail: str) -> dict:
 
 
 def build_auction_notification_readiness(db) -> dict:
-    enabled = bool(getattr(settings, "auction_notifications_enabled", False))
-    dry_run = bool(getattr(settings, "auction_notifications_dry_run", True))
-    min_score = int(getattr(settings, "auction_notifications_min_score_safe", 60) or 60)
-    max_lot_age_hours = int(getattr(settings, "auction_notifications_max_lot_age_hours_safe", 48) or 0)
-    max_per_user_per_day = int(getattr(settings, "auction_notifications_max_per_user_per_day", 3) or 3)
-    max_per_wishlist = int(getattr(settings, "auction_notifications_max_per_wishlist", 1) or 1)
-    max_wishlists = int(getattr(settings, "auction_notifications_max_wishlists_per_run", 20) or 20)
+    cfg = get_auction_notification_runtime_settings(db)
+    enabled = bool(cfg["enabled"])
+    dry_run = bool(cfg["dry_run"])
+    min_score = int(cfg["min_score"])
+    max_lot_age_hours = int(cfg["max_lot_age_hours"])
+    max_per_user_per_day = int(cfg["max_per_user_per_day"])
+    max_per_wishlist = int(cfg["max_per_wishlist"])
+    max_wishlists = int(cfg["max_wishlists_per_run"])
 
     checks: list[dict] = []
+
+    if cfg.get("kill_switch"):
+        checks.append(_check("kill_switch", "warn", "Kill switch via env", "kill_switch ativo via env; enabled efetivo forçado para false."))
 
     if enabled and not dry_run:
         checks.append(_check("safe_config", "fail", "Envio automático real desligado", "AUCTION_NOTIFICATIONS_ENABLED=true e AUCTION_NOTIFICATIONS_DRY_RUN=false"))

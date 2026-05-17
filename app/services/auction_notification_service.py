@@ -7,11 +7,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.bot.renderers import render_auction_alert
-from app.core.settings import settings
 from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.user import User
 from app.models.wishlist import Wishlist
+from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.auction_source_categories_service import is_auction_item_type_allowed, normalize_item_type
 from app.services.auction_matching_service import _BAD_STATUSES, match_auction_lots_for_wishlist, sort_auction_matches_for_alerting
 
@@ -119,8 +119,9 @@ def build_auction_notifications_for_wishlist(
         return out
 
     want = _normalize_limit(limit)
-    min_score = settings.auction_notifications_min_score_safe
-    max_age_hours = settings.auction_notifications_max_lot_age_hours_safe
+    runtime_cfg = get_auction_notification_runtime_settings(db)
+    min_score = int(runtime_cfg["min_score"])
+    max_age_hours = int(runtime_cfg["max_lot_age_hours"])
     for m in matches:
         if out["sent"] >= want:
             break

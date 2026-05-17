@@ -238,6 +238,25 @@ def test_admin_auctions_match_variants(monkeypatch, db):
 def test_admin_auctions_source_invalid_shows_registry_hint(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+
+def test_admin_auctions_settings_blocks_dry_run_false(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "settings", "set", "dry_run", "false")))
+    assert "ainda não é permitido" in up.message.sent[-1]
+    row = db.query(AppKV).filter(AppKV.key == "auction_notification_settings").first()
+    assert not row or row.value.get("dry_run") is not False
+
+
+def test_admin_auctions_settings_allows_dry_run_true(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "settings", "set", "dry_run", "true")))
+    row = db.query(AppKV).filter(AppKV.key == "auction_notification_settings").first()
+    assert row and row.value.get("dry_run") is True
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "invalida")))
     assert up.message.sent[-1] == "Source de leilão não suportada. Use: vip|mega|win|sodre|superbid|copart"
