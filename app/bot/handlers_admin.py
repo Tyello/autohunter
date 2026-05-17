@@ -40,7 +40,7 @@ from app.services.source_operational_policy import (
     should_include_in_critical_stale,
     source_operational_hint,
 )
-from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
+from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config, invalidate_source_config_cache
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
 from app.services.wishlist_tokens_service import extract_tokens
@@ -588,7 +588,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             elif action == "user-disable":
                 cfg.user_eligible = False
             elif action == "categories":
-                extra = cfg.extra or {}
+                extra = dict(cfg.extra or {})
                 if len(args) == 3:
                     allowed = sorted(get_auction_allowed_item_types(db, source))
                     await update.message.reply_text(f"source={source} categorias={','.join(allowed)}")
@@ -613,6 +613,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     return
                 extra["allowed_item_types"] = sorted(cur)
                 cfg.extra = extra
+                invalidate_source_config_cache(source)
             else:
                 await update.message.reply_text("Ação inválida.")
                 return
@@ -1966,11 +1967,29 @@ async def _admin_source_unified(update: Update, args: List[str]):
     src = args[0].strip().lower()
     mapped = resolve_auction_source_alias(src) or src
     action = args[1].strip().lower()
+    is_auction = bool(resolve_auction_source_alias(src))
+    if action in {"enable", "disable"} and is_auction:
+        with SessionLocal() as db:
+            ensure_auction_source_configs(db)
+            cfg = get_source_config(db, mapped)
+            if not cfg:
+                await update.message.reply_text("Source não encontrada.")
+                return
+            cfg.is_enabled = action == "enable"
+            if action == "disable":
+                cfg.user_eligible = False
+            db.add(cfg)
+            db.commit()
+        await update.message.reply_text(f"✅ source={mapped} enabled={'sim' if cfg.is_enabled else 'não'} user_eligible={'sim' if cfg.user_eligible else 'não'}")
+        return
     if action in {"enable", "disable"}:
         return await _admin_sources_set_simple(update, mapped, "is_enabled", "true" if action == "enable" else "false")
     if action in {"user-enable", "user-disable"}:
         with SessionLocal() as db:
-            ensure_auction_source_configs(db)
+            if is_auction:
+                ensure_auction_source_configs(db)
+            else:
+                ensure_source_configs(db)
             cfg = get_source_config(db, mapped)
             if not cfg:
                 await update.message.reply_text("Source não encontrada.")

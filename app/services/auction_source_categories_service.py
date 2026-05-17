@@ -6,11 +6,12 @@ from app.sources.auctions.registry import list_supported_auction_source_keys, re
 _DEFAULT_ALLOWED = {"car"}
 _CANON = {"car", "motorcycle", "truck", "heavy", "real_estate", "other"}
 _ALIASES = {
+    "automovel": "car", "automóvel": "car", "automobile": "car",
     "automoveis": "car", "automóveis": "car", "carros": "car", "cars": "car", "car": "car",
     "motos": "motorcycle", "moto": "motorcycle", "motorcycle": "motorcycle",
-    "caminhoes": "truck", "caminhões": "truck", "truck": "truck",
+    "caminhao": "truck", "caminhão": "truck", "caminhoes": "truck", "caminhões": "truck", "truck": "truck",
     "pesados": "heavy", "heavy": "heavy",
-    "imoveis": "real_estate", "imóveis": "real_estate", "real_estate": "real_estate",
+    "imovel": "real_estate", "imóvel": "real_estate", "imoveis": "real_estate", "imóveis": "real_estate", "real_estate": "real_estate",
     "outros": "other", "other": "other",
 }
 
@@ -47,4 +48,3 @@ def is_auction_item_type_allowed(db, source_key: str, item_type: str | None) -> 
     if normalized is None:
         return "other" in allowed
     return normalized in allowed
-
