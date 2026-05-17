@@ -40,7 +40,7 @@ from app.services.source_operational_policy import (
     should_include_in_critical_stale,
     source_operational_hint,
 )
-from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
+from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config, invalidate_source_config_cache
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
 from app.services.wishlist_tokens_service import extract_tokens
@@ -83,6 +83,7 @@ from app.services.auction_source_config_service import (
     is_auction_source_user_eligible,
     list_user_eligible_auction_sources,
 )
+from app.services.auction_source_categories_service import get_auction_allowed_item_types, normalize_item_type
 
 
 @dataclass
@@ -345,6 +346,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "sources":
         await _admin_sources_dispatch(update, args[1:])
         return
+    if action == "source":
+        await _admin_source_unified(update, args[1:])
+        return
     if action == "health":
         await _admin_health(update, args[1:])
         return
@@ -554,6 +558,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     f"enabled: {'sim' if bool(getattr(cfg, 'is_enabled', False)) else 'não'}",
                     f"user_eligible: {'sim' if bool(getattr(cfg, 'user_eligible', False)) else 'não'}",
                     f"status: {getattr(cfg, 'status', '-') or '-'}",
+                    f"categorias: {', '.join(sorted(get_auction_allowed_item_types(db, item))) if bool(getattr(cfg, 'user_eligible', False)) else '-'}",
                     "",
                 ])
             await update.message.reply_text("\n".join(lines).strip())
@@ -582,6 +587,33 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 cfg.user_eligible = True
             elif action == "user-disable":
                 cfg.user_eligible = False
+            elif action == "categories":
+                extra = dict(cfg.extra or {})
+                if len(args) == 3:
+                    allowed = sorted(get_auction_allowed_item_types(db, source))
+                    await update.message.reply_text(f"source={source} categorias={','.join(allowed)}")
+                    return
+                if len(args) < 5:
+                    await update.message.reply_text("Use: /admin auctions source-config <source> categories <set|add|remove> <tipos>")
+                    return
+                sub_action = args[3].lower()
+                tokens = [normalize_item_type(x.strip()) for x in args[4].split(",")]
+                normalized = [t for t in tokens if t]
+                cur = set(get_auction_allowed_item_types(db, source))
+                if sub_action == "set":
+                    cur = set(normalized) or {"car"}
+                elif sub_action == "add":
+                    cur |= set(normalized)
+                elif sub_action == "remove":
+                    cur -= set(normalized)
+                    if not cur:
+                        cur = {"car"}
+                else:
+                    await update.message.reply_text("Ação inválida para categories.")
+                    return
+                extra["allowed_item_types"] = sorted(cur)
+                cfg.extra = extra
+                invalidate_source_config_cache(source)
             else:
                 await update.message.reply_text("Ação inválida.")
                 return
@@ -704,6 +736,8 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"Score baixo: {result.get('skipped_score_below_min', 0)}",
                 f"Lote antigo: {result.get('skipped_stale_lot', 0)}",
                 f"Sem data de atualização: {result.get('skipped_missing_lot_updated_at', 0)}",
+                f"Tipo bloqueado: {result.get('skipped_item_type_not_allowed', 0)}",
+                f"Sem tipo: {result.get('skipped_missing_item_type', 0)}",
                 f"Duplicados ignorados: {result.get('skipped_duplicate', 0)}",
                 f"Sem match: {result.get('skipped_no_match', 0)}",
                 f"Sem chat id: {result.get('skipped_missing_chat_id', 0)}",
@@ -712,7 +746,6 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             ])
             await update.message.reply_text("\n".join(lines))
             return
-
 
         if sub == "readiness":
             data = build_auction_notification_readiness(db)
@@ -1925,6 +1958,53 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
     text = "\n".join(lines)
     await _reply_chunked(update, text)
+
+
+async def _admin_source_unified(update: Update, args: List[str]):
+    if len(args) < 2:
+        await update.message.reply_text("Use: /admin source <source> <enable|disable|user-enable|user-disable|categories>")
+        return
+    src = args[0].strip().lower()
+    mapped = resolve_auction_source_alias(src) or src
+    action = args[1].strip().lower()
+    is_auction = bool(resolve_auction_source_alias(src))
+    if action in {"enable", "disable"} and is_auction:
+        with SessionLocal() as db:
+            ensure_auction_source_configs(db)
+            cfg = get_source_config(db, mapped)
+            if not cfg:
+                await update.message.reply_text("Source não encontrada.")
+                return
+            cfg.is_enabled = action == "enable"
+            if action == "disable":
+                cfg.user_eligible = False
+            db.add(cfg)
+            db.commit()
+        await update.message.reply_text(f"✅ source={mapped} enabled={'sim' if cfg.is_enabled else 'não'} user_eligible={'sim' if cfg.user_eligible else 'não'}")
+        return
+    if action in {"enable", "disable"}:
+        return await _admin_sources_set_simple(update, mapped, "is_enabled", "true" if action == "enable" else "false")
+    if action in {"user-enable", "user-disable"}:
+        with SessionLocal() as db:
+            if is_auction:
+                ensure_auction_source_configs(db)
+            else:
+                ensure_source_configs(db)
+            cfg = get_source_config(db, mapped)
+            if not cfg:
+                await update.message.reply_text("Source não encontrada.")
+                return
+            if action == "user-enable" and not bool(cfg.is_enabled):
+                await update.message.reply_text("Não é possível user-enable com source disabled.")
+                return
+            cfg.user_eligible = action == "user-enable"
+            db.add(cfg)
+            db.commit()
+        await update.message.reply_text(f"✅ source={mapped} enabled={'sim' if cfg.is_enabled else 'não'} user_eligible={'sim' if cfg.user_eligible else 'não'}")
+        return
+    if action == "categories":
+        return await _admin_auctions(update, ["source-config", mapped, "categories", *args[2:]])
+    await update.message.reply_text("Ação inválida para /admin source.")
 
 
 async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):

@@ -10,6 +10,7 @@ from app.models.auction_lot import AuctionLot
 from app.models.source_config import SourceConfig
 from app.models.system_log import SystemLog
 from app.models.wishlist import Wishlist
+from app.services.auction_source_categories_service import get_auction_allowed_item_types
 
 _SCHEDULER_EVENTS = (
     "auction_notification_scheduler_tick_finished",
@@ -48,6 +49,15 @@ def build_auction_notification_readiness(db) -> dict:
         checks.append(_check("eligible_sources", "fail", "Source elegível disponível", "Nenhuma source de leilão elegível para usuário."))
     else:
         checks.append(_check("eligible_sources", "ok", "Source elegível disponível", ", ".join(eligible_source_keys)))
+    unsafe = []
+    for src in eligible_source_keys:
+        allowed = sorted(get_auction_allowed_item_types(db, src))
+        if allowed != ["car"]:
+            unsafe.append(f"{src}={','.join(allowed)}")
+    if unsafe:
+        checks.append(_check("auction_allowed_categories_safe", "warn", "Categorias permitidas (piloto)", "; ".join(unsafe)))
+    else:
+        checks.append(_check("auction_allowed_categories_safe", "ok", "Categorias permitidas (piloto)", "todas user_eligible com car"))
 
     vip_cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions", SourceConfig.source_type == "auction").first()
     if vip_cfg and vip_cfg.user_eligible:

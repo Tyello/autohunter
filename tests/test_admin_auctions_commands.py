@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.bot import handlers_admin
 from app.models.app_kv import AppKV
+from app.models.source_config import SourceConfig
 from app.bot.renderers import render_admin_auction_lot, render_admin_auctions_summary
 from app.services.auction_lot_service import upsert_lot
 
@@ -732,6 +733,40 @@ def test_admin_auctions_sources_and_toggles(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "mega", "user-enable")))
     assert "Não é possível user-enable" in up.message.sent[-1]
+
+
+def test_admin_source_unified_auction_enable_disable_and_categories(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    if cfg:
+        db.delete(cfg); db.commit()
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "enable")))
+    assert "source=vip_auctions enabled=sim" in up.message.sent[-1]
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    assert cfg is not None and bool(cfg.is_enabled) is True
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "disable")))
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    assert "source=vip_auctions enabled=não" in up.message.sent[-1]
+    assert bool(cfg.is_enabled) is False and bool(cfg.user_eligible) is False
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "user-enable")))
+    assert "Não é possível user-enable com source disabled." in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "categories")))
+    assert "categorias=car" in up.message.sent[-1]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("source", "vip", "categories", "set", "car,motorcycle")))
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    assert sorted((cfg.extra or {}).get("allowed_item_types") or []) == ["car", "motorcycle"]
+
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "vip", "categories", "set", "car,motorcycle")))
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    assert sorted((cfg.extra or {}).get("allowed_item_types") or []) == ["car", "motorcycle"]
 
 def test_admin_auctions_notify_run_default_dry_run(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)

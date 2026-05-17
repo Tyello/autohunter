@@ -338,3 +338,11 @@ Use `/admin auctions readiness` antes de ligar o scheduler de leilões em modo a
 O comando é somente leitura: não envia alertas e não altera configuração.
 Ele reporta status `ok|warn|fail` com checks operacionais para dry-run.
 O envio real automático continua fora da recomendação nesta fase, até validação das amostras de dry-run.
+
+## Unified source operations and auction category gates
+- Sources tradicionais e de leilão usam `source_configs` para operação (enabled/user_eligible/status/source_type).
+- Registry técnico define implementação; `source_configs` define disponibilidade operacional.
+- Usuário final não escolhe source técnica; escolhe apenas se a busca aceita leilões (`include_auctions`).
+- Admin controla por comandos operacionais quais sources e categorias chegam ao usuário.
+- No piloto atual, leilões seguem com gate seguro de categoria: apenas `car` por padrão para notify.
+- Categorias `motorcycle`, `truck`, `heavy`, `real_estate` e `other` ficam bloqueadas por padrão para usuário final.

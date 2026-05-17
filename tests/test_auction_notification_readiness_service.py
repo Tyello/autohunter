@@ -102,3 +102,23 @@ def test_readiness_samples_present_ok(db):
 
     samples = next(c for c in out["checks"] if c["key"] == "dry_run_samples")
     assert samples["status"] == "ok"
+
+
+def test_readiness_allowed_categories_safe_ok(db):
+    _seed_source(db, eligible=True)
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    cfg.extra = {"allowed_item_types": ["car"]}
+    db.add(cfg); db.commit()
+    out = build_auction_notification_readiness(db)
+    check = next(c for c in out["checks"] if c["key"] == "auction_allowed_categories_safe")
+    assert check["status"] == "ok"
+
+
+def test_readiness_allowed_categories_safe_warn(db):
+    _seed_source(db, eligible=True)
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").first()
+    cfg.extra = {"allowed_item_types": ["car", "motorcycle"]}
+    db.add(cfg); db.commit()
+    out = build_auction_notification_readiness(db)
+    check = next(c for c in out["checks"] if c["key"] == "auction_allowed_categories_safe")
+    assert check["status"] == "warn"
