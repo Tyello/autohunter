@@ -80,7 +80,23 @@ def test_build_dry_run_does_not_send_or_persist(db):
     db.add(u); db.flush()
     w = Wishlist(user_id=u.id, query="civic 2015", is_active=True, include_auctions=True)
     db.add(w); db.flush()
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "dry1", "title": "Honda Civic 2015", "year": 2015, "status": "open", "item_type": "car", "initial_bid": 80000, "url": "https://lot/dry1"})
+    upsert_lot(
+        db,
+        {
+            "source": "vip_auctions",
+            "external_id": "dry1",
+            "title": "Honda Civic 2015",
+            "year": 2015,
+            "mileage_km": 128468,
+            "total_bids": 0,
+            "auction_end_at": datetime(2026, 5, 20, 15, 0, tzinfo=timezone.utc),
+            "location": "São Paulo/SP",
+            "item_type": "car",
+            "status": "open",
+            "initial_bid": 80000,
+            "url": "https://lot/dry1",
+        },
+    )
     db.commit()
 
     res = build_auction_notifications_for_wishlist(db, w.id, limit=1)
@@ -95,6 +111,17 @@ def test_build_dry_run_does_not_send_or_persist(db):
     assert item["score"] is not None
     assert item["url"] == "https://lot/dry1"
     assert item["lot_id"]
+    assert item["source_label"] == "VIP Leilões"
+    assert item["year"] == 2015
+    assert item["mileage_km"] == 128468
+    assert item["total_bids"] == 0
+    assert item["auction_end_at"].year == 2026
+    assert item["auction_end_at"].month == 5
+    assert item["auction_end_at"].day == 20
+    assert item["location"] == "São Paulo/SP"
+    assert item["item_type"] == "car"
+    assert "Ano/KM: 2015/128.468" in item["text"]
+    assert "Lances: 0" in item["text"]
     assert db.query(AppKV).count() == 0
 
 
