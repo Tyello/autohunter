@@ -955,6 +955,63 @@ def test_admin_auctions_notify_status_non_admin(monkeypatch, db):
     assert called["status"] == 0
 
 
+def test_admin_auctions_digest_renders_and_is_read_only(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    called = {"notify": 0}
+
+    async def _notify(*_a, **_k):
+        called["notify"] += 1
+        return {}
+
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _notify)
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_dry_run_digest",
+        lambda _db, hours=24: {
+            "window_hours": hours,
+            "since": "2026-05-17T01:00:00+00:00",
+            "last_run_at": "2026-05-18T01:42:00+00:00",
+            "last_status": "dry_run",
+            "runs": 3,
+            "wishlists_scanned": 6,
+            "wishlists_with_matches": 2,
+            "previews": 2,
+            "sent": 0,
+            "errors": 0,
+            "skips": {"stale_lot": 1, "no_match": 8, "score_below_min": 0, "item_type_not_allowed": 0, "duplicate": 0, "daily_limit": 0},
+            "source_summary": {"vip_auctions": {"previews": 2, "errors": 0}},
+            "latest_samples": [{"wishlist_query": "touareg", "title": "TOUAREG", "source_label": "VIP Leilões", "score": 72, "current_bid": "10000.00"}],
+            "latest_rejections": [{"wishlist_query": "song", "title": "SONG PLUS", "reason": "stale_lot", "score": 66}],
+            "recommendation": {"status": "keep_dry_run", "message": "Dry-run saudável. Manter coleta por mais ciclos."},
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "digest")))
+    msg = up.message.sent[-1]
+    assert "digest dry-run 24h" in msg
+    assert "buscas avaliadas: 6" in msg
+    assert "lote antigo: 1" in msg
+    assert "Últimas amostras:" in msg
+    assert "Últimas rejeições:" in msg
+    assert called["notify"] == 0
+
+
+def test_admin_auctions_digest_hours_and_validation_and_non_admin(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "build_auction_dry_run_digest", lambda _db, hours=24: {"since": "-", "last_run_at": "-", "last_status": "unknown", "runs": 0, "wishlists_scanned": 0, "wishlists_with_matches": 0, "previews": 0, "sent": 0, "errors": 0, "skips": {}, "source_summary": {}, "latest_samples": [], "latest_rejections": [], "recommendation": {"status": "no_data", "message": "Sem dados suficientes."}})
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "digest", "--hours", "6")))
+    assert "digest dry-run 6h" in up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "digest", "--hours", "0")))
+    assert "hours inválido" in up.message.sent[-1]
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    up2 = _Update(chat_id=77)
+    asyncio.run(handlers_admin.cmd_admin(up2, _ctx("auctions", "digest")))
+    assert "Sem permissão" in up2.message.sent[-1]
+
+
 def test_admin_auctions_notify_samples_empty(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))

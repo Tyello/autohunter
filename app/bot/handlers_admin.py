@@ -70,6 +70,7 @@ from app.services.auction_notification_service import (
 from app.services.auction_notification_job_service import run_auction_notification_job
 from app.services.auction_notification_status_service import build_auction_notification_status
 from app.services.auction_notification_samples_service import build_auction_notification_samples
+from app.services.auction_dry_run_digest_service import build_auction_dry_run_digest
 from app.services.auction_notification_readiness_service import build_auction_notification_readiness
 from app.services.auction_notification_settings_service import (
     get_auction_notification_runtime_settings,
@@ -1098,6 +1099,79 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines))
             return
 
+        if sub == "digest":
+            hours = 24
+            if "--hours" in args:
+                i = args.index("--hours")
+                if i + 1 >= len(args):
+                    await update.message.reply_text("Use: /admin auctions digest [--hours 24]")
+                    return
+                try:
+                    hours = int(args[i + 1])
+                except Exception:
+                    await update.message.reply_text("hours inválido. Use inteiro entre 1 e 168.")
+                    return
+            if hours < 1 or hours > 168:
+                await update.message.reply_text("hours inválido. Use inteiro entre 1 e 168.")
+                return
+            data = build_auction_dry_run_digest(db, hours=hours)
+            since = str(data.get("since") or "-").replace("T", " ").replace("+00:00", " UTC")
+            last_run = str(data.get("last_run_at") or "-").replace("T", " ").replace("+00:00", " UTC")
+            lines = [
+                f"⚠️ Admin Leilões — digest dry-run {hours}h",
+                "",
+                "Janela:",
+                f"- desde: {since}",
+                f"- última execução: {last_run}",
+                f"- status: {data.get('last_status', 'unknown')}",
+                "",
+                "Resumo:",
+                f"- runs: {data.get('runs', 0)}",
+                f"- buscas avaliadas: {data.get('wishlists_scanned', 0)}",
+                f"- buscas com match: {data.get('wishlists_with_matches', 0)}",
+                f"- prévias: {data.get('previews', 0)}",
+                f"- enviados reais: {data.get('sent', 0)}",
+                f"- erros: {data.get('errors', 0)}",
+                "",
+                "Bloqueios:",
+                f"- lote antigo: {data.get('skips', {}).get('stale_lot', 0)}",
+                f"- sem match textual: {data.get('skips', {}).get('no_match', 0)}",
+                f"- score abaixo do mínimo: {data.get('skips', {}).get('score_below_min', 0)}",
+                f"- tipo bloqueado: {data.get('skips', {}).get('item_type_not_allowed', 0)}",
+                f"- duplicados: {data.get('skips', {}).get('duplicate', 0)}",
+                f"- limite diário: {data.get('skips', {}).get('daily_limit', 0)}",
+                "",
+                "Sources:",
+            ]
+            source_summary = data.get("source_summary") or {}
+            if source_summary:
+                for src, info in source_summary.items():
+                    lines.append(f"- {src}: previews={info.get('previews', 0)} erros={info.get('errors', 0)}")
+            else:
+                lines.append("- -")
+            samples = data.get("latest_samples") or []
+            rejections = data.get("latest_rejections") or []
+            if samples:
+                lines.extend(["", "Últimas amostras:"])
+                for idx, sample in enumerate(samples[:3], start=1):
+                    lines.append(
+                        f"{idx}. {sample.get('wishlist_query') or '-'} — {sample.get('title') or '-'} — "
+                        f"{sample.get('source_label') or sample.get('source') or '-'} — score {sample.get('score') if sample.get('score') is not None else '-'} "
+                        f"— lance {_fmt_money_br(sample.get('current_bid')) if sample.get('current_bid') is not None else '-'}"
+                    )
+            if rejections:
+                lines.extend(["", "Últimas rejeições:"])
+                for idx, rej in enumerate(rejections[:3], start=1):
+                    lines.append(
+                        f"{idx}. {rej.get('wishlist_query') or '-'} — {rej.get('title') or '-'} — "
+                        f"{_render_rejection_reason_label(rej.get('reason'))} — score {rej.get('score') if rej.get('score') is not None else '-'}"
+                    )
+            rec = data.get("recommendation") or {}
+            icon = "✅" if rec.get("status") in {"keep_dry_run", "ready_for_manual_pilot"} else ("⚠️" if rec.get("status") == "needs_attention" else "ℹ️")
+            lines.extend(["", "Recomendação:", f"{icon} {rec.get('message') or '-'}"])
+            await update.message.reply_text("\n".join(lines))
+            return
+
         if sub == "notify":
             if len(args) < 3 or args[1].lower() != "wishlist":
                 await update.message.reply_text("Use: /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run]")
@@ -1368,7 +1442,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples\n{_render_user_eligible_auction_sources_hint(db)}"
+        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples | /admin auctions digest [--hours 24]\n{_render_user_eligible_auction_sources_hint(db)}"
     )
 
 
