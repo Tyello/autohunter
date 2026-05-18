@@ -92,3 +92,40 @@ def test_win_fallback_alt_and_external_id_from_url():
     lot = lots[0]
     assert lot.title == 'Chevrolet Onix 2018'
     assert lot.external_id == 'placa-abc'
+
+
+def test_win_enrich_detail_updates_fields_and_returns_dataclass(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/3739/detalhes">item</a><h3></h3></article>'
+    detail_html = """
+    <html><head><meta property="og:title" content="Carro Hyundai HB20 2019"></head>
+    <body><div>Lance Inicial: R$ 45.000,00</div><div>Em Andamento</div><div>Curitiba/PR</div></body></html>
+    """
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def get(self, url):
+            if '/item/3739/detalhes' in url:
+                return _Resp(detail_html)
+            return _Resp(listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert isinstance(lot, win.NormalizedAuctionLot)
+    assert lot.title == "Carro Hyundai HB20 2019"
+    assert lot.initial_bid == Decimal("45000.00")
+    assert lot.year == 2019
+    assert lot.item_type == "car"
+
+
+def test_win_source_does_not_use_model_copy_api():
+    src = Path("app/sources/auctions/win.py").read_text(encoding="utf-8")
+    assert "model_copy(" not in src

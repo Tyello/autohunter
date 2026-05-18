@@ -670,6 +670,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"🔎 Admin Leilões — inspect {summary.get('source', source)}",
                 f"limit: {limit}",
                 f"capturados: {summary.get('fetched', 0)}",
+                f"enrich_applied: {'sim' if summary.get('enrich_applied') else 'não'}",
             ]
             if summary.get("reason"):
                 lines.append(f"reason: {summary['reason']}")

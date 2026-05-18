@@ -89,7 +89,7 @@ def test_fetch_sets_reason_for_invalid_and_js(monkeypatch):
     monkeypatch.setattr(superbid.httpx, "Client", lambda **kwargs: _Client())
     out = superbid.fetch_superbid_lots(listing_url="https://exchange.superbid.net/")
     assert out == []
-    assert superbid.get_last_reason() in {"requires_js_or_internal_endpoint", "no_public_lot_cards_found"}
+    assert superbid.get_last_reason() in {"requires_js_or_event_drilldown", "no_public_lot_cards_found"}
 
 def test_superbid_blocks_navigation_and_categoria_urls():
     html = """

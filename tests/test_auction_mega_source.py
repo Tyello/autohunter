@@ -98,3 +98,9 @@ def test_parse_mega_fallback_alt_slug_absolute_url_and_external_id():
     assert lot.title == 'Volkswagen Touareg V8 2008'
     assert lot.url == 'https://www.megaleiloes.com.br/lotes/touareg-v8-162758'
     assert lot.external_id == '162758'
+
+
+def test_mega_helpers_item_type_and_compact_year():
+    assert mega.infer_mega_item_type("Carro Hyundai I30 20 20092010 J122572", "https://www.megaleiloes.com.br/veiculos/carros/lote/x") == "car"
+    assert mega.parse_mega_compact_year("Carro Hyundai I30 20 20092010 J122572") == 2009
+    assert mega.parse_mega_compact_year("Carro Volkswagen Gol 10 20122013 J123409") == 2012
