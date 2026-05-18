@@ -55,7 +55,7 @@ from app.bot.admin_handlers_sources import (
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries
-from app.services.auction_ingestion_service import run_auction_ingestion
+from app.services.auction_ingestion_service import inspect_auction_source, run_auction_ingestion
 from app.services.auction_matching_service import (
     debug_auction_lot_candidates_for_wishlist,
     match_auction_lots_for_all_wishlists,
@@ -360,6 +360,36 @@ def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bo
         return None, None, False, "Limite inválido. Use: --limit <1-30>."
     return source, limit, enrich, None
 
+
+def _parse_auction_inspect_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
+    if len(args) < 2:
+        return None, None, False, "Use: /admin auctions inspect <source> [--limit N] [--browser]"
+    source = resolve_auction_source_alias(args[1])
+    if not source:
+        return None, None, False, f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
+    limit = 5
+    browser = False
+    idx = 2
+    while idx < len(args):
+        token = args[idx].lower()
+        if token == "--browser":
+            browser = True
+            idx += 1
+            continue
+        if token == "--limit":
+            if idx + 1 >= len(args):
+                return None, None, False, "Limite inválido. Use: --limit <1-10>."
+            try:
+                limit = int(args[idx + 1])
+            except ValueError:
+                return None, None, False, "Limite inválido. Use: --limit <1-10>."
+            idx += 2
+            continue
+        return None, None, False, f"Argumento inválido: {args[idx]}"
+    if limit < 1 or limit > 10:
+        return None, None, False, "Limite inválido. Use: --limit <1-10>."
+    return source, limit, browser, None
+
 def _classify_error(source: str, err: str | None, http_status: Optional[int]) -> tuple[str, str, str]:
     """
     Retorna (kind, short_reason, action).
@@ -617,7 +647,56 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 lines.extend(["", "Ignorados:"])
                 for reason_key, count in sorted(skipped_reasons.items()):
                     lines.append(f"- {reason_key}: {count}")
+            ignored_examples = summary.get("ignored_examples") or []
+            if ignored_examples:
+                lines.extend(["", "ignored_examples:"])
+                for item in ignored_examples[:3]:
+                    lines.append(
+                        f"- reason={item.get('reason')} source={item.get('source')} url={item.get('url') or '-'} "
+                        f"title={item.get('title') or '-'} fallback_title={item.get('fallback_title') or '-'} "
+                        f"text_preview={item.get('text_preview') or '-'}"
+                    )
             lines.extend(["", "Próximo passo:", f"/admin auctions source {source}"])
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        if sub == "inspect":
+            source, limit, use_browser, err = _parse_auction_inspect_args(args)
+            if err:
+                await update.message.reply_text(err)
+                return
+            summary = await asyncio.to_thread(
+                inspect_auction_source,
+                source=source,
+                limit=limit,
+                enrich_details=True,
+                use_browser=use_browser,
+            )
+            lines = [
+                f"🔎 Admin Leilões — inspect {summary.get('source', source)}",
+                f"limit: {limit} browser: {'sim' if use_browser else 'não'}",
+                f"capturados: {summary.get('fetched', 0)}",
+            ]
+            if summary.get("reason"):
+                lines.append(f"reason: {summary['reason']}")
+            for c in summary.get("candidates", []):
+                lines.extend(
+                    [
+                        "",
+                        f"#{c.get('index')}",
+                        f"url: {c.get('url') or '-'}",
+                        f"title: {c.get('title') or '-'}",
+                        f"title_fallback: {c.get('title_fallback') or '-'}",
+                        f"external_id: {c.get('external_id') or '-'}",
+                        f"item_type: {c.get('item_type') or '-'}",
+                        f"current_bid: {c.get('current_bid') or '-'}",
+                        f"initial_bid: {c.get('initial_bid') or '-'}",
+                        f"year: {c.get('year') or '-'}",
+                        f"status: {c.get('status') or '-'}",
+                        f"skip_reason: {c.get('skip_reason') or '-'}",
+                        f"text_preview: {c.get('text_preview') or '-'}",
+                    ]
+                )
             await update.message.reply_text("\n".join(lines))
             return
 
