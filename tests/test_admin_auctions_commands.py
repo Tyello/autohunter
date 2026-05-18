@@ -983,6 +983,7 @@ def test_admin_auctions_digest_renders_and_is_read_only(monkeypatch, db):
             "source_summary": {"vip_auctions": {"previews": 2, "errors": 0}},
             "latest_samples": [{"wishlist_query": "touareg", "title": "TOUAREG", "source_label": "VIP Leilões", "score": 72, "current_bid": "10000.00"}],
             "latest_rejections": [{"wishlist_query": "song", "title": "SONG PLUS", "reason": "stale_lot", "score": 66}],
+            "history_note": "Histórico parcial: usando último summary salvo para complementar counters.",
             "recommendation": {"status": "keep_dry_run", "message": "Dry-run saudável. Manter coleta por mais ciclos."},
         },
     )
@@ -994,6 +995,7 @@ def test_admin_auctions_digest_renders_and_is_read_only(monkeypatch, db):
     assert "lote antigo: 1" in msg
     assert "Últimas amostras:" in msg
     assert "Últimas rejeições:" in msg
+    assert "Histórico parcial: usando último summary salvo para complementar counters." in msg
     assert called["notify"] == 0
 
 

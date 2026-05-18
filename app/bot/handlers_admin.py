@@ -1166,6 +1166,8 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         f"{idx}. {rej.get('wishlist_query') or '-'} — {rej.get('title') or '-'} — "
                         f"{_render_rejection_reason_label(rej.get('reason'))} — score {rej.get('score') if rej.get('score') is not None else '-'}"
                     )
+            if data.get("history_note"):
+                lines.extend(["", "Observação:", f"- {data.get('history_note')}"])
             rec = data.get("recommendation") or {}
             icon = "✅" if rec.get("status") in {"keep_dry_run", "ready_for_manual_pilot"} else ("⚠️" if rec.get("status") == "needs_attention" else "ℹ️")
             lines.extend(["", "Recomendação:", f"{icon} {rec.get('message') or '-'}"])

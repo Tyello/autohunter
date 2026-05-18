@@ -92,6 +92,7 @@ def build_auction_dry_run_digest(db, hours: int = 24) -> dict:
         "source_summary": {},
         "latest_samples": [],
         "latest_rejections": [],
+        "history_note": None,
         "recommendation": {"status": "no_data", "message": "Sem dados suficientes. Rode notify-run ou aguarde o scheduler."},
     }
     for src in out["eligible_sources"]:
@@ -116,18 +117,41 @@ def build_auction_dry_run_digest(db, hours: int = 24) -> dict:
     last_samples = get_kv(db, _DRY_RUN_SAMPLES_KEY) or {}
     if isinstance(last_samples, dict):
         summary = last_samples.get("summary") if isinstance(last_samples.get("summary"), dict) else {}
-        if out["runs"] == 0 and summary:
-            out["wishlists_scanned"] = _to_int(summary.get("wishlists_scanned"))
-            out["wishlists_with_matches"] = _to_int(summary.get("wishlists_with_matches"))
-            out["previews"] = _to_int(summary.get("previews"))
-            out["sent"] = _to_int(summary.get("sent"))
-            out["errors"] = _to_int(summary.get("errors"))
+        complemented = False
+        if summary:
+            old = (out["wishlists_scanned"], out["wishlists_with_matches"], out["previews"], out["sent"], out["errors"])
+            out["wishlists_scanned"] = max(out["wishlists_scanned"], _to_int(summary.get("wishlists_scanned")))
+            out["wishlists_with_matches"] = max(out["wishlists_with_matches"], _to_int(summary.get("wishlists_with_matches")))
+            out["previews"] = max(out["previews"], _to_int(summary.get("previews")))
+            out["sent"] = max(out["sent"], _to_int(summary.get("sent")))
+            out["errors"] = max(out["errors"], _to_int(summary.get("errors")))
+            if old != (out["wishlists_scanned"], out["wishlists_with_matches"], out["previews"], out["sent"], out["errors"]):
+                complemented = True
             for key in _SKIP_KEYS:
-                out["skips"][key] = _to_int(summary.get(f"skipped_{key}"))
+                before = out["skips"][key]
+                out["skips"][key] = max(out["skips"][key], _to_int(summary.get(f"skipped_{key}")))
+                if out["skips"][key] != before:
+                    complemented = True
         out["latest_samples"] = (last_samples.get("samples") if isinstance(last_samples.get("samples"), list) else [])[:5]
         out["latest_rejections"] = (last_samples.get("rejections") if isinstance(last_samples.get("rejections"), list) else [])[:5]
-        if out["runs"] == 0 and (out["latest_samples"] or out["latest_rejections"]):
-            out["recommendation"]["message"] = "Histórico limitado: usando última amostra salva."
+        if out["runs"] > 0 and complemented:
+            out["history_note"] = "Histórico parcial: usando último summary salvo para complementar counters."
+
+    sample_source_counts: dict[str, int] = {}
+    for item in out["latest_samples"]:
+        if isinstance(item, dict):
+            source = str(item.get("source") or "").strip()
+            if source:
+                sample_source_counts[source] = sample_source_counts.get(source, 0) + 1
+    for bucket in (out["latest_samples"], out["latest_rejections"]):
+        for item in bucket:
+            if not isinstance(item, dict):
+                continue
+            source = str(item.get("source") or "").strip()
+            if not source:
+                continue
+            info = out["source_summary"].setdefault(source, {"runs": 0, "previews": 0, "errors": 0})
+            info["previews"] = max(info.get("previews", 0), sample_source_counts.get(source, 0))
 
     out["recommendation"] = _build_recommendation(
         enabled=bool(cfg.get("enabled", False)),
