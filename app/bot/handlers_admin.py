@@ -1013,12 +1013,24 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 "Resumo:",
                 f"- sources elegíveis: {summary.get('eligible_sources_count', 0)}",
                 f"- buscas com leilões: {summary.get('wishlists_opt_in', 0)}",
-                f"- lotes recentes com lance: {summary.get('recent_eligible_lots_with_bid', 0)}",
+                f"- lotes car elegíveis recentes com lance: {summary.get('recent_eligible_lots_with_bid', 0)}",
+                f"- sources prontas piloto car: {', '.join(summary.get('car_pilot_ready_sources') or []) or '-'}",
                 f"- última execução scheduler: {summary.get('scheduler_last_run_at', '-')}",
                 f"- últimas amostras: {summary.get('dry_run_samples', 0)}",
                 "",
-                "Checks:",
+                "Sources/piloto car:",
             ]
+            for src, src_summary in sorted((summary.get("source_car_pilot") or {}).items()):
+                ready = "sim" if src_summary.get("source_ready_for_user_car_pilot") else "não"
+                lines.append(
+                    f"- {src}: car_lots={src_summary.get('car_lots', 0)}, "
+                    f"user_allowed_lots={src_summary.get('user_allowed_lots', 0)}, "
+                    f"ready_car_pilot={ready}"
+                )
+            lines.extend([
+                "",
+                "Checks:",
+            ])
             for check in data.get("checks", []):
                 c_icon = "✅" if check.get("status") == "ok" else ("⚠️" if check.get("status") == "warn" else "❌")
                 lines.append(f"{c_icon} {check.get('label')}: {check.get('detail')}")

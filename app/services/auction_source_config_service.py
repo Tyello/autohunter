@@ -21,12 +21,12 @@ class AuctionSourceDefaults:
 
 
 DEFAULTS = {
-    "vip_auctions": AuctionSourceDefaults("auction", True, True, False, "active"),
+    "vip_auctions": AuctionSourceDefaults("auction", True, True, False, "production_ready"),
     "mega_auctions": AuctionSourceDefaults("auction", True, False, True, "experimental"),
-    "win_auctions": AuctionSourceDefaults("auction", True, False, True, "experimental"),
-    "sodre_auctions": AuctionSourceDefaults("auction", False, False, True, "needs_study"),
-    "superbid_auctions": AuctionSourceDefaults("auction", True, False, True, "experimental"),
-    "copart_auctions": AuctionSourceDefaults("auction", False, False, True, "needs_js_or_endpoint_study"),
+    "win_auctions": AuctionSourceDefaults("auction", True, False, True, "functional_non_car"),
+    "sodre_auctions": AuctionSourceDefaults("auction", False, False, True, "blocked/needs_study"),
+    "superbid_auctions": AuctionSourceDefaults("auction", True, False, True, "needs_study"),
+    "copart_auctions": AuctionSourceDefaults("auction", False, False, True, "needs_study"),
 }
 
 

@@ -33,3 +33,8 @@ def test_existing_auction_row_retypes_without_overwriting_operational_decisions(
     assert row.source_type == "auction"
     assert row.is_enabled is False
     assert row.user_eligible is False
+
+
+def test_default_user_eligible_only_vip(db):
+    ensure_auction_source_configs(db)
+    assert list_user_eligible_auction_sources(db) == {"vip_auctions"}

@@ -129,3 +129,61 @@ def test_win_enrich_detail_updates_fields_and_returns_dataclass(monkeypatch):
 def test_win_source_does_not_use_model_copy_api():
     src = Path("app/sources/auctions/win.py").read_text(encoding="utf-8")
     assert "model_copy(" not in src
+
+
+def test_win_enrich_real_estate_detail_does_not_fill_year_from_html(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/2090/detalhes">item</a><h3>Apartamento com garagem</h3></article>'
+    detail_html = """
+    <html><head><meta property="og:title" content="Apartamento Centro"></head>
+    <body><div>Edital 2025</div><div>Matrícula 2090</div><div>Lance Inicial: R$ 600.000,00</div></body></html>
+    """
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def get(self, url):
+            if "/item/2090/detalhes" in url:
+                return _Resp(detail_html)
+            return _Resp(listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.item_type == "real_estate"
+    assert lot.year is None
+
+
+def test_win_enrich_vehicle_detail_still_fills_year(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/2020/detalhes">item</a><h3>Honda Civic</h3></article>'
+    detail_html = """
+    <html><head><meta property="og:title" content="Carro Honda Civic"></head>
+    <body><div>Carro</div><div>Ano Modelo 2020</div><div>Lance Inicial: R$ 70.000,00</div></body></html>
+    """
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def get(self, url):
+            if "/item/2020/detalhes" in url:
+                return _Resp(detail_html)
+            return _Resp(listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.item_type == "car"
+    assert lot.year == 2020

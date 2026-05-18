@@ -30,7 +30,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         fetcher=fetch_vip_lots,
         reason_getter=vip_reason,
         supports_enrich=True,
-        status="active",
+        status="production_ready",
     ),
     AuctionSourceDefinition(
         key="mega_auctions",
@@ -48,7 +48,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         fetcher=fetch_win_lots,
         reason_getter=win_reason,
         supports_enrich=True,
-        status="experimental",
+        status="functional_non_car",
     ),
     AuctionSourceDefinition(
         key="sodre_auctions",
@@ -57,7 +57,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         fetcher=fetch_sodre_lots,
         reason_getter=sodre_reason,
         supports_enrich=False,
-        status="needs_study",
+        status="blocked/needs_study",
     ),
     AuctionSourceDefinition(
         key="superbid_auctions",
@@ -66,7 +66,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         fetcher=fetch_superbid_lots,
         reason_getter=superbid_reason,
         supports_enrich=True,
-        status="experimental",
+        status="needs_study",
     ),
     AuctionSourceDefinition(
         key="copart_auctions",
@@ -75,7 +75,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         fetcher=fetch_copart_lots,
         reason_getter=copart_reason,
         supports_enrich=False,
-        status="needs_js_or_endpoint_study",
+        status="needs_study",
     ),
 )
 
@@ -109,13 +109,13 @@ def render_supported_auction_sources_hint() -> str:
 
 def is_auction_source_user_eligible(source: str) -> bool:
     definition = get_auction_source_definition(source)
-    return bool(definition and definition.status == "active")
+    return bool(definition and definition.status in {"active", "production_ready"})
 
 
 def list_user_eligible_auction_source_keys() -> set[str]:
-    return {item.key for item in _AUCTION_SOURCES if item.status == "active"}
+    return {item.key for item in _AUCTION_SOURCES if item.status in {"active", "production_ready"}}
 
 
 def render_user_eligible_auction_sources_hint() -> str:
-    labels = [item.aliases[0] for item in _AUCTION_SOURCES if item.status == "active"]
+    labels = [item.aliases[0] for item in _AUCTION_SOURCES if item.status in {"active", "production_ready"}]
     return f"Sources elegíveis: {'|'.join(labels)}"
