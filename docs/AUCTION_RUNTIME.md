@@ -273,7 +273,8 @@ As amostras servem para auditar qualidade do que seria enviado:
 - source;
 - título;
 - lance atual/inicial;
-- score;
+- metadados opcionais quando disponíveis (ano, km, lances, encerramento e local);
+- score técnico no contexto admin (wrapper), sem obrigação de aparecer na copy final user-facing;
 - link;
 - summary de skips.
 
@@ -340,4 +341,5 @@ Usar label amigável da source quando houver, por exemplo `VIP Leilões`, evitan
 
 - O comando `/admin auctions notify-samples` exibe previews **user-facing simulados** dos alertas de leilão.
 - Esse comando é apenas observabilidade/admin: **nenhuma mensagem é enviada ao usuário final**.
+- O disclosure `Lance não é preço final.` permanece obrigatório na mensagem simulada/user-facing.
 - Use esse preview para validar copy, disclosure de risco e legibilidade antes de qualquer decisão de envio real.

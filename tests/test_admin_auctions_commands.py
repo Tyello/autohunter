@@ -994,8 +994,12 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
     assert "Fonte: VIP Leilões" in msg
     assert "Source: vip_auctions" not in msg
     assert "Score: 76" in msg
+    assert "Score: 76.00" not in msg
     assert "Lance atual: R$ 91.000,00" in msg
     assert "Lance inicial: R$ 88.000,00" in msg
+    preview_block = msg.split("🧪 Preview — alerta de leilão", 1)[1]
+    preview_block = preview_block.split("Link:\nhttps://x", 1)[0]
+    assert "Score:" not in preview_block
     assert "Lance não é preço final" in msg
     assert "edital" in msg
     assert "taxas/comissão" in msg
@@ -1110,4 +1114,23 @@ def test_admin_auctions_notify_samples_render_rejections_with_string_bid(monkeyp
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
     msg = up.message.sent[-1]
     assert "Rejeições recentes:" in msg
+    assert "Motivo: score abaixo do mínimo" in msg
     assert "Lance atual: R$ 8.500,00" in msg
+
+
+def test_admin_auctions_notify_samples_render_rejections_humanized_stale_lot(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {
+            "created_at": "2026-05-16 21:10 UTC",
+            "summary": {},
+            "samples": [],
+            "rejections": [{"wishlist_query": "Civic", "source": "vip_auctions", "title": "Honda Civic", "reason": "stale_lot"}],
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    assert "Motivo: lote antigo" in up.message.sent[-1]

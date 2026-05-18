@@ -56,6 +56,16 @@ def _build_sample(wishlist: Wishlist, item: dict) -> dict:
         "score": item.get("score") if item.get("score") is not None else lot.get("score"),
         "url": item.get("url") or lot.get("url"),
         "dedupe_key": item.get("dedupe_key"),
+        "year": item.get("year") if item.get("year") is not None else lot.get("year"),
+        "mileage_km": item.get("mileage_km") if item.get("mileage_km") is not None else lot.get("mileage_km"),
+        "total_bids": item.get("total_bids") if item.get("total_bids") is not None else lot.get("total_bids"),
+        "auction_end_at": item.get("auction_end_at") if item.get("auction_end_at") is not None else lot.get("auction_end_at"),
+        "ends_at": item.get("ends_at") if item.get("ends_at") is not None else lot.get("ends_at"),
+        "city": item.get("city") or lot.get("city"),
+        "state": item.get("state") or lot.get("state"),
+        "location": item.get("location") or lot.get("location"),
+        "item_type": item.get("item_type") or lot.get("item_type"),
+        "source_label": item.get("source_label") or lot.get("source_label"),
     }
 
 

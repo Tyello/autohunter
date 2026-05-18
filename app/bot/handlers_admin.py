@@ -136,6 +136,22 @@ def _sample_to_match_like(sample: Dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(**mapped)
 
 
+def _render_rejection_reason_label(reason: Any) -> str:
+    key = str(reason or "").strip().lower()
+    labels = {
+        "stale_lot": "lote antigo",
+        "missing_lot_updated_at": "sem data de atualização",
+        "score_below_min": "score abaixo do mínimo",
+        "item_type_not_allowed": "tipo bloqueado",
+        "missing_item_type": "sem tipo",
+        "filters_not_matched": "filtros não compatíveis",
+        "text_score_zero": "sem match textual",
+        "duplicate": "duplicado",
+        "daily_limit": "limite diário",
+    }
+    return labels.get(key, key or "-")
+
+
 def _fmt_dt(dt: Optional[datetime]) -> str:
     if not dt:
         return "-"
@@ -1023,7 +1039,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         lines.extend([
                             f"{idx}. {rej.get('wishlist_query') or '-'} / {str(rej.get('source') or '-').replace('_auctions', '').upper()}",
                             f"Título: {rej.get('title') or '-'}",
-                            f"Motivo: {rej.get('reason') or '-'}",
+                            f"Motivo: {_render_rejection_reason_label(rej.get('reason'))}",
                             f"Atualizado em: {rej.get('updated_at') or '-'}",
                             f"Score: {rej.get('score') if rej.get('score') is not None else '-'}",
                             f"Lance atual: {_fmt_money_br(rej.get('current_bid')) if rej.get('current_bid') is not None else '-'}",
@@ -1073,7 +1089,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     lines.extend([
                         f"{idx}. {rej.get('wishlist_query') or '-'} / {str(rej.get('source') or '-').replace('_auctions', '').upper()}",
                         f"Título: {rej.get('title') or '-'}",
-                        f"Motivo: {rej.get('reason') or '-'}",
+                        f"Motivo: {_render_rejection_reason_label(rej.get('reason'))}",
                         f"Atualizado em: {rej.get('updated_at') or '-'}",
                         f"Score: {rej.get('score') if rej.get('score') is not None else '-'}",
                         f"Lance atual: {_fmt_money_br(rej.get('current_bid')) if rej.get('current_bid') is not None else '-'}",

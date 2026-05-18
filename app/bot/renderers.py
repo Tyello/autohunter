@@ -498,12 +498,11 @@ def _render_auction_alert_body(match) -> str:
     total_bids = getattr(match, "total_bids", None)
     city = str(getattr(match, "city", "") or "").strip()
     state = str(getattr(match, "state", "") or "").strip()
-    location = "/".join([x for x in [city, state] if x]) if (city or state) else None
-    ends_at = _fmt_dt_utc(getattr(match, "auction_end_at", None))
+    raw_location = str(getattr(match, "location", "") or "").strip()
+    location = "/".join([x for x in [city, state] if x]) if (city or state) else (raw_location or None)
+    raw_ends_at = getattr(match, "auction_end_at", None)
+    ends_at = _fmt_dt_utc(raw_ends_at) if isinstance(raw_ends_at, datetime) else (str(raw_ends_at).strip() if _has_value(raw_ends_at) else None)
     url = str(getattr(match, "url", "") or "").strip()
-    score = getattr(match, "score", None)
-    score_text = f"{float(score):.2f}" if isinstance(score, (int, float)) else (str(score).strip() if _has_value(score) else None)
-
     lines = [
         "⚠️ Oportunidade em leilão encontrada",
         "",
@@ -513,9 +512,7 @@ def _render_auction_alert_body(match) -> str:
     if query:
         lines.append("")
         lines.append(f"Busca: {query}")
-    lines.extend(["", f"Fonte: {source}"])
-    if score_text:
-        lines.append(f"Score: {score_text}")
+    lines.extend([f"Fonte: {source}"])
     lines.append("")
     if current_bid:
         lines.append(f"Lance atual: {current_bid}")
@@ -528,9 +525,12 @@ def _render_auction_alert_body(match) -> str:
     if location:
         lines.append(f"Local: {location}")
     if _has_value(year) or mileage:
-        year_text = str(year) if _has_value(year) else "-"
-        km_text = mileage or "-"
-        lines.append(f"Ano/KM: {year_text}/{km_text}")
+        if _has_value(year) and mileage:
+            lines.append(f"Ano/KM: {year}/{mileage}")
+        elif _has_value(year):
+            lines.append(f"Ano: {year}")
+        else:
+            lines.append(f"KM: {mileage}")
     lines.extend(["", "Atenção:", "Lance não é preço final. Verifique edital, taxas/comissão, documentação e vistoria antes de participar."])
     if url:
         lines.extend(["", "Link:", url])
