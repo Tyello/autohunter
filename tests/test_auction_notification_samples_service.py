@@ -32,3 +32,15 @@ def test_samples_keep_string_current_bid_in_rejections(db):
     set_kv(db, "auction_last_dry_run_samples", {"rejections": [{"current_bid": "8500.00", "reason": "score_below_min"}]})
     out = build_auction_notification_samples(db)
     assert out["rejections"][0]["current_bid"] == "8500.00"
+
+
+def test_samples_keeps_optional_lot_fields(db):
+    set_kv(
+        db,
+        "auction_last_dry_run_samples",
+        {"samples": [{"year": 2018, "mileage_km": 120000, "total_bids": 3}]},
+    )
+    out = build_auction_notification_samples(db)
+    assert out["samples"][0]["year"] == 2018
+    assert out["samples"][0]["mileage_km"] == 120000
+    assert out["samples"][0]["total_bids"] == 3
