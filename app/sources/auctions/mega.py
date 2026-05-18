@@ -89,7 +89,7 @@ def infer_mega_item_type(title: str | None, url: str | None) -> str:
     if any(k in t+u for k in ("caminh","onibus","ônibus","utilit","van")): return "truck"
     if any(k in t+u for k in ("imovel","imóvel","apartamento","terreno")): return "real_estate"
     if any(k in t+u for k in ("pesad","máquina","maquina")): return "heavy"
-    return normalize_item_type(f"{title or ""} {url or ""}")
+    return normalize_item_type(" ".join([title or "", url or ""]))
 
 def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
     cards = re.findall(r'<article[^>]*class="[^"]*(?:card|lot)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S)

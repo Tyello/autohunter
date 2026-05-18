@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import replace
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -101,20 +102,21 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     imgs = [absolute_url(lot.url, i) for i in imgs if re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", i, flags=re.I)]
     extras = dict(lot.extras or {})
     if mileage is not None: extras["mileage_km"] = mileage
-    return lot.model_copy(update={
-        "title": title,
-        "initial_bid": initial_bid,
-        "current_bid": current_bid,
-        "year": year,
-        "city": city or lot.city,
-        "state": state or lot.state,
-        "location": location or lot.location,
-        "status": status,
-        "item_type": infer_win_item_type(title, _strip_html(html), lot.item_type),
-        "thumbnail_url": lot.thumbnail_url or (imgs[0] if imgs else None),
-        "images": lot.images or (imgs or None),
-        "extras": extras,
-    })
+    return replace(
+        lot,
+        title=title,
+        initial_bid=initial_bid,
+        current_bid=current_bid,
+        year=year,
+        city=city or lot.city,
+        state=state or lot.state,
+        location=location or lot.location,
+        status=status,
+        item_type=infer_win_item_type(title, _strip_html(html), lot.item_type),
+        thumbnail_url=lot.thumbnail_url or (imgs[0] if imgs else None),
+        images=lot.images or (imgs or None),
+        extras=extras,
+    )
 
 def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
     cards = re.findall(r'<article[^>]*class="[^"]*(?:card|item|lot|leilao)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S) or re.findall(r'<div[^>]*class="[^"]*(?:card|item|lot|leilao)[^"]*"[^>]*>(.*?)</div>', html, flags=re.I | re.S)
