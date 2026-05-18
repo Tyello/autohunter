@@ -981,7 +981,7 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
         lambda _db, limit=10: {
             "created_at": "2026-05-16 21:10 UTC",
             "summary": {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0},
-            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "initial_bid": "88000.00", "url": "https://x"}] * 12,
+            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "initial_bid": "88000.00", "year": 2008, "mileage_km": 128468, "total_bids": 1, "auction_end_at": "2026-05-20T12:00:00+00:00", "location": "São Paulo/SP", "url": "https://x"}] * 12,
         },
     )
     up = _Update()
@@ -997,6 +997,10 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
     assert "Score: 76.00" not in msg
     assert "Lance atual: R$ 91.000,00" in msg
     assert "Lance inicial: R$ 88.000,00" in msg
+    assert "Ano/KM: 2008/128.468" in msg
+    assert "Lances: 1" in msg
+    assert "Encerra:" in msg
+    assert "Local: São Paulo/SP" in msg
     preview_block = msg.split("🧪 Preview — alerta de leilão", 1)[1]
     preview_block = preview_block.split("Link:\nhttps://x", 1)[0]
     assert "Score:" not in preview_block

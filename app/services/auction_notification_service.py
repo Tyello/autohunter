@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.bot.renderers import render_auction_alert
+from app.bot.renderers import render_auction_alert, render_auction_source_label
 from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.user import User
@@ -36,6 +37,33 @@ def _normalize_limit(limit: int | None) -> int:
 
 def _dedupe_key(wishlist_id: str, source: str, lot_external_id: str) -> str:
     return f"auction:{wishlist_id}:{source}:{lot_external_id}"
+
+
+def _first_present(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _match_with_lot_metadata(match, lot):
+    metadata = {
+        "year": _first_present(getattr(match, "year", None), getattr(lot, "year", None)),
+        "mileage_km": _first_present(getattr(match, "mileage_km", None), getattr(lot, "mileage_km", None)),
+        "total_bids": _first_present(getattr(match, "total_bids", None), getattr(lot, "total_bids", None)),
+        "auction_end_at": _first_present(getattr(match, "auction_end_at", None), getattr(lot, "auction_end_at", None)),
+        "ends_at": _first_present(getattr(match, "ends_at", None), getattr(lot, "ends_at", None)),
+        "city": _first_present(getattr(match, "city", None), getattr(lot, "city", None)),
+        "state": _first_present(getattr(match, "state", None), getattr(lot, "state", None)),
+        "location": _first_present(getattr(match, "location", None), getattr(lot, "location", None)),
+        "item_type": _first_present(getattr(match, "item_type", None), getattr(lot, "item_type", None)),
+    }
+    try:
+        base = vars(match).copy()
+    except Exception:
+        base = {}
+    base.update(metadata)
+    return SimpleNamespace(**base)
 
 
 def _is_auction_match_notification_eligible(match, lot, *, min_score: int, max_age_hours: int, now: datetime | None = None) -> tuple[bool, str]:
@@ -187,12 +215,14 @@ def build_auction_notifications_for_wishlist(
             out["skipped_duplicate"] += 1
             _add_rejection(m, lot, "dedupe", "alerta já enviado para lote/source/busca")
             continue
+        match_for_render = _match_with_lot_metadata(m, lot)
         out["items"].append(
             {
                 "chat_id": int(user.telegram_chat_id),
-                "text": render_auction_alert(m),
+                "text": render_auction_alert(match_for_render),
                 "dedupe_key": dkey,
                 "source": getattr(m, "source", None),
+                "source_label": render_auction_source_label(getattr(m, "source", None)),
                 "external_id": str(getattr(lot, "external_id", "") or ""),
                 "title": getattr(m, "title", None) or getattr(lot, "title", None),
                 "current_bid": getattr(m, "current_bid", None),
@@ -200,6 +230,15 @@ def build_auction_notifications_for_wishlist(
                 "score": getattr(m, "score", None),
                 "url": getattr(m, "url", None),
                 "lot_id": str(getattr(lot, "id", "") or ""),
+                "year": _first_present(getattr(m, "year", None), getattr(lot, "year", None)),
+                "mileage_km": _first_present(getattr(m, "mileage_km", None), getattr(lot, "mileage_km", None)),
+                "total_bids": _first_present(getattr(m, "total_bids", None), getattr(lot, "total_bids", None)),
+                "auction_end_at": _first_present(getattr(m, "auction_end_at", None), getattr(lot, "auction_end_at", None)),
+                "ends_at": _first_present(getattr(m, "ends_at", None), getattr(lot, "ends_at", None)),
+                "city": _first_present(getattr(m, "city", None), getattr(lot, "city", None)),
+                "state": _first_present(getattr(m, "state", None), getattr(lot, "state", None)),
+                "location": _first_present(getattr(m, "location", None), getattr(lot, "location", None)),
+                "item_type": _first_present(getattr(m, "item_type", None), getattr(lot, "item_type", None)),
             }
         )
         out["sent"] += 1
