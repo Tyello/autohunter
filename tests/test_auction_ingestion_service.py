@@ -112,3 +112,54 @@ def test_run_auction_ingestion_skips_invalid_and_counts_reasons(monkeypatch):
     assert out["inserted"] == 1
     assert out["skipped"] == 1
     assert out["skipped_reasons"]["invalid_url"] == 1
+
+
+def test_run_auction_ingestion_collects_ignored_examples(monkeypatch):
+    class FakeDB:
+        def commit(self): return None
+        def rollback(self): return None
+        def close(self): return None
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(
+        svc,
+        "get_auction_source_definition",
+        lambda _s: _Def(
+            "win_auctions",
+            lambda limit: [
+                NormalizedAuctionLot(
+                    source="win_auctions",
+                    external_id="w1",
+                    title=None,
+                    url="https://win/item/1",
+                    raw_payload={"html_card": "<div>texto do card</div>"},
+                    extras={"event_title": "Fallback Win"},
+                )
+            ],
+            lambda: None,
+            False,
+        ),
+    )
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("win_auctions", limit=10, enrich_details=False)
+    assert out["skipped"] == 1
+    assert out["ignored_examples"]
+    ex = out["ignored_examples"][0]
+    assert ex["reason"] == "missing_title"
+    assert ex["url"] == "https://win/item/1"
+    assert ex["fallback_title"] == "Fallback Win"
+    assert "texto do card" in ex["text_preview"]
+
+
+def test_inspect_auction_source_does_not_persist(monkeypatch):
+    called = {"upsert": 0}
+
+    def _fetch(limit):
+        return [NormalizedAuctionLot(source="vip_auctions", external_id="1", title="Honda Civic 2018", url="https://x/item/1", year=2018)]
+
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("vip_auctions", _fetch, lambda: None, False))
+    monkeypatch.setattr(svc, "upsert_lot", lambda *_args, **_kwargs: called.__setitem__("upsert", called["upsert"] + 1))
+
+    out = svc.inspect_auction_source("vip_auctions", limit=5, enrich_details=False)
+    assert out["fetched"] == 1
+    assert called["upsert"] == 0

@@ -78,7 +78,7 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
         db.close()
 
 
-def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = False, use_browser: bool = False) -> dict[str, Any]:
+def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = False) -> dict[str, Any]:
     definition = get_auction_source_definition(source)
     if definition is None:
         raise ValueError(f"Unsupported source: {source}. {render_supported_auction_sources_hint()}")
@@ -122,7 +122,6 @@ def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = F
         "source": source,
         "limit": limit,
         "enrich_applied": enrich_applied,
-        "browser": bool(use_browser),
         "fetched": len(lots),
         "reason": reason if not lots else None,
         "candidates": candidates,

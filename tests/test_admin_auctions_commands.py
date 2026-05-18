@@ -110,13 +110,14 @@ def test_render_admin_auction_lot_shows_start_and_end():
 def test_admin_auctions_run_variants(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
-    monkeypatch.setattr(handlers_admin, "run_auction_ingestion", lambda **kwargs: {"source": "vip_auctions", "fetched": 10, "inserted": 2, "updated": 8, "skipped": 4, "errors": 0, "reason": None, "skipped_reasons": {"invalid_url": 2, "institutional_url": 2}})
+    monkeypatch.setattr(handlers_admin, "run_auction_ingestion", lambda **kwargs: {"source": "vip_auctions", "fetched": 10, "inserted": 2, "updated": 8, "skipped": 4, "errors": 0, "reason": None, "skipped_reasons": {"invalid_url": 2, "institutional_url": 2}, "ignored_examples": [{"reason": "missing_title", "source": "vip_auctions", "url": "https://vip/item/1", "title": "-", "fallback_title": "Uno", "text_preview": "card text"}]})
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip")))
     assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "limit: 10" in up.message.sent[-1]
     assert "duração_ms:" in up.message.sent[-1]
     assert "Ignorados:" in up.message.sent[-1]
+    assert "ignored_examples:" in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "run", "vip", "--limit", "5")))
     assert "Rodando leilões vip_auctions" in up.message.sent[-2]
     assert "limit: 5" in up.message.sent[-1]

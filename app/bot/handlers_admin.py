@@ -361,34 +361,29 @@ def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bo
     return source, limit, enrich, None
 
 
-def _parse_auction_inspect_args(args: list[str]) -> tuple[str | None, int | None, bool, str | None]:
+def _parse_auction_inspect_args(args: list[str]) -> tuple[str | None, int | None, str | None]:
     if len(args) < 2:
-        return None, None, False, "Use: /admin auctions inspect <source> [--limit N] [--browser]"
+        return None, None, "Use: /admin auctions inspect <source> [--limit N]"
     source = resolve_auction_source_alias(args[1])
     if not source:
-        return None, None, False, f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
+        return None, None, f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
     limit = 5
-    browser = False
     idx = 2
     while idx < len(args):
         token = args[idx].lower()
-        if token == "--browser":
-            browser = True
-            idx += 1
-            continue
         if token == "--limit":
             if idx + 1 >= len(args):
-                return None, None, False, "Limite inválido. Use: --limit <1-10>."
+                return None, None, "Limite inválido. Use: --limit <1-10>."
             try:
                 limit = int(args[idx + 1])
             except ValueError:
-                return None, None, False, "Limite inválido. Use: --limit <1-10>."
+                return None, None, "Limite inválido. Use: --limit <1-10>."
             idx += 2
             continue
-        return None, None, False, f"Argumento inválido: {args[idx]}"
+        return None, None, f"Argumento inválido: {args[idx]}"
     if limit < 1 or limit > 10:
-        return None, None, False, "Limite inválido. Use: --limit <1-10>."
-    return source, limit, browser, None
+        return None, None, "Limite inválido. Use: --limit <1-10>."
+    return source, limit, None
 
 def _classify_error(source: str, err: str | None, http_status: Optional[int]) -> tuple[str, str, str]:
     """
@@ -661,7 +656,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
 
         if sub == "inspect":
-            source, limit, use_browser, err = _parse_auction_inspect_args(args)
+            source, limit, err = _parse_auction_inspect_args(args)
             if err:
                 await update.message.reply_text(err)
                 return
@@ -670,11 +665,10 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 source=source,
                 limit=limit,
                 enrich_details=True,
-                use_browser=use_browser,
             )
             lines = [
                 f"🔎 Admin Leilões — inspect {summary.get('source', source)}",
-                f"limit: {limit} browser: {'sim' if use_browser else 'não'}",
+                f"limit: {limit}",
                 f"capturados: {summary.get('fetched', 0)}",
             ]
             if summary.get("reason"):

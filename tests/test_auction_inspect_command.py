@@ -55,6 +55,7 @@ def test_admin_auctions_inspect_render_and_non_admin(monkeypatch):
     assert "inspect win_auctions" in text
     assert "skip_reason: missing_title" in text
     assert "text_preview: preview" in text
+    assert "browser:" not in text
 
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
     up2 = _Update(chat_id=10)
