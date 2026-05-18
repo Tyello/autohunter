@@ -78,3 +78,17 @@ def test_win_only_accepts_item_detalhes_urls():
     lots = win.parse_win_listing_html(html, limit=10)
     assert len(lots) == 1
     assert lots[0].url.endswith("/item/3739/detalhes")
+
+def test_win_fallback_alt_and_external_id_from_url():
+    html = """
+    <article class="card">
+      <a href='/item/placa-abc'><img alt='Chevrolet Onix 2018' src='x.jpg'></a>
+      <div>Lance Inicial: R$ 25.000,00</div>
+      <div>Curitiba/PR</div>
+    </article>
+    """
+    lots = win.parse_win_listing_html(html, limit=5, listing_url='https://winleiloes.com.br/')
+    assert len(lots) == 1
+    lot = lots[0]
+    assert lot.title == 'Chevrolet Onix 2018'
+    assert lot.external_id == 'placa-abc'

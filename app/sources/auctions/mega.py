@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 import re
 from typing import Iterable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
-from app.sources.auctions.parsing import parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
+from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "mega_auctions"
 DEFAULT_LISTING_URL = "https://www.megaleiloes.com.br/veiculos/motos"
@@ -81,20 +81,21 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
 
     lots: list[NormalizedAuctionLot] = []
     for card in cards[:limit]:
-        title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "") or None
+        title = normalize_title(_strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or ""))
+        if not title:
+            title = normalize_title(_first_group(r'alt=["\']([^"\']+)["\']', card))
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
-        url = urljoin(listing_url, href) if href and href.strip() != "-" else None
+        url = absolute_url(listing_url, href) if href and href.strip() != "-" else None
         if not url or url == "-":
             continue
         raw_code = _strip_html(_first_group(r"\b(J\d{4,})\b", card) or "") or None
-        external_id = raw_code or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or _first_group(r"/([A-Z]\d{4,})/?$", url) or url
+        external_id = raw_code or external_id_from_url(url) or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or _first_group(r"/([A-Z]\d{4,})/?$", url) or url
         if not external_id:
             continue
         if not title:
             slug = (urlparse(url).path.rstrip("/").split("/")[-1] if url else "")
             guess = re.sub(r"[-_]+", " ", slug).strip()
-            if re.search(r"(moto|honda|yamaha|suzuki|kawasaki|bmw|ducati)", guess, flags=re.I):
-                title = guess.title()
+            title = normalize_title(guess.title())
 
         location_text = _strip_html(_first_group(r"(?:Local|Cidade)\s*:?\s*</?[^>]*>\s*([^<]+)", card) or _first_group(r"([A-Za-zÀ-ÿ\s]+,\s*[A-Za-z]{2})", card) or "") or None
         city, state, location = parse_mega_location(location_text)

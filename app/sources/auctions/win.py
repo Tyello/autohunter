@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
-from app.sources.auctions.parsing import parse_datetime_br, parse_money_br
+from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_title, parse_datetime_br, parse_money_br
 
 SOURCE_KEY = "win_auctions"
 DEFAULT_LISTING_URL = "https://winleiloes.com.br/"
@@ -95,8 +95,10 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
     lots: list[NormalizedAuctionLot] = []
     for card in cards:
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
-        title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "") or None
-        url = urljoin(listing_url, href) if href else None
+        title = normalize_title(_strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or ""))
+        if not title:
+            title = normalize_title(_first_group(r'alt=["\']([^"\']+)["\']', card))
+        url = absolute_url(listing_url, href) if href else None
         if not url:
             continue
         low_url = url.lower()
@@ -109,7 +111,7 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
         # with legacy cards while still blocking known institutional/navigation paths.
         if "/leilao/" in low_url and "/lotes" in low_url and "/item/" not in low_url:
             continue
-        external_id = extract_win_external_id(url)
+        external_id = extract_win_external_id(url) or external_id_from_url(url)
         if not external_id:
             continue
         if title and re.search(r"^\s*lance\s+inicial\s*:", title, flags=re.I):

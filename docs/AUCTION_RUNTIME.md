@@ -54,6 +54,18 @@ Registry técnico atual:
 
 O registry define implementação. `source_configs` define operação.
 
+### Status operacional por source (2026-05-18)
+
+| Source | Classificação | Diagnóstico rápido | Estratégia |
+|---|---|---|---|
+| `vip_auctions` | `production_ready` | cards públicos + parser estável | HTML simples (requests) |
+| `mega_auctions` | `experimental` | cards públicos encontrados; há mitigação parcial para `missing_title`; validar em execução real | HTML simples com fallback de título |
+| `win_auctions` | `experimental` | cards públicos encontrados; mitigação parcial de `missing_title` com fallback de `h*`/`alt`; validar com `/admin auctions run` | HTML simples com fallback de título |
+| `superbid_auctions` | `experimental` | cards/anchors públicos encontrados; pode variar por página | HTML simples preferencial, browser só se necessário |
+| `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | estudar Playwright leve sem bypass agressivo |
+| `sodre_auctions` | `blocked`/`needs_study` | ocorrência recorrente de `forbidden_403` | não contornar proteção anti-bot; manter fora do piloto |
+
+
 ## 5) Controle unificado de sources
 
 Comandos principais:

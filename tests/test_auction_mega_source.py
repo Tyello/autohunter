@@ -83,3 +83,18 @@ def test_parse_mega_ignores_dash_url_and_infers_title_from_slug():
     assert len(lots) == 1
     assert lots[0].url and lots[0].url != "-"
     assert lots[0].title is not None
+
+def test_parse_mega_fallback_alt_slug_absolute_url_and_external_id():
+    html = """
+    <article class="card">
+      <a href='/lotes/touareg-v8-162758'><img alt='Volkswagen Touareg V8 2008' src='x.jpg'></a>
+      <div>Local: Curitiba, PR</div>
+      <div>1ª Praça: 15/05/2026 às 10:00 - R$ 45.000,00</div>
+    </article>
+    """
+    lots = mega.parse_mega_listing_html(html, limit=5, listing_url='https://www.megaleiloes.com.br/veiculos')
+    assert len(lots) == 1
+    lot = lots[0]
+    assert lot.title == 'Volkswagen Touareg V8 2008'
+    assert lot.url == 'https://www.megaleiloes.com.br/lotes/touareg-v8-162758'
+    assert lot.external_id == '162758'

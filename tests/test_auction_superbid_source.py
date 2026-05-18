@@ -32,7 +32,7 @@ def test_parse_listing_cards_extracts_fields_and_mappings():
 
     assert l2.item_type == "car" and l2.status == "live"
     assert l3.item_type == "truck" and l3.auction_start_at is not None
-    assert l4.item_type == "heavy_machinery" and l4.status == "quote"
+    assert l4.item_type == "heavy" and l4.status == "quote"
 
     assert l4.thumbnail_url and "logo" not in l4.thumbnail_url.lower()
     json.dumps(l1.extras)
@@ -93,8 +93,8 @@ def test_fetch_sets_reason_for_invalid_and_js(monkeypatch):
 
 def test_superbid_blocks_navigation_and_categoria_urls():
     html = """
-    <article class='card'><a href='/categorias/motos'>Navegue pelas categorias</a></article>
-    <article class='card'><a href='/leilao/todos'>Navegue pelas modalidades de vendas</a></article>
+    <article class="card"><a href='/categorias/motos'>Navegue pelas categorias</a></article>
+    <article class="card"><a href='/leilao/todos'>Navegue pelas modalidades de vendas</a></article>
     """
     lots = superbid.parse_superbid_listing_html(html, listing_url='https://www.superbid.net/')
     assert lots == []
@@ -108,12 +108,12 @@ def test_superbid_event_without_signals_rejected_by_gate():
 
 def test_superbid_rejects_institutional_titles_and_urls():
     html = """
-    <article class='card'><a href='/evento/1'>x</a><h3>Canais</h3></article>
-    <article class='card'><a href='/evento/2'>x</a><h3>Sobre Nós</h3></article>
-    <article class='card'><a href='/todos-eventos'>Eventos</a><h3>Honda CG 160 2020</h3></article>
-    <article class='card'><a href='https://blog.superbid.net/post'>Blog</a><h3>Honda CG 160 2020</h3></article>
-    <article class='card'><a href='/files/institucional.pdf'>PDF</a><h3>Honda CG 160 2020</h3></article>
-    <article class='card'><a href='/evento/3'>x</a><h3>Superbid Exchange - Leilões de Motos, Carros, Caminhões</h3></article>
+    <article class="card"><a href='/evento/1'>x</a><h3>Canais</h3></article>
+    <article class="card"><a href='/evento/2'>x</a><h3>Sobre Nós</h3></article>
+    <article class="card"><a href='/todos-eventos'>Eventos</a><h3>Honda CG 160 2020</h3></article>
+    <article class="card"><a href='https://blog.superbid.net/post'>Blog</a><h3>Honda CG 160 2020</h3></article>
+    <article class="card"><a href='/files/institucional.pdf'>PDF</a><h3>Honda CG 160 2020</h3></article>
+    <article class="card"><a href='/evento/3'>x</a><h3>Superbid Exchange - Leilões de Motos, Carros, Caminhões</h3></article>
     """
     lots = superbid.parse_superbid_listing_html(html, listing_url="https://www.superbid.net/")
     assert lots == []
@@ -121,7 +121,7 @@ def test_superbid_rejects_institutional_titles_and_urls():
 
 def test_superbid_event_with_title_and_strong_signal_is_accepted():
     html = """
-    <article class='card'>
+    <article class="card">
       <a href='/evento/787062'>evento</a>
       <h3>Honda CG 160 FAN 2021</h3>
       <div>Lance atual: R$ 9.200,00</div>
@@ -131,3 +131,21 @@ def test_superbid_event_with_title_and_strong_signal_is_accepted():
     lots = superbid.parse_superbid_listing_html(html, listing_url="https://www.superbid.net/")
     assert len(lots) == 1
     assert validate_normalized_auction_lot_candidate(lots[0]).ok is True
+
+def test_superbid_fallback_title_url_external_id_and_heavy_type():
+    html = """
+    <article class="card">
+      <a href='/lotes/pa-carregadeira-caterpillar-320-778899'><img alt='Pá Carregadeira Caterpillar 320 2019' src='x.jpg'></a>
+      <div>Lance atual: R$ 190.000,00</div>
+      <div>Local: Campinas/SP</div>
+    </article>
+    """
+    lots = superbid.parse_superbid_listing_html(html, listing_url='https://www.superbid.net/')
+    assert len(lots) == 1
+    lot = lots[0]
+    assert lot.title == 'Pá Carregadeira Caterpillar 320 2019'
+    assert lot.url == 'https://www.superbid.net/lotes/pa-carregadeira-caterpillar-320-778899'
+    assert lot.external_id == '778899'
+    assert lot.item_type == 'heavy'
+    assert lot.item_type != 'heavy_machinery'
+
