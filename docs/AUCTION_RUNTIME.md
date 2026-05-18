@@ -343,3 +343,13 @@ Usar label amigável da source quando houver, por exemplo `VIP Leilões`, evitan
 - Esse comando é apenas observabilidade/admin: **nenhuma mensagem é enviada ao usuário final**.
 - O disclosure `Lance não é preço final.` permanece obrigatório na mensagem simulada/user-facing.
 - Use esse preview para validar copy, disclosure de risco e legibilidade antes de qualquer decisão de envio real.
+## Auction dry-run digest
+
+Use `/admin auctions digest` para visão operacional consolidada do dry-run de notificações de leilão.
+
+- É comando **somente leitura** para admin.
+- Não envia alertas reais nem altera scheduler/matching/gates.
+- Janela padrão: 24h (`/admin auctions digest --hours 6` até `--hours 168`).
+- Resume runs, buscas avaliadas, previews, erros, bloqueios, sources e últimas amostras/rejeições.
+- Deve ser consultado antes de decidir por piloto manual/controlado.
+- Envio real automático continua fora do escopo nesta fase.
