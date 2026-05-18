@@ -988,15 +988,42 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
     msg = up.message.sent[-1]
     assert "últimas amostras dry-run" in msg
-    assert "1. SONG PRO" in msg
-    assert "SONG PLUS" in msg
-    assert "Source: vip_auctions" in msg
+    assert "1. Wishlist: SONG PRO" in msg
+    assert "🧪 Preview — alerta de leilão" in msg
+    assert "⚠️ Oportunidade em leilão encontrada" in msg
+    assert "Fonte: VIP Leilões" in msg
+    assert "Source: vip_auctions" not in msg
     assert "Score: 76" in msg
     assert "Lance atual: R$ 91.000,00" in msg
     assert "Lance inicial: R$ 88.000,00" in msg
-    assert "Link: https://x" in msg
+    assert "Lance não é preço final" in msg
+    assert "edital" in msg
+    assert "taxas/comissão" in msg
+    assert "documentação" in msg
+    assert "vistoria" in msg
+    assert "Link:\nhttps://x" in msg
     assert "10." in msg
     assert "11." not in msg
+
+
+def test_admin_auctions_notify_samples_render_legacy_payload_no_none(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {
+            "created_at": "2026-05-16 21:10 UTC",
+            "summary": {"previews": 1},
+            "samples": [{"wishlist_query": "touareg", "source": "vip_auctions", "score": 72, "current_bid": "10000.00", "url": "https://x"}],
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    msg = up.message.sent[-1]
+    assert "Sem título" in msg
+    assert "None" not in msg
+    assert "R$ 10.000,00" in msg
 
 def test_admin_auctions_readiness_renders_status_and_is_read_only(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)

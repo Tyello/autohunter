@@ -107,6 +107,35 @@ class _Agg24h:
     avg_found: Optional[int] = None
 
 
+def _sample_to_match_like(sample: Dict[str, Any]) -> SimpleNamespace:
+    payload = sample if isinstance(sample, dict) else {}
+    mapped = {
+        "wishlist_query": payload.get("wishlist_query"),
+        "title": payload.get("title"),
+        "source": payload.get("source"),
+        "source_label": payload.get("source_label"),
+        "score": payload.get("score"),
+        "current_bid": payload.get("current_bid"),
+        "initial_bid": payload.get("initial_bid"),
+        "url": payload.get("url"),
+        "year": payload.get("year"),
+        "mileage_km": payload.get("mileage_km"),
+        "auction_end_at": payload.get("auction_end_at") or payload.get("ends_at"),
+        "city": payload.get("city"),
+        "state": payload.get("state"),
+        "location": payload.get("location"),
+        "item_type": payload.get("item_type"),
+        "total_bids": payload.get("total_bids"),
+    }
+    if not mapped["city"] and not mapped["state"] and mapped.get("location"):
+        location = str(mapped.get("location") or "").strip()
+        if "/" in location:
+            city, state = location.split("/", 1)
+            mapped["city"] = city.strip() or None
+            mapped["state"] = state.strip() or None
+    return SimpleNamespace(**mapped)
+
+
 def _fmt_dt(dt: Optional[datetime]) -> str:
     if not dt:
         return "-"
@@ -1027,19 +1056,29 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"- limite diário: {summary.get('skipped_daily_limit', 0)}",
                 f"- erros: {summary.get('errors', 0)}",
                 "",
-                "Amostras:",
+                "Amostras user-facing simuladas:",
             ]
             for idx, sample in enumerate(samples[:10], start=1):
+                match_like = _sample_to_match_like(sample)
                 lines.extend([
                     "",
-                    f"{idx}. {sample.get('wishlist_query') or '-'}",
-                    str(sample.get("title") or "Sem título"),
-                    f"Source: {sample.get('source') or '-'}",
+                    f"{idx}. Wishlist: {sample.get('wishlist_query') or '-'}",
                     f"Score: {sample.get('score') if sample.get('score') is not None else '-'}",
-                    f"Lance atual: {_fmt_money_br(sample.get('current_bid')) if sample.get('current_bid') is not None else '-'}",
-                    f"Lance inicial: {_fmt_money_br(sample.get('initial_bid')) if sample.get('initial_bid') is not None else '-'}",
-                    f"Link: {sample.get('url') or '-'}",
+                    "",
+                    render_auction_alert_preview(match_like),
                 ])
+            if rejections:
+                lines.extend(["", "Rejeições recentes:"])
+                for idx, rej in enumerate(rejections[:5], start=1):
+                    lines.extend([
+                        f"{idx}. {rej.get('wishlist_query') or '-'} / {str(rej.get('source') or '-').replace('_auctions', '').upper()}",
+                        f"Título: {rej.get('title') or '-'}",
+                        f"Motivo: {rej.get('reason') or '-'}",
+                        f"Atualizado em: {rej.get('updated_at') or '-'}",
+                        f"Score: {rej.get('score') if rej.get('score') is not None else '-'}",
+                        f"Lance atual: {_fmt_money_br(rej.get('current_bid')) if rej.get('current_bid') is not None else '-'}",
+                        "",
+                    ])
             await update.message.reply_text("\n".join(lines))
             return
 
