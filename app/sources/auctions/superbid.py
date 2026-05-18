@@ -75,7 +75,9 @@ def infer_superbid_item_type(*texts: str | None) -> str:
     if any(k in text for k in ("caminh", "ônibus", "onibus", "pesados")):
         return "truck"
     if any(k in text for k in ("máquinas pesadas", "maquinas pesadas", "agrícolas", "agricolas", "carregadeira", "escavadeira")):
-        return "heavy_machinery"
+        return "heavy"
+    if any(k in text for k in ("imóvel", "imovel", "imóveis", "imoveis", "apartamento", "casa", "terreno")):
+        return "real_estate"
     if any(k in text for k in ("carros", "carro", "auto", "veículo", "veiculo", "leves")):
         return "car"
     return "other"
@@ -153,7 +155,7 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             href = _first_group(r'href=["\']([^"\']+)["\']', card)
         if not href:
             continue
-        url = urljoin(listing_url, href)
+        url = absolute_url(listing_url, href)
         lower_url = url.lower()
         if any(
             blocked_url in lower_url
@@ -162,7 +164,7 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             continue
         if ".pdf" in lower_url or "blog.superbid.net" in lower_url:
             continue
-        ext = extract_superbid_external_id(url)
+        ext = extract_superbid_external_id(url) or external_id_from_url(url)
         if not ext:
             continue
         dedupe = f"{url}|{ext}"
@@ -170,11 +172,16 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             continue
         seen.add(dedupe)
 
-        title = _strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or "")
+        title = normalize_title(_strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or ""))
         full_text = _strip_html(card)
         if not title:
             inferred_title = _first_group(r"([A-Za-zÀ-ÿ0-9\-\s]{6,120}\b(?:19\d{2}|20\d{2})\b)", full_text)
-            title = _strip_html(inferred_title or "") or _strip_html(_first_group(r"<a[^>]*>(.*?)</a>", card) or "")
+            title = normalize_title(_strip_html(inferred_title or "") or _strip_html(_first_group(r"<a[^>]*>(.*?)</a>", card) or ""))
+        if not title:
+            title = normalize_title(_first_group(r'alt=["\']([^"\']+)["\']', card))
+        if not title and href:
+            slug = href.strip("/").split("/")[-1]
+            title = normalize_title(re.sub(r"[-_]+", " ", slug))
         blocked_titles = {
             "agentes de venda autorizados",
             "navegue pelas categorias",

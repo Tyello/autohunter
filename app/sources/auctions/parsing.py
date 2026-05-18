@@ -77,13 +77,13 @@ def extract_state_from_location(text: str | None) -> str | None:
 
 def normalize_item_type(category_text: str | None) -> str:
     text = (category_text or "").lower()
-    if any(k in text for k in ("im[oó]vel", "apartamento", "casa", "terreno", "sala comercial")):
+    if re.search(r"\b(im[oó]vel(?:es)?|apartamento|casa|terreno|sala comercial)\b", text):
         return "real_estate"
     if "moto" in text:
         return "motorcycle"
-    if any(k in text for k in ("escavadeira", "trato", "retroescavadeira", "p[aá] carregadeira", "motoniveladora")):
+    if re.search(r"\b(escavadeira|trator(?:es)?|retroescavadeira|p[áa]\s+carregadeira|motoniveladora)\b", text):
         return "heavy"
-    if any(k in text for k in ("caminh", "onibus", "ônibus", "van", "utilit")):
+    if re.search(r"\b(caminh[aã]o(?:es)?|ônibus|onibus|van|utilit[áa]rio)\b", text):
         return "truck"
     if "autom" in text or "car" in text or "auto" in text or "veíc" in text or "veic" in text:
         return "car"
