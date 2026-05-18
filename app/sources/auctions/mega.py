@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
-from app.sources.auctions.parsing import parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
+from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "mega_auctions"
 DEFAULT_LISTING_URL = "https://www.megaleiloes.com.br/veiculos/motos"

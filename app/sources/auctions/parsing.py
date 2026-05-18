@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 
@@ -33,6 +34,40 @@ def parse_year_from_title(title: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def normalize_title(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip(" -_:\t\n\r")
+    return cleaned or None
+
+
+def parse_mileage(value: str | None) -> int | None:
+    if not value:
+        return None
+    hit = re.search(r"(\d[\d\.,\s]{1,15})\s*(?:km|quil[oô]metros?)", value, flags=re.I)
+    return parse_int_br(hit.group(1) if hit else value)
+
+
+def absolute_url(base_url: str, url: str | None) -> str | None:
+    if not url:
+        return None
+    return urljoin(base_url, url)
+
+
+def external_id_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    slug = path.split("/")[-1] if path else ""
+    nums = re.findall(r"\d{3,}", path)
+    if nums:
+        return nums[-1]
+    if slug:
+        return slug.lower()
+    return None
+
+
 def extract_state_from_location(text: str | None) -> str | None:
     if not text:
         return None
@@ -42,9 +77,13 @@ def extract_state_from_location(text: str | None) -> str | None:
 
 def normalize_item_type(category_text: str | None) -> str:
     text = (category_text or "").lower()
+    if any(k in text for k in ("im[oó]vel", "apartamento", "casa", "terreno", "sala comercial")):
+        return "real_estate"
     if "moto" in text:
         return "motorcycle"
-    if "caminh" in text:
+    if any(k in text for k in ("escavadeira", "trato", "retroescavadeira", "p[aá] carregadeira", "motoniveladora")):
+        return "heavy"
+    if any(k in text for k in ("caminh", "onibus", "ônibus", "van", "utilit")):
         return "truck"
     if "autom" in text or "car" in text or "auto" in text or "veíc" in text or "veic" in text:
         return "car"
