@@ -11,7 +11,7 @@ from app.sources.auctions.base import NormalizedAuctionLot
 from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "mega_auctions"
-DEFAULT_LISTING_URL = "https://www.megaleiloes.com.br/veiculos/motos"
+DEFAULT_LISTING_URL = "https://www.megaleiloes.com.br/veiculos/carros"
 ALLOWED_DOMAINS = {"megaleiloes.com.br", "www.megaleiloes.com.br"}
 
 VALID_UFS = {
@@ -87,6 +87,11 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
         url = absolute_url(listing_url, href) if href and href.strip() != "-" else None
         if not url or url == "-":
+            continue
+        if any(
+            blocked in url.lower()
+            for blocked in ("/leiloes-judiciais", "/leiloes-extrajudiciais", "/como-funciona", "/cadastro", "/login", "/contato")
+        ):
             continue
         raw_code = _strip_html(_first_group(r"\b(J\d{4,})\b", card) or "") or None
         external_id = raw_code or external_id_from_url(url) or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or _first_group(r"/([A-Z]\d{4,})/?$", url) or url
