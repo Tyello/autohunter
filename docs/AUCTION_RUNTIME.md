@@ -336,3 +336,8 @@ Usar label amigável da source quando houver, por exemplo `VIP Leilões`, evitan
 - Não remover o disclosure de risco do alerta.
 - Não tratar lance como preço final.
 - Não depender apenas de `.env` para knobs operacionais runtime.
+## Validação de copy com dry-run (`notify-samples`)
+
+- O comando `/admin auctions notify-samples` exibe previews **user-facing simulados** dos alertas de leilão.
+- Esse comando é apenas observabilidade/admin: **nenhuma mensagem é enviada ao usuário final**.
+- Use esse preview para validar copy, disclosure de risco e legibilidade antes de qualquer decisão de envio real.
