@@ -38,7 +38,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         label="Mega Leilões",
         fetcher=fetch_mega_lots,
         reason_getter=mega_reason,
-        supports_enrich=False,
+        supports_enrich=True,
         status="experimental",
     ),
     AuctionSourceDefinition(
@@ -47,7 +47,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         label="Win Leilões",
         fetcher=fetch_win_lots,
         reason_getter=win_reason,
-        supports_enrich=False,
+        supports_enrich=True,
         status="experimental",
     ),
     AuctionSourceDefinition(
@@ -65,7 +65,7 @@ _AUCTION_SOURCES: tuple[AuctionSourceDefinition, ...] = (
         label="Superbid",
         fetcher=fetch_superbid_lots,
         reason_getter=superbid_reason,
-        supports_enrich=False,
+        supports_enrich=True,
         status="experimental",
     ),
     AuctionSourceDefinition(

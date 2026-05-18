@@ -24,8 +24,8 @@ def test_supported_source_keys_and_enrich_flags():
     assert {"vip_auctions", "mega_auctions", "win_auctions", "sodre_auctions", "superbid_auctions", "copart_auctions"}.issubset(keys)
 
     assert get_auction_source_definition("vip").supports_enrich is True
-    assert get_auction_source_definition("mega").supports_enrich is False
-    assert get_auction_source_definition("win").supports_enrich is False
+    assert get_auction_source_definition("mega").supports_enrich is True
+    assert get_auction_source_definition("win").supports_enrich is True
     assert get_auction_source_definition("copart").supports_enrich is False
     assert get_auction_source_definition("sodre").supports_enrich is False
 

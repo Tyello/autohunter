@@ -135,6 +135,26 @@ def _extract_superbid_candidate_blocks(html: str) -> list[str]:
         blocks.append(html[start:end])
     return blocks
 
+def _is_banner_title(title: str | None) -> bool:
+    t=(title or '').strip().lower()
+    if not t: return False
+    if re.search(r'\.(png|jpg|jpeg|webp)$', t): return True
+    if t.startswith('banners_'): return True
+    if re.search(r'jan[-_](?:fev|mai)_20\d{2}', t): return True
+    return False
+
+def _parse_event_drilldown(html: str, event_url: str, limit: int) -> list[NormalizedAuctionLot]:
+    lots=[]
+    for href in re.findall(r"href=[\"']([^\"']*(?:/lote/|/lotes/|/asset/)[^\"']+)[\"']", html, flags=re.I):
+        url=absolute_url(event_url, href)
+        slug=urlparse(url).path.rstrip('/').split('/')[-1]
+        title=normalize_title(re.sub(r'[-_]+',' ',slug))
+        if _is_banner_title(title):
+            continue
+        lots.append(NormalizedAuctionLot(source=SOURCE_KEY, external_id=extract_superbid_external_id(url) or external_id_from_url(url) or slug, title=title, url=url, item_type=infer_superbid_item_type(title,url), year=parse_year_from_title(title), status='unknown', extras={'listing_kind':'event_drilldown'}))
+        if len(lots)>=limit: break
+    return lots
+
 
 def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
     blocks = _extract_superbid_candidate_blocks(html)
@@ -188,6 +208,8 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
             "navegue pelas modalidades de vendas",
         }
         lower_title = (title or "").strip().lower()
+        if _is_banner_title(title):
+            continue
         if any(blocked in lower_title for blocked in blocked_titles) or any(
             blocked in lower_title
             for blocked in (
@@ -264,7 +286,7 @@ def parse_superbid_listing_html(html: str, limit: int = 50, listing_url: str = D
     return lots
 
 
-def fetch_superbid_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
+def fetch_superbid_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enrich: bool = False) -> list[NormalizedAuctionLot]:
     global _LAST_REASON
     _LAST_REASON = None
     if not _valid_source_url(listing_url):
@@ -274,10 +296,12 @@ def fetch_superbid_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL)
         resp = c.get(listing_url)
         resp.raise_for_status()
     lots = parse_superbid_listing_html(resp.text, limit=limit, listing_url=listing_url)
+    if not lots and "/evento/" in listing_url:
+        lots = _parse_event_drilldown(resp.text, listing_url, limit)
     if lots:
         return lots
     if ("exchange.superbid.net" in listing_url) or re.search(r"__NEXT_DATA__|react-root|vue|angular|api", resp.text, flags=re.I):
-        _LAST_REASON = "requires_js_or_internal_endpoint"
+        _LAST_REASON = "requires_js_or_event_drilldown"
     else:
         _LAST_REASON = "no_public_lot_cards_found"
     return []

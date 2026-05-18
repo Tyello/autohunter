@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
-from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
+from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_item_type, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "mega_auctions"
 DEFAULT_LISTING_URL = "https://www.megaleiloes.com.br/veiculos/carros"
@@ -74,6 +74,23 @@ def parse_mega_location(location: str | None) -> tuple[str | None, str | None, s
     return city, (uf if uf in VALID_UFS else None), clean
 
 
+def parse_mega_compact_year(text: str | None) -> int | None:
+    raw = text or ""
+    m = re.search(r"\b((?:19|20)\d{2})\s*/\s*((?:19|20)\d{2})\b", raw)
+    if m: return int(m.group(1))
+    m = re.search(r"\b((?:19|20)\d{2})((?:19|20)\d{2})\b", raw)
+    if m: return int(m.group(1))
+    return parse_year_from_title(raw)
+
+def infer_mega_item_type(title: str | None, url: str | None) -> str:
+    t=(title or "").lower(); u=(url or "").lower()
+    if "/veiculos/carros" in u or t.startswith("carro ") or " carro " in f" {t} ": return "car"
+    if "/veiculos/motos" in u or t.startswith("moto ") or " moto " in f" {t} ": return "motorcycle"
+    if any(k in t+u for k in ("caminh","onibus","ônibus","utilit","van")): return "truck"
+    if any(k in t+u for k in ("imovel","imóvel","apartamento","terreno")): return "real_estate"
+    if any(k in t+u for k in ("pesad","máquina","maquina")): return "heavy"
+    return normalize_item_type(f"{title or ""} {url or ""}")
+
 def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
     cards = re.findall(r'<article[^>]*class="[^"]*(?:card|lot)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S)
     if not cards:
@@ -114,7 +131,7 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
         end_at = second_at or first_at
 
         make = _first_group(r"\bMoto\s+([A-Za-z]+)", title or "")
-        year = parse_year_from_title(title)
+        year = parse_mega_compact_year(title)
         current_bid = parse_money_br(_first_group(r"(?:Valor atual|Lance atual|Valor)\s*:?\s*([^<]+)", card) or "")
         extras = {
             "first_praca_at": first_at.isoformat() if first_at else None,
@@ -132,7 +149,7 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
             external_id=external_id,
             url=url,
             title=title,
-            item_type="motorcycle",
+            item_type=infer_mega_item_type(title, url),
             make=make,
             year=year,
             city=city,
@@ -150,7 +167,7 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
     return lots
 
 
-def fetch_mega_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
+def fetch_mega_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enrich: bool = False) -> list[NormalizedAuctionLot]:
     global _LAST_REASON
     _LAST_REASON = None
     if not validate_auction_source_url(listing_url, ALLOWED_DOMAINS):
