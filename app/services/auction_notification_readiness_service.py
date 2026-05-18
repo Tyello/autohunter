@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_
+from sqlalchemy import func, or_
 
 from app.core.settings import settings
 from app.models.app_kv import AppKV
@@ -72,6 +72,56 @@ def build_auction_notification_readiness(db) -> dict:
     else:
         checks.append(_check("vip_operational", "warn", "VIP operacional", "vip_auctions não encontrada em source_configs"))
 
+    threshold = datetime.now(timezone.utc) - timedelta(hours=max_lot_age_hours if max_lot_age_hours > 0 else 48)
+    source_car_pilot: dict[str, dict] = {}
+    all_source_keys = sorted({s.source for s in eligible_sources} | {r[0] for r in db.query(AuctionLot.source).distinct().all() if r[0]})
+    for src in all_source_keys:
+        allowed = get_auction_allowed_item_types(db, src)
+        car_lots = int(db.query(AuctionLot).filter(AuctionLot.source == src, AuctionLot.item_type == "car").count())
+        user_allowed_lots = 0
+        if src in eligible_source_keys and allowed:
+            user_allowed_lots = int(db.query(AuctionLot).filter(AuctionLot.source == src, AuctionLot.item_type.in_(sorted(allowed))).count())
+        recent_car_base = db.query(AuctionLot).filter(
+            AuctionLot.source == src,
+            AuctionLot.item_type == "car",
+            AuctionLot.updated_at.isnot(None),
+            AuctionLot.updated_at >= threshold,
+        )
+        recent_car_lots = int(recent_car_base.count())
+        recent_car_with_url_bid_year = int(
+            recent_car_base.filter(
+                AuctionLot.url.isnot(None),
+                AuctionLot.url != "",
+                AuctionLot.year.isnot(None),
+                or_(AuctionLot.current_bid.isnot(None), AuctionLot.initial_bid.isnot(None)),
+            ).count()
+        )
+        recent_car_without_bid = int(
+            recent_car_base.filter(AuctionLot.url.isnot(None), AuctionLot.url != "", AuctionLot.current_bid.is_(None), AuctionLot.initial_bid.is_(None)).count()
+        )
+        type_counts = {
+            (item_type or "other"): int(count)
+            for item_type, count in db.query(AuctionLot.item_type, func.count(AuctionLot.id)).filter(AuctionLot.source == src).group_by(AuctionLot.item_type).all()
+        }
+        ready_for_user_car_pilot = recent_car_with_url_bid_year > 0
+        source_car_pilot[src] = {
+            "car_lots": car_lots,
+            "user_allowed_lots": user_allowed_lots,
+            "recent_car_lots": recent_car_lots,
+            "recent_car_with_url_bid_year": recent_car_with_url_bid_year,
+            "recent_car_without_bid": recent_car_without_bid,
+            "item_type_counts": type_counts,
+            "source_ready_for_user_car_pilot": ready_for_user_car_pilot,
+        }
+        if src in eligible_source_keys and not ready_for_user_car_pilot:
+            checks.append(_check("eligible_source_without_ready_car_lots", "warn", "Source elegível sem carros prontos", f"{src} elegível, mas sem lote car recente com URL, lance e ano."))
+        elif car_lots <= 0 and sum(type_counts.values()) > 0:
+            non_car_types = ", ".join(f"{k}:{v}" for k, v in sorted(type_counts.items()) if k != "car")
+            checks.append(_check("source_functional_without_car_lots", "warn", "Source funcional fora do piloto car", f"{src} funcional, mas sem lotes car recentes. Fora do piloto de carros. Tipos: {non_car_types or 'sem tipos'}"))
+        elif recent_car_lots > 0 and recent_car_with_url_bid_year <= 0:
+            missing = "sem lance inicial/atual" if recent_car_without_bid > 0 else "sem URL, lance ou ano mínimos"
+            checks.append(_check("source_car_lots_not_ready", "warn", "Source com carros ainda experimental", f"{src} tem carros, mas {missing}. Manter experimental."))
+
     wishlists_opt_in = int(db.query(Wishlist).filter(Wishlist.is_active.is_(True), Wishlist.include_auctions.is_(True)).count())
     if wishlists_opt_in <= 0:
         checks.append(_check("wishlists_opt_in", "warn", "Buscas com leilões ativados", "Nenhuma busca com leilões ativados."))
@@ -80,11 +130,11 @@ def build_auction_notification_readiness(db) -> dict:
 
     recent_with_bid = 0
     if eligible_source_keys:
-        threshold = datetime.now(timezone.utc) - timedelta(hours=max_lot_age_hours if max_lot_age_hours > 0 else 48)
         recent_with_bid = int(
             db.query(AuctionLot)
             .filter(
                 AuctionLot.source.in_(eligible_source_keys),
+                AuctionLot.item_type == "car",
                 AuctionLot.url.isnot(None),
                 AuctionLot.url != "",
                 or_(AuctionLot.current_bid.isnot(None), AuctionLot.initial_bid.isnot(None)),
@@ -94,9 +144,9 @@ def build_auction_notification_readiness(db) -> dict:
             .count()
         )
     if recent_with_bid <= 0:
-        checks.append(_check("recent_eligible_lots", "warn", "Lotes recentes com lance", "Nenhum lote recente com lance nas sources elegíveis."))
+        checks.append(_check("recent_eligible_lots", "warn", "Lotes car recentes com lance", "Nenhum lote car recente com lance nas sources elegíveis."))
     else:
-        checks.append(_check("recent_eligible_lots", "ok", "Lotes recentes com lance", str(recent_with_bid)))
+        checks.append(_check("recent_eligible_lots", "ok", "Lotes car recentes com lance", str(recent_with_bid)))
 
     last_scheduler = (
         db.query(SystemLog)
@@ -154,6 +204,8 @@ def build_auction_notification_readiness(db) -> dict:
             "eligible_sources": eligible_source_keys,
             "wishlists_opt_in": wishlists_opt_in,
             "recent_eligible_lots_with_bid": recent_with_bid,
+            "source_car_pilot": source_car_pilot,
+            "car_pilot_ready_sources": sorted(src for src, data in source_car_pilot.items() if data.get("source_ready_for_user_car_pilot")),
             "scheduler_last_run_at": scheduler_last_run_at,
             "scheduler_last_status": scheduler_last_status,
             "dry_run_samples": sample_count,

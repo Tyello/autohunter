@@ -35,7 +35,7 @@ def test_readiness_recent_lot_and_sample_ok(db):
     db.add(user)
     db.flush()
     db.add(Wishlist(user_id=user.id, query="uno", is_active=True, include_auctions=True))
-    db.add(AuctionLot(source="vip_auctions", external_id="1", url="https://x", current_bid=10, updated_at=datetime.now(timezone.utc)))
+    db.add(AuctionLot(source="vip_auctions", external_id="1", item_type="car", year=2020, url="https://x", current_bid=10, updated_at=datetime.now(timezone.utc)))
     db.add(SystemLog(level="info", component="scheduler", message="auction_notification_scheduler_tick_finished", payload={}))
     db.add(AppKV(key="auction_last_dry_run_samples", value={"samples": [{"x": 1}]}))
     db.commit()
@@ -140,3 +140,41 @@ def test_readiness_shows_kill_switch(db, monkeypatch):
     out = build_auction_notification_readiness(db)
     ks = next(c for c in out["checks"] if c["key"] == "kill_switch")
     assert ks["status"] == "warn"
+
+
+def test_readiness_real_estate_source_does_not_count_as_car_pilot_ready(db):
+    db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False))
+    db.add(AuctionLot(source="win_auctions", external_id="win-re", item_type="real_estate", url="https://win/re", current_bid=100000, updated_at=datetime.now(timezone.utc)))
+    db.commit()
+
+    out = build_auction_notification_readiness(db)
+
+    win_summary = out["summary"]["source_car_pilot"]["win_auctions"]
+    assert win_summary["car_lots"] == 0
+    assert win_summary["source_ready_for_user_car_pilot"] is False
+    assert any(c["key"] == "source_functional_without_car_lots" and "win_auctions" in c["detail"] for c in out["checks"])
+
+
+def test_readiness_car_without_bid_generates_experimental_warning(db):
+    db.add(SourceConfig(source="mega_auctions", source_type="auction", is_enabled=True, user_eligible=False))
+    db.add(AuctionLot(source="mega_auctions", external_id="mega-car", item_type="car", url="https://mega/car", year=2020, updated_at=datetime.now(timezone.utc)))
+    db.commit()
+
+    out = build_auction_notification_readiness(db)
+
+    mega_summary = out["summary"]["source_car_pilot"]["mega_auctions"]
+    assert mega_summary["car_lots"] == 1
+    assert mega_summary["source_ready_for_user_car_pilot"] is False
+    assert any(c["key"] == "source_car_lots_not_ready" and "mega_auctions" in c["detail"] and "sem lance" in c["detail"] for c in out["checks"])
+
+
+def test_readiness_vip_car_with_bid_counts_as_car_pilot_ready(db):
+    _seed_source(db, eligible=True)
+    db.add(AuctionLot(source="vip_auctions", external_id="vip-car", item_type="car", url="https://vip/car", year=2021, current_bid=50000, updated_at=datetime.now(timezone.utc)))
+    db.commit()
+
+    out = build_auction_notification_readiness(db)
+
+    vip_summary = out["summary"]["source_car_pilot"]["vip_auctions"]
+    assert vip_summary["source_ready_for_user_car_pilot"] is True
+    assert "vip_auctions" in out["summary"]["car_pilot_ready_sources"]

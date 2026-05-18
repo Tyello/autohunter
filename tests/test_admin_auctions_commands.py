@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.bot import handlers_admin
 from app.models.app_kv import AppKV
+from app.models.auction_lot import AuctionLot
 from app.models.source_config import SourceConfig
 from app.bot.renderers import render_admin_auction_lot, render_admin_auctions_summary
 from app.services.auction_lot_service import upsert_lot
@@ -1198,3 +1199,39 @@ def test_admin_auctions_notify_samples_render_rejections_humanized_stale_lot(mon
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
     assert "Motivo: lote antigo" in up.message.sent[-1]
+
+
+def test_admin_auctions_readiness_warns_functional_source_without_car(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False))
+    upsert_lot(db, {"source": "win_auctions", "external_id": "w-re", "item_type": "real_estate", "url": "https://win/re", "current_bid": 100000})
+    lot = db.query(AuctionLot).filter_by(source="win_auctions", external_id="w-re").first()
+    if lot:
+        lot.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "readiness")))
+    text = up.message.sent[-1]
+    assert "win_auctions funcional, mas sem lotes car recentes" in text
+    assert "Fora do piloto de carros" in text
+    assert "ready_car_pilot=não" in text
+
+
+def test_admin_auctions_readiness_warns_mega_car_without_bid(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    db.add(SourceConfig(source="mega_auctions", source_type="auction", is_enabled=True, user_eligible=False))
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "m-car", "item_type": "car", "url": "https://mega/car", "year": 2020})
+    lot = db.query(AuctionLot).filter_by(source="mega_auctions", external_id="m-car").first()
+    if lot:
+        lot.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "readiness")))
+    text = up.message.sent[-1]
+    assert "mega_auctions tem carros, mas sem lance inicial/atual" in text
+    assert "Manter experimental" in text
+    assert "car_lots=1" in text

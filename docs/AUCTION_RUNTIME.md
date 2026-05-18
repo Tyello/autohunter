@@ -45,12 +45,12 @@ Sistema:
 
 Registry técnico atual:
 
-- `vip_auctions` — VIP Leilões — ativa/elegível no piloto.
-- `mega_auctions` — Mega Leilões — experimental.
-- `win_auctions` — Win Leilões — experimental.
-- `sodre_auctions` — Sodré Santoro — experimental/needs study conforme disponibilidade.
-- `superbid_auctions` — Superbid — experimental.
-- `copart_auctions` — Copart — needs JS/internal endpoint study.
+- `vip_auctions` — VIP Leilões — `production_ready`, única source `user_eligible` por padrão no piloto `car`.
+- `mega_auctions` — Mega Leilões — `experimental`; encontra carros, mas ainda não tem lance/local/status/imagem suficientes.
+- `win_auctions` — Win Leilões — `functional_non_car`; predominância de imóveis, fora do piloto `car`.
+- `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fora do piloto.
+- `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
+- `copart_auctions` — Copart — `needs_study`, fora do piloto.
 
 O registry define implementação. `source_configs` define operação.
 
@@ -58,11 +58,11 @@ O registry define implementação. `source_configs` define operação.
 
 | Source | Classificação | Diagnóstico rápido | Estratégia |
 |---|---|---|---|
-| `vip_auctions` | `production_ready` | cards públicos + parser estável | HTML simples (requests) |
-| `mega_auctions` | `experimental` | cards públicos encontrados; há mitigação parcial para `missing_title`; validar em execução real | HTML simples com fallback de título |
-| `win_auctions` | `experimental` | cards públicos encontrados; mitigação parcial de `missing_title` com fallback de `h*`/`alt`; validar com `/admin auctions run` | HTML simples com fallback de título |
-| `superbid_auctions` | `experimental` | cards/anchors públicos encontrados; pode variar por página | HTML simples preferencial, browser só se necessário |
-| `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | estudar Playwright leve sem bypass agressivo |
+| `vip_auctions` | `production_ready` | pronto para piloto `car`; cards públicos + parser estável; mantém lance/URL/ano suficientes para notificação | HTML simples (requests); única `user_eligible` por padrão |
+| `mega_auctions` | `experimental` | encontra carros, mas quality ainda baixa; falta lance inicial/atual, cidade/UF, imagem e status `open`/`live` úteis | manter fora de `user_eligible`; próximo passo: enrich de detalhe |
+| `win_auctions` | `functional_non_car` | enrich funciona e persiste lotes, mas predominam `real_estate`; amostra validada tinha `car=0`, `real_estate=14`, `truck=1` | manter fora do piloto `car`; anos extraídos do HTML geral não devem preencher imóveis |
+| `superbid_auctions` | `needs_study` | banners deixaram de ser tratados como lote; retorno atual indica `requires_js_or_event_drilldown` | estudar endpoint/drilldown antes de elegibilidade; sem Playwright nesta fase |
+| `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | manter fora do piloto; estudar endpoint sem bypass agressivo |
 | `sodre_auctions` | `blocked`/`needs_study` | ocorrência recorrente de `forbidden_403` | não contornar proteção anti-bot; manter fora do piloto |
 
 
@@ -265,11 +265,15 @@ Checks esperados:
 - source elegível disponível;
 - VIP operacional no piloto;
 - existem wishlists opt-in;
-- existem lotes recentes com lance;
+- existem lotes `car` recentes com lance nas sources elegíveis;
 - scheduler registrou execução;
 - samples de dry-run existem;
 - gates de qualidade seguros;
-- categorias user_eligible permanecem somente `car`.
+- categorias user_eligible permanecem somente `car`;
+- resumo por source inclui `car_lots`, `user_allowed_lots` e `source_ready_for_user_car_pilot`;
+- source só conta como pronta para piloto `car` se tiver pelo menos um lote `car` recente com URL, lance e ano; imóveis/motos/caminhões/pesados não contam para readiness do piloto `car`;
+- sources funcionais sem `car` recente geram warning, por exemplo `win_auctions funcional, mas sem lotes car recentes. Fora do piloto de carros.`;
+- sources com carros sem lance útil geram warning, por exemplo `mega_auctions tem carros, mas sem lance inicial/atual. Manter experimental.`.
 
 ## 11) Dry-run e samples
 

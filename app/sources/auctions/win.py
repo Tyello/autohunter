@@ -22,7 +22,7 @@ def get_last_reason() -> str | None: return _LAST_REASON
 def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> bool:
     return (urlparse(url).hostname or "").lower() in {d.lower() for d in allowed_domains}
 
-def _strip_html(text: str) -> str: return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text)).strip()
+def _strip_html(text: str) -> str: return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
 def _first_group(pattern: str, text: str) -> str | None:
     m = re.search(pattern, text, flags=re.I | re.S)
     return m.group(1).strip() if m else None
@@ -91,7 +91,13 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         title = _valid_win_title(normalize_title(re.sub(r"[-_]+", " ", slug)))
     initial_bid = lot.initial_bid or parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
     current_bid = lot.current_bid or parse_money_br(_first_group(r"Lance\s*Atual\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
-    year = lot.year or parse_year_from_title(" ".join([title or "", _strip_html(html)]))
+    clean_html = _strip_html(html)
+    item_type = infer_win_item_type(title, clean_html, lot.item_type)
+    year = lot.year
+    if item_type in {"car", "motorcycle", "truck", "heavy"}:
+        year = year or parse_year_from_title(" ".join([title or "", clean_html]))
+    elif item_type == "real_estate":
+        year = None
     mileage = parse_int_br(_first_group(r"([0-9.]{2,7})\s*km", html) or "")
     raw_loc = _first_group(r"([A-Za-zÀ-ÿ\s]{2,40}/[A-Za-z]{2})", html)
     city, state, location = parse_win_location(raw_loc or lot.location)
@@ -112,7 +118,7 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         state=state or lot.state,
         location=location or lot.location,
         status=status,
-        item_type=infer_win_item_type(title, _strip_html(html), lot.item_type),
+        item_type=item_type,
         thumbnail_url=lot.thumbnail_url or (imgs[0] if imgs else None),
         images=lot.images or (imgs or None),
         extras=extras,

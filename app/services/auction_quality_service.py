@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.auction_lot import AuctionLot
 from app.sources.auctions.registry import list_auction_sources, resolve_auction_source_alias
+from app.services.auction_source_categories_service import get_auction_allowed_item_types
 
 
 def _has_text(column):
@@ -80,6 +81,29 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime) -> dict[s
         .scalar()
         or 0
     )
+    allowed_item_types = get_auction_allowed_item_types(db, source)
+    car_lots = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.item_type == "car").scalar() or 0)
+    user_allowed_lots = 0
+    if allowed_item_types:
+        user_allowed_lots = int(
+            db.query(func.count(AuctionLot.id))
+            .filter(AuctionLot.source == source, AuctionLot.item_type.in_(sorted(allowed_item_types)))
+            .scalar()
+            or 0
+        )
+    source_ready_for_user_car_pilot = bool(
+        db.query(func.count(AuctionLot.id))
+        .filter(
+            AuctionLot.source == source,
+            AuctionLot.item_type == "car",
+            AuctionLot.updated_at >= cutoff,
+            _has_text(AuctionLot.url),
+            AuctionLot.year.isnot(None),
+            or_(AuctionLot.current_bid.isnot(None), AuctionLot.initial_bid.isnot(None)),
+        )
+        .scalar()
+        or 0
+    )
 
     upcoming_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_end_at > now_utc).scalar() or 0)
     open_or_live_count = int(
@@ -110,6 +134,9 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime) -> dict[s
         "with_city_state_count": with_city_state_count,
         "with_url_count": with_url_count,
         "with_image_count": with_image_count,
+        "car_lots": car_lots,
+        "user_allowed_lots": user_allowed_lots,
+        "source_ready_for_user_car_pilot": source_ready_for_user_car_pilot,
         "upcoming_count": upcoming_count,
         "open_or_live_count": open_or_live_count,
         "ended_count": ended_count,

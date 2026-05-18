@@ -460,6 +460,9 @@ def render_admin_auction_quality_report(report: dict) -> str:
             f"Com URL: {int(item.get('with_url_count', 0) or 0)}/{total}",
             f"Com imagem: {int(item.get('with_image_count', 0) or 0)}/{total}",
             f"Open/live: {int(item.get('open_or_live_count', 0) or 0)}",
+            f"Car lots: {int(item.get('car_lots', 0) or 0)}",
+            f"User allowed lots: {int(item.get('user_allowed_lots', 0) or 0)}",
+            f"Pronta piloto car: {'sim' if item.get('source_ready_for_user_car_pilot') else 'não'}",
             f"Último update: {_fmt_dt(item.get('latest_updated_at'))}",
         ])
         types = item.get("item_type_counts") or {}
