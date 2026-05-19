@@ -372,3 +372,27 @@ Use `/admin auctions digest` para visão operacional consolidada do dry-run de n
 - Resume runs, buscas avaliadas, previews, erros, bloqueios, sources e últimas amostras/rejeições.
 - Deve ser consultado antes de decidir por piloto manual/controlado.
 - Envio real automático continua fora do escopo nesta fase.
+
+## Controlled VIP-only real pilot
+
+- Piloto real controlado usa **somente** `vip_auctions`.
+- `mega_auctions`, `win_auctions`, `superbid`, `copart`, `sodre` seguem admin/experimental e fora do piloto user-facing.
+- `dry_run=true` continua como default seguro.
+- O scheduler automático com envio real **não deve** ser ligado nesta etapa.
+- `--real` no `notify-run` é manual, limitado e não altera o `dry_run` global.
+
+Fluxo recomendado:
+1. `/admin auctions run vip --limit 20 --enrich`
+2. `/admin auctions quality vip`
+3. `/admin auctions readiness`
+4. `/admin auctions notify-run --source vip --limit-wishlists 10`
+5. `/admin auctions notify-samples`
+6. `/admin auctions notify-run --source vip --limit-wishlists 5 --real`
+7. `/admin auctions notify-status`
+
+Rollback operacional:
+- `/admin auctions settings set dry_run true`
+- `/admin auctions settings set enabled false`
+- `/admin source vip user-disable`
+
+Se algo sair errado, desabilite leilões (`enabled=false`) ou retire a VIP do user-facing (`user-disable`).
