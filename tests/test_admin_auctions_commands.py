@@ -1095,7 +1095,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
         lambda _db: {"enabled": True, "dry_run": True, "scheduler_minutes": 60, "max_wishlists": 20, "max_per_wishlist": 1, "max_per_user_per_day": 3, "eligible_sources": ["vip_auctions"], "last_run_at": "2026-05-16 17:45 UTC", "last_status": "dry_run", "last_reason": "-", "last_sent": 0, "last_previews": 1, "last_skipped_no_match": 0, "last_skipped_duplicate": 0, "last_skipped_daily_limit": 0, "last_errors": 0},
     )
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
-    assert "Simulação automática ativa. Nenhum alerta real é enviado." in up.message.sent[-1]
+    assert "Scheduler automático em simulação. Nenhum alerta real é enviado automaticamente." in up.message.sent[-1]
     assert "- scheduler automático: dry-run" in up.message.sent[-1]
 
     monkeypatch.setattr(
@@ -1441,6 +1441,22 @@ def test_admin_auctions_notify_samples_rejections_duplicate_adds_operational_rea
     assert "já foram notificados anteriormente" in up.message.sent[-1]
 
 
+def test_admin_auctions_notify_samples_empty_with_fallback_suggests_preview_send(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {"created_at": "-", "summary": {}, "samples": [], "rejections": [{"reason": "item_type_not_allowed"}]},
+    )
+    db.add(AppKV(key="auction_last_previewable_auction_sample", value={"created_at": "2026-05-18T00:00:00+00:00", "source": "dry_run", "sample": {"title": "VW"}}))
+    db.commit()
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    assert "Há uma amostra anterior disponível para preview visual:" in up.message.sent[-1]
+    assert "/admin auctions preview-send" in up.message.sent[-1]
+
+
 def test_admin_auctions_notify_run_adds_operational_readings(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
@@ -1458,7 +1474,7 @@ def test_admin_auctions_notify_run_adds_operational_readings(monkeypatch, db):
     assert "Leitura: lotes fora da categoria permitida foram bloqueados antes do score." in text
 
 
-def test_admin_auctions_preview_send_requires_sample_and_sends_keyboard(monkeypatch, db):
+def test_admin_auctions_preview_send_uses_current_sample_first_then_fallback(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     monkeypatch.setattr(handlers_admin, "build_auction_notification_samples", lambda _db, limit=1: {"samples": []})
@@ -1482,6 +1498,22 @@ def test_admin_auctions_preview_send_requires_sample_and_sends_keyboard(monkeypa
     markup = sent["reply_markup"].to_dict()
     assert markup["inline_keyboard"][0][0]["text"] == "🔗 Ver leilão"
     assert db.query(AppKV).count() == before
+
+    sent2 = {}
+    db.add(AppKV(key="auction_last_previewable_auction_sample", value={"created_at": "2026-05-18T00:00:00+00:00", "source": "dry_run", "sample": {"wishlist_query": "fallback", "source": "vip_auctions", "title": "Fallback", "url": "https://vip/fallback", "score": 79}}))
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "build_auction_notification_samples", lambda _db, limit=1: {"samples": []})
+    class _Bot2:
+        async def send_message(self, **kwargs):
+            sent2.update(kwargs)
+    up3 = _Update(chat_id=1234)
+    up3.get_bot = lambda: _Bot2()
+    before2 = db.query(AppKV).count()
+    asyncio.run(handlers_admin.cmd_admin(up3, _ctx("auctions", "preview-send")))
+    assert "usando última amostra elegível conhecida" in sent2["text"]
+    assert "usando última amostra elegível conhecida" in up3.message.sent[-2]
+    assert sent2["reply_markup"].to_dict()["inline_keyboard"][0][0]["text"] == "🔗 Ver leilão"
+    assert db.query(AppKV).count() == before2
 
 
 def test_admin_auctions_preview_send_requires_admin(monkeypatch, db):

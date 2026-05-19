@@ -43,7 +43,27 @@ def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     assert first["location"] == "São Paulo/SP"
     assert first["item_type"] == "car"
     assert first["source_label"] == "VIP Leilões"
+    previewable = db.query(AppKV).filter(AppKV.key == "auction_last_previewable_auction_sample").first()
+    assert previewable is not None
+    assert previewable.value["source"] == "dry_run"
+    assert previewable.value["sample"]["external_id"] == "161895"
     assert db.query(AppKV).filter(AppKV.key.like("auction:%")).count() == 0
+
+
+def test_job_dry_run_without_new_samples_keeps_last_previewable(monkeypatch, db):
+    db.add(AppKV(key="auction_last_previewable_auction_sample", value={"created_at": "2026-05-18T00:00:00+00:00", "source": "dry_run", "sample": {"title": "VW Touareg", "url": "https://vip/touareg"}}))
+    u = User(id=uuid.uuid4(), telegram_chat_id=123)
+    db.add(u)
+    db.flush()
+    db.add(Wishlist(user_id=u.id, query="touareg", is_active=True, include_auctions=True))
+    db.commit()
+    monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
+    monkeypatch.setattr("app.services.auction_notification_job_service.build_auction_notifications_for_wishlist", lambda *_a, **_k: {"items": [], "skipped_duplicate": 0, "skipped_no_match": 1, "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 1, "skipped_missing_lot_updated_at": 0, "errors": 0, "messages": []})
+    import asyncio
+    asyncio.run(run_auction_notification_job(db, bot=None, dry_run=True))
+    previewable = db.query(AppKV).filter(AppKV.key == "auction_last_previewable_auction_sample").first()
+    assert previewable is not None
+    assert previewable.value["sample"]["title"] == "VW Touareg"
 
 
 def test_job_dry_run_limits_samples_to_10(monkeypatch, db):

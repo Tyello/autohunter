@@ -78,6 +78,7 @@ from app.services.auction_notification_settings_service import (
     reset_runtime_setting,
     reset_all_runtime_settings,
 )
+from app.services.app_kv_service import get_kv
 from app.services.auction_preview_service import (
     build_auction_alert_previews_for_enabled_wishlists,
     build_auction_alert_previews_for_wishlist,
@@ -1142,7 +1143,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             elif not status["enabled"]:
                 health_line = "Envio automático desligado. Seguro para produção."
             elif status["dry_run"]:
-                health_line = "Simulação automática ativa. Nenhum alerta real é enviado."
+                health_line = "Scheduler automático em simulação. Nenhum alerta real é enviado automaticamente."
             else:
                 health_line = "🚨 Envio automático real ativo"
             lines = [
@@ -1240,6 +1241,13 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         lines.extend(["", "Há alertas compatíveis que não foram exibidos porque já foram notificados anteriormente."])
                     if "item_type_not_allowed" in reasons:
                         lines.extend(["", "Alguns lotes foram bloqueados por categoria, conforme configuração da source."])
+                    previewable = get_kv(db, "auction_last_previewable_auction_sample") or {}
+                    if isinstance(previewable, dict) and isinstance(previewable.get("sample"), dict):
+                        lines.extend([
+                            "",
+                            "Há uma amostra anterior disponível para preview visual:",
+                            "use /admin auctions preview-send",
+                        ])
                     lines.extend([
                         "",
                         "",
@@ -1318,13 +1326,22 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
         if sub in {"preview-send", "notify-preview-send"}:
             data = build_auction_notification_samples(db, limit=1)
             sample = (data.get("samples") or [None])[0]
+            using_fallback = False
+            if not sample:
+                previewable = get_kv(db, "auction_last_previewable_auction_sample") or {}
+                if isinstance(previewable, dict) and isinstance(previewable.get("sample"), dict):
+                    sample = previewable.get("sample")
+                    using_fallback = True
             if not sample:
                 await update.message.reply_text(
                     "Não há amostra disponível. Rode /admin auctions notify-run --source vip --limit-wishlists 5 primeiro."
                 )
                 return
             match_like = _sample_to_match_like(sample)
-            preview_text = "🧪 Preview admin — não enviado ao usuário\n\n" + render_auction_alert(match_like)
+            preview_text = (
+                ("🧪 Preview admin — usando última amostra elegível conhecida\n\n" if using_fallback else "🧪 Preview admin — não enviado ao usuário\n\n")
+                + render_auction_alert(match_like)
+            )
             admin_chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
             bot = update.get_bot() if hasattr(update, "get_bot") else None
             if not bot or admin_chat_id is None:
@@ -1336,6 +1353,8 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 reply_markup=build_auction_alert_keyboard(sample.get("url")),
                 disable_web_page_preview=True,
             )
+            if using_fallback:
+                await update.message.reply_text("🧪 Preview admin — usando última amostra elegível conhecida")
             await update.message.reply_text("✅ Preview enviado para este chat admin.")
             return
 

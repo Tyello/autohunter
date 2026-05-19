@@ -16,6 +16,7 @@ from app.services.auction_source_config_service import list_user_eligible_auctio
 
 logger = logging.getLogger(__name__)
 _DRY_RUN_SAMPLES_KEY = "auction_last_dry_run_samples"
+_PREVIEWABLE_SAMPLE_KEY = "auction_last_previewable_auction_sample"
 _MAX_SAMPLES = 10
 _MAX_REJECTIONS = 5
 
@@ -208,5 +209,17 @@ async def run_auction_notification_job(
             _DRY_RUN_SAMPLES_KEY,
             _json_safe(payload),
         )
+        if dry_run_samples:
+            set_kv(
+                db,
+                _PREVIEWABLE_SAMPLE_KEY,
+                _json_safe(
+                    {
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "sample": dry_run_samples[0],
+                        "source": "dry_run",
+                    }
+                ),
+            )
     logger.info("auction_notification_job_finished", extra={**out, "max_wishlists": max_wishlists, "max_per_wishlist": max_per_wishlist, "eligible_sources": sorted(eligible_sources), "duration_ms": duration_ms})
     return out
