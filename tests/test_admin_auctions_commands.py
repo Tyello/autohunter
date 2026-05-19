@@ -1300,3 +1300,21 @@ def test_admin_auctions_readiness_warns_mega_car_without_bid(monkeypatch, db):
     assert "mega_auctions tem carros, mas sem lance inicial/atual" in text
     assert "Manter experimental" in text
     assert "car_lots=1" in text
+
+
+def test_admin_auctions_notify_samples_render_rejections_humanized_item_type_blocked(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {
+            "created_at": "2026-05-16 21:10 UTC",
+            "summary": {},
+            "samples": [],
+            "rejections": [{"wishlist_query": "SONG", "source": "vip_auctions", "title": "F700 GS", "reason": "item_type_not_allowed"}],
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    assert "Motivo: tipo bloqueado" in up.message.sent[-1]

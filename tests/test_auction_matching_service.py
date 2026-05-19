@@ -90,7 +90,7 @@ def test_debug_candidates_reports_filters_not_matched(db):
     w = _mk_wishlist(db, "civic")
     from app.services.wishlists_service import add_filter
     add_filter(db, w.id, "state", "eq", "SP")
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "d1", "title": "Honda Civic", "status": "open", "state": "RJ"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d1", "title": "Honda Civic", "status": "open", "state": "RJ", "item_type": "car"})
     db.commit()
     out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
     assert out
@@ -99,7 +99,7 @@ def test_debug_candidates_reports_filters_not_matched(db):
 
 def test_debug_candidates_reports_text_score_zero(db):
     w = _mk_wishlist(db, "porsche")
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "d2", "title": "Fiat Uno", "status": "open"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d2", "title": "Fiat Uno", "status": "open", "item_type": "car"})
     db.commit()
     out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
     assert any(x["reject_reason"] == "text_score_zero" for x in out)
@@ -107,7 +107,7 @@ def test_debug_candidates_reports_text_score_zero(db):
 
 def test_debug_candidates_reports_ok(db):
     w = _mk_wishlist(db, "honda civic")
-    upsert_lot(db, {"source": "vip_auctions", "external_id": "d3", "title": "Honda Civic", "status": "open"})
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "d3", "title": "Honda Civic", "status": "open", "item_type": "car"})
     db.commit()
     out = debug_auction_lot_candidates_for_wishlist(db, w, limit=10)
     assert any(x["reject_reason"] == "ok" for x in out)
@@ -152,3 +152,18 @@ def test_debug_candidates_respects_eligible_sources(db):
     out = debug_auction_lot_candidates_for_wishlist(db, w, eligible_sources={"vip_auctions"}, limit=10)
     assert out
     assert all(x["source"] == "vip_auctions" for x in out)
+
+
+def test_debug_candidates_reports_item_type_blocked_before_score(db):
+    from app.models.source_config import SourceConfig
+
+    w = _mk_wishlist(db, "song pro")
+    db.add(SourceConfig(source="vip_auctions", source_type="auction", is_enabled=True, user_eligible=True, status="production_ready", extra={"allowed_item_types": ["car"]}))
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "moto-1", "title": "F700 GS - 2017/2018", "item_type": "motorcycle", "status": "open"})
+    db.commit()
+
+    out = debug_auction_lot_candidates_for_wishlist(db, w, source="vip_auctions", limit=10)
+    row = next(x for x in out if x["external_id"] == "moto-1")
+    assert row["reject_reason"] == "item_type_not_allowed"
+    assert row["item_type_normalized"] == "motorcycle"
+    assert row["allowed_item_types"] == ["car"]

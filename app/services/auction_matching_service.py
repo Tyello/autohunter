@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.text_norm import normalize, tokens
 from app.models.auction_lot import AuctionLot
 from app.models.wishlist import Wishlist
+from app.services.auction_source_categories_service import get_auction_allowed_item_types, normalize_item_type
 from app.services.matching_service import (
     _apply_filters_fast,
     _extract_city_state_from_location,
@@ -236,9 +237,13 @@ def debug_auction_lot_candidates_for_wishlist(
 
     rows: list[dict] = []
     for lot in lots:
+        lot_item_type = normalize_item_type(getattr(lot, "item_type", None))
+        allowed_item_types = sorted(get_auction_allowed_item_types(db, lot.source))
         passes_filters = _wishlist_passes_on_lot(wishlist, lot)
         score, reasons = _score_match(wishlist, lot)
-        if not passes_filters:
+        if lot_item_type is not None and lot_item_type not in set(allowed_item_types):
+            reject_reason = "item_type_not_allowed"
+        elif not passes_filters:
             reject_reason = "filters_not_matched"
         elif score <= 0:
             reject_reason = "text_score_zero"
@@ -250,6 +255,8 @@ def debug_auction_lot_candidates_for_wishlist(
                 "external_id": lot.external_id,
                 "title": lot.title,
                 "item_type": lot.item_type,
+                "item_type_normalized": lot_item_type,
+                "allowed_item_types": allowed_item_types,
                 "year": lot.year,
                 "current_bid": lot.current_bid,
                 "updated_at": lot.updated_at,
