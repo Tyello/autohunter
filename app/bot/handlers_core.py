@@ -156,7 +156,7 @@ def _build_create_wishlist_summary_screen(query: str, filters_draft: list[dict],
             "Quer incluir oportunidades de leilão nessa busca?"
         )
     if include_auctions:
-        text += "\n\nLeilão pode ter taxas, comissão, edital e vistoria. Lance não é valor final."
+        text += "\n\nAtenção: em leilões, lance não é preço final. Confira edital, taxas, documentação e vistoria antes de participar."
     toggle_label = "❌ Não, apenas anúncios tradicionais" if include_auctions else "✅ Sim, incluir leilões"
     toggle_cb = "CWL:AUCTIONS:NO" if include_auctions else "CWL:AUCTIONS:YES"
     kb = InlineKeyboardMarkup([
@@ -439,8 +439,14 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _safe_edit_or_send(update, "Busca não encontrada para sua conta.")
                 return ConversationHandler.END
         next_action = "WL:AUCTIONS:DISABLE" if bool(getattr(wl, "include_auctions", False)) else "WL:AUCTIONS:ENABLE"
-        action_label = "Desativar leilões" if next_action.endswith("DISABLE") else "Ativar leilões"
-        await _safe_edit_or_send(update, f"Leilões: {_render_auctions_status(getattr(wl, 'include_auctions', False))}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(action_label, callback_data=next_action)], [InlineKeyboardButton("↩️ Voltar aos filtros", callback_data=f"WL:FILTERS_ID:{wishlist_id}")]]))
+        action_label = "Desativar leilões" if next_action.endswith("DISABLE") else "⚠️ Ativar leilões"
+        status_enabled = bool(getattr(wl, "include_auctions", False))
+        status_label = "✅ Leilões ativados" if status_enabled else "Leilões: desativado"
+        buttons = [[InlineKeyboardButton(action_label, callback_data=next_action)]]
+        if status_enabled:
+            buttons.append([InlineKeyboardButton("Desativar leilões", callback_data="WL:AUCTIONS:DISABLE")])
+        buttons.append([InlineKeyboardButton("↩️ Voltar aos filtros", callback_data=f"WL:FILTERS_ID:{wishlist_id}")])
+        await _safe_edit_or_send(update, status_label, reply_markup=InlineKeyboardMarkup(buttons))
         return MENU_FILTER_SELECT_VALUE
     if data in {"WL:AUCTIONS:ENABLE", "WL:AUCTIONS:DISABLE"}:
         wishlist_id = context.user_data.get("menu_filter_wishlist_id")
@@ -461,9 +467,9 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.refresh(wl)
             fs = list_filters(db, wl.id)
             feedback = (
-                "✅ Leilões ativados para esta busca.\n\nLembrete: lance não é valor final. Verifique edital, taxas, comissão, documentação e vistoria."
+                "✅ Leilões ativados para esta busca.\n\nA partir de agora, também vamos considerar oportunidades em leilão compatíveis com seus filtros.\n\nAtenção: lance não é preço final. Verifique edital, taxas/comissão, documentação e vistoria antes de participar."
                 if enable
-                else "✅ Leilões desativados para esta busca."
+                else "✅ Leilões desativados para esta busca.\nVocê continuará recebendo alertas de anúncios normais compatíveis."
             )
             text = f"{feedback}\n\n{_build_filters_adjust_text(wl, fs)}"
         await _safe_edit_or_send(update, text, reply_markup=_build_filters_adjust_keyboard(wl))
@@ -952,7 +958,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 f"Leilões: {_render_auctions_status(include_auctions)}\n"
                 f"Filtros:\n{filters_text}\n\n"
                 f"{feedback_block}"
-                "Próximo passo: acompanhe suas buscas ou crie uma nova."
+                "Próximo passo:\nVocê receberá alertas quando encontrarmos anúncios compatíveis." + ("\n\nAtenção: em leilões, lance não é preço final. Confira edital, taxas, documentação e vistoria antes de participar." if include_auctions else "")
             ),
             reply_markup=_post_creation_markup(),
         )

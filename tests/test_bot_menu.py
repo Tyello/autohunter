@@ -357,6 +357,7 @@ def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
     assert state2 == handlers_core.MENU_FILTER_SELECT_VALUE
     callbacks_2 = [b.callback_data for row in q2.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
     assert "WL:AUCTIONS:ENABLE" in callbacks_2
+    assert "⚠️ Ativar leilões" in [b.text for row in q2.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
     assert "WL:FILTERS_ID:w1" in callbacks_2
 
     q3 = _CallbackQuery("WL:AUCTIONS:ENABLE")
@@ -364,6 +365,7 @@ def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
     assert state3 == handlers_core.MENU_FILTER_SELECT_VALUE
     assert wl.include_auctions is True
     assert "✅ Leilões ativados para esta busca." in q3.edits[-1]
+    assert "lance não é preço final" in q3.edits[-1]
     assert "Leilões: ativado" in q3.edits[-1]
 
     q4 = _CallbackQuery("WL:FILTER:AUCTIONS:TOGGLE")
@@ -376,6 +378,7 @@ def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
     assert state5 == handlers_core.MENU_FILTER_SELECT_VALUE
     assert wl.include_auctions is False
     assert "✅ Leilões desativados para esta busca." in q5.edits[-1]
+    assert "anúncios normais compatíveis" in q5.edits[-1]
     assert "Leilões: desativado" in q5.edits[-1]
 
 

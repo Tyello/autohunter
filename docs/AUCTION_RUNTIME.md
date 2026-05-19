@@ -406,3 +406,11 @@ Rollback operacional:
 - `/admin source vip user-disable`
 
 Se algo sair errado, desabilite leilões (`enabled=false`) ou retire a VIP do user-facing (`user-disable`).
+
+## User-facing auction UX
+
+- O usuário opta por leilões por busca (`include_auctions`), com estado visível em criação, listagem e ajustes de filtros.
+- No piloto atual, `VIP Leilões` é a única source user-facing.
+- Toda comunicação user-facing de leilão deve incluir aviso de risco: lance não é preço final; conferir edital, taxas/comissão, documentação e vistoria.
+- Sources experimentais (ex.: Mega/Win/Superbid) não devem ser expostas ao usuário final.
+- Envio real permanece sob controle operacional/admin (manual), com scheduler automático em dry-run nesta fase.

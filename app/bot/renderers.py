@@ -268,6 +268,8 @@ def render_help_text() -> str:
         "• 🔎 Buscar agora — busca pontual, sem salvar\n"
         "• /plan — ver uso e limites do seu plano\n"
         "• /upgrade — ver detalhes do Premium\n\n"
+        "Você pode ativar leilões em uma busca para receber oportunidades de fontes compatíveis, começando por VIP Leilões.\n"
+        "Em leilões, lance não é preço final: confira edital, taxas/comissão, documentação e vistoria.\n\n"
         "Dica: se quiser comandos avançados/legados, use /wishlist_help."
     )
 
