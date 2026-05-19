@@ -872,7 +872,12 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     return
                 readiness = build_auction_notification_readiness(db)
                 reason = None
-                if source not in set(readiness.get("car_pilot_ready_sources") or []):
+                summary = readiness.get("summary") if isinstance(readiness, dict) else None
+                ready_sources = set((summary or {}).get("car_pilot_ready_sources") or [])
+                if not ready_sources and isinstance(readiness, dict):
+                    # defensive fallback for legacy/mock payloads
+                    ready_sources = set(readiness.get("car_pilot_ready_sources") or [])
+                if source not in ready_sources:
                     reason = "readiness_sem_source_pronta"
                 elif not is_auction_source_enabled(db, source):
                     reason = "source_disabled"
