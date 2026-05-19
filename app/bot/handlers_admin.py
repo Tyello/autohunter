@@ -696,7 +696,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
 
         if sub == "sources":
-            ensure_auction_source_configs(db)
+            changed = ensure_auction_source_configs(db)
+            if changed:
+                db.commit()
             lines = ["⚙️ Admin Leilões — sources", ""]
             for item in sorted([d.key for d in list_auction_sources()]):
                 cfg = get_source_config(db, item)

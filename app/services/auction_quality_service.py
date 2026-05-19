@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.auction_lot import AuctionLot
 from app.sources.auctions.registry import list_auction_sources, resolve_auction_source_alias
+from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.auction_source_categories_service import get_auction_allowed_item_types
 
 
@@ -45,8 +46,9 @@ def _label(score: int) -> str:
     return "fraca"
 
 
-def _build_source_metrics(db: Session, source: str, now_utc: datetime) -> dict[str, Any]:
+def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot_window_hours: int) -> dict[str, Any]:
     cutoff = now_utc - timedelta(hours=24)
+    car_pilot_cutoff = now_utc - timedelta(hours=car_pilot_window_hours if car_pilot_window_hours > 0 else 48)
     total_lots = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source).scalar() or 0)
     updated_last_24h = int(
         db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.updated_at >= cutoff).scalar() or 0
@@ -96,7 +98,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime) -> dict[s
         .filter(
             AuctionLot.source == source,
             AuctionLot.item_type == "car",
-            AuctionLot.updated_at >= cutoff,
+            AuctionLot.updated_at >= car_pilot_cutoff,
             _has_text(AuctionLot.url),
             AuctionLot.year.isnot(None),
             or_(AuctionLot.current_bid.isnot(None), AuctionLot.initial_bid.isnot(None)),
@@ -137,6 +139,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime) -> dict[s
         "car_lots": car_lots,
         "user_allowed_lots": user_allowed_lots,
         "source_ready_for_user_car_pilot": source_ready_for_user_car_pilot,
+        "car_pilot_window_hours": car_pilot_window_hours if car_pilot_window_hours > 0 else 48,
         "upcoming_count": upcoming_count,
         "open_or_live_count": open_or_live_count,
         "ended_count": ended_count,
@@ -158,5 +161,8 @@ def build_auction_quality_report(db: Session, source: str | None = None) -> dict
         else:
             keys = []
 
-    sources = [_build_source_metrics(db, key, now_utc) for key in keys]
-    return {"generated_at": now_utc, "sources": sources}
+    cfg = get_auction_notification_runtime_settings(db)
+    car_pilot_window_hours = int(cfg.get("max_lot_age_hours") or 48)
+
+    sources = [_build_source_metrics(db, key, now_utc, car_pilot_window_hours) for key in keys]
+    return {"generated_at": now_utc, "sources": sources, "car_pilot_window_hours": car_pilot_window_hours}

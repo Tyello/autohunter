@@ -1,7 +1,7 @@
 import asyncio
 import types
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.bot import handlers_admin
 from app.models.app_kv import AppKV
@@ -790,6 +790,71 @@ def test_admin_auctions_sources_and_toggles(monkeypatch, db):
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-config", "mega", "user-enable")))
     assert "Não é possível user-enable" in up.message.sent[-1]
+
+
+def test_admin_auctions_sources_renders_reconciled_metadata_status(monkeypatch, db):
+    db.add(SourceConfig(source="vip_auctions", source_type="auction", is_enabled=False, user_eligible=False, status="active", extra={"allowed_item_types": ["car", "motorcycle"]}))
+    db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental"))
+    db.add(SourceConfig(source="superbid_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental"))
+    db.add(SourceConfig(source="copart_auctions", source_type="auction", is_enabled=False, user_eligible=False, status="needs_js_or_endpoint_study"))
+    db.add(SourceConfig(source="sodre_auctions", source_type="auction", is_enabled=False, user_eligible=False, status="needs_study"))
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "sources")))
+    text = up.message.sent[-1]
+
+    assert "VIP Leilões" in text
+    assert "source: vip_auctions" in text
+    assert "status: production_ready" in text
+    assert "source: win_auctions" in text and "status: functional_non_car" in text
+    assert "source: superbid_auctions" in text and "status: needs_study" in text
+    assert "source: copart_auctions" in text and "status: needs_study" in text
+    assert "source: sodre_auctions" in text and "status: blocked/needs_study" in text
+    vip = db.query(SourceConfig).filter(SourceConfig.source == "vip_auctions").one()
+    assert vip.is_enabled is False
+    assert vip.user_eligible is False
+    assert vip.extra == {"allowed_item_types": ["car", "motorcycle"]}
+
+
+def test_admin_auctions_quality_matches_readiness_window_for_vip_48h(monkeypatch, db):
+    from app.services.app_kv_service import set_kv
+
+    now = datetime.now(timezone.utc)
+    upsert_lot(
+        db,
+        {
+            "source": "vip_auctions",
+            "external_id": "vip-30h-admin",
+            "title": "Honda Civic",
+            "item_type": "car",
+            "year": 2020,
+            "current_bid": 50000,
+            "url": "https://vip/30h-admin",
+            "status": "open",
+        },
+    )
+    lot = db.query(AuctionLot).filter_by(source="vip_auctions", external_id="vip-30h-admin").one()
+    lot.updated_at = now - timedelta(hours=30)
+    db.add(SourceConfig(source="vip_auctions", source_type="auction", is_enabled=True, user_eligible=True, status="active", extra={"allowed_item_types": ["car"]}))
+    set_kv(db, "auction_notification_settings", {"max_lot_age_hours": 48})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "quality", "vip")))
+    quality_text = up.message.sent[-1]
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "readiness")))
+    readiness_text = up.message.sent[-1]
+
+    assert "Atualizados 24h: 0" in quality_text
+    assert "Pronta piloto car: sim" in quality_text
+    assert "Janela piloto car: 48h" in quality_text
+    assert "vip_auctions: car_lots=1" in readiness_text
+    assert "ready_car_pilot=sim" in readiness_text
 
 
 def test_admin_source_unified_auction_enable_disable_and_categories(monkeypatch, db):
