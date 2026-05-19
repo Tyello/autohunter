@@ -205,16 +205,22 @@ def _normalize_status_vip(text: str | None) -> str:
     return normalize_status(text)
 
 
+def _has_bmw_gs_motorcycle_pattern(text: str) -> bool:
+    return bool(re.search(r"\b[frgs]\s?\d{2,4}\s?gs\b", text, flags=re.I))
+
+
 def _infer_item_type(title: str | None, make: str | None, mileage_km: int | None, card_text: str) -> str:
     text = f" {title or ''} {card_text} ".lower()
     make_l = f" {(make or '').lower()} "
-    moto_tokens = (" cg ", " fan ", " titan ", " biz ", " pop ", " bros ", " factor ", " fazer ", " xre ", " mt-", " nmax ", " pcx ", " scooter ", " moto ", " xy200", " xy ", " shi ")
+    moto_tokens = (" cg ", " fan ", " titan ", " biz ", " pop ", " bros ", " factor ", " fazer ", " xre ", " mt-", " nmax ", " pcx ", " scooter ", " moto ", " xy200", " xy200gy", " shi ")
     moto_brands_strong = (" shineray ", " dafra ", " haojue ", " kawasaki ", " ktm ")
     moto_brand_terms = {
         " honda ": (" cg ", " biz ", " bros ", " fan ", " titan ", " xre ", " pop ", " 160 "),
         " yamaha ": (" fazer ", " factor ", " mt-", " nmax "),
         " suzuki ": (" yes ", " intruder ", " burgman ", " gsx ", " moto "),
     }
+    if _has_bmw_gs_motorcycle_pattern(text):
+        return "motorcycle"
     if any(token in text for token in moto_brands_strong):
         return "motorcycle"
     if any(token in text for token in moto_tokens):

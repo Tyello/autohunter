@@ -246,8 +246,16 @@ def test_infer_item_type_motorcycle_heuristics():
     assert vip._infer_item_type("XY200GY-04", "Shineray", None, "") == "motorcycle"
     assert vip._infer_item_type("Yamaha Fazer 250", "Yamaha", None, "") == "motorcycle"
     assert vip._infer_item_type("Dafra Next 300", "Dafra", None, "") == "motorcycle"
+    assert vip._infer_item_type("F700 GS - 2017/2018", "BMW", None, "") == "motorcycle"
+    assert vip._infer_item_type("F 800 GS", "BMW", None, "") == "motorcycle"
+    assert vip._infer_item_type("R1200 GS", "BMW", None, "") == "motorcycle"
 
 
 def test_infer_item_type_keeps_honda_cars_as_car():
     assert vip._infer_item_type("Honda Civic EXL 2020", "Honda", 10000, "") == "car"
     assert vip._infer_item_type("Honda HR-V EX 2021", "Honda", 20000, "") == "car"
+
+
+def test_infer_item_type_song_plus_gs_not_motorcycle():
+    out = vip._infer_item_type("BYD SONG PLUS GS DM", "BYD", 10000, "")
+    assert out != "motorcycle"

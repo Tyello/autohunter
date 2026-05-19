@@ -146,3 +146,24 @@ def test_job_dry_run_persists_rejections_with_decimal_current_bid(monkeypatch, d
     assert row is not None
     assert row.value["rejections"][0]["current_bid"] == "8500.00"
     assert row.value["rejections"][0]["updated_at"] == "2026-05-17T00:00:00+00:00"
+
+
+def test_job_dry_run_counts_item_type_not_allowed(monkeypatch, db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=123)
+    db.add(u)
+    db.flush()
+    w = Wishlist(user_id=u.id, query="song pro", is_active=True, include_auctions=True)
+    db.add(w)
+    db.commit()
+
+    monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
+    monkeypatch.setattr(
+        "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
+        lambda *_a, **_k: {"items": [], "skipped_duplicate": 0, "skipped_no_match": 1, "skipped_missing_chat_id": 0, "skipped_score_below_min": 0, "skipped_stale_lot": 0, "skipped_missing_lot_updated_at": 0, "skipped_item_type_not_allowed": 1, "errors": 0, "messages": [], "rejections": [{"reason": "item_type_not_allowed", "title": "F700 GS"}]},
+    )
+
+    import asyncio
+    out = asyncio.run(run_auction_notification_job(db, bot=None, dry_run=True))
+    assert out["skipped_item_type_not_allowed"] == 1
+    assert out["skipped_score_below_min"] == 0
+    assert out["previews"] == 0
