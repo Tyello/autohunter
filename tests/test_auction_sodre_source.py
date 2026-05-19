@@ -144,3 +144,12 @@ def test_fetch_403_sets_forbidden_reason(monkeypatch):
     lots = sodre.fetch_sodre_lots(limit=10)
     assert lots == []
     assert sodre.get_last_reason() == "forbidden_403"
+
+
+def test_sodre_detail_url_poc_parse():
+    url = 'https://leilao.sodresantoro.com.br/leilao/28528/lote/2760648/'
+    lot = sodre.parse_sodre_detail_html(_read('sodre/detail_lote_2760648.html'), url)
+    assert lot.external_id == '2760648'
+    assert lot.extras and lot.extras.get('auction_id') == '28528'
+    assert lot.title
+    assert lot.initial_bid == Decimal('12000.00')

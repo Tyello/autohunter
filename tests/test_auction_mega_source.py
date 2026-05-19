@@ -104,3 +104,15 @@ def test_mega_helpers_item_type_and_compact_year():
     assert mega.infer_mega_item_type("Carro Hyundai I30 20 20092010 J122572", "https://www.megaleiloes.com.br/veiculos/carros/lote/x") == "car"
     assert mega.parse_mega_compact_year("Carro Hyundai I30 20 20092010 J122572") == 2009
     assert mega.parse_mega_compact_year("Carro Volkswagen Gol 10 20122013 J123409") == 2012
+
+
+def test_mega_detail_kombi_fixture_extracts_minimum_fields():
+    url = 'https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/veiculo-volkswagen-kombi-carat-16-mi-1999-j122290?utm_source=x&utm_medium=y'
+    lot = mega.parse_mega_detail_html(_read('mega/detail_kombi.html'), url)
+    assert lot.title == 'Volkswagen Kombi Carat 1.6 MI 1999'
+    assert lot.item_type == 'car'
+    assert lot.item_type != 'motorcycle'
+    assert lot.year == 1999
+    assert lot.state == 'SP'
+    assert lot.city == 'Atibaia'
+    assert lot.external_id == 'J122290'

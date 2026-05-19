@@ -114,6 +114,13 @@ def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = F
             "initial_bid": lot.initial_bid,
             "year": lot.year,
             "status": lot.status,
+            "city": lot.city,
+            "state": lot.state,
+            "location": lot.location,
+            "image": lot.thumbnail_url or ((lot.images or [None])[0]),
+            "source": lot.source,
+            "detail_url": lot.url,
+            "list_url": (lot.extras or {}).get("listing_url") if isinstance(lot.extras, dict) else None,
             "skip_reason": None if quality.ok else (quality.reason or "quality_rejected"),
             "text_preview": _preview(lot),
         })
