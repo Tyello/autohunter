@@ -108,6 +108,7 @@ def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     assert q.answers == 1
     assert state == ConversationHandler.END
     assert "✅ Busca criada com sucesso." in q.edits[-1]["text"]
+    assert "Leilões: desativado" in q.edits[-1]["text"]
     buttons = q.edits[-1]["reply_markup"].inline_keyboard
     assert buttons[0][0].text == "🎯 Ver minhas buscas"
     assert buttons[1][0].text == "➕ Criar outra busca"
@@ -123,13 +124,25 @@ def test_cwl_create_auctions_opt_in_persists_true(monkeypatch):
     assert called["include"] is True
 
 
+def test_cwl_create_auctions_enabled_shows_disclaimer(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_a, **_k: (True, "ok"))
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "touareg", "menu_create_wishlist_include_auctions": True})
+    q = _CallbackQuery("CWL:CREATE")
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
+    assert state == ConversationHandler.END
+    text = q.edits[-1]["text"]
+    assert "Leilões: ativado" in text
+    assert "lance não é preço final" in text
+
+
 def test_cwl_auctions_yes_keeps_create_button_and_shows_risk_copy():
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_draft_filters": []})
     q = _CallbackQuery("CWL:AUCTIONS:YES")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
     assert state == handlers_core.MENU_CREATE_WISHLIST_QUERY
     assert "Leilões: ativado" in q.edits[-1]["text"]
-    assert "Lance não é valor final" in q.edits[-1]["text"]
+    assert "lance não é preço final" in q.edits[-1]["text"]
     labels = [btn.text for row in q.edits[-1]["reply_markup"].inline_keyboard for btn in row]
     assert "✅ Criar mesmo assim" in labels
 
@@ -215,6 +228,7 @@ def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     assert "menu_create_wishlist_query" not in ctx.user_data
     assert "menu_create_wishlist_draft_filters" not in ctx.user_data
     assert "✅ Busca criada com sucesso." in q.edits[-1]["text"]
+    assert "Leilões: desativado" in q.edits[-1]["text"]
 
 
 def test_draft_done_without_query_expires_session():
