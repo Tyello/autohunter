@@ -1084,6 +1084,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "Envio automático desligado. Seguro para produção." in up.message.sent[-1]
+    assert "- scheduler automático: desligado" in up.message.sent[-1]
     assert "/admin auctions notify-samples" in up.message.sent[-1]
     assert "Sources elegíveis:" in up.message.sent[-1]
     assert "- vip_auctions" in up.message.sent[-1]
@@ -1095,6 +1096,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     )
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "Simulação automática ativa. Nenhum alerta real é enviado." in up.message.sent[-1]
+    assert "- scheduler automático: dry-run" in up.message.sent[-1]
 
     monkeypatch.setattr(
         handlers_admin,
@@ -1103,6 +1105,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     )
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "🚨 Envio automático real ativo" in up.message.sent[-1]
+    assert "- scheduler automático: envio real automático" in up.message.sent[-1]
 
 
 def test_admin_auctions_notify_status_non_admin(monkeypatch, db):
@@ -1420,3 +1423,70 @@ def test_admin_auctions_notify_samples_render_rejections_humanized_item_type_blo
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
     assert "Motivo: tipo bloqueado" in up.message.sent[-1]
+    assert "Nenhum novo alerta elegível nesta última execução." in up.message.sent[-1]
+    assert "Alguns lotes foram bloqueados por categoria" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_samples_rejections_duplicate_adds_operational_reading(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {"created_at": "-", "summary": {}, "samples": [], "rejections": [{"reason": "duplicate"}]},
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    assert "Nenhum novo alerta elegível nesta última execução." in up.message.sent[-1]
+    assert "já foram notificados anteriormente" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_run_adds_operational_readings(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin, "get_auction_notification_runtime_settings",
+        lambda _db: {"dry_run": True, "max_wishlists_per_run": 5, "max_per_wishlist": 5, "max_per_user_per_day": 2}
+    )
+    async def _job(*_a, **_k):
+        return {"sent": 0, "previews": 0, "skipped_duplicate": 2, "skipped_item_type_not_allowed": 1}
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _job)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run")))
+    text = up.message.sent[-1]
+    assert "Leitura: nenhum novo alerta enviado porque os matches elegíveis já foram notificados." in text
+    assert "Leitura: lotes fora da categoria permitida foram bloqueados antes do score." in text
+
+
+def test_admin_auctions_preview_send_requires_sample_and_sends_keyboard(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "build_auction_notification_samples", lambda _db, limit=1: {"samples": []})
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview-send")))
+    assert "Não há amostra disponível." in up.message.sent[-1]
+
+    sample = {"wishlist_query": "touareg", "source": "vip_auctions", "title": "VW Touareg", "url": "https://vip/touareg", "score": 82}
+    monkeypatch.setattr(handlers_admin, "build_auction_notification_samples", lambda _db, limit=1: {"samples": [sample]})
+    sent = {}
+    class _Bot:
+        async def send_message(self, **kwargs):
+            sent.update(kwargs)
+    up2 = _Update(chat_id=4321)
+    up2.get_bot = lambda: _Bot()
+    before = db.query(AppKV).count()
+    asyncio.run(handlers_admin.cmd_admin(up2, _ctx("auctions", "preview-send")))
+    assert sent["chat_id"] == 4321
+    assert "Preview admin — não enviado ao usuário" in sent["text"]
+    assert sent["disable_web_page_preview"] is True
+    markup = sent["reply_markup"].to_dict()
+    assert markup["inline_keyboard"][0][0]["text"] == "🔗 Ver leilão"
+    assert db.query(AppKV).count() == before
+
+
+def test_admin_auctions_preview_send_requires_admin(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update(chat_id=11)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview-send")))
+    assert "Sem permissão" in up.message.sent[-1]

@@ -362,6 +362,19 @@ Usar label amigável da source quando houver, por exemplo `VIP Leilões`, evitan
 - Esse comando é apenas observabilidade/admin: **nenhuma mensagem é enviada ao usuário final**.
 - O disclosure `Lance não é preço final.` permanece obrigatório na mensagem simulada/user-facing.
 - Use esse preview para validar copy, disclosure de risco e legibilidade antes de qualquer decisão de envio real.
+
+## Admin preview send
+
+Use `/admin auctions preview-send` para validar visualmente a mensagem final do alerta de leilão (incluindo botão inline `🔗 Ver leilão`) com segurança operacional.
+
+- Envia **somente para o chat do admin** que executou o comando.
+- Reaproveita o mesmo renderer user-facing e o mesmo `reply_markup` do envio real.
+- **Não grava dedupe**, não incrementa limite diário e não altera status de notificação.
+- **Não envia ao usuário final**.
+- **Não substitui o envio real manual** (`notify-run --real`).
+- Fonte do preview: última amostra disponível em `auction_last_dry_run_samples`.
+- Sem amostra, o comando orienta rodar:
+  `/admin auctions notify-run --source vip --limit-wishlists 5`
 ## Auction dry-run digest
 
 Use `/admin auctions digest` para visão operacional consolidada do dry-run de notificações de leilão.
@@ -382,13 +395,10 @@ Use `/admin auctions digest` para visão operacional consolidada do dry-run de n
 - `--real` no `notify-run` é manual, limitado e não altera o `dry_run` global.
 
 Fluxo recomendado:
-1. `/admin auctions run vip --limit 20 --enrich`
-2. `/admin auctions quality vip`
-3. `/admin auctions readiness`
-4. `/admin auctions notify-run --source vip --limit-wishlists 10`
-5. `/admin auctions notify-samples`
-6. `/admin auctions notify-run --source vip --limit-wishlists 5 --real`
-7. `/admin auctions notify-status`
+1. `/admin auctions notify-run --source vip --limit-wishlists 5`
+2. `/admin auctions notify-samples`
+3. `/admin auctions preview-send`
+4. `/admin auctions notify-run --source vip --limit-wishlists 5 --real`
 
 Rollback operacional:
 - `/admin auctions settings set dry_run true`
