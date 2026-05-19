@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview, _friendly_wishlist_filters
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview, render_auction_alert, build_auction_alert_keyboard, _friendly_wishlist_filters
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -971,6 +971,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"Limite diário: {result.get('skipped_daily_limit', 0)}",
                 f"Erros: {result.get('errors', 0)}",
             ])
+            if (
+                int(result.get("sent", 0) or 0) == 0
+                and int(result.get("previews", 0) or 0) == 0
+                and int(result.get("skipped_duplicate", 0) or 0) > 0
+            ):
+                lines.extend(["", "Leitura: nenhum novo alerta enviado porque os matches elegíveis já foram notificados."])
+            if int(result.get("skipped_item_type_not_allowed", 0) or 0) > 0:
+                lines.extend(["", "Leitura: lotes fora da categoria permitida foram bloqueados antes do score."])
             rejections = list(result.get("rejections") or [])[:5]
             if rejections:
                 lines.extend(["", "Rejeições principais:"])
@@ -1184,6 +1192,22 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 "",
                 f"Scheduler automático real: {'ativo' if (status['enabled'] and not status['dry_run']) else 'não (dry_run=true ou disabled)'}",
                 "",
+                "Modo operacional:",
+            ])
+            readiness = build_auction_notification_readiness(db)
+            readiness_summary = readiness.get("summary") if isinstance(readiness, dict) else {}
+            ready_sources = set((readiness_summary or {}).get("car_pilot_ready_sources") or [])
+            vip_allowed_types = set(get_auction_allowed_item_types(db, "vip_auctions"))
+            vip_manual_available = (
+                is_auction_source_user_eligible(db, "vip_auctions")
+                and "car" in vip_allowed_types
+                and "vip_auctions" in ready_sources
+            )
+            lines.extend([
+                "- scheduler automático: dry-run",
+                f"- envio real manual: {'disponível para VIP' if vip_manual_available else 'indisponível (validar readiness/source)'}",
+                "- preview admin: disponível via /admin auctions preview-send",
+                "",
                 "Próximo passo:",
                 "Para validar volume sem envio real, use:",
                 "/admin auctions notify-run --source vip --limit-wishlists 5",
@@ -1200,13 +1224,21 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             rejections = data.get("rejections") or []
             if not samples:
                 if rejections:
+                    reasons = {str((r or {}).get("reason") or "").strip().lower() for r in rejections}
                     lines = [
                         "⚠️ Admin Leilões — últimas amostras dry-run",
                         "",
-                        "Ainda não houve alerta elegível.",
+                        "Nenhum novo alerta elegível nesta última execução.",
+                    ]
+                    if "duplicate" in reasons:
+                        lines.extend(["", "Há alertas compatíveis que não foram exibidos porque já foram notificados anteriormente."])
+                    if "item_type_not_allowed" in reasons:
+                        lines.extend(["", "Alguns lotes foram bloqueados por categoria, conforme configuração da source."])
+                    lines.extend([
+                        "",
                         "",
                         "Rejeições recentes:",
-                    ]
+                    ])
                     for idx, rej in enumerate(rejections[:5], start=1):
                         lines.extend([
                             f"{idx}. {rej.get('wishlist_query') or '-'} / {str(rej.get('source') or '-').replace('_auctions', '').upper()}",
@@ -1275,6 +1307,30 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         "",
                     ])
             await update.message.reply_text("\n".join(lines))
+            return
+
+        if sub in {"preview-send", "notify-preview-send"}:
+            data = build_auction_notification_samples(db, limit=1)
+            sample = (data.get("samples") or [None])[0]
+            if not sample:
+                await update.message.reply_text(
+                    "Não há amostra disponível. Rode /admin auctions notify-run --source vip --limit-wishlists 5 primeiro."
+                )
+                return
+            match_like = _sample_to_match_like(sample)
+            preview_text = "🧪 Preview admin — não enviado ao usuário\n\n" + render_auction_alert(match_like)
+            admin_chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
+            bot = update.get_bot() if hasattr(update, "get_bot") else None
+            if not bot or admin_chat_id is None:
+                await update.message.reply_text("Bot indisponível para preview.")
+                return
+            await bot.send_message(
+                chat_id=admin_chat_id,
+                text=preview_text,
+                reply_markup=build_auction_alert_keyboard(sample.get("url")),
+                disable_web_page_preview=True,
+            )
+            await update.message.reply_text("✅ Preview enviado para este chat admin.")
             return
 
         if sub == "digest":
@@ -1622,7 +1678,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples | /admin auctions digest [--hours 24]\n{_render_user_eligible_auction_sources_hint(db)}"
+        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples | /admin auctions preview-send | /admin auctions digest [--hours 24]\n{_render_user_eligible_auction_sources_hint(db)}"
     )
 
 
