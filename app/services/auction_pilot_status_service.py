@@ -66,7 +66,7 @@ def build_auction_pilot_status(db) -> dict:
 
     manual_rows = (
         db.query(SystemLog)
-        .filter(SystemLog.component == "scheduler", SystemLog.message.in_(MANUAL_REAL_EVENTS))
+        .filter(SystemLog.message.in_(MANUAL_REAL_EVENTS))
         .order_by(SystemLog.created_at.desc())
         .all()
     )

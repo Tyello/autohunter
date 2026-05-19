@@ -61,11 +61,28 @@ def test_pilot_mode_dry_run_false_blocks(db):
 
 def test_pilot_aggregates_manual_real_24h(db):
     _seed_vip(db)
-    db.add(SystemLog(level="info", component="scheduler", message="auction_notification_manual_real_run_finished", payload={"sent": 2, "skipped_duplicate": 1, "errors": 0}))
-    db.add(SystemLog(level="error", component="scheduler", message="auction_notification_manual_real_run_failed", payload={"sent": 1, "skipped_duplicate": 2, "errors": 3}))
+    db.add(SystemLog(level="info", component="bot.admin", message="auction_notification_manual_real_run_finished", payload={"sent": 2, "skipped_duplicate": 1, "errors": 0}))
+    db.add(SystemLog(level="error", component="bot.admin", message="auction_notification_manual_real_run_failed", payload={"sent": 1, "skipped_duplicate": 2, "errors": 3}))
     db.add(AppKV(key="auction_last_dry_run_samples", value={"created_at": "2026-05-19 17:30 UTC", "summary": {"previews": 2}}))
     db.commit()
     out = build_auction_pilot_status(db)
     assert out["notifications"]["manual_real_sent_24h"] == 3
     assert out["notifications"]["duplicates_24h"] == 3
     assert out["notifications"]["errors_24h"] == 3
+
+
+
+def test_pilot_manual_real_reads_bot_admin_logs_regression(db):
+    _seed_vip(db)
+    db.add(SystemLog(level="info", component="bot.admin", message="auction_notification_manual_real_run_finished", payload={"sent": 1, "skipped_duplicate": 1, "errors": 0}))
+    db.commit()
+    out = build_auction_pilot_status(db)
+    assert out["notifications"]["last_manual_real_sent"] == 1
+    assert out["notifications"]["duplicates_24h"] == 1
+
+def test_pilot_manual_real_message_only_filter_accepts_scheduler_component_too(db):
+    _seed_vip(db)
+    db.add(SystemLog(level="info", component="scheduler", message="auction_notification_manual_real_run_finished", payload={"sent": 2, "skipped_duplicate": 0, "errors": 0}))
+    db.commit()
+    out = build_auction_pilot_status(db)
+    assert out["notifications"]["last_manual_real_sent"] == 2
