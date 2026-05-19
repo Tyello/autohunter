@@ -187,3 +187,39 @@ def test_win_enrich_vehicle_detail_still_fills_year(monkeypatch):
     lot = win.fetch_win_lots(limit=1, enrich=True)[0]
     assert lot.item_type == "car"
     assert lot.year == 2020
+
+
+def test_win_default_vehicle_listing_url_and_external_id_parser():
+    assert '/lotes/veiculo' in win.DEFAULT_LISTING_URL
+    assert 'categoria_id=8' in win.DEFAULT_LISTING_URL
+    assert win.parse_win_external_id_from_url('https://www.winleiloes.com.br/item/4042/detalhes?page=1') == '4042'
+
+
+def test_win_vehicle_listing_fixture_and_detail_parsing(monkeypatch):
+    listing_html = _read('win/listing_vehicle.html')
+    detail_html = _read('win/detail_item_4042.html')
+
+    class _Resp:
+        def __init__(self, text): self.text=text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self,*_): return False
+        def get(self,url):
+            if 'item/4042' in url: return _Resp(detail_html)
+            return _Resp(listing_html)
+
+    monkeypatch.setattr(win.httpx, 'Client', lambda **kwargs: _Client())
+    lots = win.fetch_win_lots(limit=5, enrich=True)
+    assert lots
+    lot = lots[0]
+    assert lot.external_id == '4042'
+    assert lot.item_type != 'real_estate'
+    assert lot.year == 2014
+    assert lot.initial_bid == Decimal('18000.00')
+    assert lot.current_bid == Decimal('19200.00')
+    assert lot.city == 'São Paulo'
+    assert lot.state == 'SP'
+    assert lot.location == 'São Paulo/SP'
+    assert lot.thumbnail_url and '4042.jpg' in lot.thumbnail_url
+    assert '?page=1' not in (lot.url or '')

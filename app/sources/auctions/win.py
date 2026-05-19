@@ -12,7 +12,7 @@ from app.sources.auctions.base import NormalizedAuctionLot
 from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_item_type, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "win_auctions"
-DEFAULT_LISTING_URL = "https://winleiloes.com.br/"
+DEFAULT_LISTING_URL = "https://www.winleiloes.com.br/lotes/veiculo?tipo=veiculo&categoria_id=8"
 ALLOWED_DOMAINS = {"winleiloes.com.br", "www.winleiloes.com.br"}
 VALID_UFS = {"AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"}
 _LAST_REASON: str | None = None
@@ -42,7 +42,7 @@ def parse_win_location(text: str | None) -> tuple[str | None, str | None, str | 
     city, state = m.group(1).strip(), m.group(2).upper()
     return city, (state if state in VALID_UFS else None), clean
 
-def extract_win_external_id(url: str | None) -> str | None:
+def parse_win_external_id_from_url(url: str | None) -> str | None:
     if not url: return None
     path = urlparse(url).path.rstrip("/")
     slug = path.split("/")[-1] if path else ""
@@ -51,11 +51,17 @@ def extract_win_external_id(url: str | None) -> str | None:
     if slug: return slug.lower()
     return hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
 
+extract_win_external_id = parse_win_external_id_from_url
+
 def infer_win_item_type(*texts: str | None) -> str:
     txt = " ".join(t for t in texts if t).lower()
     if any(k in txt for k in ("moto"," cg "," biz "," fan "," titan")): return "motorcycle"
-    if any(k in txt for k in ("caminh","ônibus","onibus","van","utilit")): return "truck"
-    if any(k in txt for k in ("pesad","máquina","maquina")): return "heavy"
+    if any(k in txt for k in ("caminh","ônibus","onibus")): return "truck"
+    if any(k in txt for k in ("pesad","carreta","bitrem")): return "heavy"
+    if any(k in txt for k in ("suv","pickup","caminhonete","utilit","carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch")): return "car"
+    if re.search(r"\b(volkswagen|vw|chevrolet|fiat|ford|toyota|honda|hyundai|renault|jeep|nissan|peugeot|citroen)\b", txt):
+        return "car"
+    if any(k in txt for k in ("máquina","maquina")): return "heavy"
     if any(k in txt for k in ("imóvel","imovel","apartamento","terreno","casa")): return "real_estate"
     if any(k in txt for k in ("carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch","suv","pickup")): return "car"
     return normalize_item_type(txt)
@@ -131,11 +137,13 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
         title = _valid_win_title(normalize_title(_strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or ""))) or _valid_win_title(normalize_title(_first_group(r'alt=["\']([^"\']+)["\']', card)))
         url = absolute_url(listing_url, href) if href else None
+        if url and url.endswith("/detalhes?page=1"):
+            url = url.replace("?page=1", "")
         if not url: continue
         low_url=url.lower()
         if any(block in low_url for block in ("/licitante/cadastro/login","/lotes/search","/leiloes/venda-direta","/login","/cadastro")) and "/item/" not in low_url: continue
         if "/leilao/" in low_url and "/lotes" in low_url and "/item/" not in low_url: continue
-        external_id = extract_win_external_id(url) or external_id_from_url(url)
+        external_id = parse_win_external_id_from_url(url) or external_id_from_url(url)
         if not external_id: continue
         loc = next((c for c in re.findall(r"\b([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s]{1,40}/[A-Za-z]{2})\b", card, flags=re.I) if "lote" not in c.lower()), None)
         city,state,location = parse_win_location(loc)

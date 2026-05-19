@@ -46,8 +46,8 @@ Sistema:
 Registry técnico atual:
 
 - `vip_auctions` — VIP Leilões — `production_ready`, única source `user_eligible` por padrão no piloto `car`.
-- `mega_auctions` — Mega Leilões — `experimental`; encontra carros, mas ainda não tem lance/local/status/imagem suficientes.
-- `win_auctions` — Win Leilões — `functional_non_car`; predominância de imóveis, fora do piloto `car`.
+- `mega_auctions` — Mega Leilões — `experimental_detail_enrichment`; encontra carros, mas ainda não tem lance/local/status/imagem suficientes.
+- `win_auctions` — Win Leilões — `experimental_vehicle_route_found`; predominância de imóveis, fora do piloto `car`.
 - `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fora do piloto.
 - `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
 - `copart_auctions` — Copart — `needs_study`, fora do piloto.
@@ -60,7 +60,7 @@ O registry define implementação. `source_configs` define operação. O bootstr
 |---|---|---|---|
 | `vip_auctions` | `production_ready` | pronto para piloto `car`; cards públicos + parser estável; mantém lance/URL/ano suficientes para notificação | HTML simples (requests); única `user_eligible` por padrão |
 | `mega_auctions` | `experimental` | encontra carros, mas quality ainda baixa; falta lance inicial/atual, cidade/UF, imagem e status `open`/`live` úteis | manter fora de `user_eligible`; próximo passo: enrich de detalhe |
-| `win_auctions` | `functional_non_car` | enrich funciona e persiste lotes, mas predominam `real_estate`; amostra validada tinha `car=0`, `real_estate=14`, `truck=1` | manter fora do piloto `car`; anos extraídos do HTML geral não devem preencher imóveis |
+| `win_auctions` | `experimental_vehicle_route_found` | enrich funciona e persiste lotes, mas predominam `real_estate`; amostra validada tinha `car=0`, `real_estate=14`, `truck=1` | manter fora do piloto `car`; anos extraídos do HTML geral não devem preencher imóveis |
 | `superbid_auctions` | `needs_study` | banners deixaram de ser tratados como lote; retorno atual indica `requires_js_or_event_drilldown` | estudar endpoint/drilldown antes de elegibilidade; sem Playwright nesta fase |
 | `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | manter fora do piloto; estudar endpoint sem bypass agressivo |
 | `sodre_auctions` | `blocked`/`needs_study` | ocorrência recorrente de `forbidden_403` | não contornar proteção anti-bot; manter fora do piloto |

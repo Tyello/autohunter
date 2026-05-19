@@ -181,3 +181,16 @@ def fetch_mega_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enr
         return lots
     _LAST_REASON = "no_public_lot_cards_found"
     return []
+
+
+def parse_mega_detail_html(html: str, url: str) -> NormalizedAuctionLot:
+    clean_url = re.sub(r"[?&]utm_[^=&]+=[^&]+", "", url).rstrip("?&")
+    title = normalize_title(_strip_html(_first_group(r"<h1[^>]*>(.*?)</h1>", html) or _first_group(r"<title[^>]*>(.*?)</title>", html) or ""))
+    external_id = _first_group(r"\b(J\d{4,})\b", html) or external_id_from_url(clean_url)
+    city = state = None
+    m = re.search(r"/veiculos/carros/([a-z-]+)/([a-z-]+)/", clean_url, flags=re.I)
+    if m:
+        state = m.group(1).upper()
+        city = m.group(2).replace('-', ' ').title()
+    imgs = re.findall(r"<meta[^>]+property=['\"]og:image['\"][^>]+content=['\"]([^'\"]+)", html, flags=re.I)
+    return NormalizedAuctionLot(source=SOURCE_KEY, external_id=external_id or clean_url, url=clean_url, title=title, item_type=infer_mega_item_type(title, clean_url), year=parse_mega_compact_year(title), city=city, state=state, initial_bid=parse_money_br(_first_group(r"Lance\s*inicial[^R]*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""), current_bid=parse_money_br(_first_group(r"(?:Lance\s*atual|Maior\s*lance)[^R]*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""), thumbnail_url=absolute_url(clean_url, imgs[0]) if imgs else None, images=[absolute_url(clean_url, i) for i in imgs] or None, status=normalize_mega_status(_first_group(r"(Aberto para lances|Em breve)", html)), raw_payload={"html_card": html[:1000]})

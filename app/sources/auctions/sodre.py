@@ -12,7 +12,7 @@ from app.sources.auctions.parsing import parse_datetime_br, parse_money_br, pars
 
 SOURCE_KEY = "sodre_auctions"
 DEFAULT_LISTING_URL = "https://www.sodresantoro.com.br/"
-ALLOWED_DOMAINS = {"sodresantoro.com.br", "www.sodresantoro.com.br"}
+ALLOWED_DOMAINS = {"sodresantoro.com.br", "www.sodresantoro.com.br", "leilao.sodresantoro.com.br"}
 VALID_UFS = {
     "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
 }
@@ -227,3 +227,14 @@ def fetch_sodre_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) ->
     else:
         _LAST_REASON = "no_public_lot_cards_found"
     return []
+
+
+def parse_sodre_detail_html(html: str, url: str) -> NormalizedAuctionLot:
+    ext = _first_group(r"/lote/(\d+)/", url) or extract_sodre_external_id(url)
+    auction_id = _first_group(r"/leilao/(\d+)/", url)
+    title = _strip_html(_first_group(r"<h1[^>]*>(.*?)</h1>", html) or _first_group(r"<title[^>]*>(.*?)</title>", html) or "") or None
+    imgs = filter_sodre_images(re.findall(r"<(?:img|source)[^>]+(?:src|data-src)=['\"]([^'\"]+)['\"]", html, flags=re.I), url)
+    extras = {"auction_id": auction_id} if auction_id else {}
+    if not any([title, imgs]):
+        extras["skip_reason"] = "insufficient_detail_signals"
+    return NormalizedAuctionLot(source=SOURCE_KEY, external_id=ext or url, title=title, url=url, item_type=infer_sodre_item_type(title, html), year=parse_year_from_title(title), initial_bid=parse_money_br(_first_group(r"Lance\s*inicial[^R]*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""), current_bid=parse_money_br(_first_group(r"(?:Lance\s*atual|Maior\s*lance)[^R]*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""), status=normalize_sodre_status(_first_group(r"(Ao vivo|Aberto|Encerrado|Em breve)", html)), thumbnail_url=imgs[0] if imgs else None, images=imgs or None, extras=extras or None, raw_payload={"html_card": html[:1000]})
