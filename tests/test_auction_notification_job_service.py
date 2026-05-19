@@ -19,7 +19,7 @@ def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
     monkeypatch.setattr(
         "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
-        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a", "source": "vip_auctions", "source_label": "VIP Leilões", "external_id": "161895", "title": "SONG PLUS", "current_bid": "91000.00", "initial_bid": None, "score": 76, "url": "https://vip/161895", "year": 2019, "mileage_km": 50500, "total_bids": 7, "auction_end_at": datetime(2026, 5, 18, 15, 0, tzinfo=timezone.utc), "location": "São Paulo/SP", "item_type": "car"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a", "source": "vip_auctions", "source_label": "VIP Leilões", "external_id": "161895", "title": "SONG PLUS", "current_bid": "91000.00", "initial_bid": None, "score": 76, "url": "https://vip/161895", "button_label": "🔗 Ver leilão", "year": 2019, "mileage_km": 50500, "total_bids": 7, "auction_end_at": datetime(2026, 5, 18, 15, 0, tzinfo=timezone.utc), "location": "São Paulo/SP", "item_type": "car"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
     )
 
     import asyncio
@@ -35,6 +35,7 @@ def test_job_dry_run_writes_samples_without_dedupe(monkeypatch, db):
     assert first["current_bid"] == "91000.00"
     assert first["score"] == 76
     assert first["url"] == "https://vip/161895"
+    assert first["button_label"] == "🔗 Ver leilão"
     assert first["year"] == 2019
     assert first["mileage_km"] == 50500
     assert first["total_bids"] == 7
@@ -82,13 +83,14 @@ def test_job_real_sends_and_respects_daily_limit(monkeypatch, db):
     monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
     monkeypatch.setattr(
         "app.services.auction_notification_job_service.build_auction_notifications_for_wishlist",
-        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a"}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
+        lambda *_a, **_k: {"items": [{"chat_id": 123, "text": "x", "dedupe_key": "auction:1:vip:a", "reply_markup": {"inline_keyboard": []}}], "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 3, "errors": 0, "messages": []},
     )
 
     import asyncio
     out = asyncio.run(run_auction_notification_job(db, bot=Bot(), dry_run=False, max_per_user_per_day=1))
     assert out["sent"] == 1
     assert sent
+    assert "reply_markup" in sent[0]
     out2 = asyncio.run(run_auction_notification_job(db, bot=Bot(), dry_run=False, max_per_user_per_day=1))
     assert out2["skipped_daily_limit"] == 1
 

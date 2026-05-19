@@ -1255,6 +1255,13 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     "",
                     render_auction_alert_preview(match_like),
                 ])
+                if sample.get("url"):
+                    lines.extend([
+                        "",
+                        "Botão:",
+                        str(sample.get("button_label") or "🔗 Ver leilão"),
+                        str(sample.get("url")),
+                    ])
             if rejections:
                 lines.extend(["", "Rejeições recentes:"])
                 for idx, rej in enumerate(rejections[:5], start=1):

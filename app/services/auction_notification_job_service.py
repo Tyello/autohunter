@@ -55,6 +55,7 @@ def _build_sample(wishlist: Wishlist, item: dict) -> dict:
         "initial_bid": item.get("initial_bid") if item.get("initial_bid") is not None else lot.get("initial_bid"),
         "score": item.get("score") if item.get("score") is not None else lot.get("score"),
         "url": item.get("url") or lot.get("url"),
+        "button_label": item.get("button_label") or "🔗 Ver leilão",
         "dedupe_key": item.get("dedupe_key"),
         "year": item.get("year") if item.get("year") is not None else lot.get("year"),
         "mileage_km": item.get("mileage_km") if item.get("mileage_km") is not None else lot.get("mileage_km"),
@@ -160,7 +161,12 @@ async def run_auction_notification_job(
                 continue
             remaining = max(0, int(max_per_user_per_day) - used)
             for item in items[:remaining]:
-                await bot.send_message(chat_id=item["chat_id"], text=item["text"], disable_web_page_preview=True)
+                await bot.send_message(
+                    chat_id=item["chat_id"],
+                    text=item["text"],
+                    reply_markup=item.get("reply_markup"),
+                    disable_web_page_preview=True,
+                )
                 db.add(AppKV(key=item["dedupe_key"], value={"sent_at": datetime.now(timezone.utc).isoformat(), "type": "auction"}))
                 out["sent"] += 1
             new_count = used + min(len(items), remaining)

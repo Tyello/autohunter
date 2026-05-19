@@ -408,7 +408,7 @@ def test_render_auction_alert_preview_contract():
     assert "Encerra:" in text
     assert "Local: São Paulo/SP" in text
     assert "Ano/KM: 2015/98.000" in text
-    assert "https://example/lote" in text
+    assert "https://example/lote" not in text
 
 
 def test_admin_auctions_preview_variants(monkeypatch, db):
@@ -460,7 +460,7 @@ def test_render_auction_alert_contract_real():
     assert "Lance não é preço final" in text
     assert "Oportunidade em leilão encontrada" in text
     assert "Lance atual" in text and "Lance inicial" in text
-    assert "https://example/lote" in text
+    assert "https://example/lote" not in text
 
 
 def test_render_auction_alert_initial_bid_without_current_bid():
@@ -1206,7 +1206,7 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
         lambda _db, limit=10: {
             "created_at": "2026-05-16 21:10 UTC",
             "summary": {"wishlists_scanned": 5, "wishlists_with_matches": 2, "previews": 2, "skipped_duplicate": 1, "skipped_no_match": 3, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0},
-            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "initial_bid": "88000.00", "year": 2008, "mileage_km": 128468, "total_bids": 1, "auction_end_at": "2026-05-20T12:00:00+00:00", "location": "São Paulo/SP", "url": "https://x"}] * 12,
+            "samples": [{"wishlist_query": "SONG PRO", "title": "SONG PLUS", "source": "vip_auctions", "score": 76, "current_bid": "91000.00", "initial_bid": "88000.00", "year": 2008, "mileage_km": 128468, "total_bids": 1, "auction_end_at": "2026-05-20T12:00:00+00:00", "location": "São Paulo/SP", "url": "https://x", "button_label": "🔗 Ver leilão"}] * 12,
         },
     )
     up = _Update()
@@ -1227,14 +1227,17 @@ def test_admin_auctions_notify_samples_render(monkeypatch, db):
     assert "Encerra:" in msg
     assert "Local: São Paulo/SP" in msg
     preview_block = msg.split("🧪 Preview — alerta de leilão", 1)[1]
-    preview_block = preview_block.split("Link:\nhttps://x", 1)[0]
+    preview_block = preview_block.split("Botão:", 1)[0]
     assert "Score:" not in preview_block
     assert "Lance não é preço final" in msg
     assert "edital" in msg
     assert "taxas/comissão" in msg
     assert "documentação" in msg
     assert "vistoria" in msg
-    assert "Link:\nhttps://x" in msg
+    assert "Link:\nhttps://x" not in preview_block
+    assert "Botão:" in msg
+    assert "🔗 Ver leilão" in msg
+    assert "https://x" in msg
     assert "10." in msg
     assert "11." not in msg
 

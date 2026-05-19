@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.bot.renderers import render_auction_alert, render_auction_source_label
+from app.bot.renderers import build_auction_alert_keyboard, render_auction_alert, render_auction_source_label
 from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.user import User
@@ -229,6 +229,8 @@ def build_auction_notifications_for_wishlist(
                 "initial_bid": getattr(m, "initial_bid", None),
                 "score": getattr(m, "score", None),
                 "url": getattr(m, "url", None),
+                "button_label": "🔗 Ver leilão",
+                "reply_markup": build_auction_alert_keyboard(getattr(m, "url", None)),
                 "lot_id": str(getattr(lot, "id", "") or ""),
                 "year": _first_present(getattr(m, "year", None), getattr(lot, "year", None)),
                 "mileage_km": _first_present(getattr(m, "mileage_km", None), getattr(lot, "mileage_km", None)),
@@ -271,7 +273,12 @@ async def send_auction_notifications_for_wishlist(
     sent = 0
     for item in result.get("items", []):
         try:
-            await bot.send_message(chat_id=item["chat_id"], text=item["text"], disable_web_page_preview=True)
+            await bot.send_message(
+                chat_id=item["chat_id"],
+                text=item["text"],
+                reply_markup=item.get("reply_markup"),
+                disable_web_page_preview=True,
+            )
             db.add(AppKV(key=item["dedupe_key"], value={"sent_at": datetime.now(timezone.utc).isoformat(), "type": "auction"}))
             db.commit()
             sent += 1
