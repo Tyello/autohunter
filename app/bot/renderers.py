@@ -433,6 +433,20 @@ def build_upgrade_payment_link_keyboard(*, plan_period: str, payment_link: str):
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, url=payment_link)]])
 
 
+def build_url_button_keyboard(label: str, url: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    safe_url = str(url or "").strip()
+    if not safe_url:
+        return None
+    safe_label = str(label or "").strip() or "🔗 Abrir link"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(safe_label, url=safe_url)]])
+
+
+def build_auction_alert_keyboard(url: str):
+    return build_url_button_keyboard("🔗 Ver leilão", url)
+
+
 def render_admin_auction_quality_report(report: dict) -> str:
     def _fmt_dt(value):
         if not value:
@@ -536,9 +550,6 @@ def _render_auction_alert_body(match) -> str:
         else:
             lines.append(f"KM: {mileage}")
     lines.extend(["", "Atenção:", "Lance não é preço final. Verifique edital, taxas/comissão, documentação e vistoria antes de participar."])
-    if url:
-        lines.extend(["", "Link:", url])
-
     return "\n".join(lines).strip()
 
 

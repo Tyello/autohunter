@@ -11,6 +11,7 @@ from app.services.auction_notification_job_service import run_auction_notificati
 from app.models.source_config import SourceConfig
 from app.core.settings import settings
 from app.services.app_kv_service import set_kv
+from app.bot.renderers import build_auction_alert_keyboard, render_auction_alert
 
 
 import pytest
@@ -157,7 +158,22 @@ def test_notify_prefers_bid_when_score_ties(db):
     db.commit()
     res = build_auction_notifications_for_wishlist(db, w.id, limit=1)
     assert res["sent"] == 1
-    assert "https://lot/t2" in res["items"][0]["text"]
+    assert "https://lot/t2" not in res["items"][0]["text"]
+    assert res["items"][0]["reply_markup"] is not None
+
+
+def test_render_auction_alert_has_no_link_or_url():
+    m = type("M", (), {"source": "vip_auctions", "title": "Honda Civic", "wishlist_query": "civic", "current_bid": 1000, "url": "https://x"})()
+    text = render_auction_alert(m)
+    assert "Link:" not in text
+    assert "https://x" not in text
+
+
+def test_build_auction_alert_keyboard():
+    kb = build_auction_alert_keyboard("https://x")
+    assert kb is not None
+    assert kb.inline_keyboard[0][0].text == "🔗 Ver leilão"
+    assert kb.inline_keyboard[0][0].url == "https://x"
 
 
 def test_notify_blocks_no_bid_by_default_and_allow_no_bid(db):
