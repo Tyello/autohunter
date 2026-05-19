@@ -7,8 +7,10 @@ from app.bot import handlers_admin
 from app.models.app_kv import AppKV
 from app.models.auction_lot import AuctionLot
 from app.models.source_config import SourceConfig
+from app.models.system_log import SystemLog
 from app.models.user import User
 from app.models.wishlist import Wishlist
+from app.services.app_kv_service import set_kv
 from app.bot.renderers import render_admin_auction_lot, render_admin_auctions_summary
 from app.services.auction_lot_service import upsert_lot
 
@@ -915,6 +917,7 @@ def test_admin_auctions_notify_run_real(monkeypatch, db):
         return {"wishlists_scanned": 1, "wishlists_with_matches": 1, "previews": 0, "sent": 1, "skipped_duplicate": 0, "skipped_no_match": 0, "skipped_missing_chat_id": 0, "skipped_daily_limit": 0, "skipped_score_below_min": 1, "skipped_stale_lot": 2, "skipped_missing_lot_updated_at": 0, "errors": 0}
 
     monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _fake_job)
+    set_kv(db, "auction_notification_settings", {"dry_run": True})
     user = User(id=uuid.uuid4(), telegram_chat_id=999)
     db.add(user)
     db.flush()
@@ -930,6 +933,16 @@ def test_admin_auctions_notify_run_real(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run", "--source", "vip", "--real")))
     assert "envio real manual" in up.message.sent[-1]
     assert "Enviados: 1" in up.message.sent[-1]
+    cfg = handlers_admin.get_auction_notification_runtime_settings(db)
+    assert cfg["dry_run"] is True
+    db.expire_all()
+    row = (
+        db.query(SystemLog)
+        .filter(SystemLog.component == "bot.admin", SystemLog.message == "auction_notification_manual_real_run_finished")
+        .order_by(SystemLog.created_at.desc())
+        .first()
+    )
+    assert row is not None
 
 
 def test_admin_auctions_notify_run_real_without_source_blocked(monkeypatch, db):
@@ -938,6 +951,30 @@ def test_admin_auctions_notify_run_real_without_source_blocked(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run", "--real")))
     assert "exige source explícita" in up.message.sent[-1]
+
+
+def test_admin_auctions_notify_run_real_guardrail_failure_persists_log(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    user = User(id=uuid.uuid4(), telegram_chat_id=999)
+    db.add(user)
+    db.flush()
+    db.add(Wishlist(user_id=user.id, query="touareg", is_active=True, include_auctions=True))
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "build_auction_notification_readiness", lambda _db: {"car_pilot_ready_sources": []})
+    monkeypatch.setattr(handlers_admin, "is_auction_source_user_eligible", lambda _db, _src: True)
+    up = _Update()
+    up.get_bot = lambda: object()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-run", "--source", "vip", "--real")))
+    assert "Falha operacional no envio real manual" in up.message.sent[-1]
+    db.expire_all()
+    row = (
+        db.query(SystemLog)
+        .filter(SystemLog.component == "bot.admin", SystemLog.message == "auction_notification_manual_real_run_failed")
+        .order_by(SystemLog.created_at.desc())
+        .first()
+    )
+    assert row is not None
 
 
 def test_admin_auctions_notify_run_real_non_vip_blocked(monkeypatch, db):

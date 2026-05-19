@@ -93,6 +93,60 @@ def test_job_real_sends_and_respects_daily_limit(monkeypatch, db):
     assert out2["skipped_daily_limit"] == 1
 
 
+def test_job_real_dedupe_blocks_second_send(monkeypatch, db):
+    u = User(id=uuid.uuid4(), telegram_chat_id=123)
+    db.add(u)
+    db.flush()
+    w = Wishlist(id=uuid.uuid4(), user_id=u.id, query="touareg", is_active=True, include_auctions=True)
+    db.add(w)
+    db.commit()
+    sent = []
+
+    class Bot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+
+    dedupe_key = f"auction:{w.id}:vip_auctions:lot-1"
+
+    def _fake_build(_db, wishlist_id, **_kwargs):
+        exists = _db.query(AppKV).filter(AppKV.key == dedupe_key).first()
+        if exists:
+            return {
+                "items": [],
+                "skipped_duplicate": 1,
+                "skipped_no_match": 0,
+                "skipped_missing_chat_id": 0,
+                "skipped_score_below_min": 0,
+                "skipped_stale_lot": 0,
+                "skipped_missing_lot_updated_at": 0,
+                "skipped_item_type_not_allowed": 0,
+                "errors": 0,
+                "messages": [],
+            }
+        return {
+            "items": [{"chat_id": 123, "text": "x", "dedupe_key": dedupe_key}],
+            "skipped_duplicate": 0,
+            "skipped_no_match": 0,
+            "skipped_missing_chat_id": 0,
+            "skipped_score_below_min": 0,
+            "skipped_stale_lot": 0,
+            "skipped_missing_lot_updated_at": 0,
+            "skipped_item_type_not_allowed": 0,
+            "errors": 0,
+            "messages": [],
+        }
+
+    monkeypatch.setattr("app.services.auction_notification_job_service.list_user_eligible_auction_sources", lambda _db: {"vip_auctions"})
+    monkeypatch.setattr("app.services.auction_notification_job_service.build_auction_notifications_for_wishlist", _fake_build)
+    import asyncio
+    first = asyncio.run(run_auction_notification_job(db, bot=Bot(), dry_run=False, max_per_user_per_day=5))
+    second = asyncio.run(run_auction_notification_job(db, bot=Bot(), dry_run=False, max_per_user_per_day=5))
+    assert first["sent"] == 1
+    assert second["sent"] == 0
+    assert second["skipped_duplicate"] == 1
+    assert len(sent) == 1
+
+
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4

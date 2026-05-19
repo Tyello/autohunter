@@ -11,8 +11,6 @@ _STATUS_EVENTS = {
     "auction_notification_scheduler_tick_skipped",
     "auction_notification_scheduler_tick_failed",
     "auction_notification_job_skipped",
-    "auction_notification_manual_real_run_finished",
-    "auction_notification_manual_real_run_failed",
 }
 
 
@@ -75,10 +73,6 @@ def build_auction_notification_status(db) -> dict:
 
     if row.message == "auction_notification_scheduler_tick_failed":
         out["last_status"] = "error"
-    elif row.message == "auction_notification_manual_real_run_failed":
-        out["last_status"] = "manual_real_error"
-    elif row.message == "auction_notification_manual_real_run_finished":
-        out["last_status"] = "manual_real_sent" if out["last_sent"] > 0 else "manual_real_done"
     elif bool(payload.get("skipped")):
         out["last_status"] = "disabled" if payload.get("reason") == "disabled" else "skipped"
     elif out["last_sent"] > 0:

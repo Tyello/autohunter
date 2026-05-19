@@ -905,6 +905,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         "admin_chat_id": getattr(getattr(update, "effective_chat", None), "id", None),
                     }
                     log(db, "error", "bot.admin", "auction_notification_manual_real_run_failed", payload=payload)
+                    db.commit()
                     await update.message.reply_text(f"Falha operacional no envio real manual: {reason}. Nenhum alerta foi enviado.")
                     return
             async with _ADMIN_AUCTION_NOTIFY_LOCK:
@@ -937,6 +938,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         "admin_chat_id": getattr(getattr(update, "effective_chat", None), "id", None),
                     },
                 )
+                db.commit()
             lines = [
                 "🚨 Admin Leilões — notify-run REAL" if real_mode else "⚠️ Admin Leilões — notify-run",
                 f"Source: {source or '-'}",
