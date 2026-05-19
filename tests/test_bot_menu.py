@@ -357,7 +357,9 @@ def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
     assert state2 == handlers_core.MENU_FILTER_SELECT_VALUE
     callbacks_2 = [b.callback_data for row in q2.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
     assert "WL:AUCTIONS:ENABLE" in callbacks_2
-    assert "⚠️ Ativar leilões" in [b.text for row in q2.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    labels_2 = [b.text for row in q2.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    assert labels_2.count("⚠️ Ativar leilões") == 1
+    assert "↩️ Voltar aos filtros" in labels_2
     assert "WL:FILTERS_ID:w1" in callbacks_2
 
     q3 = _CallbackQuery("WL:AUCTIONS:ENABLE")
@@ -372,6 +374,9 @@ def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
     asyncio.run(handlers_core.cb_menu(_Update(q4), ctx))
     callbacks_4 = [b.callback_data for row in q4.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
     assert "WL:AUCTIONS:DISABLE" in callbacks_4
+    labels_4 = [b.text for row in q4.edit_payloads[-1]["reply_markup"].inline_keyboard for b in row]
+    assert labels_4.count("Desativar leilões") == 1
+    assert "↩️ Voltar aos filtros" in labels_4
 
     q5 = _CallbackQuery("WL:AUCTIONS:DISABLE")
     state5 = asyncio.run(handlers_core.cb_menu(_Update(q5), ctx))
@@ -380,7 +385,6 @@ def test_menu_filter_auction_toggle_callbacks_are_routed(monkeypatch):
     assert "✅ Leilões desativados para esta busca." in q5.edits[-1]
     assert "anúncios normais compatíveis" in q5.edits[-1]
     assert "Leilões: desativado" in q5.edits[-1]
-
 
 def test_menu_filter_auctions_back_to_filters_callback(monkeypatch):
     _patch_user(monkeypatch)

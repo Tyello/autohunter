@@ -438,13 +438,13 @@ async def cb_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not wl:
                 await _safe_edit_or_send(update, "Busca não encontrada para sua conta.")
                 return ConversationHandler.END
-        next_action = "WL:AUCTIONS:DISABLE" if bool(getattr(wl, "include_auctions", False)) else "WL:AUCTIONS:ENABLE"
-        action_label = "Desativar leilões" if next_action.endswith("DISABLE") else "⚠️ Ativar leilões"
         status_enabled = bool(getattr(wl, "include_auctions", False))
-        status_label = "✅ Leilões ativados" if status_enabled else "Leilões: desativado"
-        buttons = [[InlineKeyboardButton(action_label, callback_data=next_action)]]
         if status_enabled:
-            buttons.append([InlineKeyboardButton("Desativar leilões", callback_data="WL:AUCTIONS:DISABLE")])
+            status_label = "✅ Leilões ativados"
+            buttons = [[InlineKeyboardButton("Desativar leilões", callback_data="WL:AUCTIONS:DISABLE")]]
+        else:
+            status_label = "Leilões: desativado"
+            buttons = [[InlineKeyboardButton("⚠️ Ativar leilões", callback_data="WL:AUCTIONS:ENABLE")]]
         buttons.append([InlineKeyboardButton("↩️ Voltar aos filtros", callback_data=f"WL:FILTERS_ID:{wishlist_id}")])
         await _safe_edit_or_send(update, status_label, reply_markup=InlineKeyboardMarkup(buttons))
         return MENU_FILTER_SELECT_VALUE
