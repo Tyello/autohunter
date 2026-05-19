@@ -1084,6 +1084,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "Envio automático desligado. Seguro para produção." in up.message.sent[-1]
+    assert "- scheduler automático: desligado" in up.message.sent[-1]
     assert "/admin auctions notify-samples" in up.message.sent[-1]
     assert "Sources elegíveis:" in up.message.sent[-1]
     assert "- vip_auctions" in up.message.sent[-1]
@@ -1095,6 +1096,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     )
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "Simulação automática ativa. Nenhum alerta real é enviado." in up.message.sent[-1]
+    assert "- scheduler automático: dry-run" in up.message.sent[-1]
 
     monkeypatch.setattr(
         handlers_admin,
@@ -1103,6 +1105,7 @@ def test_admin_auctions_notify_status_variants(monkeypatch, db):
     )
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-status")))
     assert "🚨 Envio automático real ativo" in up.message.sent[-1]
+    assert "- scheduler automático: envio real automático" in up.message.sent[-1]
 
 
 def test_admin_auctions_notify_status_non_admin(monkeypatch, db):

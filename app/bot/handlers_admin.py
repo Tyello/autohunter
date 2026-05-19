@@ -1203,8 +1203,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 and "car" in vip_allowed_types
                 and "vip_auctions" in ready_sources
             )
+            if not status["enabled"]:
+                scheduler_mode = "desligado"
+            elif status["dry_run"]:
+                scheduler_mode = "dry-run"
+            else:
+                scheduler_mode = "envio real automático"
             lines.extend([
-                "- scheduler automático: dry-run",
+                f"- scheduler automático: {scheduler_mode}",
                 f"- envio real manual: {'disponível para VIP' if vip_manual_available else 'indisponível (validar readiness/source)'}",
                 "- preview admin: disponível via /admin auctions preview-send",
                 "",
