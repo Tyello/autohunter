@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.models.source_config import SourceConfig
-from app.services.source_configs_service import ensure_source_configs, get_source_config
+from app.services.source_configs_service import ensure_source_configs, get_source_config, invalidate_source_config_cache
 from app.sources.auctions.registry import list_auction_sources, resolve_auction_source_alias, list_supported_auction_source_keys
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,31 @@ DEFAULTS = {
 }
 
 
+def reconcile_auction_source_config_metadata(db: Session) -> int:
+    """Reconcile safe auction source metadata with the registry/default map.
+
+    This intentionally updates only metadata fields that do not represent an
+    operator decision: ``source_type`` and ``status``. It never changes enabled,
+    user_eligible, admin_only, disabled reasons, categories, or any other
+    values stored under ``extra``.
+    """
+    changed = 0
+    for source, defaults in DEFAULTS.items():
+        cfg = get_source_config(db, source)
+        if not cfg:
+            continue
+        if getattr(cfg, "source_type", None) != defaults.source_type:
+            cfg.source_type = defaults.source_type
+            changed += 1
+        if (getattr(cfg, "status", None) or "") != defaults.status:
+            cfg.status = defaults.status
+            changed += 1
+    if changed:
+        invalidate_source_config_cache()
+        db.flush()
+    return changed
+
+
 def ensure_auction_source_configs(db: Session) -> int:
     ensure_source_configs(db)
     changed = 0
@@ -50,16 +75,16 @@ def ensure_auction_source_configs(db: Session) -> int:
             cfg.source_type = d.source_type
             changed += 1
             continue
-        if getattr(cfg, "source_type", None) != "auction":
-            cfg.source_type = "auction"; changed += 1
-        if getattr(cfg, "status", None) in (None, ""):
-            cfg.status = d.status; changed += 1
         if getattr(cfg, "admin_only", None) is None:
-            cfg.admin_only = d.admin_only; changed += 1
+            cfg.admin_only = d.admin_only
+            changed += 1
         if getattr(cfg, "user_eligible", None) is None:
-            cfg.user_eligible = d.user_eligible; changed += 1
+            cfg.user_eligible = d.user_eligible
+            changed += 1
     if changed:
+        invalidate_source_config_cache()
         db.flush()
+    changed += reconcile_auction_source_config_metadata(db)
     return changed
 
 

@@ -52,7 +52,7 @@ Registry técnico atual:
 - `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
 - `copart_auctions` — Copart — `needs_study`, fora do piloto.
 
-O registry define implementação. `source_configs` define operação.
+O registry define implementação. `source_configs` define operação. O bootstrap/reconcile de leilões atualiza automaticamente apenas metadados seguros (`source_type` e `status`) para refletir o registry/defaults atuais; decisões operacionais como `is_enabled`, `user_eligible`, `disabled_reason` e categorias permitidas em `extra.allowed_item_types` não são sobrescritas.
 
 ### Status operacional por source (2026-05-18)
 
@@ -201,6 +201,8 @@ Contadores operacionais relevantes:
 
 ### Qualidade/source
 
+`/admin auctions quality` mantém `Atualizados 24h` como métrica de freshness, mas `Pronta piloto car` usa a mesma janela operacional de readiness: `auction_notification_settings.max_lot_age_hours` em AppKV, com fallback seguro de 48h. O render também mostra `Janela piloto car: Nh` para evitar confusão entre freshness de 24h e prontidão operacional.
+
 ```text
 /admin auctions sources
 /admin auctions source vip
@@ -271,7 +273,8 @@ Checks esperados:
 - gates de qualidade seguros;
 - categorias user_eligible permanecem somente `car`;
 - resumo por source inclui `car_lots`, `user_allowed_lots` e `source_ready_for_user_car_pilot`;
-- source só conta como pronta para piloto `car` se tiver pelo menos um lote `car` recente com URL, lance e ano; imóveis/motos/caminhões/pesados não contam para readiness do piloto `car`;
+- readiness usa `auction_notification_settings.max_lot_age_hours` para definir a janela de lote recente, com fallback seguro de 48h;
+- source só conta como pronta para piloto `car` se tiver pelo menos um lote `car` dentro dessa janela operacional, com URL, lance e ano; imóveis/motos/caminhões/pesados não contam para readiness do piloto `car`;
 - sources funcionais sem `car` recente geram warning, por exemplo `win_auctions funcional, mas sem lotes car recentes. Fora do piloto de carros.`;
 - sources com carros sem lance útil geram warning, por exemplo `mega_auctions tem carros, mas sem lance inicial/atual. Manter experimental.`.
 

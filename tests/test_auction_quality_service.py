@@ -74,3 +74,31 @@ def test_quality_report_includes_registry_sources_without_lots(db):
     keys = {x["source"] for x in report["sources"]}
     assert "copart_auctions" in keys
     assert "vip_auctions" in keys
+
+
+def test_quality_car_pilot_readiness_uses_runtime_max_lot_age_window(db):
+    from app.models.auction_lot import AuctionLot
+    from app.services.app_kv_service import set_kv
+
+    now = datetime.now(timezone.utc)
+    _seed(
+        db,
+        "vip_auctions",
+        "vip-30h",
+        title="Civic",
+        item_type="car",
+        year=2020,
+        current_bid=50000,
+        url="https://vip/30h",
+        status="open",
+    )
+    lot = db.query(AuctionLot).filter(AuctionLot.source == "vip_auctions", AuctionLot.external_id == "vip-30h").one()
+    lot.updated_at = now - timedelta(hours=30)
+    set_kv(db, "auction_notification_settings", {"max_lot_age_hours": 48})
+    db.commit()
+
+    src = build_auction_quality_report(db, source="vip")["sources"][0]
+
+    assert src["updated_last_24h"] == 0
+    assert src["car_pilot_window_hours"] == 48
+    assert src["source_ready_for_user_car_pilot"] is True
