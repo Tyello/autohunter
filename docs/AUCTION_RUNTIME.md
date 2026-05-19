@@ -414,3 +414,21 @@ Se algo sair errado, desabilite leilões (`enabled=false`) ou retire a VIP do us
 - Toda comunicação user-facing de leilão deve incluir aviso de risco: lance não é preço final; conferir edital, taxas/comissão, documentação e vistoria.
 - Sources experimentais (ex.: Mega/Win/Superbid) não devem ser expostas ao usuário final.
 - Envio real permanece sob controle operacional/admin (manual), com scheduler automático em dry-run nesta fase.
+
+## Pilot monitoring
+
+Use `/admin auctions pilot` como visão consolidada do piloto user-facing de leilões.
+
+O comando é **somente leitura** e **não envia alertas**. Ele consolida:
+- adoção (`buscas ativas`, `buscas com leilões`, `usuários com leilões`);
+- segurança operacional de sources (`user_eligible`, `unsafe_user_eligible`, prontidão car);
+- estado do scheduler (dry-run vs risco de envio automático real);
+- últimos envios reais manuais e agregados de 24h;
+- resumo de dry-run (última execução e prévias).
+
+Fluxo recomendado continua:
+1. `/admin auctions notify-run --source vip --limit-wishlists 5`
+2. `/admin auctions preview-send`
+3. `/admin auctions notify-run --source vip --limit-wishlists 5 --real`
+
+`/admin auctions pilot` **não substitui** os guardrails: o scheduler automático real continua fora do fluxo recomendado nesta fase do piloto.

@@ -72,6 +72,7 @@ from app.services.auction_notification_status_service import build_auction_notif
 from app.services.auction_notification_samples_service import build_auction_notification_samples
 from app.services.auction_dry_run_digest_service import build_auction_dry_run_digest
 from app.services.auction_notification_readiness_service import build_auction_notification_readiness
+from app.services.auction_pilot_status_service import build_auction_pilot_status
 from app.services.auction_notification_settings_service import (
     get_auction_notification_runtime_settings,
     set_runtime_setting,
@@ -1136,6 +1137,11 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             await update.message.reply_text("\n".join(lines))
             return
 
+        if sub == "pilot":
+            data = build_auction_pilot_status(db)
+            await update.message.reply_text(render_admin_auction_pilot_status(data))
+            return
+
         if sub == "notify-status":
             status = build_auction_notification_status(db)
             if status.get("kill_switch"):
@@ -1703,9 +1709,73 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
         "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
-        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions notify-status | /admin auctions notify-samples | /admin auctions preview-send | /admin auctions digest [--hours 24]\n{_render_user_eligible_auction_sources_hint(db)}"
+        f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions pilot | /admin auctions notify-status | /admin auctions notify-samples | /admin auctions preview-send | /admin auctions digest [--hours 24]\n{_render_user_eligible_auction_sources_hint(db)}"
     )
 
+
+
+def render_admin_auction_pilot_status(status: dict) -> str:
+    health = (status or {}).get("health") or {}
+    icon = "✅" if health.get("status") == "ok" else ("⚠️" if health.get("status") == "warning" else "❌")
+    mode = (status or {}).get("mode") or {}
+    sources = (status or {}).get("sources") or {}
+    wish = (status or {}).get("wishlists") or {}
+    notif = (status or {}).get("notifications") or {}
+    if not mode.get("scheduler_enabled"):
+        scheduler_mode = "desligado"
+    elif mode.get("scheduler_dry_run"):
+        scheduler_mode = "dry-run"
+    else:
+        scheduler_mode = "real"
+    lines = [
+        f"{icon} Admin Leilões — piloto",
+        "",
+        "Modo:",
+        f"- scheduler automático: {scheduler_mode}",
+        f"- envio real manual: {'disponível para VIP' if mode.get('manual_real_available') else 'indisponível (validar readiness/source)'}",
+        f"- envio real automático: {'sim' if mode.get('automatic_real_active') else 'não'}",
+        "",
+        "Adoção:",
+        f"- buscas ativas: {wish.get('active_total', 0)}",
+        f"- buscas com leilões: {wish.get('include_auctions_total', 0)}",
+        f"- usuários com leilões: {wish.get('users_with_auction_wishlists', 0)}",
+        "",
+        "Sources user-facing:",
+    ]
+    ues = sources.get("user_eligible") or []
+    lines.extend([f"- {src}" for src in ues] or ["- -"])
+    lines.extend(["", "Sources experimentais/admin:"])
+    exp = sources.get("experimental_enabled") or []
+    lines.extend([f"- {src}" for src in exp] or ["- -"])
+    lines.extend([
+        "",
+        "Envios reais manuais:",
+        f"- último envio: {notif.get('last_manual_real_at') or 'sem envio real manual registrado'}",
+        f"- enviados último run: {notif.get('last_manual_real_sent', 0)}",
+        f"- duplicados último run: {notif.get('last_manual_real_duplicates', 0)}",
+        f"- erros último run: {notif.get('last_manual_real_errors', 0)}",
+        f"- enviados 24h: {notif.get('manual_real_sent_24h', 0)}",
+        f"- duplicados 24h: {notif.get('duplicates_24h', 0)}",
+        "",
+        "Dry-run:",
+        f"- última execução: {notif.get('last_dry_run_at') or '-'}",
+        f"- prévias último run: {notif.get('last_dry_run_previews', 0)}",
+        f"- prévias 24h: {notif.get('dry_run_previews_24h', 0)}" + (" (histórico parcial)" if notif.get('dry_run_history_partial') else ""),
+        f"- rejeições principais: {', '.join(notif.get('top_rejections') or []) or '-'}",
+        "",
+        "Checks:",
+    ])
+    for check in health.get("checks") or []:
+        c_icon = "✅" if check.get("status") == "ok" else ("⚠️" if check.get("status") == "warning" else "❌")
+        lines.append(f"{c_icon} {check.get('label')}: {check.get('detail')}")
+    lines.extend([
+        "",
+        "Próximos comandos:",
+        "- /admin auctions notify-run --source vip --limit-wishlists 5",
+        "- /admin auctions preview-send",
+        "- /admin auctions notify-run --source vip --limit-wishlists 5 --real",
+    ])
+    return "\n".join(lines)
 
 def _render_admin_auction_matches(wishlist_query: str, matches: list) -> list[str]:
     lines = [f"🎯 Busca: {wishlist_query}"]

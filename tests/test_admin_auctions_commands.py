@@ -1522,3 +1522,43 @@ def test_admin_auctions_preview_send_requires_admin(monkeypatch, db):
     up = _Update(chat_id=11)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "preview-send")))
     assert "Sem permissão" in up.message.sent[-1]
+
+def test_admin_auctions_pilot_admin_only(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    up = _Update(chat_id=123)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "pilot")))
+    assert "Sem permissão" in up.message.sent[-1]
+
+
+def test_admin_auctions_pilot_renders_and_read_only(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+
+    called = {"run": 0, "user_send": 0}
+
+    async def _forbidden_run(*_args, **_kwargs):
+        called["run"] += 1
+        return {}
+
+    monkeypatch.setattr(handlers_admin, "run_auction_notification_job", _forbidden_run)
+    monkeypatch.setattr(handlers_admin, "build_auction_pilot_status", lambda _db: {
+        "mode": {"scheduler_enabled": True, "scheduler_dry_run": True, "manual_real_available": True, "automatic_real_active": False},
+        "sources": {"user_eligible": ["vip_auctions"], "ready_car_pilot": ["vip_auctions"], "experimental_enabled": ["mega_auctions"], "unsafe_user_eligible": []},
+        "wishlists": {"active_total": 12, "include_auctions_total": 2, "users_with_auction_wishlists": 1},
+        "notifications": {"last_manual_real_at": "2026-05-19 10:23 UTC", "last_manual_real_sent": 0, "last_manual_real_duplicates": 1, "last_manual_real_errors": 0, "manual_real_sent_24h": 1, "duplicates_24h": 1, "last_dry_run_at": "2026-05-19 17:30 UTC", "last_dry_run_previews": 0, "dry_run_previews_24h": 0, "dry_run_history_partial": False, "top_rejections": ["item_type_not_allowed", "stale_lot"]},
+        "health": {"status": "warning", "checks": [{"status": "ok", "label": "VIP é a única source user-facing", "detail": "ok"}]},
+    })
+
+    up = _Update(chat_id=123)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "pilot")))
+    text = up.message.sent[-1]
+    assert "Admin Leilões — piloto" in text
+    assert "Adoção:" in text
+    assert "Sources user-facing:" in text
+    assert "Envios reais manuais:" in text
+    assert "Próximos comandos:" in text
+    assert called["run"] == 0
+
+    row = db.query(AppKV).filter(AppKV.key == "auction_notification_settings").first()
+    assert not row or row.value.get("dry_run") is not False
