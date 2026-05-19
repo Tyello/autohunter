@@ -95,6 +95,7 @@ from app.services.auction_source_config_service import (
     list_user_eligible_auction_sources,
 )
 from app.services.auction_source_categories_service import get_auction_allowed_item_types, normalize_item_type
+from app.services.system_logs_service import log
 
 
 @dataclass
@@ -818,12 +819,12 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if _ADMIN_AUCTION_NOTIFY_LOCK.locked():
                 await update.message.reply_text("Já existe uma execução de notify-run de leilões em andamento. Aguarde finalizar.")
                 return
-            confirm = any(a.strip().lower() == "--confirm" for a in args[1:])
+            real_mode = any(a.strip().lower() in {"--real", "--confirm"} for a in args[1:])
             has_dry_run = any(a.strip().lower() == "--dry-run" for a in args[1:])
-            if confirm and has_dry_run:
-                await update.message.reply_text("Use apenas um modo: --confirm (envio real) ou --dry-run (simulação).")
+            if real_mode and has_dry_run:
+                await update.message.reply_text("Use apenas um modo: --real (envio real manual) ou --dry-run (simulação).")
                 return
-            dry_run = not confirm
+            dry_run = not real_mode
             source = None
             cfg = get_auction_notification_runtime_settings(db)
             limit_wishlists = cfg["max_wishlists_per_run"]
@@ -862,6 +863,51 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if source and not is_auction_source_user_eligible(db, source):
                 await update.message.reply_text("Source não elegível para envio ao usuário.")
                 return
+            if real_mode:
+                if not source:
+                    await update.message.reply_text("Envio real manual exige source explícita: --source vip.")
+                    return
+                if source != "vip_auctions":
+                    await update.message.reply_text("Envio real manual disponível apenas para vip_auctions neste piloto.")
+                    return
+                readiness = build_auction_notification_readiness(db)
+                reason = None
+                if source not in set(readiness.get("car_pilot_ready_sources") or []):
+                    reason = "readiness_sem_source_pronta"
+                elif not is_auction_source_enabled(db, source):
+                    reason = "source_disabled"
+                elif not is_auction_source_user_eligible(db, source):
+                    reason = "source_not_user_eligible"
+                elif "car" not in set(get_auction_allowed_item_types(db, source)):
+                    reason = "source_without_car_allowed"
+                elif not (update.get_bot() if hasattr(update, "get_bot") else None):
+                    reason = "bot_unavailable"
+                elif int(cfg.get("max_per_user_per_day", 0) or 0) <= 0:
+                    reason = "max_per_user_per_day_invalid"
+                elif int(limit_per_wishlist or 0) <= 0:
+                    reason = "max_per_wishlist_invalid"
+                elif int(limit_wishlists or 0) <= 0:
+                    reason = "max_wishlists_invalid"
+                else:
+                    wl_count = (
+                        db.query(Wishlist)
+                        .filter(Wishlist.is_active.is_(True), Wishlist.include_auctions.is_(True))
+                        .count()
+                    )
+                    if wl_count <= 0:
+                        reason = "no_active_wishlist_include_auctions"
+                if reason:
+                    payload = {
+                        "source": source,
+                        "limit_wishlists": limit_wishlists,
+                        "max_per_wishlist": limit_per_wishlist,
+                        "reason": reason,
+                        "admin_chat_id": getattr(getattr(update, "effective_chat", None), "id", None),
+                    }
+                    log(db, "error", "bot.admin", "auction_notification_manual_real_run_failed", payload=payload)
+                    db.commit()
+                    await update.message.reply_text(f"Falha operacional no envio real manual: {reason}. Nenhum alerta foi enviado.")
+                    return
             async with _ADMIN_AUCTION_NOTIFY_LOCK:
                 result = await run_auction_notification_job(
                     db,
@@ -872,13 +918,37 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     max_per_user_per_day=cfg["max_per_user_per_day"],
                     source=source,
                 )
+            if real_mode:
+                log(
+                    db,
+                    "info",
+                    "bot.admin",
+                    "auction_notification_manual_real_run_finished",
+                    payload={
+                        "source": source,
+                        "limit_wishlists": limit_wishlists,
+                        "wishlists_scanned": result.get("wishlists_scanned", 0),
+                        "wishlists_with_matches": result.get("wishlists_with_matches", 0),
+                        "sent": result.get("sent", 0),
+                        "skipped_duplicate": result.get("skipped_duplicate", 0),
+                        "skipped_score_below_min": result.get("skipped_score_below_min", 0),
+                        "skipped_item_type_not_allowed": result.get("skipped_item_type_not_allowed", 0),
+                        "skipped_daily_limit": result.get("skipped_daily_limit", 0),
+                        "errors": result.get("errors", 0),
+                        "admin_chat_id": getattr(getattr(update, "effective_chat", None), "id", None),
+                    },
+                )
+                db.commit()
             lines = [
-                "⚠️ Admin Leilões — notify-run",
-                f"Modo: {'dry-run' if dry_run else 'envio real'}",
+                "🚨 Admin Leilões — notify-run REAL" if real_mode else "⚠️ Admin Leilões — notify-run",
+                f"Source: {source or '-'}",
+                f"Modo: {'envio real manual' if real_mode else 'dry-run'}",
+                "Scheduler automático real: não alterado" if real_mode else "Nenhum alerta foi enviado.",
             ]
-            if dry_run:
-                lines.append("Nenhum alerta foi enviado.")
-            else:
+            if real_mode:
+                lines.append("")
+                lines.append(f"Enviados: {result.get('sent', 0)}")
+            elif not dry_run:
                 lines.append(f"Alertas enviados: {result.get('sent', 0)}")
             lines.extend([
                 "",
@@ -1100,6 +1170,14 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"- sem data atualização: {status.get('last_skipped_missing_lot_updated_at', 0)}",
                 f"- limite diário: {status['last_skipped_daily_limit']}",
                 f"- erros: {status['last_errors']}",
+                "",
+                "Último envio real manual:",
+                f"- quando: {status.get('last_manual_real_run_at', '-')}",
+                f"- enviados reais: {status.get('last_manual_real_sent', 0)}",
+                f"- duplicados: {status.get('last_manual_real_duplicates', 0)}",
+                f"- erros: {status.get('last_manual_real_errors', 0)}",
+                "",
+                f"Scheduler automático real: {'ativo' if (status['enabled'] and not status['dry_run']) else 'não (dry_run=true ou disabled)'}",
                 "",
                 "Próximo passo:",
                 "Para validar volume sem envio real, use:",

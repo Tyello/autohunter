@@ -40,6 +40,10 @@ def _base_status(db) -> dict:
         "last_skipped_stale_lot": 0,
         "last_skipped_missing_lot_updated_at": 0,
         "last_errors": 0,
+        "last_manual_real_run_at": "-",
+        "last_manual_real_sent": 0,
+        "last_manual_real_duplicates": 0,
+        "last_manual_real_errors": 0,
     }
 
 
@@ -77,4 +81,16 @@ def build_auction_notification_status(db) -> dict:
         out["last_status"] = "dry_run"
     else:
         out["last_status"] = "sent"
+    manual = (
+        db.query(SystemLog)
+        .filter(SystemLog.component == "bot.admin", SystemLog.message.in_(["auction_notification_manual_real_run_finished", "auction_notification_manual_real_run_failed"]))
+        .order_by(SystemLog.created_at.desc())
+        .first()
+    )
+    if manual:
+        mp = manual.payload or {}
+        out["last_manual_real_run_at"] = manual.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if manual.created_at else "-"
+        out["last_manual_real_sent"] = int(mp.get("sent", 0) or 0)
+        out["last_manual_real_duplicates"] = int(mp.get("skipped_duplicate", 0) or 0)
+        out["last_manual_real_errors"] = int(mp.get("errors", 0) or 0)
     return out
