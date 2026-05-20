@@ -16,7 +16,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.admin import is_admin
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, _fmt_money_br, render_auction_alert_preview, render_auction_alert, build_auction_alert_keyboard, _friendly_wishlist_filters
+from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, render_admin_auction_source_history, _fmt_money_br, render_auction_alert_preview, render_auction_alert, build_auction_alert_keyboard, _friendly_wishlist_filters
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
@@ -63,6 +63,7 @@ from app.services.auction_matching_service import (
     match_auction_lots_for_wishlist,
 )
 from app.services.auction_quality_service import build_auction_quality_report
+from app.services.auction_source_history_service import build_auction_source_history
 from app.services.auction_notification_service import (
     build_auction_notifications_for_wishlist,
     send_auction_notifications_for_wishlist,
@@ -560,6 +561,17 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 return
             report = build_auction_quality_report(db, source=source)
             await update.message.reply_text(render_admin_auction_quality_report(report))
+            return
+        if sub in {"source-history", "monitor"}:
+            if len(args) < 2:
+                await update.message.reply_text("Use: /admin auctions source-history <source>")
+                return
+            source = resolve_auction_source_alias(args[1])
+            if not source:
+                await update.message.reply_text(f"Source de leilão não suportada. {render_supported_auction_sources_hint()}")
+                return
+            history = build_auction_source_history(db, source=source, limit=8)
+            await update.message.reply_text(render_admin_auction_source_history(history))
             return
 
         if sub == "upcoming":
@@ -1774,7 +1786,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
     sources_hint = render_supported_auction_sources_hint().replace("Use: ", "")
     await update.message.reply_text(
         "Use: /admin auctions | /admin auctions source <source> | /admin auctions run <source> [--limit N] [--enrich] "
-        "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions motos "
+        "| /admin auctions upcoming | /admin auctions quality [source] | /admin auctions source-history <source> | /admin auctions monitor <source> | /admin auctions motos "
         f"| /admin auctions match [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions preview [{sources_hint}|wishlist <wishlist_id|index> [--force] [--all-sources]] | /admin auctions wishlists [texto] | /admin auctions wishlist <wishlist_id|index> <enable|disable> | /admin auctions notify wishlist <wishlist_id|index> [--source <alias>] [--limit N] [--force] [--allow-no-bid] [--allow-experimental] [--confirm|--dry-run] | /admin auctions settings | /admin auctions readiness | /admin auctions pilot | /admin auctions notify-status | /admin auctions notify-samples | /admin auctions preview-send | /admin auctions digest [--hours 24]\n{_render_user_eligible_auction_sources_hint(db)}"
     )
 

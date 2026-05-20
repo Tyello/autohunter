@@ -505,6 +505,29 @@ def render_admin_auction_quality_report(report: dict) -> str:
     return "\n".join(lines).strip()
 
 
+def render_admin_auction_source_history(report: dict) -> str:
+    source = str(report.get("source") or "-")
+    current_score = report.get("current_score")
+    cycles = report.get("cycles") or []
+    lines = [f"⚠️ Admin Leilões — monitor {source}", f"Score atual: {current_score if current_score is not None else '-'}", ""]
+    if not cycles:
+        lines.append("Sem histórico de ciclos para esta source.")
+        return "\n".join(lines).strip()
+    for item in cycles:
+        at = item.get("at")
+        at_s = at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if at else "-"
+        lines.extend(
+            [
+                f"{at_s}",
+                f"encontrados={int(item.get('found', 0) or 0)} atualizados={int(item.get('updated', 0) or 0)} erros={int(item.get('errors', 0) or 0)}",
+                f"score={item.get('score') if item.get('score') is not None else '-'} carros={int(item.get('car_lots', 0) or 0)}",
+                f"lance_atual={int(item.get('with_current_bid_count', 0) or 0)} início={int(item.get('with_auction_start_at_count', 0) or 0)} encerramento={int(item.get('with_auction_end_at_count', 0) or 0)}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
 
 def _render_auction_alert_body(match) -> str:
     def _has_value(value) -> bool:

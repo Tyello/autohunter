@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -7,6 +8,8 @@ import httpx
 from app.sources.auctions.base import NormalizedAuctionLot
 
 from app.db.session import SessionLocal
+from app.models.source_config import SourceConfig
+from app.services.source_runs_service import record_run
 from app.services.auction_lot_service import upsert_lot
 from app.sources.auctions.quality import validate_normalized_auction_lot_candidate
 from app.sources.auctions.registry import (
@@ -19,6 +22,69 @@ SUPPORTED_SOURCES = list_supported_auction_source_keys()
 
 from app.sources.auctions import mega, sodre, win
 from app.sources.auctions.diagnostics import build_auction_source_fetch_diagnostics
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_int_score(cfg: SourceConfig | None) -> int | None:
+    if cfg and isinstance(getattr(cfg, "extra", None), dict):
+        maybe_score = cfg.extra.get("quality_score")
+        if maybe_score is not None:
+            try:
+                return int(maybe_score)
+            except Exception:
+                return None
+    return None
+
+
+def _build_auction_summary_payload(summary: dict[str, Any], lots: list[NormalizedAuctionLot] | None, score: int | None, *, error_type: str | None = None, error_message: str | None = None) -> dict[str, Any]:
+    lots = lots or []
+    payload = {
+        "found": int(summary.get("fetched", 0) or 0),
+        "inserted": int(summary.get("inserted", 0) or 0),
+        "updated": int(summary.get("updated", 0) or 0),
+        "ignored": int(summary.get("skipped", 0) or 0),
+        "errors": int(summary.get("errors", 0) or 0),
+        "car_lots": int(sum(1 for lot in lots if str(getattr(lot, "item_type", "") or "").lower() == "car")),
+        "with_current_bid_count": int(sum(1 for lot in lots if getattr(lot, "current_bid", None) is not None)),
+        "with_initial_bid_count": int(sum(1 for lot in lots if getattr(lot, "initial_bid", None) is not None)),
+        "with_auction_start_at_count": int(sum(1 for lot in lots if getattr(lot, "auction_start_at", None) is not None)),
+        "with_auction_end_at_count": int(sum(1 for lot in lots if getattr(lot, "auction_end_at", None) is not None)),
+        "open_or_live_count": int(sum(1 for lot in lots if str(getattr(lot, "status", "") or "").strip().lower() in {"open", "live"})),
+        "score": score,
+    }
+    if error_type:
+        payload["error_type"] = str(error_type)
+    if error_message:
+        payload["error_message"] = str(error_message)[:240]
+    return payload
+
+
+def _record_auction_ingestion_run_safe(*, source: str, status: str, summary: dict[str, Any], lots: list[NormalizedAuctionLot] | None, score: int | None, error_type: str | None = None, error_message: str | None = None, limit: int, enrich_applied: bool) -> None:
+    try:
+        db = SessionLocal()
+        try:
+            payload = {
+                "domain": "auction_ingestion",
+                "auction_summary": _build_auction_summary_payload(summary, lots, score, error_type=error_type, error_message=error_message),
+                "limit": int(limit or 0),
+                "enrich_applied": bool(enrich_applied),
+            }
+            record_run(
+                db,
+                source=source,
+                kind="manual",
+                status=status,
+                items_found=int(summary.get("fetched", 0) or 0),
+                items_ingested=int(summary.get("inserted", 0) or 0) + int(summary.get("updated", 0) or 0),
+                error=(f"{error_type}: {error_message}"[:240] if error_type else None),
+                payload=payload,
+            )
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("auction_ingestion_record_run_failed", extra={"source": source, "status": status})
 
 
 def _get_source_diagnostics(source: str) -> dict[str, Any] | None:
@@ -34,15 +100,12 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
 
     source = definition.key
     enrich_applied = bool(enrich_details and definition.supports_enrich)
-    if definition.supports_enrich:
-        lots = definition.fetcher(limit=limit, enrich=enrich_applied)
-    else:
-        lots = definition.fetcher(limit=limit)
-    reason = definition.reason_getter()
+    lots: list[NormalizedAuctionLot] = []
+    reason = None
 
     summary: dict[str, Any] = {
         "source": source,
-        "fetched": len(lots),
+        "fetched": 0,
         "inserted": 0,
         "updated": 0,
         "skipped": 0,
@@ -54,7 +117,15 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
     }
 
     db = SessionLocal()
+    score = None
     try:
+        if definition.supports_enrich:
+            lots = definition.fetcher(limit=limit, enrich=enrich_applied)
+        else:
+            lots = definition.fetcher(limit=limit)
+        reason = definition.reason_getter()
+        summary["fetched"] = len(lots)
+        summary["reason"] = reason if not lots else None
         for lot in lots:
             quality = validate_normalized_auction_lot_candidate(lot)
             if not quality.ok:
@@ -77,13 +148,41 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
                 summary["inserted"] += 1
             else:
                 summary["updated"] += 1
+        cfg = None
+        if hasattr(db, "query"):
+            cfg = db.query(SourceConfig).filter(SourceConfig.source == source).first()
+        score = _safe_int_score(cfg)
+        if cfg and cfg.status:
+            status = str(cfg.status).strip()
+            if status:
+                summary["source_status"] = status
+        _record_auction_ingestion_run_safe(
+            source=source,
+            status="success",
+            summary=summary,
+            lots=lots,
+            score=score,
+            limit=limit,
+            enrich_applied=enrich_applied,
+        )
         if not summary["skipped_reasons"]:
             summary.pop("skipped_reasons", None)
         db.commit()
         return summary
-    except Exception:
+    except Exception as exc:
         db.rollback()
-        summary["errors"] += 1
+        summary["errors"] = 1
+        _record_auction_ingestion_run_safe(
+            source=source,
+            status="error",
+            summary=summary,
+            lots=lots,
+            score=score,
+            error_type=type(exc).__name__,
+            error_message=str(exc).strip() or "erro sem mensagem",
+            limit=limit,
+            enrich_applied=enrich_applied,
+        )
         raise
     finally:
         db.close()

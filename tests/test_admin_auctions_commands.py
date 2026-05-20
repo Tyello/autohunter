@@ -346,6 +346,60 @@ def test_admin_auctions_quality_invalid_and_non_admin(monkeypatch, db):
     assert "Sem permissão" in up2.message.sent[-1]
 
 
+def test_admin_auctions_source_history_command(monkeypatch, db):
+    from app.models.source_run import SourceRun
+
+    db.add(
+        SourceRun(
+            source="win_auctions",
+            kind="manual",
+            status="success",
+            payload={
+                "auction_summary": {
+                    "found": 20,
+                    "updated": 8,
+                    "errors": 0,
+                    "car_lots": 20,
+                    "with_current_bid_count": 8,
+                    "with_auction_start_at_count": 20,
+                    "with_auction_end_at_count": 0,
+                    "score": 80,
+                }
+            },
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-history", "win")))
+    text = up.message.sent[-1]
+    assert "Admin Leilões — monitor win_auctions" in text
+    assert "encontrados=20" in text
+    assert "score=80" in text
+
+
+def test_admin_auctions_source_history_shows_error_cycle(monkeypatch, db):
+    from app.models.source_run import SourceRun
+
+    db.add(
+        SourceRun(
+            source="win_auctions",
+            kind="manual",
+            status="error",
+            error="RuntimeError: fetch failed",
+            payload={"auction_summary": {"found": 0, "inserted": 0, "updated": 0, "ignored": 0, "errors": 1, "car_lots": 0, "with_current_bid_count": 0, "with_auction_start_at_count": 0, "with_auction_end_at_count": 0, "error_type": "RuntimeError"}},
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source-history", "win")))
+    text = up.message.sent[-1]
+    assert "erros=1" in text
+
+
 def test_admin_auctions_help_uses_registry_sources_hint(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
