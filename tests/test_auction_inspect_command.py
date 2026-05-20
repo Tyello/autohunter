@@ -98,6 +98,8 @@ def test_admin_auctions_inspect_renders_endpoint_candidates_and_preview(monkeypa
                     "has_script_tags": True,
                     "possible_js_app": True,
                     "possible_api_endpoints": ["/lotes/veiculo", "/api/lotes", "/search"],
+                    "lot_detail_candidates": ["/item/4042/detalhes"],
+                    "lot_image_candidates": ["https://x.cloudfront.net/watermark/bens/4042.jpg"],
                 },
             },
             "candidates": [],
@@ -108,4 +110,6 @@ def test_admin_auctions_inspect_renders_endpoint_candidates_and_preview(monkeypa
     text = up.message.sent[-1]
     assert "reason: requires_js_or_endpoint_study" in text
     assert "endpoint_candidates_top:" in text
+    assert "lot_detail_candidates_top:" in text
+    assert "lot_image_candidates_top:" in text
     assert "Preview HTML:" in text

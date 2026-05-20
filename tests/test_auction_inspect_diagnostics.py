@@ -31,8 +31,12 @@ def test_preview_truncated_and_sanitized():
 
 
 def test_diagnostics_exposes_endpoint_candidates_list():
-    html = '<script>fetch("/api/lotes/search")</script><a href="/lotes/veiculo">x</a>'
+    html = '<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.0.0/umd/popper.min.js"></script><script>fetch("/api/lotes/search")</script><a href="/lotes/veiculo">x</a><img src="https://d123.cloudfront.net/watermark/bens/1.jpg"><a href="/item/4042/detalhes?page=1">d</a>'
     d = build_auction_source_fetch_diagnostics(_Resp(text=html), html, 'https://x/list')
     endpoints = d['hints']['possible_api_endpoints']
     assert isinstance(endpoints, list)
     assert endpoints
+    assert '/api/lotes/search' in endpoints
+    assert not any('cdnjs' in x for x in endpoints)
+    assert any('/item/4042/detalhes' in x for x in d['hints']['lot_detail_candidates'])
+    assert any('watermark/bens' in x for x in d['hints']['lot_image_candidates'])

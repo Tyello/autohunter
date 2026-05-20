@@ -688,16 +688,26 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             if summary.get("reason"):
                 lines.append(f"reason: {summary['reason']}")
             diag = summary.get("diagnostics") or {}
+            hints = diag.get("hints") or {}
+            endpoints = (hints.get("possible_api_endpoints") or [])[:5]
+            detail_candidates = (hints.get("lot_detail_candidates") or [])[:5]
+            image_candidates = (hints.get("lot_image_candidates") or [])[:5]
             if diag and summary.get("fetched", 0) == 0:
                 lines.extend(["", "Diagnóstico HTTP:", f"- url: {diag.get('url') or '-'}", f"- final_url: {diag.get('final_url') or '-'}", f"- status: {diag.get('status_code') or '-'}", f"- content_type: {diag.get('content_type') or '-'}", f"- tamanho: {diag.get('content_length') or 0} bytes", f"- title: {diag.get('html_title') or '-'}"])
-                hints = diag.get("hints") or {}
-                endpoints = (hints.get("possible_api_endpoints") or [])[:5]
                 lines.append(f"- hints: has_script_tags={hints.get('has_script_tags')} possible_js_app={hints.get('possible_js_app')} endpoint_candidates={len(hints.get('possible_api_endpoints') or [])}")
-                if endpoints:
-                    lines.append("- endpoint_candidates_top:")
-                    for ep in endpoints:
-                        lines.append(f"  - {ep}")
                 lines.extend(["", "Preview HTML:", diag.get("html_preview") or "-"])
+            if endpoints:
+                lines.append("- endpoint_candidates_top:")
+                for ep in endpoints:
+                    lines.append(f"  - {ep}")
+            if detail_candidates:
+                lines.append("- lot_detail_candidates_top:")
+                for ep in detail_candidates:
+                    lines.append(f"  - {ep}")
+            if image_candidates:
+                lines.append("- lot_image_candidates_top:")
+                for ep in image_candidates:
+                    lines.append(f"  - {ep}")
             for c in summary.get("candidates", []):
                 lines.extend(
                     [
