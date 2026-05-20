@@ -813,7 +813,7 @@ def test_admin_auctions_sources_renders_reconciled_metadata_status(monkeypatch, 
     assert "VIP Leilões" in text
     assert "source: vip_auctions" in text
     assert "status: production_ready" in text
-    assert "source: win_auctions" in text and "status: functional_non_car" in text
+    assert "source: win_auctions" in text and "status: experimental_functional_vehicle" in text
     assert "source: superbid_auctions" in text and "status: needs_study" in text
     assert "source: copart_auctions" in text and "status: needs_study" in text
     assert "source: sodre_auctions" in text and "status: blocked/needs_study" in text

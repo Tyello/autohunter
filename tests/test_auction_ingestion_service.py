@@ -216,3 +216,27 @@ def test_inspect_auction_source_detail_url_unsupported_source_returns_reason(mon
     out = svc.inspect_auction_source("vip_auctions", detail_url="https://example.com/item/1")
     assert out["fetched"] == 0
     assert out["reason"] == "detail_inspect_not_supported_for_source"
+
+
+def test_upsert_win_clears_stale_invalid_location_on_none(db):
+    from app.services.auction_lot_service import upsert_lot
+
+    upsert_lot(db, {"source": "win_auctions", "external_id": "4077", "location": "CAOA CHERY / CE", "city": "CAOA CHERY", "state": "CE", "url": "https://win/4077"})
+    db.commit()
+    lot, _ = upsert_lot(db, {"source": "win_auctions", "external_id": "4077", "location": None, "city": None, "state": None, "url": "https://win/4077"})
+    db.commit()
+    assert lot.location is None
+    assert lot.city is None
+    assert lot.state is None
+
+
+def test_upsert_win_preserves_valid_location_when_still_valid(db):
+    from app.services.auction_lot_service import upsert_lot
+
+    upsert_lot(db, {"source": "win_auctions", "external_id": "5001", "location": "Curitiba/PR", "city": "Curitiba", "state": "PR", "url": "https://win/5001"})
+    db.commit()
+    lot, _ = upsert_lot(db, {"source": "win_auctions", "external_id": "5001", "location": "Curitiba/PR", "city": "Curitiba", "state": "PR", "url": "https://win/5001"})
+    db.commit()
+    assert lot.location == "Curitiba/PR"
+    assert lot.city == "Curitiba"
+    assert lot.state == "PR"
