@@ -47,7 +47,7 @@ Registry técnico atual:
 
 - `vip_auctions` — VIP Leilões — `production_ready`, única source `user_eligible` por padrão no piloto `car`.
 - `mega_auctions` — Mega Leilões — `experimental_detail_enrichment`; encontra carros, com enrich de detalhe parcial e diagnóstico quando faltam sinais de bid/imagem/status.
-- `win_auctions` — Win Leilões — `experimental_functional_vehicle`; captura carros reais via detail URLs e enrich funcional; forte em lance inicial, ano, imagem e URL, com extração incremental de status e datas de leilão quando disponíveis no detalhe. Ainda experimental e fora do user-facing.
+- `win_auctions` — Win Leilões — `experimental_functional_vehicle`; captura carros reais via detail URLs e enrich funcional; forte em lance inicial, ano, imagem e URL. Status/encerramento/current_bid ainda dependem de sinais explícitos no HTML real; usar inspect diagnostics antes de ampliar regex. Ainda experimental e fora do user-facing.
 - `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fetch real com `forbidden_403` e diagnóstico HTTP mínimo no inspect.
 - `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
 - `copart_auctions` — Copart — `needs_study`, fora do piloto.
@@ -62,7 +62,7 @@ O registry define implementação. `source_configs` define operação. O bootstr
 | `mega_auctions` | `experimental` | encontra carros, mas quality ainda baixa; falta lance inicial/atual, cidade/UF, imagem e status `open`/`live` úteis | manter fora de `user_eligible`; próximo passo: enrich de detalhe |
 | `win_auctions` | `experimental_functional_vehicle` | captura carros reais com enrich por detalhe (`/item/<id>/detalhes`) e cobertura boa de `initial_bid`, `year`, imagem e URL; parser já tenta extrair status e `auction_end_at`/`auction_start_at` quando o detalhe traz sinal explícito, mas cobertura de `current_bid`/encerramento ainda é parcial | manter `user_eligible=false`; próximo passo: monitorar por ciclos, ampliar cobertura confiável de status/end date/current bid e reduzir ruído de localização |
 
-Estado validado (admin): captura 20 carros reais via detail URLs, com lance inicial, ano e imagem; status/encerramento/current_bid ainda são pendências de cobertura (extraídos apenas quando o HTML do detalhe expõe sinal claro), e há ruído de localização em parte dos lotes. Win permanece experimental e não user-facing (`user_eligible=false`). Próxima etapa: validar qualidade por alguns ciclos antes de considerar piloto.
+Estado validado (admin): captura 20 carros reais via detail URLs, com lance inicial, ano e imagem; status/encerramento/current_bid ainda são pendências de cobertura (extraídos apenas quando o HTML do detalhe expõe sinal claro), e há ruído de localização em parte dos lotes. Win permanece experimental e não user-facing (`user_eligible=false`). Próxima etapa: usar `/admin auctions inspect win --url <detail_url>` e a seção **Diagnóstico detalhe Win** para mapear sinais reais (status/date/bid/json/data-*/hidden) antes de novas regex de parser.
 | `superbid_auctions` | `needs_study` | banners deixaram de ser tratados como lote; retorno atual indica `requires_js_or_event_drilldown` | estudar endpoint/drilldown antes de elegibilidade; sem Playwright nesta fase |
 | `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | manter fora do piloto; estudar endpoint sem bypass agressivo |
 | `sodre_auctions` | `blocked`/`needs_study` | ocorrência recorrente de `forbidden_403` | não contornar proteção anti-bot; manter fora do piloto |

@@ -113,3 +113,33 @@ def test_admin_auctions_inspect_renders_endpoint_candidates_and_preview(monkeypa
     assert "lot_detail_candidates_top:" in text
     assert "lot_image_candidates_top:" in text
     assert "Preview HTML:" in text
+
+
+def test_admin_auctions_inspect_renders_win_detail_diagnostics(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(
+        handlers_admin,
+        "inspect_auction_source",
+        lambda **kwargs: {
+            "source": "win_auctions",
+            "fetched": 1,
+            "candidates": [{"index": 1, "url": "https://x", "title": "Carro", "title_fallback": None, "external_id": "1", "item_type": "car", "current_bid": None, "initial_bid": 1000, "year": 2020, "status": "unknown", "skip_reason": None, "text_preview": "ok"}],
+            "diagnostics": {
+                "detail_diagnostics": {
+                    "win_detail": {
+                        "status_candidates": ["Status: em andamento"],
+                        "date_candidates": ["Data de encerramento: 20/05/2026"],
+                        "bid_candidates": ["Maior lance: R$ 100,00"],
+                        "json_like_blocks": ["window.__LOT__={...}"],
+                        "hidden_inputs": ["input hidden lot_id=1"],
+                        "data_attributes": ["data-lot-id=1"],
+                    }
+                }
+            },
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "win", "--url", "https://www.winleiloes.com.br/item/4086/detalhes")))
+    text = up.message.sent[-1]
+    assert "Diagnóstico detalhe Win:" in text
+    assert "status_candidates" in text
