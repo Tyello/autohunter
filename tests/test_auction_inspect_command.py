@@ -76,3 +76,36 @@ def test_admin_auctions_inspect_with_detail_url_passes_param(monkeypatch):
     detail_url = "https://www.winleiloes.com.br/item/4042/detalhes?page=1"
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "win", "--url", detail_url)))
     assert seen.get("detail_url") == detail_url
+
+
+def test_admin_auctions_inspect_renders_endpoint_candidates_and_preview(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(
+        handlers_admin,
+        "inspect_auction_source",
+        lambda **kwargs: {
+            "source": "win_auctions",
+            "fetched": 0,
+            "reason": "requires_js_or_endpoint_study",
+            "diagnostics": {
+                "url": "https://www.winleiloes.com.br/lotes/veiculo?tipo=veiculo&categoria_id=8",
+                "status_code": 200,
+                "content_type": "text/html",
+                "content_length": 1200,
+                "html_title": "Busca de Veículos :: Win Leilões",
+                "html_preview": "preview truncado",
+                "hints": {
+                    "has_script_tags": True,
+                    "possible_js_app": True,
+                    "possible_api_endpoints": ["/lotes/veiculo", "/api/lotes", "/search"],
+                },
+            },
+            "candidates": [],
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "win", "--limit", "5")))
+    text = up.message.sent[-1]
+    assert "reason: requires_js_or_endpoint_study" in text
+    assert "endpoint_candidates_top:" in text
+    assert "Preview HTML:" in text

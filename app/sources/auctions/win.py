@@ -10,7 +10,7 @@ import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
 from app.sources.auctions.diagnostics import build_auction_source_fetch_diagnostics
-from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_item_type, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
+from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_item_type, normalize_title, parse_datetime_br, parse_int_br, parse_money_br
 
 SOURCE_KEY = "win_auctions"
 DEFAULT_LISTING_URL = "https://www.winleiloes.com.br/lotes/veiculo?tipo=veiculo&categoria_id=8"
@@ -64,16 +64,26 @@ extract_win_external_id = parse_win_external_id_from_url
 
 def infer_win_item_type(*texts: str | None) -> str:
     txt = " ".join(t for t in texts if t).lower()
-    if any(k in txt for k in ("imóvel","imovel","terreno","casa","apartamento","prédio","predio","propriedade rural","fazenda","sítio","sitio")): return "real_estate"
-    if any(k in txt for k in ("moto"," cg "," biz "," fan "," titan")): return "motorcycle"
-    if any(k in txt for k in ("caminh","ônibus","onibus")): return "truck"
-    if any(k in txt for k in ("pesad","carreta","bitrem")): return "heavy"
-    if any(k in txt for k in ("suv","pickup","caminhonete","utilit","carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch")): return "car"
-    if re.search(r"\b(volkswagen|vw|chevrolet|fiat|ford|toyota|honda|hyundai|renault|jeep|nissan|peugeot|citroen)\b", txt):
+    vehicle_terms = (
+        "toyota","hilux","volkswagen","vw","chevrolet","fiat","ford","honda","hyundai","renault","jeep",
+        "nissan","peugeot","citroen","mitsubishi","bmw","audi","mercedes","kia","volvo","land rover","ram",
+        "corolla","civic","hb20","onix","ranger","s10","compass","renegade","kicks","sandero","gol","kombi",
+    )
+    real_estate_terms = ("imóvel","imovel","terreno","apartamento","casa","fazenda","sítio","sitio","propriedade rural","prédio","predio")
+    if any(k in txt for k in vehicle_terms):
         return "car"
-    if any(k in txt for k in ("máquina","maquina")): return "heavy"
-    if any(k in txt for k in ("imóvel","imovel","apartamento","terreno","casa")): return "real_estate"
-    if any(k in txt for k in ("carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch","suv","pickup")): return "car"
+    if any(k in txt for k in real_estate_terms):
+        return "real_estate"
+    if any(k in txt for k in ("moto"," cg "," biz "," fan "," titan")):
+        return "motorcycle"
+    if any(k in txt for k in ("caminh","ônibus","onibus")):
+        return "truck"
+    if any(k in txt for k in ("pesad","carreta","bitrem")):
+        return "heavy"
+    if any(k in txt for k in ("suv","pickup","caminhonete","utilit","carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch")):
+        return "car"
+    if any(k in txt for k in ("máquina","maquina")):
+        return "heavy"
     return normalize_item_type(txt)
 
 def _valid_win_title(title: str | None) -> str | None:
@@ -83,6 +93,21 @@ def _valid_win_title(title: str | None) -> str | None:
     if re.fullmatch(r"[a-zà-ÿ\s]{2,40}/[a-z]{2}", low): return None
     if re.fullmatch(r"[a-zà-ÿ\s]{2,30}", low) and low in {"descrição do lote","informações do lote","informacoes do lote"}: return None
     return title
+
+
+def _extract_vehicle_year_from_text(text: str | None) -> int | None:
+    if not text:
+        return None
+    years = [int(y) for y in re.findall(r"\b(19\d{2}|20\d{2})\b", text)]
+    if not years:
+        return None
+    current_year = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).year
+    valid = [y for y in years if 1900 <= y <= current_year + 1]
+    if not valid:
+        return None
+    if len(valid) >= 2 and 0 <= (valid[1] - valid[0]) <= 2:
+        return valid[0]
+    return valid[0]
 
 def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> NormalizedAuctionLot:
     if not lot.url or "/item/" not in lot.url.lower() or "/detalhes" not in lot.url.lower(): return lot
@@ -108,10 +133,13 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     initial_bid = lot.initial_bid or parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
     current_bid = lot.current_bid or parse_money_br(_first_group(r"Lance\s*Atual\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
     clean_html = _strip_html(html)
-    item_type = infer_win_item_type(title, clean_html, lot.item_type)
+    primary_text = " ".join(p for p in [title, lot.url, lot.item_type] if p)
+    item_type = infer_win_item_type(primary_text)
+    if item_type == "other":
+        item_type = infer_win_item_type(clean_html, lot.item_type)
     year = lot.year
     if item_type in {"car", "motorcycle", "truck", "heavy"}:
-        year = year or parse_year_from_title(" ".join([title or "", clean_html]))
+        year = year or _extract_vehicle_year_from_text(" ".join([title or "", clean_html]))
     elif item_type == "real_estate":
         year = None
     mileage = parse_int_br(_first_group(r"([0-9.]{2,7})\s*km", html) or "")
@@ -178,11 +206,13 @@ def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enri
         _LAST_FETCH_DIAGNOSTICS = build_auction_source_fetch_diagnostics(resp, resp.text, listing_url)
         if enrich and lots: lots=[_enrich_win_detail(client, l) for l in lots]
     if lots: return lots
-    html = (_LAST_FETCH_DIAGNOSTICS or {}).get("html_preview","")
+    diag = _LAST_FETCH_DIAGNOSTICS or {}
+    html = (diag.get("html_preview") or "")
+    hints = diag.get("hints") or {}
     r = "no_public_lot_cards_found"
     if any(k in html.lower() for k in ["login","cadastro","forbidden","access denied"]):
         r = "blocked_or_login_required"
-    elif any(k in html.lower() for k in ["__next_data__","react","webpack"]):
+    elif hints.get("has_script_tags") and hints.get("possible_js_app"):
         r = "requires_js_or_endpoint_study"
     _LAST_REASON=r
     if _LAST_FETCH_DIAGNOSTICS is not None:
