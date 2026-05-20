@@ -8,6 +8,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
+from app.sources.auctions.diagnostics import build_auction_source_fetch_diagnostics
 from app.sources.auctions.parsing import parse_datetime_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "sodre_auctions"
@@ -18,10 +19,13 @@ VALID_UFS = {
 }
 
 _LAST_REASON: str | None = None
-
+_LAST_FETCH_DIAGNOSTICS: dict | None = None
 
 def get_last_reason() -> str | None:
     return _LAST_REASON
+
+def get_last_fetch_diagnostics() -> dict | None:
+    return _LAST_FETCH_DIAGNOSTICS
 
 
 def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> bool:
@@ -208,15 +212,19 @@ def parse_sodre_listing_html(html: str, limit: int = 50, listing_url: str = DEFA
 
 
 def fetch_sodre_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
-    global _LAST_REASON
+    global _LAST_REASON, _LAST_FETCH_DIAGNOSTICS
     _LAST_REASON = None
+    _LAST_FETCH_DIAGNOSTICS = None
     if not validate_auction_source_url(listing_url, ALLOWED_DOMAINS):
         _LAST_REASON = "invalid_source_url"
         return []
     with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": "AutoHunter/1.0 (+experimental)"}) as client:
         resp = client.get(listing_url)
+        _LAST_FETCH_DIAGNOSTICS = build_auction_source_fetch_diagnostics(resp, getattr(resp,"text",""), listing_url)
         if getattr(resp, "status_code", None) == 403:
             _LAST_REASON = "forbidden_403"
+            _LAST_FETCH_DIAGNOSTICS["source_status"] = "blocked/needs_study"
+            _LAST_FETCH_DIAGNOSTICS["reason"] = _LAST_REASON
             return []
         resp.raise_for_status()
     lots = parse_sodre_listing_html(resp.text, limit=limit, listing_url=listing_url)

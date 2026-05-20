@@ -349,6 +349,12 @@ def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bo
             enrich = True
             idx += 1
             continue
+        if token == "--url":
+            if idx + 1 >= len(args):
+                return None, None, None, "URL inválida. Use: --url <detail_url>."
+            detail_url = args[idx + 1].strip()
+            idx += 2
+            continue
         if token == "--limit":
             if idx + 1 >= len(args):
                 return None, None, False, "Limite inválido. Use: --limit <1-30>."
@@ -364,29 +370,36 @@ def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bo
     return source, limit, enrich, None
 
 
-def _parse_auction_inspect_args(args: list[str]) -> tuple[str | None, int | None, str | None]:
+def _parse_auction_inspect_args(args: list[str]) -> tuple[str | None, int | None, str | None, str | None]:
     if len(args) < 2:
-        return None, None, "Use: /admin auctions inspect <source> [--limit N]"
+        return None, None, None, "Use: /admin auctions inspect <source> [--limit N] [--url DETAIL_URL]"
     source = resolve_auction_source_alias(args[1])
     if not source:
-        return None, None, f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
+        return None, None, None, f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
     limit = 5
+    detail_url = None
     idx = 2
     while idx < len(args):
         token = args[idx].lower()
+        if token == "--url":
+            if idx + 1 >= len(args):
+                return None, None, None, "URL inválida. Use: --url <detail_url>."
+            detail_url = args[idx + 1].strip()
+            idx += 2
+            continue
         if token == "--limit":
             if idx + 1 >= len(args):
-                return None, None, "Limite inválido. Use: --limit <1-10>."
+                return None, None, None, "Limite inválido. Use: --limit <1-10>."
             try:
                 limit = int(args[idx + 1])
             except ValueError:
-                return None, None, "Limite inválido. Use: --limit <1-10>."
+                return None, None, None, "Limite inválido. Use: --limit <1-10>."
             idx += 2
             continue
-        return None, None, f"Argumento inválido: {args[idx]}"
+        return None, None, None, f"Argumento inválido: {args[idx]}"
     if limit < 1 or limit > 10:
-        return None, None, "Limite inválido. Use: --limit <1-10>."
-    return source, limit, None
+        return None, None, None, "Limite inválido. Use: --limit <1-10>."
+    return source, limit, detail_url, None
 
 def _classify_error(source: str, err: str | None, http_status: Optional[int]) -> tuple[str, str, str]:
     """
@@ -659,7 +672,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             return
 
         if sub == "inspect":
-            source, limit, err = _parse_auction_inspect_args(args)
+            source, limit, detail_url, err = _parse_auction_inspect_args(args)
             if err:
                 await update.message.reply_text(err)
                 return
@@ -677,6 +690,12 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             ]
             if summary.get("reason"):
                 lines.append(f"reason: {summary['reason']}")
+            diag = summary.get("diagnostics") or {}
+            if diag and summary.get("fetched", 0) == 0:
+                lines.extend(["", "Diagnóstico HTTP:", f"- url: {diag.get('url') or "-"}", f"- final_url: {diag.get('final_url') or "-"}", f"- status: {diag.get('status_code') or "-"}", f"- content_type: {diag.get('content_type') or "-"}", f"- tamanho: {diag.get('content_length') or 0} bytes", f"- title: {diag.get('html_title') or "-"}"])
+                hints = diag.get("hints") or {}
+                lines.append(f"- hints: has_script_tags={hints.get('has_script_tags')} possible_js_app={hints.get('possible_js_app')} endpoint_candidates={len(hints.get('possible_api_endpoints') or [])}")
+                lines.extend(["", "Preview HTML:", diag.get("html_preview") or "-"])
             for c in summary.get("candidates", []):
                 lines.extend(
                     [

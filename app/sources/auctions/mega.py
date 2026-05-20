@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 import re
 from typing import Iterable
 from urllib.parse import urlparse
@@ -8,6 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
+from app.sources.auctions.diagnostics import build_auction_source_fetch_diagnostics
 from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_item_type, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "mega_auctions"
@@ -20,10 +22,13 @@ VALID_UFS = {
 
 logger = logging.getLogger(__name__)
 _LAST_REASON: str | None = None
-
+_LAST_FETCH_DIAGNOSTICS: dict | None = None
 
 def get_last_reason() -> str | None:
     return _LAST_REASON
+
+def get_last_fetch_diagnostics() -> dict | None:
+    return _LAST_FETCH_DIAGNOSTICS
 
 
 def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> bool:
@@ -168,15 +173,39 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
 
 
 def fetch_mega_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enrich: bool = False) -> list[NormalizedAuctionLot]:
-    global _LAST_REASON
+    global _LAST_REASON, _LAST_FETCH_DIAGNOSTICS
     _LAST_REASON = None
+    _LAST_FETCH_DIAGNOSTICS = None
     if not validate_auction_source_url(listing_url, ALLOWED_DOMAINS):
         _LAST_REASON = "invalid_source_url"
         return []
     with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": "AutoHunter/1.0 (+experimental)"}) as client:
         resp = client.get(listing_url)
         resp.raise_for_status()
-    lots = parse_mega_listing_html(resp.text, limit=limit, listing_url=listing_url)
+        _LAST_FETCH_DIAGNOSTICS = build_auction_source_fetch_diagnostics(resp, resp.text, listing_url)
+        lots = parse_mega_listing_html(resp.text, limit=limit, listing_url=listing_url)
+        if enrich and lots:
+            out=[]
+            for lot in lots:
+                detail_applied=False
+                d_reason=[]
+                try:
+                    d=client.get(lot.url)
+                    d.raise_for_status()
+                    parsed=parse_mega_detail_html(d.text, lot.url)
+                    detail_applied=True
+                    if parsed.current_bid is None and parsed.initial_bid is None: d_reason.append("detail_without_bid_signals")
+                    if not parsed.thumbnail_url: d_reason.append("detail_without_image_signals")
+                    extras=dict(lot.extras or {})
+                    extras.update({"detail_fetch_applied": True, "detail_parse_applied": detail_applied})
+                    if d_reason: extras["detail_reason"]=d_reason
+                    lot=replace(lot, title=parsed.title or lot.title, year=parsed.year or lot.year, city=parsed.city or lot.city, state=parsed.state or lot.state, status=parsed.status or lot.status, initial_bid=lot.initial_bid or parsed.initial_bid, current_bid=lot.current_bid or parsed.current_bid, thumbnail_url=lot.thumbnail_url or parsed.thumbnail_url, images=lot.images or parsed.images, extras=extras)
+                except Exception:
+                    extras=dict(lot.extras or {})
+                    extras.update({"detail_fetch_applied": False, "detail_parse_applied": False})
+                    lot=replace(lot, extras=extras)
+                out.append(lot)
+            lots=out
     if lots:
         return lots
     _LAST_REASON = "no_public_lot_cards_found"

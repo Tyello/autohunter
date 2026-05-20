@@ -15,6 +15,14 @@ from app.sources.auctions.registry import (
 
 SUPPORTED_SOURCES = list_supported_auction_source_keys()
 
+from app.sources.auctions import mega, sodre, win
+
+
+def _get_source_diagnostics(source: str) -> dict[str, Any] | None:
+    mapping = {"win_auctions": win.get_last_fetch_diagnostics, "mega_auctions": mega.get_last_fetch_diagnostics, "sodre_auctions": sodre.get_last_fetch_diagnostics}
+    getter = mapping.get(source)
+    return getter() if getter else None
+
 
 def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False) -> dict[str, Any]:
     definition = get_auction_source_definition(source)
@@ -131,5 +139,6 @@ def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = F
         "enrich_applied": enrich_applied,
         "fetched": len(lots),
         "reason": reason if not lots else None,
+        "diagnostics": _get_source_diagnostics(source),
         "candidates": candidates,
     }
