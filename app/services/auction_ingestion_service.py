@@ -113,6 +113,11 @@ def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = F
                 else:
                     base = NormalizedAuctionLot(source=source, external_id=ext, url=detail_url)
                     lot = win._enrich_win_detail(client, base)  # type: ignore[attr-defined]
+                    if lot.status in (None, "", "unknown") or lot.current_bid is None or lot.auction_end_at is None:
+                        diagnostics = diagnostics or {}
+                        detail_diagnostics = diagnostics.get("detail_diagnostics") or {}
+                        detail_diagnostics["win_detail"] = win.build_win_detail_diagnostics(html)
+                        diagnostics["detail_diagnostics"] = detail_diagnostics
                     lots = [lot] if (lot.title or lot.current_bid is not None or lot.initial_bid is not None) else []
                     reason = None if lots else "detail_without_extractable_signals"
             elif source == "mega_auctions":

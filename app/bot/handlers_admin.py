@@ -692,6 +692,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             endpoints = (hints.get("possible_api_endpoints") or [])[:5]
             detail_candidates = (hints.get("lot_detail_candidates") or [])[:5]
             image_candidates = (hints.get("lot_image_candidates") or [])[:5]
+            detail_diags = ((diag.get("detail_diagnostics") or {}).get("win_detail") or {})
             if diag and summary.get("fetched", 0) == 0:
                 lines.extend(["", "Diagnóstico HTTP:", f"- url: {diag.get('url') or '-'}", f"- final_url: {diag.get('final_url') or '-'}", f"- status: {diag.get('status_code') or '-'}", f"- content_type: {diag.get('content_type') or '-'}", f"- tamanho: {diag.get('content_length') or 0} bytes", f"- title: {diag.get('html_title') or '-'}"])
                 lines.append(f"- hints: has_script_tags={hints.get('has_script_tags')} possible_js_app={hints.get('possible_js_app')} endpoint_candidates={len(hints.get('possible_api_endpoints') or [])}")
@@ -708,6 +709,16 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 lines.append("- lot_image_candidates_top:")
                 for ep in image_candidates:
                     lines.append(f"  - {ep}")
+            if detail_diags:
+                lines.extend(["", "Diagnóstico detalhe Win:"])
+                for key in ("status_candidates", "date_candidates", "bid_candidates", "json_like_blocks", "hidden_inputs", "data_attributes"):
+                    values = (detail_diags.get(key) or [])[:5]
+                    lines.append(f"- {key}:")
+                    if values:
+                        for value in values:
+                            lines.append(f"  - {value}")
+                    else:
+                        lines.append("  - -")
             for c in summary.get("candidates", []):
                 lines.extend(
                     [

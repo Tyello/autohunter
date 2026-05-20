@@ -31,6 +31,67 @@ def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> boo
     return (urlparse(url).hostname or "").lower() in {d.lower() for d in allowed_domains}
 
 def _strip_html(text: str) -> str: return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+def _sanitize_snippet(text: str, max_len: int = 250) -> str:
+    clean = _strip_html(text)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if len(clean) <= max_len:
+        return clean
+    return f"{clean[: max_len - 3].rstrip()}..."
+
+
+def _collect_keyword_snippets(html: str, keywords: tuple[str, ...], max_items: int = 5) -> list[str]:
+    snippets: list[str] = []
+    seen: set[str] = set()
+    compact = re.sub(r"\s+", " ", html)
+    for kw in keywords:
+        pattern = re.compile(rf"(.{{0,120}}{re.escape(kw)}.{{0,120}})", flags=re.I)
+        for m in pattern.finditer(compact):
+            snippet = _sanitize_snippet(m.group(1))
+            if not snippet or snippet in seen:
+                continue
+            seen.add(snippet)
+            snippets.append(snippet)
+            if len(snippets) >= max_items:
+                return snippets
+    return snippets
+
+
+def build_win_detail_diagnostics(html: str) -> dict[str, list[str]]:
+    status_candidates = _collect_keyword_snippets(
+        html,
+        ("status", "situação", "situacao", "andamento", "aberto", "encerrado", "finalizado", "loteamento"),
+    )
+    date_candidates = _collect_keyword_snippets(
+        html,
+        ("encerramento", "fim", "término", "termino", "data", "leilão", "leilao", "abertura", "início", "inicio"),
+    )
+    bid_candidates = _collect_keyword_snippets(
+        html,
+        ("lance atual", "maior lance", "último lance", "ultimo lance", "lance vencedor", "lance inicial"),
+    )
+
+    json_like_blocks = _collect_keyword_snippets(
+        html,
+        ("window.__", '"@context"', '"@type"', '"auction"', "application/ld+json", '{"', ":["),
+    )
+
+    hidden_inputs = _collect_keyword_snippets(
+        html,
+        ('type="hidden"', "type='hidden'", "hidden"),
+    )
+    data_attributes = _collect_keyword_snippets(
+        html,
+        ("data-",),
+    )
+    return {
+        "status_candidates": status_candidates[:5],
+        "date_candidates": date_candidates[:5],
+        "bid_candidates": bid_candidates[:5],
+        "json_like_blocks": json_like_blocks[:5],
+        "hidden_inputs": hidden_inputs[:5],
+        "data_attributes": data_attributes[:5],
+    }
+
 def _first_group(pattern: str, text: str) -> str | None:
     m = re.search(pattern, text, flags=re.I | re.S)
     return m.group(1).strip() if m else None

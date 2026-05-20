@@ -194,6 +194,8 @@ def test_inspect_auction_source_win_detail_url_external_id_and_no_persist(monkey
     assert out["fetched"] == 1
     assert out["candidates"][0]["external_id"] == "4042"
     assert called["upsert"] == 0
+    win_diag = (((out.get("diagnostics") or {}).get("detail_diagnostics") or {}).get("win_detail") or {})
+    assert "status_candidates" in win_diag
 
 
 def test_inspect_auction_source_detail_url_unsupported_source_returns_reason(monkeypatch):
@@ -216,6 +218,23 @@ def test_inspect_auction_source_detail_url_unsupported_source_returns_reason(mon
     out = svc.inspect_auction_source("vip_auctions", detail_url="https://example.com/item/1")
     assert out["fetched"] == 0
     assert out["reason"] == "detail_inspect_not_supported_for_source"
+
+
+def test_run_auction_ingestion_does_not_include_detail_diagnostics(monkeypatch):
+    class FakeDB:
+        def commit(self): return None
+        def rollback(self): return None
+        def close(self): return None
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
+    monkeypatch.setattr(
+        svc,
+        "get_auction_source_definition",
+        lambda _s: _Def("win_auctions", lambda limit, enrich=False: [NormalizedAuctionLot(source="win_auctions", external_id="1", title="Civic", url="https://x/1", year=2020)], lambda: None, True),
+    )
+    monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    out = svc.run_auction_ingestion("win_auctions", limit=1, enrich_details=True)
+    assert "diagnostics" not in out
 
 
 def test_upsert_win_clears_stale_invalid_location_on_none(db):

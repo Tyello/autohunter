@@ -433,3 +433,41 @@ def test_is_reliable_win_location_helper_rules():
     assert win.is_reliable_win_location("CAOA CHERY", "CE", "CAOA CHERY/CE") is False
     assert win.is_reliable_win_location("www", "SP", "www/SP") is False
     assert win.is_reliable_win_location("TOYOTA/HILUX", "SP", "TOYOTA/HILUX/SP") is False
+
+
+def test_build_win_detail_diagnostics_finds_status_date_bid_snippets():
+    html = """
+    <html><body>
+      <div>Status do lote: Em Andamento</div>
+      <div>Data de encerramento: 20/05/2026 12:30</div>
+      <div>Maior lance: R$ 55.000,00</div>
+      <script>window.__LOT__={"status":"open","auction_end":"20/05/2026 12:30"}</script>
+      <input type="hidden" name="lot_id" value="4086" />
+      <div data-lot-id="4086" data-status="open"></div>
+    </body></html>
+    """
+    out = win.build_win_detail_diagnostics(html)
+    assert any("Status" in s or "status" in s for s in out["status_candidates"])
+    assert any("encerramento" in s.lower() for s in out["date_candidates"])
+    assert any("lance" in s.lower() for s in out["bid_candidates"])
+    assert out["json_like_blocks"]
+    assert out["hidden_inputs"]
+    assert out["data_attributes"]
+
+
+def test_build_win_detail_diagnostics_ignores_html_without_signals():
+    out = win.build_win_detail_diagnostics("<html><body><p>Sem dados relevantes.</p></body></html>")
+    assert out["status_candidates"] == []
+    assert out["date_candidates"] == []
+    assert out["bid_candidates"] == []
+    assert out["json_like_blocks"] == []
+
+
+def test_build_win_detail_diagnostics_truncates_snippets_and_limits_items():
+    html = "".join(
+        f"<div>Status {idx}: {'x' * 400}</div>"
+        for idx in range(10)
+    )
+    out = win.build_win_detail_diagnostics(html)
+    assert len(out["status_candidates"]) == 5
+    assert all(len(s) <= 250 for s in out["status_candidates"])
