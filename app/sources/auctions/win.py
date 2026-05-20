@@ -313,7 +313,11 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         title = _valid_win_title(normalize_title(re.sub(r"[-_]+", " ", slug)))
     initial_bid = lot.initial_bid or parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
     current_bid = lot.current_bid or parse_money_br(
-        _first_group(r"(?:Lance\s*Atual|Lance\s*Vencedor|Maior\s*Lance|[UÚ]ltimo\s*Lance)\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""
+        _first_group(
+            r"(?:MAIOR\s*LANCE\s*NO\s*MOMENTO|Maior\s*Lance\s*no\s*Momento|Maior\s*Lance|Lance\s*Atual|[UÚ]ltimo\s*Lance|Lance\s*Vencedor)\s*:?\s*[^R$]{0,20}(R\$\s*[0-9.]+,[0-9]{2})",
+            html,
+        )
+        or ""
     )
     clean_html = _strip_html(html)
     primary_text = " ".join(p for p in [title, lot.url, lot.item_type] if p)

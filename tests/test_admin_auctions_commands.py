@@ -112,6 +112,23 @@ def test_render_admin_auction_lot_shows_start_and_end():
     assert "Encerra:" in text
 
 
+
+def test_render_admin_auction_lot_shows_start_without_end_label():
+    lot = types.SimpleNamespace(
+        title="X",
+        source="win_auctions",
+        make="Fiat",
+        item_type="car",
+        status="live",
+        auction_start_at=datetime(2026, 5, 21, 11, 0, tzinfo=timezone.utc),
+        auction_end_at=None,
+        url="https://win/l1",
+        extras={},
+    )
+    text = render_admin_auction_lot(lot)
+    assert "Início:" in text
+    assert "Encerra:" not in text
+
 def test_admin_auctions_run_variants(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
