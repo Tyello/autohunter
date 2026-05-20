@@ -1174,6 +1174,9 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     f"- {src}: car_lots={src_summary.get('car_lots', 0)}, "
                     f"user_allowed_lots={src_summary.get('user_allowed_lots', 0)}, "
                     f"dados_car={data_quality}, "
+                    f"status/live={'sim' if int(src_summary.get('open_or_live_count', 0) or 0) > 0 else 'não'}, "
+                    f"início={'sim' if int(src_summary.get('with_auction_start_at_count', 0) or 0) > 0 else 'não'}, "
+                    f"encerramento={'sim' if int(src_summary.get('with_auction_end_at_count', 0) or 0) > 0 else 'não'}, "
                     f"user_facing={ready}, "
                     f"motivo={src_summary.get('user_facing_ready_reason', '-')}"
                 )

@@ -71,6 +71,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
     with_year_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.year.isnot(None)).scalar() or 0)
     with_current_bid_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.current_bid.isnot(None)).scalar() or 0)
     with_initial_bid_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.initial_bid.isnot(None)).scalar() or 0)
+    with_auction_start_at_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_start_at.isnot(None)).scalar() or 0)
     with_auction_end_at_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_end_at.isnot(None)).scalar() or 0)
     with_city_state_count = int(
         db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, _has_text(AuctionLot.city), _has_text(AuctionLot.state)).scalar() or 0
@@ -117,9 +118,18 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
     status_ready = status in {"production_ready", "pilot_ready", "active"}
     unknown_only = total_lots > 0 and int(status_counts.get("unknown", 0) or 0) == total_lots
     no_endings = total_lots > 0 and with_auction_end_at_count <= 0
+    has_open_or_live = int(
+        db.query(func.count(AuctionLot.id))
+        .filter(AuctionLot.source == source, func.lower(func.coalesce(AuctionLot.status, "")).in_(["open", "live"]))
+        .scalar()
+        or 0
+    ) > 0
     critical_warnings: list[str] = []
-    if is_experimental and (unknown_only or no_endings):
-        critical_warnings.append("sem status/encerramento; manter experimental")
+    if is_experimental and no_endings:
+        if has_open_or_live:
+            critical_warnings.append("sem encerramento; manter experimental")
+        elif unknown_only:
+            critical_warnings.append("sem status/encerramento; manter experimental")
     user_facing_reasons: list[str] = []
     if not user_eligible:
         user_facing_reasons.append("user_eligible=false")
@@ -132,7 +142,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
     if not data_quality_ready_car:
         user_facing_reasons.append("dados car insuficientes")
     if critical_warnings:
-        user_facing_reasons.append("warnings críticos")
+        user_facing_reasons.append("sem encerramento")
     user_facing_ready_car = not user_facing_reasons
 
     upcoming_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_end_at > now_utc).scalar() or 0)
@@ -160,6 +170,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         "with_year_count": with_year_count,
         "with_current_bid_count": with_current_bid_count,
         "with_initial_bid_count": with_initial_bid_count,
+        "with_auction_start_at_count": with_auction_start_at_count,
         "with_auction_end_at_count": with_auction_end_at_count,
         "with_city_state_count": with_city_state_count,
         "with_url_count": with_url_count,

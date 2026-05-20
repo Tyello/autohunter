@@ -1406,6 +1406,9 @@ def test_admin_auctions_readiness_warns_functional_source_without_car(monkeypatc
     assert "win_auctions funcional, mas sem lotes car recentes" in text
     assert "Fora do piloto de carros" in text
     assert "dados_car=não" in text
+    assert "status/live=não" in text
+    assert "início=não" in text
+    assert "encerramento=não" in text
     assert "user_facing=não" in text
 
 
@@ -1588,21 +1591,23 @@ def test_admin_quality_renders_user_facing_reason_for_win(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental_vehicle_route_found", extra={"allowed_item_types":["car"]}))
-    upsert_lot(db, {"source": "win_auctions", "external_id": "win-car-q", "title": "Civic", "item_type": "car", "year": 2020, "initial_bid": 10000, "url": "https://win/car-q", "status": "unknown"})
+    upsert_lot(db, {"source": "win_auctions", "external_id": "win-car-q", "title": "Civic", "item_type": "car", "year": 2020, "initial_bid": 10000, "url": "https://win/car-q", "status": "live", "auction_start_at": datetime.now(timezone.utc)})
     db.commit()
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "quality", "win")))
     text = up.message.sent[-1]
     assert "Qualidade dados car" in text
     assert "Pronta user-facing car: não" in text
+    assert "Com início:" in text
     assert "Motivo user-facing:" in text
+    assert "sem encerramento" in text
 
 
 def test_admin_readiness_win_shows_experimental_not_user_facing(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
     db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental_vehicle_route_found", extra={"allowed_item_types":["car"]}))
-    upsert_lot(db, {"source": "win_auctions", "external_id": "wcar1", "item_type": "car", "year": 2020, "initial_bid": 1000, "url": "https://win/wcar1"})
+    upsert_lot(db, {"source": "win_auctions", "external_id": "wcar1", "item_type": "car", "year": 2020, "initial_bid": 1000, "url": "https://win/wcar1", "status": "live", "auction_start_at": datetime.now(timezone.utc)})
     lot = db.query(AuctionLot).filter_by(source="win_auctions", external_id="wcar1").first()
     if lot:
         lot.updated_at = datetime.now(timezone.utc)
@@ -1612,4 +1617,7 @@ def test_admin_readiness_win_shows_experimental_not_user_facing(monkeypatch, db)
     text = up.message.sent[-1]
     assert "win_auctions:" in text
     assert "dados_car=sim" in text
+    assert "status/live=sim" in text
+    assert "início=sim" in text
+    assert "encerramento=não" in text
     assert "user_facing=não" in text
