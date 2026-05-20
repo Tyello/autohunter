@@ -1,5 +1,7 @@
 import pytest
 
+from app.models.source_run import SourceRun
+from app.db.session import SessionLocal as RealSessionLocal
 from app.sources.auctions.base import NormalizedAuctionLot
 from app.services import auction_ingestion_service as svc
 
@@ -63,6 +65,24 @@ def test_run_auction_ingestion_rollback_on_error(monkeypatch):
     with pytest.raises(RuntimeError):
         svc.run_auction_ingestion("vip_auctions", limit=10, enrich_details=False)
     assert calls["rolled"] is True
+
+
+def test_run_auction_ingestion_records_error_run_and_reraises(monkeypatch, db):
+    monkeypatch.setattr(svc, "SessionLocal", RealSessionLocal)
+    monkeypatch.setattr(
+        svc,
+        "get_auction_source_definition",
+        lambda _s: _Def("win_auctions", lambda limit, enrich=False: (_ for _ in ()).throw(RuntimeError("fetch failed")), lambda: None, True),
+    )
+    with pytest.raises(RuntimeError):
+        svc.run_auction_ingestion("win_auctions", limit=10, enrich_details=False)
+    row = db.query(SourceRun).filter(SourceRun.source == "win_auctions").order_by(SourceRun.created_at.desc()).first()
+    assert row is not None
+    assert row.status == "error"
+    payload = row.payload or {}
+    summary = payload.get("auction_summary") or {}
+    assert summary.get("errors") == 1
+    assert summary.get("error_type") == "RuntimeError"
 
 
 def test_run_auction_ingestion_sodre_without_enrich(monkeypatch):
