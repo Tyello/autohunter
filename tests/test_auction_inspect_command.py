@@ -61,3 +61,18 @@ def test_admin_auctions_inspect_render_and_non_admin(monkeypatch):
     up2 = _Update(chat_id=10)
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("auctions", "inspect", "win")))
     assert "Sem permissão" in up2.message.sent[-1]
+
+
+def test_admin_auctions_inspect_with_detail_url_passes_param(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    seen = {}
+
+    def _inspect(**kwargs):
+        seen.update(kwargs)
+        return {"source": "win_auctions", "fetched": 0, "reason": "detail_without_extractable_signals", "candidates": []}
+
+    monkeypatch.setattr(handlers_admin, "inspect_auction_source", _inspect)
+    up = _Update()
+    detail_url = "https://www.winleiloes.com.br/item/4042/detalhes?page=1"
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "win", "--url", detail_url)))
+    assert seen.get("detail_url") == detail_url

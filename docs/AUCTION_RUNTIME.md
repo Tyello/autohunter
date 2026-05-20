@@ -46,9 +46,9 @@ Sistema:
 Registry técnico atual:
 
 - `vip_auctions` — VIP Leilões — `production_ready`, única source `user_eligible` por padrão no piloto `car`.
-- `mega_auctions` — Mega Leilões — `experimental_detail_enrichment`; encontra carros, mas ainda não tem lance/local/status/imagem suficientes.
-- `win_auctions` — Win Leilões — `experimental_vehicle_route_found`; predominância de imóveis, fora do piloto `car`.
-- `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fora do piloto.
+- `mega_auctions` — Mega Leilões — `experimental_detail_enrichment`; encontra carros, com enrich de detalhe parcial e diagnóstico quando faltam sinais de bid/imagem/status.
+- `win_auctions` — Win Leilões — `experimental_vehicle_route_found`; rota de veículos identificada, porém listagem HTML real ainda sem cards parseáveis no fetch atual (próxima etapa: endpoint/JS study).
+- `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fetch real com `forbidden_403` e diagnóstico HTTP mínimo no inspect.
 - `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
 - `copart_auctions` — Copart — `needs_study`, fora do piloto.
 

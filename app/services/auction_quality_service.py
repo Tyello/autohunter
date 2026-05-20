@@ -33,6 +33,8 @@ def _score(metrics: dict[str, Any]) -> int:
     score += 10 if cov("with_url_count") >= 0.90 else 0
     score += 10 if int(metrics.get("open_or_live_count", 0) or 0) > 0 else 0
     score += 5 if cov("with_image_count") > 0.0 else 0
+    if int(metrics.get("updated_last_24h",0) or 0) == 0 and total > 0:
+        score = max(10, score - 30)
     return min(100, score)
 
 
@@ -145,7 +147,8 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         "ended_count": ended_count,
     }
     metrics["quality_score"] = _score(metrics)
-    metrics["quality_label"] = _label(metrics["quality_score"])
+    metrics["quality_label"] = "sem dados recentes" if (metrics["total_lots"] > 0 and metrics["updated_last_24h"] == 0) else _label(metrics["quality_score"])
+    metrics["stale_warning"] = "Dados sem atualização recente; execute run/inspect antes de avaliar." if metrics["updated_last_24h"] == 0 and metrics["total_lots"] > 0 else None
     return metrics
 
 

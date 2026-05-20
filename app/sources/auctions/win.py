@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.sources.auctions.base import NormalizedAuctionLot
+from app.sources.auctions.diagnostics import build_auction_source_fetch_diagnostics
 from app.sources.auctions.parsing import absolute_url, external_id_from_url, normalize_item_type, normalize_title, parse_datetime_br, parse_int_br, parse_money_br, parse_year_from_title
 
 SOURCE_KEY = "win_auctions"
@@ -16,8 +17,10 @@ DEFAULT_LISTING_URL = "https://www.winleiloes.com.br/lotes/veiculo?tipo=veiculo&
 ALLOWED_DOMAINS = {"winleiloes.com.br", "www.winleiloes.com.br"}
 VALID_UFS = {"AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"}
 _LAST_REASON: str | None = None
+_LAST_FETCH_DIAGNOSTICS: dict | None = None
 
 def get_last_reason() -> str | None: return _LAST_REASON
+def get_last_fetch_diagnostics() -> dict | None: return _LAST_FETCH_DIAGNOSTICS
 
 def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> bool:
     return (urlparse(url).hostname or "").lower() in {d.lower() for d in allowed_domains}
@@ -40,7 +43,13 @@ def parse_win_location(text: str | None) -> tuple[str | None, str | None, str | 
     m = re.search(r"^(.+?)\s*/\s*([A-Za-z]{2})$", clean)
     if not m: return clean or None, None, clean or None
     city, state = m.group(1).strip(), m.group(2).upper()
-    return city, (state if state in VALID_UFS else None), clean
+    city_l = city.lower()
+    invalid = city_l in {"com","www","http","https"} or "." in city_l or "/" in city_l or len(city_l) < 3
+    if invalid: city = None
+    st = state if state in VALID_UFS else None
+    if city and st: return city, st, f"{city}/{st}"
+    if st: return None, st, st
+    return None, None, None
 
 def parse_win_external_id_from_url(url: str | None) -> str | None:
     if not url: return None
@@ -55,6 +64,7 @@ extract_win_external_id = parse_win_external_id_from_url
 
 def infer_win_item_type(*texts: str | None) -> str:
     txt = " ".join(t for t in texts if t).lower()
+    if any(k in txt for k in ("imóvel","imovel","terreno","casa","apartamento","prédio","predio","propriedade rural","fazenda","sítio","sitio")): return "real_estate"
     if any(k in txt for k in ("moto"," cg "," biz "," fan "," titan")): return "motorcycle"
     if any(k in txt for k in ("caminh","ônibus","onibus")): return "truck"
     if any(k in txt for k in ("pesad","carreta","bitrem")): return "heavy"
@@ -114,6 +124,9 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     imgs = [absolute_url(lot.url, i) for i in imgs if re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", i, flags=re.I)]
     extras = dict(lot.extras or {})
     if mileage is not None: extras["mileage_km"] = mileage
+    current_year = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).year
+    if year is not None and (year < 1900 or year > current_year + 1):
+        year = None
     return replace(
         lot,
         title=title,
@@ -155,12 +168,23 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
     return lots
 
 def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enrich: bool = False) -> list[NormalizedAuctionLot]:
-    global _LAST_REASON
+    global _LAST_REASON, _LAST_FETCH_DIAGNOSTICS
     _LAST_REASON=None
+    _LAST_FETCH_DIAGNOSTICS=None
     if not validate_auction_source_url(listing_url, ALLOWED_DOMAINS): _LAST_REASON="invalid_source_url"; return []
     with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent":"AutoHunter/1.0 (+experimental)"}) as client:
         resp = client.get(listing_url); resp.raise_for_status()
         lots = parse_win_listing_html(resp.text, limit=limit, listing_url=listing_url)
+        _LAST_FETCH_DIAGNOSTICS = build_auction_source_fetch_diagnostics(resp, resp.text, listing_url)
         if enrich and lots: lots=[_enrich_win_detail(client, l) for l in lots]
     if lots: return lots
-    _LAST_REASON="no_public_lot_cards_found"; return []
+    html = (_LAST_FETCH_DIAGNOSTICS or {}).get("html_preview","")
+    r = "no_public_lot_cards_found"
+    if any(k in html.lower() for k in ["login","cadastro","forbidden","access denied"]):
+        r = "blocked_or_login_required"
+    elif any(k in html.lower() for k in ["__next_data__","react","webpack"]):
+        r = "requires_js_or_endpoint_study"
+    _LAST_REASON=r
+    if _LAST_FETCH_DIAGNOSTICS is not None:
+        _LAST_FETCH_DIAGNOSTICS["reason"] = r
+    return []
