@@ -481,7 +481,7 @@ def render_admin_auction_quality_report(report: dict) -> str:
             f"Pronta piloto car: {'sim' if item.get('source_ready_for_user_car_pilot') else 'não'}",
             f"Janela piloto car: {int(item.get('car_pilot_window_hours', report.get('car_pilot_window_hours', 48)) or 48)}h",
             f"Último update: {_fmt_dt(item.get('latest_updated_at'))}",
-            f"Aviso: {item.get('stale_warning') or "-"}",
+            f"Aviso: {item.get('stale_warning') or '-'}",
         ])
         types = item.get("item_type_counts") or {}
         lines.extend([

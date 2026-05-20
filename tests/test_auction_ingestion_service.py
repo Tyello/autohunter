@@ -163,3 +163,56 @@ def test_inspect_auction_source_does_not_persist(monkeypatch):
     out = svc.inspect_auction_source("vip_auctions", limit=5, enrich_details=False)
     assert out["fetched"] == 1
     assert called["upsert"] == 0
+
+
+def test_inspect_auction_source_win_detail_url_external_id_and_no_persist(monkeypatch):
+    called = {"upsert": 0}
+
+    class _Resp:
+        status_code = 200
+        url = "https://www.winleiloes.com.br/item/4042/detalhes?page=1"
+        headers = {"content-type": "text/html"}
+        text = "<html><head><title>Gol 2015</title></head><body>Lance Inicial: R$ 10.000,00</body></html>"
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def get(self, _url):
+            return _Resp()
+
+    monkeypatch.setattr(svc.httpx, "Client", _Client)
+    monkeypatch.setattr(svc, "upsert_lot", lambda *_args, **_kwargs: called.__setitem__("upsert", called["upsert"] + 1))
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("win_auctions", lambda limit, enrich=False: [], lambda: None, True))
+
+    out = svc.inspect_auction_source("win_auctions", detail_url="https://www.winleiloes.com.br/item/4042/detalhes?page=1")
+    assert out["fetched"] == 1
+    assert out["candidates"][0]["external_id"] == "4042"
+    assert called["upsert"] == 0
+
+
+def test_inspect_auction_source_detail_url_unsupported_source_returns_reason(monkeypatch):
+    class _Resp:
+        status_code = 200
+        url = "https://example.com/item/1"
+        headers = {"content-type": "text/html"}
+        text = "<html><body>ok</body></html>"
+    class _Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def get(self, _url):
+            return _Resp()
+    monkeypatch.setattr(svc.httpx, "Client", _Client)
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("vip_auctions", lambda limit, enrich=False: [], lambda: None, True))
+    out = svc.inspect_auction_source("vip_auctions", detail_url="https://example.com/item/1")
+    assert out["fetched"] == 0
+    assert out["reason"] == "detail_inspect_not_supported_for_source"

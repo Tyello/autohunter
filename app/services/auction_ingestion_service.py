@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from app.sources.auctions.base import NormalizedAuctionLot
 
 from app.db.session import SessionLocal
@@ -16,6 +18,7 @@ from app.sources.auctions.registry import (
 SUPPORTED_SOURCES = list_supported_auction_source_keys()
 
 from app.sources.auctions import mega, sodre, win
+from app.sources.auctions.diagnostics import build_auction_source_fetch_diagnostics
 
 
 def _get_source_diagnostics(source: str) -> dict[str, Any] | None:
@@ -86,18 +89,48 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
         db.close()
 
 
-def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = False) -> dict[str, Any]:
+def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = False, detail_url: str | None = None) -> dict[str, Any]:
     definition = get_auction_source_definition(source)
     if definition is None:
         raise ValueError(f"Unsupported source: {source}. {render_supported_auction_sources_hint()}")
 
     source = definition.key
     enrich_applied = bool(enrich_details and definition.supports_enrich)
-    if definition.supports_enrich:
-        lots = definition.fetcher(limit=limit, enrich=enrich_applied)
+    lots: list[NormalizedAuctionLot] = []
+    reason = None
+    diagnostics = None
+    if detail_url:
+        with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": "AutoHunter/1.0 (+experimental)"}) as client:
+            resp = client.get(detail_url)
+            html = getattr(resp, "text", "")
+            diagnostics = build_auction_source_fetch_diagnostics(resp, html, detail_url)
+            if resp.status_code >= 400:
+                reason = f"http_{resp.status_code}_detail_fetch_failed"
+            elif source == "win_auctions":
+                ext = win.parse_win_external_id_from_url(detail_url)
+                if not ext:
+                    reason = "invalid_detail_url"
+                else:
+                    base = NormalizedAuctionLot(source=source, external_id=ext, url=detail_url)
+                    lot = win._enrich_win_detail(client, base)  # type: ignore[attr-defined]
+                    lots = [lot] if (lot.title or lot.current_bid is not None or lot.initial_bid is not None) else []
+                    reason = None if lots else "detail_without_extractable_signals"
+            elif source == "mega_auctions":
+                lot = mega.parse_mega_detail_html(html, detail_url)
+                lots = [lot] if (lot.title or lot.current_bid is not None or lot.initial_bid is not None) else []
+                reason = None if lots else "detail_without_extractable_signals"
+            elif source == "sodre_auctions":
+                lot = sodre.parse_sodre_detail_html(html, detail_url)
+                lots = [lot] if (lot.title or lot.current_bid is not None or lot.initial_bid is not None) else []
+                reason = None if lots else "detail_without_extractable_signals"
+            else:
+                reason = "detail_inspect_not_supported_for_source"
     else:
-        lots = definition.fetcher(limit=limit)
-    reason = definition.reason_getter()
+        if definition.supports_enrich:
+            lots = definition.fetcher(limit=limit, enrich=enrich_applied)
+        else:
+            lots = definition.fetcher(limit=limit)
+        reason = definition.reason_getter()
 
     def _preview(lot: NormalizedAuctionLot) -> str:
         text = " ".join([
@@ -139,6 +172,7 @@ def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = F
         "enrich_applied": enrich_applied,
         "fetched": len(lots),
         "reason": reason if not lots else None,
-        "diagnostics": _get_source_diagnostics(source),
+        "diagnostics": diagnostics or _get_source_diagnostics(source),
+        "detail_url": detail_url,
         "candidates": candidates,
     }

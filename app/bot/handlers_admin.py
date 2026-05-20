@@ -349,12 +349,6 @@ def _parse_auction_run_args(args: list[str]) -> tuple[str | None, int | None, bo
             enrich = True
             idx += 1
             continue
-        if token == "--url":
-            if idx + 1 >= len(args):
-                return None, None, None, "URL inválida. Use: --url <detail_url>."
-            detail_url = args[idx + 1].strip()
-            idx += 2
-            continue
         if token == "--limit":
             if idx + 1 >= len(args):
                 return None, None, False, "Limite inválido. Use: --limit <1-30>."
@@ -681,6 +675,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 source=source,
                 limit=limit,
                 enrich_details=True,
+                detail_url=detail_url,
             )
             lines = [
                 f"🔎 Admin Leilões — inspect {summary.get('source', source)}",
@@ -688,11 +683,13 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"capturados: {summary.get('fetched', 0)}",
                 f"enrich_applied: {'sim' if summary.get('enrich_applied') else 'não'}",
             ]
+            if detail_url:
+                lines.append(f"detail_url: {detail_url}")
             if summary.get("reason"):
                 lines.append(f"reason: {summary['reason']}")
             diag = summary.get("diagnostics") or {}
             if diag and summary.get("fetched", 0) == 0:
-                lines.extend(["", "Diagnóstico HTTP:", f"- url: {diag.get('url') or "-"}", f"- final_url: {diag.get('final_url') or "-"}", f"- status: {diag.get('status_code') or "-"}", f"- content_type: {diag.get('content_type') or "-"}", f"- tamanho: {diag.get('content_length') or 0} bytes", f"- title: {diag.get('html_title') or "-"}"])
+                lines.extend(["", "Diagnóstico HTTP:", f"- url: {diag.get('url') or '-'}", f"- final_url: {diag.get('final_url') or '-'}", f"- status: {diag.get('status_code') or '-'}", f"- content_type: {diag.get('content_type') or '-'}", f"- tamanho: {diag.get('content_length') or 0} bytes", f"- title: {diag.get('html_title') or '-'}"])
                 hints = diag.get("hints") or {}
                 lines.append(f"- hints: has_script_tags={hints.get('has_script_tags')} possible_js_app={hints.get('possible_js_app')} endpoint_candidates={len(hints.get('possible_api_endpoints') or [])}")
                 lines.extend(["", "Preview HTML:", diag.get("html_preview") or "-"])
