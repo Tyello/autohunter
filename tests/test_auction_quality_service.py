@@ -102,3 +102,43 @@ def test_quality_car_pilot_readiness_uses_runtime_max_lot_age_window(db):
     assert src["updated_last_24h"] == 0
     assert src["car_pilot_window_hours"] == 48
     assert src["source_ready_for_user_car_pilot"] is True
+
+
+def test_quality_user_facing_requires_source_gates(db):
+    _seed(db, "win_auctions", "w1", title="Civic", item_type="car", year=2020, initial_bid=1000, url="https://win/1")
+    db.commit()
+    src = build_auction_quality_report(db, source="win")["sources"][0]
+    assert src["data_quality_ready_car"] is True
+    assert src["user_facing_ready_car"] is False
+    assert "user_eligible=false" in src["user_facing_ready_reason"]
+
+
+def test_quality_user_facing_ready_when_production_and_eligible(db):
+    from app.models.source_config import SourceConfig
+    db.add(SourceConfig(source="vip_auctions", source_type="auction", is_enabled=True, user_eligible=True, status="production_ready", extra={"allowed_item_types":["car"]}))
+    _seed(
+        db,
+        "vip_auctions",
+        "v-ready",
+        title="Civic",
+        item_type="car",
+        year=2020,
+        initial_bid=1000,
+        url="https://vip/1",
+        status="open",
+        auction_end_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    db.commit()
+    src = build_auction_quality_report(db, source="vip")["sources"][0]
+    assert src["data_quality_ready_car"] is True
+    assert src["user_facing_ready_car"] is True
+
+
+def test_quality_warns_when_unknown_status_and_missing_end(db):
+    from app.models.source_config import SourceConfig
+    db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental_vehicle_route_found"))
+    _seed(db, "win_auctions", "w2", title="Civic", item_type="car", year=2020, initial_bid=1000, url="https://win/2", status="unknown")
+    db.commit()
+    src = build_auction_quality_report(db, source="win")["sources"][0]
+    assert "sem status/encerramento; manter experimental" in (src.get("critical_warnings") or [])
+    assert src["data_quality_ready_car"] is True

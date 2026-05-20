@@ -7,6 +7,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.auction_lot import AuctionLot
+from app.models.source_config import SourceConfig
 from app.sources.auctions.registry import list_auction_sources, resolve_auction_source_alias
 from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.auction_source_categories_service import get_auction_allowed_item_types
@@ -95,7 +96,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
             .scalar()
             or 0
         )
-    source_ready_for_user_car_pilot = bool(
+    data_quality_ready_car = bool(
         db.query(func.count(AuctionLot.id))
         .filter(
             AuctionLot.source == source,
@@ -108,6 +109,31 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         .scalar()
         or 0
     )
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == source, SourceConfig.source_type == "auction").first()
+    status = str((cfg.status if cfg else "") or "").strip().lower()
+    is_experimental = status.startswith("experimental")
+    user_eligible = bool(cfg.user_eligible) if cfg else False
+    has_allowed_car = "car" in allowed_item_types
+    status_ready = status in {"production_ready", "pilot_ready", "active"}
+    unknown_only = total_lots > 0 and int(status_counts.get("unknown", 0) or 0) == total_lots
+    no_endings = total_lots > 0 and with_auction_end_at_count <= 0
+    critical_warnings: list[str] = []
+    if is_experimental and (unknown_only or no_endings):
+        critical_warnings.append("sem status/encerramento; manter experimental")
+    user_facing_reasons: list[str] = []
+    if not user_eligible:
+        user_facing_reasons.append("user_eligible=false")
+    if not has_allowed_car:
+        user_facing_reasons.append("allowed_item_types sem car")
+    if not status_ready:
+        user_facing_reasons.append(f"status={status or 'unknown'}")
+    if is_experimental:
+        user_facing_reasons.append("source experimental")
+    if not data_quality_ready_car:
+        user_facing_reasons.append("dados car insuficientes")
+    if critical_warnings:
+        user_facing_reasons.append("warnings críticos")
+    user_facing_ready_car = not user_facing_reasons
 
     upcoming_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.auction_end_at > now_utc).scalar() or 0)
     open_or_live_count = int(
@@ -140,7 +166,11 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         "with_image_count": with_image_count,
         "car_lots": car_lots,
         "user_allowed_lots": user_allowed_lots,
-        "source_ready_for_user_car_pilot": source_ready_for_user_car_pilot,
+        "data_quality_ready_car": data_quality_ready_car,
+        "source_ready_for_user_car_pilot": data_quality_ready_car,
+        "user_facing_ready_car": user_facing_ready_car,
+        "user_facing_ready_reason": "; ".join(user_facing_reasons) if user_facing_reasons else "ok",
+        "critical_warnings": critical_warnings,
         "car_pilot_window_hours": car_pilot_window_hours if car_pilot_window_hours > 0 else 48,
         "upcoming_count": upcoming_count,
         "open_or_live_count": open_or_live_count,

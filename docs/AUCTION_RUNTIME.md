@@ -61,6 +61,8 @@ O registry define implementação. `source_configs` define operação. O bootstr
 | `vip_auctions` | `production_ready` | pronto para piloto `car`; cards públicos + parser estável; mantém lance/URL/ano suficientes para notificação | HTML simples (requests); única `user_eligible` por padrão |
 | `mega_auctions` | `experimental` | encontra carros, mas quality ainda baixa; falta lance inicial/atual, cidade/UF, imagem e status `open`/`live` úteis | manter fora de `user_eligible`; próximo passo: enrich de detalhe |
 | `win_auctions` | `experimental_vehicle_route_found` | detalhe `item/4042` (Hilux) parseável com `item_type=car` e `year=2016`; listagem HTML segue JS/app-like, porém com sinais reutilizáveis (`/item/<id>/detalhes`, imagens de lote) para enriquecer candidatos mínimos | manter `user_eligible=false`; próximo passo: aprofundar endpoint study sem Playwright nesta fase |
+
+Estado validado (admin): captura 20 carros reais via detail URLs, com lance inicial, ano e imagem; ainda sem cobertura confiável de status/encerramento e com ruído de localização em parte dos lotes. Win permanece experimental e não user-facing (`user_eligible=false`). Próxima etapa: validar qualidade por alguns ciclos antes de considerar piloto.
 | `superbid_auctions` | `needs_study` | banners deixaram de ser tratados como lote; retorno atual indica `requires_js_or_event_drilldown` | estudar endpoint/drilldown antes de elegibilidade; sem Playwright nesta fase |
 | `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | manter fora do piloto; estudar endpoint sem bypass agressivo |
 | `sodre_auctions` | `blocked`/`needs_study` | ocorrência recorrente de `forbidden_403` | não contornar proteção anti-bot; manter fora do piloto |

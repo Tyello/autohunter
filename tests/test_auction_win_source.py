@@ -292,4 +292,16 @@ def test_win_html_real_estate_noise_does_not_override_vehicle_title(monkeypatch)
 
 
 def test_parse_win_location_rejects_com_pi():
-    assert win.parse_win_location('com / PI') == (None, 'PI', 'PI')
+    assert win.parse_win_location('com / PI') == (None, None, None)
+
+
+def test_parse_win_location_rejects_brand_as_city():
+    assert win.parse_win_location("CAOA CHERY / CE") == (None, None, None)
+
+
+def test_parse_win_location_rejects_title_like_brand_with_uf():
+    assert win.parse_win_location("TOYOTA/HILUX / SP") == (None, None, None)
+
+
+def test_parse_win_location_accepts_reliable_city_uf():
+    assert win.parse_win_location("Curitiba / PR") == ("Curitiba", "PR", "Curitiba/PR")

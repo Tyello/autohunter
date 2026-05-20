@@ -478,11 +478,16 @@ def render_admin_auction_quality_report(report: dict) -> str:
             f"Open/live: {int(item.get('open_or_live_count', 0) or 0)}",
             f"Car lots: {int(item.get('car_lots', 0) or 0)}",
             f"User allowed lots: {int(item.get('user_allowed_lots', 0) or 0)}",
-            f"Pronta piloto car: {'sim' if item.get('source_ready_for_user_car_pilot') else 'não'}",
+            f"Qualidade dados car: {'sim' if item.get('data_quality_ready_car') else 'não'}",
+            f"Pronta user-facing car: {'sim' if item.get('user_facing_ready_car') else 'não'}",
+            f"Motivo user-facing: {item.get('user_facing_ready_reason') or '-'}",
             f"Janela piloto car: {int(item.get('car_pilot_window_hours', report.get('car_pilot_window_hours', 48)) or 48)}h",
             f"Último update: {_fmt_dt(item.get('latest_updated_at'))}",
             f"Aviso: {item.get('stale_warning') or '-'}",
         ])
+        critical_warnings = item.get("critical_warnings") or []
+        if critical_warnings:
+            lines.append(f"Warning crítico: {'; '.join(str(x) for x in critical_warnings)}")
         types = item.get("item_type_counts") or {}
         lines.extend([
             "Tipos:",

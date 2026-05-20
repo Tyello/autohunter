@@ -76,6 +76,10 @@ def build_auction_notification_readiness(db) -> dict:
     source_car_pilot: dict[str, dict] = {}
     all_source_keys = sorted({s.source for s in eligible_sources} | {r[0] for r in db.query(AuctionLot.source).distinct().all() if r[0]})
     for src in all_source_keys:
+        cfg_src = db.query(SourceConfig).filter(SourceConfig.source == src, SourceConfig.source_type == "auction").first()
+        cfg_status = str((cfg_src.status if cfg_src else "") or "").strip().lower()
+        cfg_experimental = cfg_status.startswith("experimental")
+        cfg_user_eligible = bool(cfg_src.user_eligible) if cfg_src else False
         allowed = get_auction_allowed_item_types(db, src)
         car_lots = int(db.query(AuctionLot).filter(AuctionLot.source == src, AuctionLot.item_type == "car").count())
         user_allowed_lots = 0
@@ -103,7 +107,17 @@ def build_auction_notification_readiness(db) -> dict:
             (item_type or "other"): int(count)
             for item_type, count in db.query(AuctionLot.item_type, func.count(AuctionLot.id)).filter(AuctionLot.source == src).group_by(AuctionLot.item_type).all()
         }
-        ready_for_user_car_pilot = recent_car_with_url_bid_year > 0
+        data_quality_ready_car = recent_car_with_url_bid_year > 0
+        warnings_critical: list[str] = []
+        status_unknown = int(db.query(AuctionLot).filter(AuctionLot.source == src, func.lower(func.coalesce(AuctionLot.status, "unknown")) == "unknown").count())
+        has_end = int(db.query(AuctionLot).filter(AuctionLot.source == src, AuctionLot.auction_end_at.isnot(None)).count())
+        total = int(db.query(AuctionLot).filter(AuctionLot.source == src).count())
+        if total > 0 and cfg_experimental and status_unknown == total and has_end <= 0:
+            warnings_critical.append("sem status/encerramento")
+        status_ready = cfg_status in {"production_ready", "pilot_ready", "active"} or (not cfg_status and cfg_user_eligible)
+        ready_for_user_car_pilot = bool(
+            data_quality_ready_car and cfg_user_eligible and ("car" in allowed) and status_ready and (not cfg_experimental) and (not warnings_critical)
+        )
         source_car_pilot[src] = {
             "car_lots": car_lots,
             "user_allowed_lots": user_allowed_lots,
@@ -111,7 +125,9 @@ def build_auction_notification_readiness(db) -> dict:
             "recent_car_with_url_bid_year": recent_car_with_url_bid_year,
             "recent_car_without_bid": recent_car_without_bid,
             "item_type_counts": type_counts,
+            "data_quality_ready_car": data_quality_ready_car,
             "source_ready_for_user_car_pilot": ready_for_user_car_pilot,
+            "user_facing_ready_reason": "ok" if ready_for_user_car_pilot else f"experimental/user_eligible=false/status={cfg_status or 'unknown'}",
         }
         if src in eligible_source_keys and not ready_for_user_car_pilot:
             checks.append(_check("eligible_source_without_ready_car_lots", "warn", "Source elegível sem carros prontos", f"{src} elegível, mas sem lote car recente com URL, lance e ano."))
