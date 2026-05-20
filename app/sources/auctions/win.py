@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 from dataclasses import replace
 from typing import Iterable
 from urllib.parse import urlparse
@@ -36,10 +37,67 @@ def _first_group(pattern: str, text: str) -> str | None:
 
 def normalize_win_status(text: str | None) -> str:
     v = (text or "").lower()
-    if "andamento" in v: return "live"
-    if "loteamento" in v: return "scheduled"
-    if "encerrado" in v: return "ended"
+    if any(k in v for k in ("loteamento", "agendado", "agendada")): return "scheduled"
+    if any(k in v for k in ("encerrado", "finalizado", "arrematado")): return "ended"
+    if any(k in v for k in ("aberto", "aberta", "online", "andamento")): return "live"
     return "unknown"
+
+
+def _extract_win_status(html: str, fallback: str | None) -> str:
+    labels = (
+        r"(?:situa[cç][aã]o|status)\s*:?\s*(aberto|aberta|online|em\s+andamento|encerrado|finalizado|em\s+loteamento|loteamento|agendad[oa])",
+        r"\b(online\s+em\s+andamento|em\s+andamento|online|abert[oa]|em\s+loteamento|loteamento|encerrado|finalizado|agendad[oa])\b",
+    )
+    for pat in labels:
+        val = _first_group(pat, html)
+        if val:
+            return normalize_win_status(val)
+    return normalize_win_status(fallback)
+
+
+def _parse_br_dt(raw: str) -> object | None:
+    clean = (raw or "").strip()
+    m = re.search(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})(?:\s+([0-9]{1,2}:[0-9]{2}))?", clean)
+    if m:
+        d = m.group(1)
+        t = m.group(2)
+        if len(d.split("/")[-1]) == 2:
+            d = f"{d[:-2]}20{d[-2:]}"
+        if t:
+            try:
+                return datetime.strptime(f"{d} {t}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        return parse_datetime_br(d)
+    return parse_datetime_br(clean)
+
+
+def _extract_win_auction_dates(html: str) -> tuple[object | None, object | None]:
+    end_at = None
+    start_at = None
+    end_patterns = (
+        r"(?:encerramento|fim\s+do\s+leil[aã]o|data\s+final|encerra(?:\s*em)?|t[eé]rmino)\s*:?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*(?:[àa-]|\s)\s*[0-9]{1,2}:[0-9]{2})?)",
+    )
+    start_patterns = (
+        r"(?:in[ií]cio|data\s+do\s+leil[aã]o|leil[aã]o\s+em|abertura)\s*:?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*(?:[àa-]|\s)\s*[0-9]{1,2}:[0-9]{2})?)",
+    )
+    for pat in end_patterns:
+        raw = _first_group(pat, html)
+        if raw:
+            date = _first_group(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})", raw)
+            hhmm = _first_group(r"([0-9]{1,2}:[0-9]{2})", raw)
+            end_at = _parse_br_dt(f"{date} {hhmm}" if date and hhmm else (date or raw))
+            if end_at:
+                break
+    for pat in start_patterns:
+        raw = _first_group(pat, html)
+        if raw:
+            date = _first_group(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})", raw)
+            hhmm = _first_group(r"([0-9]{1,2}:[0-9]{2})", raw)
+            start_at = _parse_br_dt(f"{date} {hhmm}" if date and hhmm else (date or raw))
+            if start_at:
+                break
+    return end_at, start_at
 
 
 def is_reliable_win_location(city: str | None, state: str | None, location: str | None) -> bool:
@@ -161,7 +219,9 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         slug = urlparse(lot.url).path.rstrip("/").split("/")[-2] if "/detalhes" in lot.url else ""
         title = _valid_win_title(normalize_title(re.sub(r"[-_]+", " ", slug)))
     initial_bid = lot.initial_bid or parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
-    current_bid = lot.current_bid or parse_money_br(_first_group(r"Lance\s*Atual\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
+    current_bid = lot.current_bid or parse_money_br(
+        _first_group(r"(?:Lance\s*Atual|Lance\s*Vencedor|Maior\s*Lance|[UÚ]ltimo\s*Lance)\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""
+    )
     clean_html = _strip_html(html)
     primary_text = " ".join(p for p in [title, lot.url, lot.item_type] if p)
     item_type = infer_win_item_type(primary_text)
@@ -177,7 +237,8 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     city, state, location = parse_win_location(raw_loc)
     if not is_reliable_win_location(city, state, location):
         city, state, location = parse_win_location(lot.location)
-    status = normalize_win_status(_first_group(r"(Online\s+Em\s+Andamento|Em\s+Andamento|Online\s+Em\s+Loteamento|Em\s+Loteamento|Encerrado)", html) or lot.status)
+    status = _extract_win_status(html, lot.status)
+    end_at, start_at = _extract_win_auction_dates(html)
     imgs = re.findall(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', html, flags=re.I)
     if not imgs:
         imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.I)
@@ -197,6 +258,8 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         state=state,
         location=location,
         status=status,
+        auction_end_at=lot.auction_end_at or end_at,
+        auction_start_at=lot.auction_start_at or start_at,
         item_type=item_type,
         thumbnail_url=lot.thumbnail_url or (imgs[0] if imgs else None),
         images=lot.images or (imgs or None),
@@ -307,3 +370,18 @@ def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enri
     if _LAST_FETCH_DIAGNOSTICS is not None:
         _LAST_FETCH_DIAGNOSTICS["reason"] = r
     return []
+    def _parse_br_dt(raw: str) -> object | None:
+        clean = (raw or "").strip()
+        m = re.search(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})(?:\s+([0-9]{1,2}:[0-9]{2}))?", clean)
+        if m:
+            d = m.group(1)
+            t = m.group(2)
+            if len(d.split("/")[-1]) == 2:
+                d = f"{d[:-2]}20{d[-2:]}"
+            if t:
+                try:
+                    return datetime.strptime(f"{d} {t}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
+                except ValueError:
+                    pass
+            return parse_datetime_br(d)
+        return parse_datetime_br(clean)
