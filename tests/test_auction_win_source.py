@@ -214,12 +214,43 @@ def test_win_vehicle_listing_fixture_and_detail_parsing(monkeypatch):
     assert lots
     lot = lots[0]
     assert lot.external_id == '4042'
-    assert lot.item_type != 'real_estate'
-    assert lot.year == 2014
-    assert lot.initial_bid == Decimal('18000.00')
-    assert lot.current_bid == Decimal('19200.00')
+    assert lot.item_type == 'car'
+    assert lot.year == 2016
+    assert lot.initial_bid == Decimal('66500.00')
+    assert lot.current_bid == Decimal('67000.00')
     assert lot.city == 'São Paulo'
     assert lot.state == 'SP'
     assert lot.location == 'São Paulo/SP'
     assert lot.thumbnail_url and '4042.jpg' in lot.thumbnail_url
     assert '?page=1' not in (lot.url or '')
+
+
+def test_infer_win_item_type_vehicle_and_real_estate_priority():
+    assert win.infer_win_item_type("Moto Honda CG 160 Fan 2021") == "motorcycle"
+    assert win.infer_win_item_type("Honda Biz 125 2020") == "motorcycle"
+    assert win.infer_win_item_type("Honda Titan 160") == "motorcycle"
+    assert win.infer_win_item_type("Caminhão Ford Cargo 2429") == "truck"
+    assert win.infer_win_item_type("Mercedes-Benz Atego 2426") == "truck"
+    assert win.infer_win_item_type("TOYOTA/HILUX CDLOWM4FD - 2016 - 2017 - DIESEL") == "car"
+    assert win.infer_win_item_type("Imóvel Comercial em Altos") == "real_estate"
+
+
+def test_win_html_real_estate_noise_does_not_override_vehicle_title(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4042/detalhes">item</a><h3>TOYOTA/HILUX CDLOWM4FD - 2016 - 2017 - DIESEL</h3></article>'
+    detail_html = '<html><body><h1>TOYOTA/HILUX CDLOWM4FD - 2016 - 2017 - DIESEL</h1><footer>imóvel terreno casa</footer></body></html>'
+
+    class _Resp:
+        def __init__(self, text): self.text=text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self,*_): return False
+        def get(self,url): return _Resp(detail_html if '/item/4042/detalhes' in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, 'Client', lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.item_type == 'car'
+
+
+def test_parse_win_location_rejects_com_pi():
+    assert win.parse_win_location('com / PI') == (None, 'PI', 'PI')

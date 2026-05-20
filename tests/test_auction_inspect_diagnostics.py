@@ -28,3 +28,11 @@ def test_preview_truncated_and_sanitized():
     d = build_auction_source_fetch_diagnostics(_Resp(text=html), html, 'https://x/list')
     assert len(d['html_preview']) <= 900
     assert 'alert(1)' not in d['html_preview']
+
+
+def test_diagnostics_exposes_endpoint_candidates_list():
+    html = '<script>fetch("/api/lotes/search")</script><a href="/lotes/veiculo">x</a>'
+    d = build_auction_source_fetch_diagnostics(_Resp(text=html), html, 'https://x/list')
+    endpoints = d['hints']['possible_api_endpoints']
+    assert isinstance(endpoints, list)
+    assert endpoints
