@@ -176,8 +176,34 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     )
 
 def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
+    detail_pat = re.compile(r'(?:https?://(?:www\.)?winleiloes\.com\.br)?/item/\d+/detalhes(?:\?[^"\']*)?', flags=re.I)
+    found_urls: list[str] = []
+    for m in re.findall(r'href=["\']([^"\']+)["\']', html, flags=re.I):
+        if detail_pat.search(m):
+            found_urls.append(m)
+    for m in detail_pat.findall(html):
+        found_urls.append(m)
+    normalized_detail_urls: list[str] = []
+    seen_urls = set()
+    for u in found_urls:
+        url = absolute_url(listing_url, u)
+        if not url:
+            continue
+        if url.endswith("/detalhes?page=1"):
+            url = url.replace("?page=1", "")
+        url = re.sub(r"\?page=1$", "", url, flags=re.I)
+        if not validate_auction_source_url(url, ALLOWED_DOMAINS):
+            continue
+        if "/item/" not in url.lower() or "/detalhes" not in url.lower():
+            continue
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        normalized_detail_urls.append(url)
+
+    card_by_detail_url: dict[str, str] = {}
     cards = re.findall(r'<article[^>]*class="[^"]*(?:card|item|lot|leilao)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S) or re.findall(r'<div[^>]*class="[^"]*(?:card|item|lot|leilao)[^"]*"[^>]*>(.*?)</div>', html, flags=re.I | re.S)
-    lots=[]
+    lots = []
     for card in cards:
         href = _first_group(r'href=["\']([^"\']+)["\']', card)
         title = _valid_win_title(normalize_title(_strip_html(_first_group(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card) or ""))) or _valid_win_title(normalize_title(_first_group(r'alt=["\']([^"\']+)["\']', card)))
@@ -196,7 +222,29 @@ def parse_win_listing_html(html: str, limit: int = 50, listing_url: str = DEFAUL
         auction_date = _first_group(r"Data\s*:?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})", card)
         first_lot_time = _first_group(r"Primeiro\s*lote\s*a\s*partir\s*das\s*:?\s*([0-9]{1,2}:[0-9]{2})", card)
         lots.append(NormalizedAuctionLot(source=SOURCE_KEY, external_id=external_id, title=title, url=url, item_type=infer_win_item_type(title, card), city=city, state=state, location=location, status=normalize_win_status(raw_status), auction_start_at=parse_datetime_br(f"{auction_date} {first_lot_time}" if auction_date and first_lot_time else auction_date), initial_bid=parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", card) or ""), current_bid=parse_money_br(_first_group(r"Lance\s*Atual\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", card) or ""), extras={"auction_date": auction_date, "first_lot_time": first_lot_time}, raw_payload={"html_card": card[:1000]}))
-        if len(lots)>=limit: break
+        if "/item/" in low_url and "/detalhes" in low_url:
+            card_by_detail_url[url] = card
+        if len(lots) >= limit:
+            break
+
+    existing_urls = {str(l.url or "") for l in lots}
+    for detail_url in normalized_detail_urls:
+        if len(lots) >= limit or detail_url in existing_urls:
+            continue
+        external_id = parse_win_external_id_from_url(detail_url) or external_id_from_url(detail_url)
+        if not external_id:
+            continue
+        card = card_by_detail_url.get(detail_url, "")
+        lots.append(
+            NormalizedAuctionLot(
+                source=SOURCE_KEY,
+                external_id=external_id,
+                title=None,
+                url=detail_url,
+                item_type="other",
+                raw_payload={"html_card": card[:1000] if card else None},
+            )
+        )
     return lots
 
 def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enrich: bool = False) -> list[NormalizedAuctionLot]:
@@ -208,7 +256,14 @@ def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enri
         resp = client.get(listing_url); resp.raise_for_status()
         lots = parse_win_listing_html(resp.text, limit=limit, listing_url=listing_url)
         _LAST_FETCH_DIAGNOSTICS = build_auction_source_fetch_diagnostics(resp, resp.text, listing_url)
-        if enrich and lots: lots=[_enrich_win_detail(client, l) for l in lots]
+        if enrich and lots:
+            enriched = [_enrich_win_detail(client, l) for l in lots]
+            enriched_useful = [l for l in enriched if l.title or l.initial_bid or l.current_bid or l.year]
+            if not enriched_useful and any("/item/" in (str(l.url or "").lower()) and "/detalhes" in (str(l.url or "").lower()) for l in lots):
+                _LAST_REASON = "detail_urls_found_but_enrich_failed"
+                if _LAST_FETCH_DIAGNOSTICS is not None:
+                    _LAST_FETCH_DIAGNOSTICS["reason"] = _LAST_REASON
+            lots = enriched
     if lots: return lots
     diag = _LAST_FETCH_DIAGNOSTICS or {}
     html = (diag.get("html_preview") or "")
@@ -216,8 +271,10 @@ def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enri
     r = "no_public_lot_cards_found"
     if any(k in html.lower() for k in ["login","cadastro","forbidden","access denied"]):
         r = "blocked_or_login_required"
+    elif hints.get("lot_detail_candidates"):
+        r = "parser_found_detail_urls"
     elif hints.get("has_script_tags") and hints.get("possible_js_app"):
-        r = "requires_js_or_endpoint_study"
+        r = "no_detail_urls_found_requires_endpoint_study"
     _LAST_REASON=r
     if _LAST_FETCH_DIAGNOSTICS is not None:
         _LAST_FETCH_DIAGNOSTICS["reason"] = r

@@ -47,7 +47,7 @@ Registry técnico atual:
 
 - `vip_auctions` — VIP Leilões — `production_ready`, única source `user_eligible` por padrão no piloto `car`.
 - `mega_auctions` — Mega Leilões — `experimental_detail_enrichment`; encontra carros, com enrich de detalhe parcial e diagnóstico quando faltam sinais de bid/imagem/status.
-- `win_auctions` — Win Leilões — `experimental_vehicle_route_found`; rota de veículos confirmada (`/lotes/veiculo?tipo=veiculo&categoria_id=8`), listagem HTML indica app JS + endpoint candidates, detalhe direto parseável (referência `item/4042` Hilux), próxima etapa: investigar endpoints internos sem liberar user-facing.
+- `win_auctions` — Win Leilões — `experimental_vehicle_route_found`; rota de veículos confirmada (`/lotes/veiculo?tipo=veiculo&categoria_id=8`), detalhe direto parseável (referência `item/4042` Hilux), listagem HTML é JS/app-like mas já expõe sinais de `detail_url`/imagens para diagnóstico e enrich via detalhe, mantendo source fora do user-facing.
 - `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fetch real com `forbidden_403` e diagnóstico HTTP mínimo no inspect.
 - `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
 - `copart_auctions` — Copart — `needs_study`, fora do piloto.
@@ -60,7 +60,7 @@ O registry define implementação. `source_configs` define operação. O bootstr
 |---|---|---|---|
 | `vip_auctions` | `production_ready` | pronto para piloto `car`; cards públicos + parser estável; mantém lance/URL/ano suficientes para notificação | HTML simples (requests); única `user_eligible` por padrão |
 | `mega_auctions` | `experimental` | encontra carros, mas quality ainda baixa; falta lance inicial/atual, cidade/UF, imagem e status `open`/`live` úteis | manter fora de `user_eligible`; próximo passo: enrich de detalhe |
-| `win_auctions` | `experimental_vehicle_route_found` | listagem veículos responde 200 com sinais JS (`has_script_tags`/`possible_js_app`) e candidatos de endpoint; detalhe `item/4042` (Hilux) parseável com `item_type=car` e `year=2016` | manter `user_eligible=false`; próximo passo: estudo de endpoints internos sem Playwright nesta fase |
+| `win_auctions` | `experimental_vehicle_route_found` | detalhe `item/4042` (Hilux) parseável com `item_type=car` e `year=2016`; listagem HTML segue JS/app-like, porém com sinais reutilizáveis (`/item/<id>/detalhes`, imagens de lote) para enriquecer candidatos mínimos | manter `user_eligible=false`; próximo passo: aprofundar endpoint study sem Playwright nesta fase |
 | `superbid_auctions` | `needs_study` | banners deixaram de ser tratados como lote; retorno atual indica `requires_js_or_event_drilldown` | estudar endpoint/drilldown antes de elegibilidade; sem Playwright nesta fase |
 | `copart_auctions` | `needs_study` | sem cards públicos no HTML estático; indício de renderização JS | manter fora do piloto; estudar endpoint sem bypass agressivo |
 | `sodre_auctions` | `blocked`/`needs_study` | ocorrência recorrente de `forbidden_403` | não contornar proteção anti-bot; manter fora do piloto |

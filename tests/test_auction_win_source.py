@@ -195,6 +195,45 @@ def test_win_default_vehicle_listing_url_and_external_id_parser():
     assert win.parse_win_external_id_from_url('https://www.winleiloes.com.br/item/4042/detalhes?page=1') == '4042'
 
 
+def test_win_listing_detail_href_without_title_creates_minimal_lot():
+    html = '<div><a href="/item/4042/detalhes?page=1">detalhes</a></div>'
+    lots = win.parse_win_listing_html(html, limit=5)
+    assert len(lots) == 1
+    assert lots[0].external_id == "4042"
+    assert lots[0].title is None
+    assert lots[0].item_type == "other"
+    assert lots[0].url.endswith("/item/4042/detalhes")
+
+
+def test_win_listing_js_string_detail_url_and_deduplicate():
+    html = """
+    <script>
+      const x="/item/4042/detalhes?page=1";
+      const y="https://www.winleiloes.com.br/item/4042/detalhes?page=1";
+    </script>
+    """
+    lots = win.parse_win_listing_html(html, limit=10)
+    assert len(lots) == 1
+    assert lots[0].external_id == "4042"
+
+
+def test_win_no_detail_urls_keeps_requires_endpoint_reason(monkeypatch):
+    class _Resp:
+        text = '<html><script>window.__NEXT_DATA__={}</script><title>Busca de Veículos</title></html>'
+        status_code = 200
+        url = "https://www.winleiloes.com.br/lotes/veiculo"
+        headers = {"content-type": "text/html"}
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, _url): return _Resp()
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    out = win.fetch_win_lots(limit=5)
+    assert out == []
+    assert win.get_last_reason() == "no_detail_urls_found_requires_endpoint_study"
+
+
 def test_win_vehicle_listing_fixture_and_detail_parsing(monkeypatch):
     listing_html = _read('win/listing_vehicle.html')
     detail_html = _read('win/detail_item_4042.html')
