@@ -388,6 +388,47 @@ def test_win_enrich_uses_aberto_para_lances_and_data_do_leilao_as_start(monkeypa
     assert lot.initial_bid == Decimal("5000.00")
 
 
+
+
+def test_win_enrich_extracts_current_bid_from_maior_lance_no_momento(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6002/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <div>MAIOR LANCE NO MOMENTO R$33.000,00</div>
+      <div>Lance Inicial: R$ 20.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6002/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.current_bid == Decimal("33000.00")
+
+
+def test_win_enrich_extracts_current_bid_from_mixed_case_maior_lance_no_momento(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6003/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <div>Maior Lance no Momento R$5.000,00</div>
+      <div>Lance Inicial: R$ 5.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6003/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.current_bid == Decimal("5000.00")
+
 def test_win_status_labeled_mappings(monkeypatch):
     listing_html = '<article class="card"><a href="/item/5000/detalhes">item</a></article>'
     cases = [
