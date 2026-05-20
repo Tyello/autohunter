@@ -1140,10 +1140,13 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             ]
             for src, src_summary in sorted((summary.get("source_car_pilot") or {}).items()):
                 ready = "sim" if src_summary.get("source_ready_for_user_car_pilot") else "não"
+                data_quality = "sim" if src_summary.get("data_quality_ready_car") else "não"
                 lines.append(
                     f"- {src}: car_lots={src_summary.get('car_lots', 0)}, "
                     f"user_allowed_lots={src_summary.get('user_allowed_lots', 0)}, "
-                    f"ready_car_pilot={ready}"
+                    f"dados_car={data_quality}, "
+                    f"user_facing={ready}, "
+                    f"motivo={src_summary.get('user_facing_ready_reason', '-')}"
                 )
             lines.extend([
                 "",

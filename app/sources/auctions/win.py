@@ -16,6 +16,10 @@ SOURCE_KEY = "win_auctions"
 DEFAULT_LISTING_URL = "https://www.winleiloes.com.br/lotes/veiculo?tipo=veiculo&categoria_id=8"
 ALLOWED_DOMAINS = {"winleiloes.com.br", "www.winleiloes.com.br"}
 VALID_UFS = {"AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"}
+_AUTOMOTIVE_BRANDS = {
+    "CAOA CHERY", "FIAT", "VOLKSWAGEN", "VW", "TOYOTA", "HONDA", "HYUNDAI", "FORD", "RENAULT", "PEUGEOT", "CITROEN",
+    "CHEVROLET", "NISSAN", "JEEP", "BMW", "AUDI", "MERCEDES", "MERCEDES-BENZ", "KIA", "VOLVO", "MITSUBISHI", "RAM"
+}
 _LAST_REASON: str | None = None
 _LAST_FETCH_DIAGNOSTICS: dict | None = None
 
@@ -44,11 +48,13 @@ def parse_win_location(text: str | None) -> tuple[str | None, str | None, str | 
     if not m: return clean or None, None, clean or None
     city, state = m.group(1).strip(), m.group(2).upper()
     city_l = city.lower()
-    invalid = city_l in {"com","www","http","https"} or "." in city_l or "/" in city_l or len(city_l) < 3
+    city_upper = re.sub(r"\s+", " ", city.upper()).strip()
+    has_brand = any(b in city_upper for b in _AUTOMOTIVE_BRANDS)
+    invalid = city_l in {"com","www","http","https"} or "." in city_l or "/" in city_l or len(city_l) < 3 or has_brand
     if invalid: city = None
     st = state if state in VALID_UFS else None
     if city and st: return city, st, f"{city}/{st}"
-    if st: return None, st, st
+    if st: return None, None, None
     return None, None, None
 
 def parse_win_external_id_from_url(url: str | None) -> str | None:

@@ -178,3 +178,14 @@ def test_readiness_vip_car_with_bid_counts_as_car_pilot_ready(db):
     vip_summary = out["summary"]["source_car_pilot"]["vip_auctions"]
     assert vip_summary["source_ready_for_user_car_pilot"] is True
     assert "vip_auctions" in out["summary"]["car_pilot_ready_sources"]
+
+
+def test_readiness_win_not_user_facing_even_with_recent_car(db):
+    db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental_vehicle_route_found", extra={"allowed_item_types":["car"]}))
+    db.add(AuctionLot(source="win_auctions", external_id="win-car", item_type="car", year=2022, initial_bid=10000, url="https://win/car", updated_at=datetime.now(timezone.utc)))
+    db.commit()
+    out = build_auction_notification_readiness(db)
+    win_summary = out["summary"]["source_car_pilot"]["win_auctions"]
+    assert win_summary["data_quality_ready_car"] is True
+    assert win_summary["source_ready_for_user_car_pilot"] is False
+    assert "win_auctions" not in out["summary"]["car_pilot_ready_sources"]
