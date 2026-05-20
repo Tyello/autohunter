@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from types import SimpleNamespace
 from dataclasses import dataclass
@@ -395,6 +396,14 @@ def _parse_auction_inspect_args(args: list[str]) -> tuple[str | None, int | None
         return None, None, None, "Limite inválido. Use: --limit <1-10>."
     return source, limit, detail_url, None
 
+
+def _truncate_admin_message(text: str, max_chars: int = 3500) -> tuple[str, bool]:
+    if len(text) <= max_chars:
+        return text, False
+    suffix = "\n\nDiagnóstico reduzido para caber no Telegram."
+    allowed = max(0, max_chars - len(suffix))
+    return text[:allowed].rstrip() + suffix, True
+
 def _classify_error(source: str, err: str | None, http_status: Optional[int]) -> tuple[str, str, str]:
     """
     Retorna (kind, short_reason, action).
@@ -692,6 +701,7 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             endpoints = (hints.get("possible_api_endpoints") or [])[:5]
             detail_candidates = (hints.get("lot_detail_candidates") or [])[:5]
             image_candidates = (hints.get("lot_image_candidates") or [])[:5]
+            doc_candidates = (hints.get("lot_document_candidates") or [])[:5]
             detail_diags = ((diag.get("detail_diagnostics") or {}).get("win_detail") or {})
             if diag and summary.get("fetched", 0) == 0:
                 lines.extend(["", "Diagnóstico HTTP:", f"- url: {diag.get('url') or '-'}", f"- final_url: {diag.get('final_url') or '-'}", f"- status: {diag.get('status_code') or '-'}", f"- content_type: {diag.get('content_type') or '-'}", f"- tamanho: {diag.get('content_length') or 0} bytes", f"- title: {diag.get('html_title') or '-'}"])
@@ -709,14 +719,21 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 lines.append("- lot_image_candidates_top:")
                 for ep in image_candidates:
                     lines.append(f"  - {ep}")
+            if doc_candidates:
+                lines.append("- lot_document_candidates_top:")
+                for ep in doc_candidates:
+                    lines.append(f"  - {ep}")
             if detail_diags:
                 lines.extend(["", "Diagnóstico detalhe Win:"])
                 for key in ("status_candidates", "date_candidates", "bid_candidates", "json_like_blocks", "hidden_inputs", "data_attributes"):
-                    values = (detail_diags.get(key) or [])[:5]
+                    key_limit = 3 if key in {"status_candidates", "date_candidates", "bid_candidates"} else 1
+                    values = (detail_diags.get(key) or [])[:key_limit]
                     lines.append(f"- {key}:")
                     if values:
                         for value in values:
-                            lines.append(f"  - {value}")
+                            snippet = re.sub(r"\s+", " ", str(value or "")).strip()
+                            if snippet:
+                                lines.append(f"  - {snippet[:120]}")
                     else:
                         lines.append("  - -")
             for c in summary.get("candidates", []):
@@ -737,7 +754,8 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                         f"text_preview: {c.get('text_preview') or '-'}",
                     ]
                 )
-            await update.message.reply_text("\n".join(lines))
+            msg, _ = _truncate_admin_message("\n".join(lines), max_chars=3500)
+            await update.message.reply_text(msg)
             return
 
         if sub == "sources":

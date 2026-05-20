@@ -281,6 +281,7 @@ def test_win_enrich_extracts_end_date_status_and_current_bid(monkeypatch):
     assert lot.status == "live"
     assert lot.auction_end_at == datetime(2026, 5, 22, 14, 30, tzinfo=timezone.utc)
     assert lot.current_bid == Decimal("98700.00")
+    assert lot.auction_start_at is None
 
 
 def test_win_enrich_extracts_ended_status_and_no_fake_current_bid(monkeypatch):
@@ -359,6 +360,32 @@ def test_win_status_requires_explicit_label_not_generic_online_word(monkeypatch)
     monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
     lot = win.fetch_win_lots(limit=1, enrich=True)[0]
     assert lot.status == "unknown"
+
+
+def test_win_enrich_uses_aberto_para_lances_and_data_do_leilao_as_start(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6001/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <h1>Lote 6001</h1>
+      <div>Aberto para Lances</div>
+      <div>Data do Leilão: 21/05/2026 11:00</div>
+      <div>Lance Inicial: R$ 5.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6001/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "live"
+    assert lot.auction_start_at == datetime(2026, 5, 21, 11, 0, tzinfo=timezone.utc)
+    assert lot.auction_end_at is None
+    assert lot.current_bid is None
+    assert lot.initial_bid == Decimal("5000.00")
 
 
 def test_win_status_labeled_mappings(monkeypatch):
@@ -469,5 +496,31 @@ def test_build_win_detail_diagnostics_truncates_snippets_and_limits_items():
         for idx in range(10)
     )
     out = win.build_win_detail_diagnostics(html)
-    assert len(out["status_candidates"]) == 5
-    assert all(len(s) <= 250 for s in out["status_candidates"])
+    assert len(out["status_candidates"]) <= 3
+    assert all(len(s) <= 120 for s in out["status_candidates"])
+
+
+def test_build_win_detail_diagnostics_filters_login_and_tech_limits():
+    html = """
+    <html><body>
+      <div>Aberto para Lances</div>
+      <div>Data do Leilão: 21/05/2026 11:00</div>
+      <div>Lance Inicial: R$ 5.000,00</div>
+      <div class="navbar">menu login cadastro</div>
+      <script>window.__LOT__={"status":"live"}</script>
+      <script>window.__ANOTHER__={"x":1}</script>
+      <input type="hidden" name="auth_token" value="x" />
+      <input type="hidden" name="lot_id" value="1" />
+      <div data-lot-id="1"></div>
+      <div data-toggle="modal"></div>
+    </body></html>
+    """
+    out = win.build_win_detail_diagnostics(html)
+    assert len(out["status_candidates"]) <= 3
+    assert all("login" not in s.lower() for s in out["status_candidates"])
+    assert len(out["status_candidates"]) <= 3
+    assert len(out["date_candidates"]) <= 3
+    assert len(out["bid_candidates"]) <= 3
+    assert len(out["json_like_blocks"]) <= 1
+    assert len(out["hidden_inputs"]) <= 1
+    assert len(out["data_attributes"]) <= 1
