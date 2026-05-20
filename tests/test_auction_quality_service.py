@@ -146,3 +146,25 @@ def test_quality_warns_when_unknown_status_and_missing_end(db):
     src = build_auction_quality_report(db, source="win")["sources"][0]
     assert "sem status/encerramento; manter experimental" in (src.get("critical_warnings") or [])
     assert src["data_quality_ready_car"] is True
+
+
+def test_quality_win_with_status_and_end_still_not_user_facing_when_not_eligible(db):
+    from app.models.source_config import SourceConfig
+    db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental_functional_vehicle"))
+    _seed(
+        db,
+        "win_auctions",
+        "w3",
+        title="Corolla",
+        item_type="car",
+        year=2021,
+        initial_bid=50000,
+        auction_end_at=datetime.now(timezone.utc) + timedelta(hours=3),
+        status="live",
+        url="https://win/3",
+    )
+    db.commit()
+    src = build_auction_quality_report(db, source="win")["sources"][0]
+    assert src["data_quality_ready_car"] is True
+    assert src["user_facing_ready_car"] is False
+    assert "user_eligible=false" in src["user_facing_ready_reason"]

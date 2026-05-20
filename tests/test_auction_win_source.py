@@ -264,6 +264,127 @@ def test_win_vehicle_listing_fixture_and_detail_parsing(monkeypatch):
     assert '?page=1' not in (lot.url or '')
 
 
+def test_win_enrich_extracts_end_date_status_and_current_bid(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4086/detalhes">item</a></article>'
+    detail_html = _read("win/detail_item_4086.html")
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/4086/detalhes" in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "live"
+    assert lot.auction_end_at == datetime(2026, 5, 22, 14, 30, tzinfo=timezone.utc)
+    assert lot.current_bid == Decimal("98700.00")
+
+
+def test_win_enrich_extracts_ended_status_and_no_fake_current_bid(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4084/detalhes">item</a></article>'
+    detail_html = _read("win/detail_item_4084.html")
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/4084/detalhes" in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "ended"
+    assert lot.auction_end_at == datetime(2026, 5, 18, 16, 0, tzinfo=timezone.utc)
+    assert lot.current_bid == Decimal("36500.00")
+
+
+def test_win_enrich_extracts_start_date_and_keeps_current_bid_none_when_only_initial(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4085/detalhes">item</a></article>'
+    detail_html = _read("win/detail_item_4085.html")
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/4085/detalhes" in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "live"
+    assert lot.auction_start_at == datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc)
+    assert lot.auction_end_at is None
+    assert lot.initial_bid == Decimal("54000.00")
+    assert lot.current_bid is None
+
+
+def test_win_enrich_without_clear_end_date_keeps_none(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4077/detalhes">item</a></article>'
+    detail_html = _read("win/detail_item_4077.html")
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/4077/detalhes" in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "scheduled"
+    assert lot.auction_end_at is None
+
+
+def test_win_status_requires_explicit_label_not_generic_online_word(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4999/detalhes">item</a></article>'
+    detail_html = """
+    <html><head><title>Leilão online de veículos</title></head>
+    <body><h1>Lote 4999</h1><footer>Plataforma de leilões online</footer></body></html>
+    """
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/4999/detalhes" in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "unknown"
+
+
+def test_win_status_labeled_mappings(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/5000/detalhes">item</a></article>'
+    cases = [
+        ("<div>Status: Em andamento</div>", "live"),
+        ("<div>Situação: Encerrado</div>", "ended"),
+        ("<div>Situação: Em loteamento</div>", "scheduled"),
+    ]
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    for body, expected in cases:
+        class _Client:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def get(self, url):
+                if "/item/5000/detalhes" in url:
+                    return _Resp(f"<html><body>{body}</body></html>")
+                return _Resp(listing_html)
+        monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+        lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+        assert lot.status == expected
+
+
 def test_infer_win_item_type_vehicle_and_real_estate_priority():
     assert win.infer_win_item_type("Moto Honda CG 160 Fan 2021") == "motorcycle"
     assert win.infer_win_item_type("Honda Biz 125 2020") == "motorcycle"
@@ -312,4 +433,3 @@ def test_is_reliable_win_location_helper_rules():
     assert win.is_reliable_win_location("CAOA CHERY", "CE", "CAOA CHERY/CE") is False
     assert win.is_reliable_win_location("www", "SP", "www/SP") is False
     assert win.is_reliable_win_location("TOYOTA/HILUX", "SP", "TOYOTA/HILUX/SP") is False
-
