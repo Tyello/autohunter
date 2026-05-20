@@ -111,9 +111,14 @@ def build_auction_notification_readiness(db) -> dict:
         warnings_critical: list[str] = []
         status_unknown = int(db.query(AuctionLot).filter(AuctionLot.source == src, func.lower(func.coalesce(AuctionLot.status, "unknown")) == "unknown").count())
         has_end = int(db.query(AuctionLot).filter(AuctionLot.source == src, AuctionLot.auction_end_at.isnot(None)).count())
+        has_start = int(db.query(AuctionLot).filter(AuctionLot.source == src, AuctionLot.auction_start_at.isnot(None)).count())
+        open_or_live = int(db.query(AuctionLot).filter(AuctionLot.source == src, func.lower(func.coalesce(AuctionLot.status, "")).in_(["open", "live"])).count())
         total = int(db.query(AuctionLot).filter(AuctionLot.source == src).count())
-        if total > 0 and cfg_experimental and status_unknown == total and has_end <= 0:
-            warnings_critical.append("sem status/encerramento")
+        if total > 0 and cfg_experimental and has_end <= 0:
+            if open_or_live > 0:
+                warnings_critical.append("sem encerramento")
+            elif status_unknown == total:
+                warnings_critical.append("sem status/encerramento")
         status_ready = cfg_status in {"production_ready", "pilot_ready", "active"} or (not cfg_status and cfg_user_eligible)
         ready_for_user_car_pilot = bool(
             data_quality_ready_car and cfg_user_eligible and ("car" in allowed) and status_ready and (not cfg_experimental) and (not warnings_critical)
@@ -128,6 +133,10 @@ def build_auction_notification_readiness(db) -> dict:
             "data_quality_ready_car": data_quality_ready_car,
             "source_ready_for_user_car_pilot": ready_for_user_car_pilot,
             "user_facing_ready_reason": "ok" if ready_for_user_car_pilot else f"experimental/user_eligible=false/status={cfg_status or 'unknown'}",
+            "open_or_live_count": open_or_live,
+            "with_auction_start_at_count": has_start,
+            "with_auction_end_at_count": has_end,
+            "critical_warnings": warnings_critical,
         }
         if src in eligible_source_keys and not ready_for_user_car_pilot:
             checks.append(_check("eligible_source_without_ready_car_lots", "warn", "Source elegível sem carros prontos", f"{src} elegível, mas sem lote car recente com URL, lance e ano."))

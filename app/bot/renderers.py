@@ -471,6 +471,7 @@ def render_admin_auction_quality_report(report: dict) -> str:
             f"Com lance atual: {int(item.get('with_current_bid_count', 0) or 0)}/{total}",
             f"Com lance inicial: {int(item.get('with_initial_bid_count', 0) or 0)}/{total}",
             f"Com ano: {int(item.get('with_year_count', 0) or 0)}/{total}",
+            f"Com início: {int(item.get('with_auction_start_at_count', 0) or 0)}/{total}",
             f"Com encerramento: {int(item.get('with_auction_end_at_count', 0) or 0)}/{total}",
             f"Com cidade/UF: {int(item.get('with_city_state_count', 0) or 0)}/{total}",
             f"Com URL: {int(item.get('with_url_count', 0) or 0)}/{total}",
