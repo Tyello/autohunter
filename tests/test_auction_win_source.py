@@ -226,6 +226,11 @@ def test_win_vehicle_listing_fixture_and_detail_parsing(monkeypatch):
 
 
 def test_infer_win_item_type_vehicle_and_real_estate_priority():
+    assert win.infer_win_item_type("Moto Honda CG 160 Fan 2021") == "motorcycle"
+    assert win.infer_win_item_type("Honda Biz 125 2020") == "motorcycle"
+    assert win.infer_win_item_type("Honda Titan 160") == "motorcycle"
+    assert win.infer_win_item_type("Caminhão Ford Cargo 2429") == "truck"
+    assert win.infer_win_item_type("Mercedes-Benz Atego 2426") == "truck"
     assert win.infer_win_item_type("TOYOTA/HILUX CDLOWM4FD - 2016 - 2017 - DIESEL") == "car"
     assert win.infer_win_item_type("Imóvel Comercial em Altos") == "real_estate"
 

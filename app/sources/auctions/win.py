@@ -64,23 +64,27 @@ extract_win_external_id = parse_win_external_id_from_url
 
 def infer_win_item_type(*texts: str | None) -> str:
     txt = " ".join(t for t in texts if t).lower()
-    vehicle_terms = (
-        "toyota","hilux","volkswagen","vw","chevrolet","fiat","ford","honda","hyundai","renault","jeep",
-        "nissan","peugeot","citroen","mitsubishi","bmw","audi","mercedes","kia","volvo","land rover","ram",
-        "corolla","civic","hb20","onix","ranger","s10","compass","renegade","kicks","sandero","gol","kombi",
-    )
     real_estate_terms = ("imóvel","imovel","terreno","apartamento","casa","fazenda","sítio","sitio","propriedade rural","prédio","predio")
-    if any(k in txt for k in vehicle_terms):
-        return "car"
+    motorcycle_terms = ("moto","motocicleta"," cg "," biz "," fan "," titan"," bros "," xre "," pop "," yamaha "," fazer "," factor "," crypton ")
+    truck_terms = ("caminhão","caminhao","ônibus","onibus","cargo","atego","accelo","constellation")
+    heavy_terms = ("carreta","bitrem","pesado")
+    car_models = ("hilux","corolla","civic","hb20","onix","ranger","s10","compass","renegade","kicks","sandero","gol","kombi","uno","palio","fiesta","fox","saveiro","strada","toro")
+    car_terms = ("carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch","suv","pickup","caminhonete","utilitário","utilitario")
+    generic_brands = ("toyota","volkswagen","vw","chevrolet","fiat","ford","honda","hyundai","renault","jeep","nissan","peugeot","citroen","mitsubishi","bmw","audi","mercedes","kia","volvo","land rover","ram")
+
     if any(k in txt for k in real_estate_terms):
         return "real_estate"
-    if any(k in txt for k in ("moto"," cg "," biz "," fan "," titan")):
+    if any(k in txt for k in motorcycle_terms):
         return "motorcycle"
-    if any(k in txt for k in ("caminh","ônibus","onibus")):
+    if any(k in txt for k in truck_terms):
         return "truck"
-    if any(k in txt for k in ("pesad","carreta","bitrem")):
+    if any(k in txt for k in heavy_terms):
         return "heavy"
-    if any(k in txt for k in ("suv","pickup","caminhonete","utilit","carro","automóvel","automovel","veículo leve","veiculo leve","sedan","hatch")):
+    if any(k in txt for k in car_models):
+        return "car"
+    if any(k in txt for k in car_terms):
+        return "car"
+    if any(k in txt for k in generic_brands):
         return "car"
     if any(k in txt for k in ("máquina","maquina")):
         return "heavy"
