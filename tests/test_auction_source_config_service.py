@@ -65,7 +65,7 @@ def test_reconcile_existing_auction_rows_updates_metadata_only(db):
     assert vip.is_enabled is False
     assert vip.user_eligible is False
     assert vip.extra == {"allowed_item_types": ["car", "motorcycle"], "disabled_reason": "manual"}
-    assert win.status == "functional_non_car"
+    assert win.status == "experimental_functional_vehicle"
     assert win.is_enabled is False
     assert win.user_eligible is True
     assert copart.status == "needs_study"

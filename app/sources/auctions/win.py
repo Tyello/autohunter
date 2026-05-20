@@ -41,20 +41,40 @@ def normalize_win_status(text: str | None) -> str:
     if "encerrado" in v: return "ended"
     return "unknown"
 
+
+def is_reliable_win_location(city: str | None, state: str | None, location: str | None) -> bool:
+    city_clean = (city or "").strip()
+    state_clean = (state or "").strip().upper()
+    location_clean = (location or "").strip()
+    city_upper = re.sub(r"\s+", " ", city_clean.upper())
+    city_lower = city_clean.lower()
+
+    if not city_clean or not state_clean or state_clean not in VALID_UFS:
+        return False
+    if "/" in city_clean or len(city_clean) < 3:
+        return False
+    if any(tok in city_lower for tok in ("www", "http", "https")) or "." in city_lower:
+        return False
+    if city_lower == "com" or city_lower.endswith(".com"):
+        return False
+    if any(brand in city_upper for brand in _AUTOMOTIVE_BRANDS):
+        return False
+    if location_clean:
+        normalized_location = re.sub(r"\s*/\s*", "/", location_clean)
+        if normalized_location != f"{city_clean}/{state_clean}":
+            return False
+    return True
+
 def parse_win_location(text: str | None) -> tuple[str | None, str | None, str | None]:
     if not text: return None, None, None
     clean = _strip_html(text).strip(" :,-")
     m = re.search(r"^(.+?)\s*/\s*([A-Za-z]{2})$", clean)
     if not m: return clean or None, None, clean or None
     city, state = m.group(1).strip(), m.group(2).upper()
-    city_l = city.lower()
-    city_upper = re.sub(r"\s+", " ", city.upper()).strip()
-    has_brand = any(b in city_upper for b in _AUTOMOTIVE_BRANDS)
-    invalid = city_l in {"com","www","http","https"} or "." in city_l or "/" in city_l or len(city_l) < 3 or has_brand
-    if invalid: city = None
     st = state if state in VALID_UFS else None
-    if city and st: return city, st, f"{city}/{st}"
-    if st: return None, None, None
+    normalized = f"{city}/{st}" if city and st else None
+    if is_reliable_win_location(city, st, normalized):
+        return city, st, normalized
     return None, None, None
 
 def parse_win_external_id_from_url(url: str | None) -> str | None:
@@ -154,7 +174,9 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         year = None
     mileage = parse_int_br(_first_group(r"([0-9.]{2,7})\s*km", html) or "")
     raw_loc = _first_group(r"([A-Za-zÀ-ÿ\s]{2,40}/[A-Za-z]{2})", html)
-    city, state, location = parse_win_location(raw_loc or lot.location)
+    city, state, location = parse_win_location(raw_loc)
+    if not is_reliable_win_location(city, state, location):
+        city, state, location = parse_win_location(lot.location)
     status = normalize_win_status(_first_group(r"(Online\s+Em\s+Andamento|Em\s+Andamento|Online\s+Em\s+Loteamento|Em\s+Loteamento|Encerrado)", html) or lot.status)
     imgs = re.findall(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', html, flags=re.I)
     if not imgs:
@@ -171,9 +193,9 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
         initial_bid=initial_bid,
         current_bid=current_bid,
         year=year,
-        city=city or lot.city,
-        state=state or lot.state,
-        location=location or lot.location,
+        city=city,
+        state=state,
+        location=location,
         status=status,
         item_type=item_type,
         thumbnail_url=lot.thumbnail_url or (imgs[0] if imgs else None),

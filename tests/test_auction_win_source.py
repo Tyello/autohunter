@@ -305,3 +305,11 @@ def test_parse_win_location_rejects_title_like_brand_with_uf():
 
 def test_parse_win_location_accepts_reliable_city_uf():
     assert win.parse_win_location("Curitiba / PR") == ("Curitiba", "PR", "Curitiba/PR")
+
+
+def test_is_reliable_win_location_helper_rules():
+    assert win.is_reliable_win_location("Curitiba", "PR", "Curitiba/PR") is True
+    assert win.is_reliable_win_location("CAOA CHERY", "CE", "CAOA CHERY/CE") is False
+    assert win.is_reliable_win_location("www", "SP", "www/SP") is False
+    assert win.is_reliable_win_location("TOYOTA/HILUX", "SP", "TOYOTA/HILUX/SP") is False
+
