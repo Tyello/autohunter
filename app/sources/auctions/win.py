@@ -44,14 +44,13 @@ def normalize_win_status(text: str | None) -> str:
 
 
 def _extract_win_status(html: str, fallback: str | None) -> str:
-    labels = (
-        r"(?:situa[cç][aã]o|status)\s*:?\s*(aberto|aberta|online|em\s+andamento|encerrado|finalizado|em\s+loteamento|loteamento|agendad[oa])",
-        r"\b(online\s+em\s+andamento|em\s+andamento|online|abert[oa]|em\s+loteamento|loteamento|encerrado|finalizado|agendad[oa])\b",
+    label_pat = (
+        r"(?:status|situa[cç][aã]o|estado|situa[cç][aã]o\s+do\s+lote|status\s+do\s+lote|condi[cç][aã]o)\s*:?\s*"
+        r"(aberto|aberta|online|em\s+andamento|encerrado|finalizado|arrematado|em\s+loteamento|loteamento|agendad[oa])"
     )
-    for pat in labels:
-        val = _first_group(pat, html)
-        if val:
-            return normalize_win_status(val)
+    val = _first_group(label_pat, html)
+    if val:
+        return normalize_win_status(val)
     return normalize_win_status(fallback)
 
 
@@ -370,18 +369,3 @@ def fetch_win_lots(limit: int = 50, listing_url: str = DEFAULT_LISTING_URL, enri
     if _LAST_FETCH_DIAGNOSTICS is not None:
         _LAST_FETCH_DIAGNOSTICS["reason"] = r
     return []
-    def _parse_br_dt(raw: str) -> object | None:
-        clean = (raw or "").strip()
-        m = re.search(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})(?:\s+([0-9]{1,2}:[0-9]{2}))?", clean)
-        if m:
-            d = m.group(1)
-            t = m.group(2)
-            if len(d.split("/")[-1]) == 2:
-                d = f"{d[:-2]}20{d[-2:]}"
-            if t:
-                try:
-                    return datetime.strptime(f"{d} {t}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
-                except ValueError:
-                    pass
-            return parse_datetime_br(d)
-        return parse_datetime_br(clean)

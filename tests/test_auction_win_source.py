@@ -341,6 +341,50 @@ def test_win_enrich_without_clear_end_date_keeps_none(monkeypatch):
     assert lot.auction_end_at is None
 
 
+def test_win_status_requires_explicit_label_not_generic_online_word(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/4999/detalhes">item</a></article>'
+    detail_html = """
+    <html><head><title>Leilão online de veículos</title></head>
+    <body><h1>Lote 4999</h1><footer>Plataforma de leilões online</footer></body></html>
+    """
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/4999/detalhes" in url else listing_html)
+
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.status == "unknown"
+
+
+def test_win_status_labeled_mappings(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/5000/detalhes">item</a></article>'
+    cases = [
+        ("<div>Status: Em andamento</div>", "live"),
+        ("<div>Situação: Encerrado</div>", "ended"),
+        ("<div>Situação: Em loteamento</div>", "scheduled"),
+    ]
+
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    for body, expected in cases:
+        class _Client:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def get(self, url):
+                if "/item/5000/detalhes" in url:
+                    return _Resp(f"<html><body>{body}</body></html>")
+                return _Resp(listing_html)
+        monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+        lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+        assert lot.status == expected
+
+
 def test_infer_win_item_type_vehicle_and_real_estate_priority():
     assert win.infer_win_item_type("Moto Honda CG 160 Fan 2021") == "motorcycle"
     assert win.infer_win_item_type("Honda Biz 125 2020") == "motorcycle"
