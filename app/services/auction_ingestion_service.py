@@ -7,6 +7,8 @@ import httpx
 from app.sources.auctions.base import NormalizedAuctionLot
 
 from app.db.session import SessionLocal
+from app.models.source_config import SourceConfig
+from app.services.source_runs_service import record_run
 from app.services.auction_lot_service import upsert_lot
 from app.sources.auctions.quality import validate_normalized_auction_lot_candidate
 from app.sources.auctions.registry import (
@@ -77,6 +79,51 @@ def run_auction_ingestion(source: str, limit: int, enrich_details: bool = False)
                 summary["inserted"] += 1
             else:
                 summary["updated"] += 1
+        cfg = None
+        if hasattr(db, "query"):
+            cfg = db.query(SourceConfig).filter(SourceConfig.source == source).first()
+        score = None
+        if cfg and isinstance(getattr(cfg, "extra", None), dict):
+            maybe_score = cfg.extra.get("quality_score")
+            if maybe_score is not None:
+                try:
+                    score = int(maybe_score)
+                except Exception:
+                    score = None
+        if cfg and cfg.status:
+            status = str(cfg.status).strip()
+            if status:
+                summary["source_status"] = status
+        run_payload = {
+            "domain": "auction_ingestion",
+            "auction_summary": {
+                "found": int(summary.get("fetched", 0) or 0),
+                "inserted": int(summary.get("inserted", 0) or 0),
+                "updated": int(summary.get("updated", 0) or 0),
+                "ignored": int(summary.get("skipped", 0) or 0),
+                "errors": int(summary.get("errors", 0) or 0),
+                "car_lots": int(sum(1 for lot in lots if str(getattr(lot, "item_type", "") or "").lower() == "car")),
+                "with_current_bid_count": int(sum(1 for lot in lots if getattr(lot, "current_bid", None) is not None)),
+                "with_initial_bid_count": int(sum(1 for lot in lots if getattr(lot, "initial_bid", None) is not None)),
+                "with_auction_start_at_count": int(sum(1 for lot in lots if getattr(lot, "auction_start_at", None) is not None)),
+                "with_auction_end_at_count": int(sum(1 for lot in lots if getattr(lot, "auction_end_at", None) is not None)),
+                "open_or_live_count": int(sum(1 for lot in lots if str(getattr(lot, "status", "") or "").strip().lower() in {"open", "live"})),
+                "score": score,
+            },
+            "limit": int(limit or 0),
+            "enrich_applied": bool(enrich_applied),
+        }
+        if hasattr(db, "add") and hasattr(db, "flush"):
+            record_run(
+                db,
+                source=source,
+                kind="manual",
+                status="success" if int(summary.get("errors", 0) or 0) == 0 else "error",
+                items_found=int(summary.get("fetched", 0) or 0),
+                items_ingested=int(summary.get("inserted", 0) or 0) + int(summary.get("updated", 0) or 0),
+                error=None,
+                payload=run_payload,
+            )
         if not summary["skipped_reasons"]:
             summary.pop("skipped_reasons", None)
         db.commit()

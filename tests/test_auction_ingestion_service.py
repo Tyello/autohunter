@@ -15,7 +15,15 @@ class _Def:
 def test_run_auction_ingestion_vip_enrich_and_summary(monkeypatch):
     calls = {"committed": False, "enrich": None}
 
+    class _Q:
+        def filter(self, *_args, **_kwargs):
+            return self
+        def first(self):
+            return None
     class FakeDB:
+        def query(self, *_args, **_kwargs): return _Q()
+        def add(self, *_args, **_kwargs): return None
+        def flush(self): return None
         def commit(self): calls["committed"] = True
         def rollback(self): calls["rollback"] = True
         def close(self): calls["closed"] = True
@@ -27,12 +35,14 @@ def test_run_auction_ingestion_vip_enrich_and_summary(monkeypatch):
     monkeypatch.setattr(svc, "SessionLocal", lambda: FakeDB())
     monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("vip_auctions", _fetch, lambda: "x", True))
     monkeypatch.setattr(svc, "upsert_lot", lambda db, payload: (object(), True))
+    monkeypatch.setattr(svc, "record_run", lambda *args, **kwargs: calls.__setitem__("recorded", True))
 
     out = svc.run_auction_ingestion("vip_auctions", limit=10, enrich_details=True)
     assert out["fetched"] == 1
     assert out["inserted"] == 1
     assert calls["committed"] is True
     assert calls["enrich"] is True
+    assert calls["recorded"] is True
 
 
 def test_run_auction_ingestion_rollback_on_error(monkeypatch):
