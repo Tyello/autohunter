@@ -31,7 +31,7 @@ def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> boo
     return (urlparse(url).hostname or "").lower() in {d.lower() for d in allowed_domains}
 
 def _strip_html(text: str) -> str: return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
-def _sanitize_snippet(text: str, max_len: int = 250) -> str:
+def _sanitize_snippet(text: str, max_len: int = 120) -> str:
     clean = _strip_html(text)
     clean = re.sub(r"\s+", " ", clean).strip()
     if len(clean) <= max_len:
@@ -54,6 +54,19 @@ def _collect_keyword_snippets(html: str, keywords: tuple[str, ...], max_items: i
             if len(snippets) >= max_items:
                 return snippets
     return snippets
+
+
+_WIN_DETAIL_NOISE_TERMS = (
+    "login", "cadastro", "navbar", "header", "menu", "facebook", "whatsapp", "cloudflare",
+    "googletagmanager", "gtm.js", "data-toggle", "data-target", "compartilhar",
+)
+
+
+def _is_noise_snippet(text: str) -> bool:
+    low = (text or "").lower()
+    if not low:
+        return True
+    return any(term in low for term in _WIN_DETAIL_NOISE_TERMS)
 
 
 def build_win_detail_diagnostics(html: str) -> dict[str, list[str]]:
@@ -83,13 +96,23 @@ def build_win_detail_diagnostics(html: str) -> dict[str, list[str]]:
         html,
         ("data-",),
     )
+    def _filter(values: list[str], max_items: int) -> list[str]:
+        out: list[str] = []
+        for value in values:
+            if not value or _is_noise_snippet(value):
+                continue
+            out.append(value)
+            if len(out) >= max_items:
+                break
+        return out
+
     return {
-        "status_candidates": status_candidates[:5],
-        "date_candidates": date_candidates[:5],
-        "bid_candidates": bid_candidates[:5],
-        "json_like_blocks": json_like_blocks[:5],
-        "hidden_inputs": hidden_inputs[:5],
-        "data_attributes": data_attributes[:5],
+        "status_candidates": _filter(status_candidates, 3),
+        "date_candidates": _filter(date_candidates, 3),
+        "bid_candidates": _filter(bid_candidates, 3),
+        "json_like_blocks": _filter(json_like_blocks, 1),
+        "hidden_inputs": _filter(hidden_inputs, 1),
+        "data_attributes": _filter(data_attributes, 1),
     }
 
 def _first_group(pattern: str, text: str) -> str | None:
@@ -100,7 +123,7 @@ def normalize_win_status(text: str | None) -> str:
     v = (text or "").lower()
     if any(k in v for k in ("loteamento", "agendado", "agendada")): return "scheduled"
     if any(k in v for k in ("encerrado", "finalizado", "arrematado")): return "ended"
-    if any(k in v for k in ("aberto", "aberta", "online", "andamento")): return "live"
+    if any(k in v for k in ("aberto", "aberta", "andamento")): return "live"
     return "unknown"
 
 
@@ -112,6 +135,16 @@ def _extract_win_status(html: str, fallback: str | None) -> str:
     val = _first_group(label_pat, html)
     if val:
         return normalize_win_status(val)
+    plain_status_patterns = (
+        (r"aberto\s+para\s+lances?", "live"),
+        (r"fechado\s+para\s+lances?", "ended"),
+        (r"encerrado", "ended"),
+        (r"em\s+loteamento", "scheduled"),
+    )
+    normalized_html = _strip_html(html).lower()
+    for pattern, mapped_status in plain_status_patterns:
+        if re.search(pattern, normalized_html, flags=re.I):
+            return mapped_status
     return normalize_win_status(fallback)
 
 

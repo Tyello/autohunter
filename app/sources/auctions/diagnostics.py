@@ -18,6 +18,7 @@ def build_auction_source_fetch_diagnostics(response: Any | None, html: str | Non
     detail_re = re.compile(r"(?:https?://(?:www\.)?winleiloes\.com\.br)?/item/\d+/detalhes(?:\?[^\"'\s<]*)?", flags=re.I)
     lot_detail_candidates: list[str] = []
     lot_image_candidates: list[str] = []
+    lot_document_candidates: list[str] = []
     asset_candidates: list[str] = []
     possible_api_endpoints: list[str] = []
     seen = set()
@@ -29,6 +30,9 @@ def build_auction_source_fetch_diagnostics(response: Any | None, html: str | Non
         seen.add(t)
         if detail_re.search(t):
             lot_detail_candidates.append(t)
+        if low.endswith(".pdf") or ".pdf?" in low or "laudo" in low and ".pdf" in low:
+            lot_document_candidates.append(t)
+            continue
         if "cloudfront" in low or "/watermark/" in low or "/bens/" in low:
             if asset_ext_re.search(low) or "/watermark/" in low or "/bens/" in low:
                 lot_image_candidates.append(t)
@@ -62,6 +66,7 @@ def build_auction_source_fetch_diagnostics(response: Any | None, html: str | Non
             "possible_api_endpoints": endpoints,
             "asset_candidates": asset_candidates[:20],
             "lot_image_candidates": lot_image_candidates[:20],
+            "lot_document_candidates": lot_document_candidates[:20],
             "lot_detail_candidates": lot_detail_candidates[:20],
             "form": {"action": form_m.group(1) if form_m else None, "method": (method_m.group(1).upper() if method_m else None)},
             "indicators": indicators,

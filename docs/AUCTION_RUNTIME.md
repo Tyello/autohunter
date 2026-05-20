@@ -47,7 +47,7 @@ Registry técnico atual:
 
 - `vip_auctions` — VIP Leilões — `production_ready`, única source `user_eligible` por padrão no piloto `car`.
 - `mega_auctions` — Mega Leilões — `experimental_detail_enrichment`; encontra carros, com enrich de detalhe parcial e diagnóstico quando faltam sinais de bid/imagem/status.
-- `win_auctions` — Win Leilões — `experimental_functional_vehicle`; captura carros reais via detail URLs e enrich funcional; forte em lance inicial, ano, imagem e URL. Status/encerramento/current_bid ainda dependem de sinais explícitos no HTML real; usar inspect diagnostics antes de ampliar regex. Ainda experimental e fora do user-facing.
+- `win_auctions` — Win Leilões — `experimental_functional_vehicle`; captura carros reais via detail URLs e enrich funcional. Sinais operacionais atuais: `Aberto para Lances` => `status=live`; `Data do Leilão` => `auction_start_at` (não encerra o lote); `Lance Inicial` alimenta apenas `initial_bid`; `current_bid` continua ausente sem rótulo explícito (`Lance Atual`/`Maior Lance`/`Último Lance`/`Lance Vencedor`). Inspect de detalhe usa diagnóstico compacto para caber no Telegram. Ainda experimental e fora do user-facing.
 - `sodre_auctions` — Sodré Santoro — `blocked`/`needs_study`, fetch real com `forbidden_403` e diagnóstico HTTP mínimo no inspect.
 - `superbid_auctions` — Superbid — `needs_study`, fora do piloto.
 - `copart_auctions` — Copart — `needs_study`, fora do piloto.

@@ -143,3 +143,45 @@ def test_admin_auctions_inspect_renders_win_detail_diagnostics(monkeypatch):
     text = up.message.sent[-1]
     assert "Diagnóstico detalhe Win:" in text
     assert "status_candidates" in text
+
+
+def test_admin_auctions_inspect_win_detail_is_compact_and_truncated(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    noisy = "x" * 500
+    monkeypatch.setattr(
+        handlers_admin,
+        "inspect_auction_source",
+        lambda **kwargs: {
+            "source": "win_auctions",
+            "fetched": 1,
+            "candidates": [{"index": 1, "url": "https://x", "title": "Carro", "title_fallback": None, "external_id": "1", "item_type": "car", "current_bid": None, "initial_bid": 1000, "year": 2020, "status": "live", "skip_reason": None, "text_preview": noisy}],
+            "diagnostics": {
+                "detail_diagnostics": {
+                    "win_detail": {
+                        "status_candidates": ["Aberto para Lances"] * 10,
+                        "date_candidates": ["Data do Leilão: 21/05/2026 11:00"] * 10,
+                        "bid_candidates": ["Lance Inicial: R$ 5.000,00"] * 10,
+                        "json_like_blocks": [noisy] * 3,
+                        "hidden_inputs": [noisy] * 3,
+                        "data_attributes": [noisy] * 3,
+                    }
+                }
+            },
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "win", "--url", "https://www.winleiloes.com.br/item/4086/detalhes")))
+    text = up.message.sent[-1]
+    assert len(text) <= 3500
+    assert "Diagnóstico detalhe Win:" in text
+    assert "Aberto para Lances" in text
+    assert "Data do Leilão" in text
+    assert "json_like_blocks" in text
+
+
+def test_truncate_admin_message_adds_warning_suffix():
+    text = "a" * 4000
+    out, truncated = handlers_admin._truncate_admin_message(text, max_chars=3500)
+    assert truncated is True
+    assert len(out) <= 3500
+    assert "Diagnóstico reduzido para caber no Telegram." in out
