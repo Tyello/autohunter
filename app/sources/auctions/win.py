@@ -31,6 +31,8 @@ def validate_auction_source_url(url: str, allowed_domains: Iterable[str]) -> boo
     return (urlparse(url).hostname or "").lower() in {d.lower() for d in allowed_domains}
 
 def _strip_html(text: str) -> str: return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+def _normalize_win_detail_text(html: str) -> str:
+    return _strip_html(html)
 def _sanitize_snippet(text: str, max_len: int = 120) -> str:
     clean = _strip_html(text)
     clean = re.sub(r"\s+", " ", clean).strip()
@@ -165,7 +167,22 @@ def _parse_br_dt(raw: str) -> object | None:
     return parse_datetime_br(clean)
 
 
-def _extract_win_auction_dates(html: str) -> tuple[object | None, object | None]:
+def _extract_win_current_bid(html: str, clean_text: str) -> object | None:
+    del html  # interface kept for compatibility with diagnostics/debugging call sites
+    bid_labels = (
+        r"MAIOR\s*LANCE\s*NO\s*MOMENTO",
+        r"Maior\s*Lance\s*no\s*Momento",
+        r"Maior\s*Lance",
+        r"Lance\s*Atual",
+        r"[UÚ]ltimo\s*Lance",
+        r"Lance\s*Vencedor",
+    )
+    pat = rf"(?:{'|'.join(bid_labels)})\s*:?\s*(?:\S+\s*){{0,6}}?(R\$\s*[0-9.]+,[0-9]{{2}})"
+    return parse_money_br(_first_group(pat, clean_text) or "")
+
+
+def _extract_win_auction_dates(html: str, clean_text: str) -> tuple[object | None, object | None]:
+    del html  # interface kept for compatibility with diagnostics/debugging call sites
     end_at = None
     start_at = None
     end_patterns = (
@@ -175,7 +192,7 @@ def _extract_win_auction_dates(html: str) -> tuple[object | None, object | None]
         r"(?:in[ií]cio|data\s+do\s+leil[aã]o|leil[aã]o\s+em|abertura)\s*:?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*(?:[àa-]|\s)\s*[0-9]{1,2}:[0-9]{2})?)",
     )
     for pat in end_patterns:
-        raw = _first_group(pat, html)
+        raw = _first_group(pat, clean_text)
         if raw:
             date = _first_group(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})", raw)
             hhmm = _first_group(r"([0-9]{1,2}:[0-9]{2})", raw)
@@ -183,7 +200,7 @@ def _extract_win_auction_dates(html: str) -> tuple[object | None, object | None]
             if end_at:
                 break
     for pat in start_patterns:
-        raw = _first_group(pat, html)
+        raw = _first_group(pat, clean_text)
         if raw:
             date = _first_group(r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})", raw)
             hhmm = _first_group(r"([0-9]{1,2}:[0-9]{2})", raw)
@@ -311,15 +328,9 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     if not title and lot.url:
         slug = urlparse(lot.url).path.rstrip("/").split("/")[-2] if "/detalhes" in lot.url else ""
         title = _valid_win_title(normalize_title(re.sub(r"[-_]+", " ", slug)))
-    initial_bid = lot.initial_bid or parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", html) or "")
-    current_bid = lot.current_bid or parse_money_br(
-        _first_group(
-            r"(?:MAIOR\s*LANCE\s*NO\s*MOMENTO|Maior\s*Lance\s*no\s*Momento|Maior\s*Lance|Lance\s*Atual|[UÚ]ltimo\s*Lance|Lance\s*Vencedor)\s*:?\s*[^R$]{0,20}(R\$\s*[0-9.]+,[0-9]{2})",
-            html,
-        )
-        or ""
-    )
-    clean_html = _strip_html(html)
+    clean_html = _normalize_win_detail_text(html)
+    initial_bid = lot.initial_bid or parse_money_br(_first_group(r"Lance\s*Inicial\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", clean_html) or "")
+    current_bid = lot.current_bid or _extract_win_current_bid(html, clean_html)
     primary_text = " ".join(p for p in [title, lot.url, lot.item_type] if p)
     item_type = infer_win_item_type(primary_text)
     if item_type == "other":
@@ -335,7 +346,7 @@ def _enrich_win_detail(client: httpx.Client, lot: NormalizedAuctionLot) -> Norma
     if not is_reliable_win_location(city, state, location):
         city, state, location = parse_win_location(lot.location)
     status = _extract_win_status(html, lot.status)
-    end_at, start_at = _extract_win_auction_dates(html)
+    end_at, start_at = _extract_win_auction_dates(html, clean_html)
     imgs = re.findall(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', html, flags=re.I)
     if not imgs:
         imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.I)

@@ -429,6 +429,86 @@ def test_win_enrich_extracts_current_bid_from_mixed_case_maior_lance_no_momento(
     lot = win.fetch_win_lots(limit=1, enrich=True)[0]
     assert lot.current_bid == Decimal("5000.00")
 
+
+def test_win_enrich_extracts_current_bid_when_label_and_value_are_split_by_html_tags(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6004/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <div>MAIOR LANCE NO MOMENTO <h3 class="x">R$33.000,00</h3></div>
+      <div>Lance Inicial: R$ 20.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6004/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.current_bid == Decimal("33000.00")
+
+
+def test_win_enrich_does_not_infer_current_bid_from_lance_inicial_only(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6005/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <div>Lance Inicial: R$ 20.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6005/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.current_bid is None
+
+
+def test_win_enrich_data_do_leilao_sets_start_without_fake_end(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6006/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <div>Data do Leilão: 21/05/2026 11:00</div>
+      <div>Lance Inicial: R$ 20.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6006/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.auction_start_at == datetime(2026, 5, 21, 11, 0, tzinfo=timezone.utc)
+    assert lot.auction_end_at is None
+
+
+def test_win_enrich_encerramento_sets_auction_end_at(monkeypatch):
+    listing_html = '<article class="card"><a href="/item/6007/detalhes">item</a></article>'
+    detail_html = """
+    <html><body>
+      <div>Encerramento: 21/05/2026 18:00</div>
+      <div>Lance Inicial: R$ 20.000,00</div>
+    </body></html>
+    """
+    class _Resp:
+        def __init__(self, text): self.text = text
+        def raise_for_status(self): return None
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url): return _Resp(detail_html if "/item/6007/detalhes" in url else listing_html)
+    monkeypatch.setattr(win.httpx, "Client", lambda **kwargs: _Client())
+    lot = win.fetch_win_lots(limit=1, enrich=True)[0]
+    assert lot.auction_end_at == datetime(2026, 5, 21, 18, 0, tzinfo=timezone.utc)
+
 def test_win_status_labeled_mappings(monkeypatch):
     listing_html = '<article class="card"><a href="/item/5000/detalhes">item</a></article>'
     cases = [
