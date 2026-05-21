@@ -622,12 +622,14 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
         db.rollback()
 
     if not enqueue_initial_run:
+        invalidate_wishlist_summaries_cache(user_id)
         return True, (
             f"✅ Wishlist criada: {cleaned_query}\n\n"
             "Monitoramento salvo. A primeira busca será disparada quando o fluxo guiado concluir os filtros."
         )
 
     run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
+    invalidate_wishlist_summaries_cache(user_id)
 
     if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
         return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
