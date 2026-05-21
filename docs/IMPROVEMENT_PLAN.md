@@ -17,6 +17,14 @@
 - **Mantidos por segurança operacional (validar depois):**
   - `scripts/cache_manager.py` e `scripts/database_optimizer.py` (ainda referenciados em `config/raspberry-pi/crontab`).
 
+## Status de execução (P2-A) — 2026-05-21
+
+- **Status:** implementado.
+- `_wishlist_eligibility_snapshot` deixou de carregar todas as wishlists ativas por source para filtrar em memória.
+- A elegibilidade agora é resolvida com query SQL (EXISTS em `wishlist_filters`) por source, preservando a regra:
+  - wishlist sem filtro `source=eq` segue elegível apenas em sources default monitoráveis/implementadas;
+  - wishlist com filtro `source=eq` segue restrita às sources explicitamente escolhidas.
+
 ## 1. Bugs Confirmados
 
 > Status P1-A (2026-05-21): **concluído na PR #248** (pool SQLAlchemy explícito, bootstrap único de `source_configs` no scheduler e testes de regressão).
