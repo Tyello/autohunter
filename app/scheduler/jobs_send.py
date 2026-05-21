@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import settings
 from app.services.limits_service import (
-    can_send_more_today,
+    count_sent_today,
     get_active_subscription_limit_for_user,
     should_send_daily_limit_notice,
 )
@@ -29,6 +29,18 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
     discarded = 0
     commit_batch_size = max(1, int(getattr(settings, "notification_sender_commit_batch_size", 1) or 1))
     pending_mutations = 0
+    user_budget_cache: dict[str, dict[str, int]] = {}
+
+    def _get_user_budget(user_id):
+        key = str(user_id)
+        budget = user_budget_cache.get(key)
+        if budget is None:
+            budget = {
+                "sent": int(count_sent_today(db, user_id) or 0),
+                "limit": int(get_active_subscription_limit_for_user(db, user_id) or 0),
+            }
+            user_budget_cache[key] = budget
+        return budget
 
     def _flush(force: bool = False):
         nonlocal pending_mutations
@@ -47,7 +59,8 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
             failed += 1
             continue
 
-        if not can_send_more_today(db, n.user_id):
+        budget = _get_user_budget(n.user_id)
+        if budget["sent"] >= budget["limit"]:
             # política (não é erro)
             mark_suppressed_reason(db, n.id, "daily_limit_reached")
             pending_mutations += 1
@@ -56,8 +69,7 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
             # aviso 1x por dia (no fuso do usuário)
             user = n.user
             if user and should_send_daily_limit_notice(user):
-                limit = get_active_subscription_limit_for_user(db, n.user_id)
-                ok = send_daily_limit_notice_http(user, limit)
+                ok = send_daily_limit_notice_http(user, budget["limit"])
                 if ok:
                     user.last_daily_limit_notice_at = datetime.now(timezone.utc)
                     pending_mutations += 1
@@ -70,6 +82,7 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
         try:
             sender_fn(n, listing, user)
             mark_notification_sent(n)
+            budget["sent"] += 1
             pending_mutations += 1
             _flush()
             sent += 1
