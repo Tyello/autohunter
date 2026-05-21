@@ -66,6 +66,11 @@ def test_settings_parsing_and_defaults() -> None:
     assert cfg.tracking_price_drop_alert_cooldown_hours == 24
     assert cfg.tracking_price_drop_alert_min_amount == 500
     assert cfg.tracking_price_drop_alert_min_pct == 1.0
+    assert cfg.db_pool_size == 5
+    assert cfg.db_max_overflow == 5
+    assert cfg.db_pool_recycle == 1800
+    assert cfg.db_pool_timeout == 20
+    assert cfg.db_connect_timeout == 10
 
 
 def test_settings_requires_database_url(monkeypatch: pytest.MonkeyPatch) -> None:

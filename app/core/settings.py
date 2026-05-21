@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    db_pool_recycle: int = 1800
+    db_pool_timeout: int = 20
+    db_connect_timeout: int = 10
     telegram_bot_token: str | None = None
     telegram_enabled: bool = True
     autohunter_admins: str | None = None

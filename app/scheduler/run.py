@@ -76,6 +76,24 @@ def _print_throttled_scheduler_error(stage: str, exc: Exception) -> None:
     )
 
 
+def _bootstrap_source_configs_once() -> None:
+    try:
+        with SessionLocal() as db:
+            created = ensure_source_configs(db)
+            db.commit()
+            if created:
+                log(db, "info", "scheduler", "source_configs_bootstrapped", {"created": created})
+                db.commit()
+    except Exception as exc:
+        _log_suppressed_exception(
+            stage="bootstrap.source_configs",
+            exc=exc,
+            impact="source_configs_may_be_missing",
+            fallback="ticks_skip_sources_without_config",
+            worker="boot",
+        )
+
+
 def job_heartbeat():
     if is_shutdown_requested():
         return
@@ -112,7 +130,6 @@ def job_run_source_for_all_wishlists(source_name: str):
 
     with SessionLocal() as db:
         try:
-            ensure_source_configs(db)
             cfg = _get_cfg(db, src)
             if not cfg or not bool(cfg.is_enabled) or plugin.scrape is None:
                 db.commit()
@@ -195,6 +212,7 @@ def job_run_source_for_all_wishlists(source_name: str):
 
 
 def start_scheduler() -> BackgroundScheduler:
+    _bootstrap_source_configs_once()
     sched = BackgroundScheduler(
         timezone="UTC",
         executors={
