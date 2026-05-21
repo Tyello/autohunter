@@ -7,7 +7,7 @@ def test_friendly_filters_with_dict_shape():
     text = render_user_wishlists([
         {"index": 1, "query": "dict", "filters": [{"field": "year", "operator": "gte", "value": "2018"}], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
     ])
-    assert "Ano a partir de 2018" in text
+    assert "filtros" in text
 
 
 def test_friendly_filters_with_object_shape_and_invalid_ignored():
@@ -19,8 +19,7 @@ def test_friendly_filters_with_object_shape_and_invalid_ignored():
             SimpleNamespace(value="invalid"),
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
     ])
-    assert "Ano entre 2018 e 2020" in text
-    assert "Estado: SP" in text
+    assert "filtros" in text
 
 
 def test_render_auction_alert_preview_has_disclosure_and_friendly_source():

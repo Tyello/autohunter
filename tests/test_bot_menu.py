@@ -89,6 +89,29 @@ def test_menu_keyboard_hides_upgrade_for_premium():
     assert "MENU:UPGRADE" not in callback_data
 
 
+
+
+def test_cmd_start_without_wishlists_shows_create_cta(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [])
+    update = _Update()
+    asyncio.run(handlers_core.cmd_start(update, types.SimpleNamespace()))
+
+    payload = update.message.sent[-1]
+    assert "Bem-vindo" in payload["text"] or "Garagem Alvo" in payload["text"]
+    callback_data = [btn.callback_data for row in payload["reply_markup"].inline_keyboard for btn in row]
+    assert "MENU:CREATE_WISHLIST" in callback_data
+
+
+def test_cmd_start_with_wishlists_shows_wishlists_cta(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", query="civic")])
+    update = _Update()
+    asyncio.run(handlers_core.cmd_start(update, types.SimpleNamespace()))
+
+    payload = update.message.sent[-1]
+    callback_data = [btn.callback_data for row in payload["reply_markup"].inline_keyboard for btn in row]
+    assert "MENU:WISHLISTS" in callback_data
 def test_callback_menu_search():
     q = _CallbackQuery("MENU:SEARCH")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
@@ -104,10 +127,9 @@ def test_callback_menu_wishlists_real(monkeypatch):
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
     assert "🎯 Minhas buscas" in q.edits[-1]
-    assert "1. civic si" in q.edits[-1]
-    assert "Filtros:\n- Nenhum filtro" in q.edits[-1]
-    assert "Anúncios rastreados: 0/3" in q.edits[-1]
-    assert "Alertas enviados hoje: 2" in q.edits[-1]
+    assert "✅ 1. civic si" in q.edits[-1]
+    assert "sem filtros" in q.edits[-1]
+    assert "2 alertas hoje" in q.edits[-1]
 
 
 def test_callback_menu_wishlists_empty_guides_create(monkeypatch):
@@ -222,7 +244,7 @@ def test_callback_menu_pause_resume_flow(monkeypatch):
 
     q5 = _CallbackQuery("MENU:WISHLISTS")
     asyncio.run(handlers_core.cb_menu(_Update(q5), types.SimpleNamespace(user_data={})))
-    assert "Status: pausada" in q5.edits[-1]
+    assert "⏸️" in q5.edits[-1]
 
     q6 = _CallbackQuery("WL:RESUME:1")
     asyncio.run(handlers_core.cb_menu(_Update(q6), types.SimpleNamespace(user_data={})))
@@ -235,7 +257,7 @@ def test_callback_menu_pause_resume_flow(monkeypatch):
 
     q8 = _CallbackQuery("MENU:WISHLISTS")
     asyncio.run(handlers_core.cb_menu(_Update(q8), types.SimpleNamespace(user_data={})))
-    assert "Status: ativa" in q8.edits[-1]
+    assert "✅" in q8.edits[-1]
 
 
 def test_callback_menu_pause_invalid_index(monkeypatch):
@@ -266,7 +288,21 @@ def test_callback_menu_tracked_empty_slots(monkeypatch):
     q = _CallbackQuery("MENU:TRACKED")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
     assert q.answers == 1
-    assert "(vazio)" in q.edits[-1]
+    assert "Você ainda não está acompanhando nenhum anúncio" in q.edits[-1]
+    assert "⭐ Rastrear" in q.edits[-1]
+
+
+def test_callback_menu_tracked_keeps_real_content(monkeypatch):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", query="civic")])
+    monkeypatch.setattr(
+        handlers_core,
+        "list_tracked_listings",
+        lambda _db, **kwargs: (True, "📌 Rastreados da wishlist 1 — civic\n1) https://example.com/ad/123"),
+    )
+    q = _CallbackQuery("MENU:TRACKED")
+    asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
+    assert "https://example.com/ad/123" in q.edits[-1]
 
 
 def test_callback_menu_filters_legacy_redirect(monkeypatch):

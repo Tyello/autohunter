@@ -135,27 +135,24 @@ def render_user_wishlists(wishlists) -> str:
     if isinstance(wishlists[0], dict):
         lines = ["🎯 Minhas buscas", ""]
         for item in wishlists:
+            status_icon = "✅" if item.get("is_active", True) else "⏸️"
             labels = _friendly_wishlist_filters(item.get("filters", []))
-            shown = labels[:3]
-            status = "ativa" if item.get("is_active", True) else "pausada"
-            lines.extend([
-                f"{item['index']}. {item['query']}",
-                f"Status: {status}",
-                f"Leilões: {'ativado' if item.get('include_auctions', False) else 'desativado'}",
-                "Filtros:",
-            ])
-            if shown:
-                lines.extend([f"- {label}" for label in shown])
-                if len(labels) > 3:
-                    lines.append(f"- +{len(labels) - 3} filtros")
-            else:
-                lines.append("- Nenhum filtro")
-            lines.extend([
-                f"Anúncios rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
-                f"Alertas enviados hoje: {item.get('notifications_24h_count', 0)}",
-                "",
-            ])
-        lines.append("Escolha uma ação:")
+            parts = [f"{len(labels)} filtros" if labels else "sem filtros"]
+
+            tracked_count = int(item.get("tracked_count", 0) or 0)
+            if tracked_count > 0:
+                parts.append(f"{tracked_count} rastreado" if tracked_count == 1 else f"{tracked_count} rastreados")
+
+            notifications_24h_count = int(item.get("notifications_24h_count", 0) or 0)
+            if notifications_24h_count > 0:
+                parts.append(
+                    f"{notifications_24h_count} alerta hoje"
+                    if notifications_24h_count == 1
+                    else f"{notifications_24h_count} alertas hoje"
+                )
+
+            lines.append(f"{status_icon} {item['index']}. {item['query']} • " + " • ".join(parts))
+        lines.extend(["", "Escolha uma busca para gerenciar:"])
         return "\n".join(lines).strip()
 
     lines = [f"{i + 1}. {x.query}" for i, x in enumerate(wishlists)]
@@ -172,6 +169,14 @@ def render_all_tracked_listings(wishlists, tracked_messages: list[str], plan_usa
             "Anúncio rastreado = eu acompanho preço/status de um anúncio específico.\n\n"
             "Você ainda não rastreou nenhum anúncio.\n\n"
             "Quando receber ou encontrar um anúncio interessante, toque em ⭐ Rastrear para acompanhar preço e status."
+        )
+
+    has_real_tracked = any("(vazio)" not in str(msg or "").lower() for msg in tracked_messages or [])
+    if tracked_messages and not has_real_tracked:
+        return (
+            "⭐ Anúncios rastreados\n\n"
+            "Você ainda não está acompanhando nenhum anúncio.\n\n"
+            "Quando receber um alerta ou fizer uma busca, toque em ⭐ Rastrear para acompanhar preço e status daquele anúncio."
         )
 
     lines = ["⭐ Anúncios rastreados", "", "Aqui ficam anúncios específicos que você quer acompanhar de perto.", "", "Busca salva = eu encontro novos anúncios para você.", "Anúncio rastreado = eu acompanho preço/status de um anúncio específico.", ""]
