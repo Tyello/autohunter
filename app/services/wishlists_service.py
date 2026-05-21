@@ -602,7 +602,9 @@ def get_wishlist_summaries(db: Session, user_id):
         if (now - ts).total_seconds() <= ttl_seconds:
             _WISHLIST_SUMMARIES_CACHE_METRICS["hits"] += 1
             return copy.deepcopy(payload)
-        _WISHLIST_SUMMARIES_CACHE.pop(cache_key, None)
+        removed = _WISHLIST_SUMMARIES_CACHE.pop(cache_key, None)
+        if removed is not None:
+            _WISHLIST_SUMMARIES_CACHE_METRICS["prunes"] += 1
     _WISHLIST_SUMMARIES_CACHE_METRICS["misses"] += 1
     computed = _compute_wishlist_summaries(db, user_id)
     _WISHLIST_SUMMARIES_CACHE[cache_key] = (now, computed)

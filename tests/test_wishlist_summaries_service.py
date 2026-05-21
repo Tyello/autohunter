@@ -332,3 +332,21 @@ def test_wishlist_summaries_cache_stats_disabled(db, monkeypatch):
     assert stats["cache_enabled"] is False
     assert stats["ttl_seconds"] == 0
 
+
+
+def test_wishlist_summaries_cache_expired_direct_path_counts_prune(db, monkeypatch):
+    user = _mk_user(db)
+    _mk_wishlist(db, user, "civic")
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    wishlists_service.reset_wishlist_summaries_cache_stats()
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_ttl_seconds", 10)
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(wishlists_service, "_utcnow", lambda: base)
+    get_wishlist_summaries(db, user.id)
+
+    monkeypatch.setattr(wishlists_service, "_utcnow", lambda: base + timedelta(seconds=11))
+    get_wishlist_summaries(db, user.id)
+
+    stats = get_wishlist_summaries_cache_stats()
+    assert stats["prunes"] >= 1
