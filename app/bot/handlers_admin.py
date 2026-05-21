@@ -546,22 +546,20 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 return
             include_invalid = "--include-invalid" in args[2:]
             base_query = db.query(AuctionLot).filter(AuctionLot.source == source)
+            skip_reason = func.coalesce(cast(AuctionLot.extras["skip_reason"], Text), "")
             hidden_invalid_count = 0
             if not include_invalid:
                 hidden_invalid_count = (
                     base_query.filter(
                         or_(
                             AuctionLot.status == "invalid",
-                            cast(AuctionLot.extras["skip_reason"], Text) == '"generic_page"',
+                            skip_reason == '"generic_page"',
                         )
                     ).count()
                 )
                 base_query = base_query.filter(
                     AuctionLot.status != "invalid",
-                    or_(
-                        AuctionLot.extras.is_(None),
-                        cast(AuctionLot.extras["skip_reason"], Text) != '"generic_page"',
-                    ),
+                    skip_reason != '"generic_page"',
                 )
             lots = base_query.order_by(AuctionLot.updated_at.desc()).limit(10).all()
             if not lots:

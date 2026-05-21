@@ -71,7 +71,17 @@ def test_admin_auctions_and_source_and_upcoming_and_motos(monkeypatch, db):
 
 
 def test_admin_auctions_source_hides_invalid_by_default(monkeypatch, db):
-    upsert_lot(db, {"source": "mega_auctions", "external_id": "m1", "title": "Carro Audi Q3", "status": "live", "item_type": "car"})
+    upsert_lot(
+        db,
+        {
+            "source": "mega_auctions",
+            "external_id": "m1",
+            "title": "Carro Audi Q3",
+            "status": "live",
+            "item_type": "car",
+            "extras": {"plate_final": "1"},
+        },
+    )
     upsert_lot(
         db,
         {
