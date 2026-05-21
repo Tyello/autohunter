@@ -123,6 +123,23 @@ def build_auction_notification_readiness(db) -> dict:
         ready_for_user_car_pilot = bool(
             data_quality_ready_car and cfg_user_eligible and ("car" in allowed) and status_ready and (not cfg_experimental) and (not warnings_critical)
         )
+        not_ready_reasons: list[str] = []
+        if not ready_for_user_car_pilot:
+            if cfg_experimental or not status_ready:
+                not_ready_reasons.append(f"experimental/status={cfg_status or 'unknown'}")
+            if not cfg_user_eligible:
+                not_ready_reasons.append("user_eligible=false")
+            if "car" not in allowed:
+                not_ready_reasons.append("categoria_car_nao_permitida")
+            if not data_quality_ready_car:
+                not_ready_reasons.append("dados_car_insuficientes")
+                if recent_car_lots <= 0:
+                    not_ready_reasons.append("sem_lote_car_recente")
+                if recent_car_with_url_bid_year <= 0:
+                    not_ready_reasons.append("sem_lote_car_recente_com_lance")
+            if int(has_end or 0) <= 0 and warnings_critical and any("encerramento" in w for w in warnings_critical):
+                not_ready_reasons.append("sem_encerramento")
+
         source_car_pilot[src] = {
             "car_lots": car_lots,
             "user_allowed_lots": user_allowed_lots,
@@ -132,7 +149,7 @@ def build_auction_notification_readiness(db) -> dict:
             "item_type_counts": type_counts,
             "data_quality_ready_car": data_quality_ready_car,
             "source_ready_for_user_car_pilot": ready_for_user_car_pilot,
-            "user_facing_ready_reason": "ok" if ready_for_user_car_pilot else f"experimental/user_eligible=false/status={cfg_status or 'unknown'}",
+            "user_facing_ready_reason": "ok" if ready_for_user_car_pilot else "/".join(not_ready_reasons) or "nao_pronta",
             "open_or_live_count": open_or_live,
             "with_auction_start_at_count": has_start,
             "with_auction_end_at_count": has_end,
