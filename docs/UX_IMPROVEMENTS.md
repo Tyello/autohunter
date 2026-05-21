@@ -25,8 +25,11 @@
 ### Próximo pacote recomendado
 
 P1 — Fechar o loop busca manual → rastreamento:
-- item 4.1 — adicionar botão `⭐ Rastrear` nos resultados de `/buscar`
+- item 4.1 — adicionar botão `⭐ Rastrear` nos resultados de `/buscar` — ✅ Concluído no PR #264
 - objetivo: permitir que o usuário faça uma busca pontual, encontre um anúncio interessante e comece a rastrear sem voltar ao menu
+
+Novo próximo recomendado:
+- item 1.2 — Resultado imediato após criar busca
 
 ---
 
@@ -404,12 +407,16 @@ def send_daily_limit_notice_http(user, limit: int, missed_count: int = 0):
 
 ## Bloco 4 — Rastreamento de anúncios
 
-### 4.1 Botão "⭐ Rastrear" não aparece em `/buscar`
+### 4.1 Botão "⭐ Rastrear" não aparece em `/buscar` — ✅ Concluído no PR #264
 
 **O problema hoje:**
 O botão "⭐ Rastrear" aparece nos alertas automáticos (notificações), mas não nos resultados de `/buscar` (busca manual). Usuário faz busca pontual, vê um anúncio interessante, e não tem como rastrear sem voltar ao menu.
 
-**O que fazer** — `handlers_search.py`, adicionar botão rastrear nos resultados de busca:
+> Status: implementado no `app/bot/handlers.py` (fluxo real de `/buscar`), com callbacks compactos e seguros.
+> - 1 wishlist ativa: `TRACK:ADDT:<token>`
+> - múltiplas wishlists ativas: `TRACK:CHOOSE:<listing_id>` com escolha e emissão de `TRACK:ADDT:<token>`
+
+**O que fazer** — `app/bot/handlers.py`, adicionar botão rastrear nos resultados de busca:
 
 ```python
 # Para cada listing nos resultados do /buscar:
@@ -635,8 +642,8 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 1.1 | Botão CTA no `/start` | ✅ Concluído PR #260 | Baixo | Alto — reduz abandono no onboarding |
 | 3.1 | Lista de buscas compacta | ✅ Concluído PR #260 | Baixo | Médio — reduz fricção no uso diário |
 | 6.2 | Tela vazia de anúncios rastreados | ✅ Concluído PR #260 | Baixo | Médio — reduz beco sem saída |
-| 4.1 | Botão rastrear nos resultados de `/buscar` | Próximo recomendado | Médio | Médio — fecha o loop busca → rastreio |
-| 1.2 | Resultado imediato após criar busca | Pendente | Médio | Alto — constrói confiança no primeiro uso |
+| 4.1 | Botão rastrear nos resultados de `/buscar` | ✅ Concluído PR #264 | Médio | Médio — fecha o loop busca → rastreio |
+| 1.2 | Resultado imediato após criar busca | Próximo recomendado | Médio | Alto — constrói confiança no primeiro uso |
 | 2.1 | Badge de recência com fallback para `created_at` | Pendente | Baixo | Alto — o argumento central do produto reaparece |
 | 2.3 | Contexto mínimo garantido em todo alerta | Pendente | Baixo | Médio — usuário sempre entende por que recebeu |
 | 3.3 | Limite diário com contexto e CTA suave | Pendente | Baixo | Alto para conversão Free → Premium |
