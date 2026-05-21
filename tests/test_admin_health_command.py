@@ -220,3 +220,13 @@ def test_admin_health_verbose_uses_chunking(monkeypatch, db):
 
     assert len(chunks) >= 2
     assert all(len(c) <= 200 for c in chunks)
+
+
+def test_admin_health_includes_wishlist_cache_line(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin.settings, "wishlist_summaries_cache_ttl_seconds", 0)
+
+    text = _run_health(monkeypatch, _Update(), [])
+
+    assert "Wishlist summaries cache:" in text
+    assert "off ttl=0s" in text

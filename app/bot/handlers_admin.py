@@ -55,7 +55,7 @@ from app.bot.admin_handlers_sources import (
 )
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.services.premium_subscription_service import activate_manual_premium
-from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries
+from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries, get_wishlist_summaries_cache_stats
 from app.services.auction_ingestion_service import inspect_auction_source, run_auction_ingestion
 from app.services.auction_matching_service import (
     debug_auction_lot_candidates_for_wishlist,
@@ -3090,6 +3090,19 @@ async def _admin_health(update: Update, raw_args: Optional[List[str]] = None):
         )
         if queued_old:
             lines.append(f"⚠️ sender possivelmente parado: queued_old={int(queued_old)} (>20m)")
+
+        cache_stats = get_wishlist_summaries_cache_stats()
+        lines.append("")
+        if cache_stats.get("cache_enabled"):
+            lines.append(
+                "Wishlist summaries cache: on "
+                f"size={cache_stats.get('size')} hits={cache_stats.get('hits')} misses={cache_stats.get('misses')} "
+                f"hit={cache_stats.get('hit_rate_pct')}% invalid={cache_stats.get('invalidations')} "
+                f"global_invalid={cache_stats.get('global_invalidations')} prune={cache_stats.get('prunes')} "
+                f"evict={cache_stats.get('evictions')} ttl={cache_stats.get('ttl_seconds')}s max={cache_stats.get('max_entries')}"
+            )
+        else:
+            lines.append(f"Wishlist summaries cache: off ttl={cache_stats.get('ttl_seconds')}s")
 
         # Last failures by source
         fail_rows = (

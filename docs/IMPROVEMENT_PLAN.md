@@ -478,3 +478,11 @@ app/scrapers/webmotors.py         → v1 legado
 ---
 
 *Documento gerado com base em análise estática completa de 548 arquivos Python, migrations Alembic e configurações de deploy. Data: 2026-05-21.*
+
+
+## P2-C — Observabilidade leve do cache de wishlist summaries
+
+- Status: implementado.
+- Cache de `get_wishlist_summaries` agora expõe métricas em memória (hits/misses/invalidations/prunes/evictions e snapshot de configuração).
+- `/admin health` agora mostra uma linha dedicada de estado/métricas do cache para validar impacto real em produção.
+- Objetivo desta etapa: medir ganho real antes de novas otimizações.
