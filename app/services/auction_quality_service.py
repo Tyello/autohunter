@@ -66,6 +66,15 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         (k or "other"): int(v)
         for k, v in db.query(AuctionLot.item_type, func.count(AuctionLot.id)).filter(AuctionLot.source == source).group_by(AuctionLot.item_type).all()
     }
+    invalid_or_other_count = int(
+        db.query(func.count(AuctionLot.id))
+        .filter(
+            AuctionLot.source == source,
+            or_(func.lower(func.coalesce(AuctionLot.status, "")) == "invalid", func.lower(func.coalesce(AuctionLot.item_type, "")) == "other"),
+        )
+        .scalar()
+        or 0
+    )
 
     with_title_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, _has_text(AuctionLot.title)).scalar() or 0)
     with_year_count = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.year.isnot(None)).scalar() or 0)
@@ -88,12 +97,22 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         or 0
     )
     allowed_item_types = get_auction_allowed_item_types(db, source)
-    car_lots = int(db.query(func.count(AuctionLot.id)).filter(AuctionLot.source == source, AuctionLot.item_type == "car").scalar() or 0)
+    car_lots = int(
+        db.query(func.count(AuctionLot.id))
+        .filter(AuctionLot.source == source, AuctionLot.item_type == "car", func.lower(func.coalesce(AuctionLot.status, "")) != "invalid")
+        .scalar()
+        or 0
+    )
     user_allowed_lots = 0
     if allowed_item_types:
         user_allowed_lots = int(
             db.query(func.count(AuctionLot.id))
-            .filter(AuctionLot.source == source, AuctionLot.item_type.in_(sorted(allowed_item_types)))
+            .filter(
+                AuctionLot.source == source,
+                AuctionLot.item_type.in_(sorted(allowed_item_types)),
+                func.lower(func.coalesce(AuctionLot.status, "")) != "invalid",
+                func.lower(func.coalesce(AuctionLot.item_type, "")) != "other",
+            )
             .scalar()
             or 0
         )
@@ -182,6 +201,7 @@ def _build_source_metrics(db: Session, source: str, now_utc: datetime, car_pilot
         "user_facing_ready_car": user_facing_ready_car,
         "user_facing_ready_reason": "; ".join(user_facing_reasons) if user_facing_reasons else "ok",
         "critical_warnings": critical_warnings,
+        "invalid_or_other_count": invalid_or_other_count,
         "car_pilot_window_hours": car_pilot_window_hours if car_pilot_window_hours > 0 else 48,
         "upcoming_count": upcoming_count,
         "open_or_live_count": open_or_live_count,

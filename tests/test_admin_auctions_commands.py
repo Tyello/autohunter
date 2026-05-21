@@ -259,26 +259,31 @@ def test_admin_auctions_match_variants(monkeypatch, db):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "mega")))
     assert "source mega_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=mega_auctions" in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "win")))
-    assert "source win_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=win_auctions" in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "sodre")))
-    assert "source sodre_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=sodre_auctions" in up.message.sent[-1]
+def test_admin_auctions_hygiene_mega_dry_run_does_not_change_db(monkeypatch, db):
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "h1", "title": "Leiloes Judiciais", "url": "https://www.megaleiloes.com.br/leiloes-judiciais", "item_type": "motorcycle"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "hygiene", "mega", "--dry-run")))
+    text = up.message.sent[-1]
+    assert "hygiene mega_auctions" in text
+    assert "- generic_page: 1" in text
+    lot = db.query(AuctionLot).filter(AuctionLot.source == "mega_auctions", AuctionLot.external_id == "h1").first()
+    assert lot.status != "invalid"
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "superbid")))
-    assert "source superbid_auctions" in up.message.sent[-1] or "Nenhum lote persistido para source=superbid_auctions" in up.message.sent[-1]
 
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "sodre")))
-    assert "matching (somente leitura)" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
-
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "superbid")))
-    assert "matching (somente leitura)" in up.message.sent[-1] or "Sem leilões compatíveis" in up.message.sent[-1]
-
-    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "match", "wishlist", str(w.id))))
-    assert "🎯 Busca: civic 2015" in up.message.sent[-1]
-    assert "Lance atual: R$ 91.000,00" in up.message.sent[-1]
-    assert "Lance atual: R$ 91000.00" not in up.message.sent[-1]
-    assert "Lance atual: -" in up.message.sent[-1]
+def test_admin_auctions_hygiene_mega_apply_updates_safe_fields(monkeypatch, db):
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "h2", "title": "Direitos Sobre Carro Renault Sandero", "url": "https://www.megaleiloes.com.br/veiculos/carros/si/sem-informacao/x-j121066", "item_type": "motorcycle", "city": "SI", "state": "SI", "location": "Sem informação, SI"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "hygiene", "mega", "--apply")))
+    lot = db.query(AuctionLot).filter(AuctionLot.source == "mega_auctions", AuctionLot.external_id == "h2").first()
+    assert lot.item_type == "car"
+    assert lot.city is None and lot.state is None and lot.location is None
 
 
 

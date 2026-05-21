@@ -185,3 +185,13 @@ def test_quality_win_with_status_and_end_still_not_user_facing_when_not_eligible
     assert src["data_quality_ready_car"] is True
     assert src["user_facing_ready_car"] is False
     assert "user_eligible=false" in src["user_facing_ready_reason"]
+
+
+def test_quality_excludes_invalid_or_other_from_car_and_user_allowed(db):
+    _seed(db, "mega_auctions", "m-ok", item_type="car", status="open", year=2019, url="https://mega/j1")
+    _seed(db, "mega_auctions", "m-invalid", item_type="car", status="invalid", year=2019, url="https://mega/j2")
+    _seed(db, "mega_auctions", "m-other", item_type="other", status="open", year=2019, url="https://mega/j3")
+    db.commit()
+    src = build_auction_quality_report(db, source="mega")["sources"][0]
+    assert src["car_lots"] == 1
+    assert src["user_allowed_lots"] == 1

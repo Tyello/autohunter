@@ -203,3 +203,29 @@ def test_mega_detail_valid_location_slug_is_populated():
     lot = mega.parse_mega_detail_html("<h1>Audi Q3 2016</h1>", "https://www.megaleiloes.com.br/veiculos/carros/sp/sao-bernardo-do-campo/x-j100004")
     assert lot.city == "Sao Bernardo Do Campo"
     assert lot.state == "SP"
+
+
+def test_audit_mega_persisted_lot_generic_page():
+    lot = type("Lot", (), {"url": "https://www.megaleiloes.com.br/leiloes-judiciais", "item_type": "motorcycle", "city": None, "state": None, "location": None})()
+    out = mega.audit_mega_persisted_lot(lot)
+    assert "generic_page" in out["issues"]
+    assert out["suggested_updates"]["status"] == "invalid"
+    assert out["suggested_updates"]["item_type"] == "other"
+
+
+def test_audit_mega_persisted_lot_item_type_mismatch_and_invalid_location():
+    lot = type("Lot", (), {"url": "https://www.megaleiloes.com.br/veiculos/carros/si/sem-informacao/direitos-j121066", "item_type": "motorcycle", "city": "SI", "state": "SI", "location": "Sem informação, SI"})()
+    out = mega.audit_mega_persisted_lot(lot)
+    assert "item_type_mismatch" in out["issues"]
+    assert "invalid_location" in out["issues"]
+    assert out["suggested_updates"]["item_type"] == "car"
+    assert out["suggested_updates"]["city"] is None
+    assert out["suggested_updates"]["state"] is None
+    assert out["suggested_updates"]["location"] is None
+
+
+def test_audit_mega_persisted_lot_valid_car_ok():
+    lot = type("Lot", (), {"url": "https://www.megaleiloes.com.br/veiculos/carros/sp/santos/carro-j121066", "item_type": "car", "city": "Santos", "state": "SP", "location": "Santos, SP"})()
+    out = mega.audit_mega_persisted_lot(lot)
+    assert out["ok"] is True
+    assert out["issues"] == []
