@@ -52,8 +52,11 @@ O estado efetivo de operação é runtime/DB-driven:
 ## Leitura recomendada
 
 - [`AGENTS.md`](AGENTS.md) — mapa mental curto para pessoas técnicas e IAs.
+- [`docs/LLM_CONTEXT.md`](docs/LLM_CONTEXT.md) — guia de contexto para qualquer LLM entender o projeto sem memória informal.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — documentação da arquitetura atual, camadas, fluxos e contratos operacionais.
 - [`docs/PROJECT_GUIDELINE.md`](docs/PROJECT_GUIDELINE.md) — documentação viva do runtime atual.
 - [`docs/AUCTION_RUNTIME.md`](docs/AUCTION_RUNTIME.md) — guia operacional específico de leilões.
 - [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md) — runbook operacional curto.
+- [`docs/DOCUMENTATION_AUDIT.md`](docs/DOCUMENTATION_AUDIT.md) — auditoria de docs vivos, históricos e candidatos a arquivamento/remoção.
 - [`docs/LEGACY_INVENTORY.md`](docs/LEGACY_INVENTORY.md) — inventário de legado/compatibilidade e risco de remoção.
 - [`docs/BACKUP_RESTORE.md`](docs/BACKUP_RESTORE.md) — backup/restore operacional mínimo.
