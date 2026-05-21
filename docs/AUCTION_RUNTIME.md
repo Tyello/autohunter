@@ -181,6 +181,24 @@ O pipeline de notificação de leilão só deve montar item se todos os gates pa
 10. Dedupe ainda não enviado para a mesma wishlist/source/lote.
 11. Limite diário por usuário não atingido.
 
+
+
+### Scoring textual (modelos automotivos)
+
+O scoring textual de leilões prioriza match por token (não por substring solta) e aplica boost para modelos compostos/alfanuméricos quando há evidência forte no título do lote.
+
+Regras operacionais:
+- Não reduzimos `min_score` global como workaround de qualidade textual.
+- Se todos os tokens relevantes da busca aparecem no título, o score recebe piso de match forte.
+- Se a frase normalizada da busca aparece no título normalizado, o boost é ainda maior.
+- Tokens curtos automotivos relevantes são preservados (ex.: `x1`, `c4`, `si`, `gti`, `l200`, `208`).
+- Stopwords e termos genéricos não devem induzir falso positivo.
+
+Exemplos esperados de match forte:
+- `L200 Triton` ↔ `L200 TRITON 3.5 G`
+- `Peugeot 208` ↔ `208 GRIFFE AT`
+- `BMW X1` ↔ `X1 S20IACTIVE FLEX`
+- `C4 Pallas` ↔ `C4 PALLAS20EAF`
 Contadores operacionais relevantes:
 
 - `skipped_score_below_min`
