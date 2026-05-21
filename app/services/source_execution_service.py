@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.core.settings import settings
@@ -17,7 +17,7 @@ from app.services.source_backoff_service import is_source_allowed, mark_blocked,
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context
 from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
-from app.services.wishlist_sources_service import allowed_sources_for_wishlists
+from app.services.wishlist_sources_service import get_eligible_wishlists_for_source
 from app.services.source_execution_helpers import build_scrape_dispatch, build_run_payload
 from app.sources.registry import get_source
 from app.sources.flags import read_source_impl_flags
@@ -94,33 +94,7 @@ def _get_cfg(db: Session, source: str) -> Optional[SourceConfig]:
 
 
 def _wishlist_eligibility_snapshot(db: Session, src: str) -> tuple[list[Wishlist], dict[str, int]]:
-    """Return active wishlists plus diagnostics for run-all eligibility filters.
-
-    `is_active` may contain NULL on legacy/inconsistent datasets; for scheduler
-    purposes we treat NULL as active (only explicit `False` is disabled).
-    """
-    total_wishlists = int(db.query(Wishlist.id).count())
-    active_wishlists = (
-        db.query(Wishlist)
-        .options(joinedload(Wishlist.filters))
-        .filter(Wishlist.is_active.is_not(False))
-        .all()
-    )
-
-    allowed_map = allowed_sources_for_wishlists(db, active_wishlists)
-    eligible = [w for w in active_wishlists if src in (allowed_map.get(w.id) or set())]
-
-    stats = {
-        "total_wishlists": total_wishlists,
-        "active_wishlists": len(active_wishlists),
-        "eligible_wishlists": len(eligible),
-        "filtered_by_disabled": max(0, total_wishlists - len(active_wishlists)),
-        "filtered_by_source_binding": max(0, len(active_wishlists) - len(eligible)),
-        # Not enforced in this pipeline yet; keep explicit for observability.
-        "filtered_by_plan": 0,
-        "filtered_by_user_state": 0,
-    }
-    return eligible, stats
+    return get_eligible_wishlists_for_source(db, src)
 
 
 def run_source_for_all_wishlists(
