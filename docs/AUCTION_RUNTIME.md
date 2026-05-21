@@ -282,8 +282,11 @@ Checks esperados:
 - gates de qualidade seguros;
 - categorias user_eligible permanecem somente `car`;
 - resumo por source inclui `car_lots`, `user_allowed_lots` e `source_ready_for_user_car_pilot`;
+- readiness separa elegibilidade/configuração (ex.: `status`, `user_eligible`, categorias permitidas) de frescor/qualidade de dados (lote recente com URL+lance+ano);
 - readiness usa `auction_notification_settings.max_lot_age_hours` para definir a janela de lote recente, com fallback seguro de 48h;
 - source só conta como pronta para piloto `car` se tiver pelo menos um lote `car` dentro dessa janela operacional, com URL, lance e ano; imóveis/motos/caminhões/pesados não contam para readiness do piloto `car`;
+- source `production_ready` pode aparecer temporariamente como não pronta se os dados estiverem stale/insuficientes; nesse cenário o motivo deve apontar qualidade/frescor de dados, não elegibilidade;
+- próximo passo operacional para source stale no piloto `car`: executar `/admin auctions run <source> --enrich` e revalidar `/admin auctions quality` + `/admin auctions readiness`;
 - sources funcionais sem `car` recente geram warning, por exemplo `win_auctions funcional, mas sem lotes car recentes. Fora do piloto de carros.`;
 - sources com carros sem lance útil geram warning, por exemplo `mega_auctions tem carros, mas sem lance inicial/atual. Manter experimental.`.
 

@@ -180,6 +180,71 @@ def test_readiness_vip_car_with_bid_counts_as_car_pilot_ready(db):
     assert "vip_auctions" in out["summary"]["car_pilot_ready_sources"]
 
 
+def test_readiness_vip_production_ready_stale_reason_is_data_not_experimental(db):
+    db.add(
+        SourceConfig(
+            source="vip_auctions",
+            source_type="auction",
+            is_enabled=True,
+            user_eligible=True,
+            status="production_ready",
+            extra={"allowed_item_types": ["car"]},
+        )
+    )
+    db.add(
+        AuctionLot(
+            source="vip_auctions",
+            external_id="vip-stale",
+            item_type="car",
+            year=2021,
+            url="https://vip/stale",
+            current_bid=20000,
+            updated_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    out = build_auction_notification_readiness(db)
+    vip_summary = out["summary"]["source_car_pilot"]["vip_auctions"]
+    reason = vip_summary["user_facing_ready_reason"]
+    assert "vip_auctions" not in out["summary"]["car_pilot_ready_sources"]
+    assert "experimental" not in reason
+    assert "user_eligible=false" not in reason
+    assert ("dados_car_insuficientes" in reason) or ("sem_lote_car_recente" in reason)
+
+
+def test_readiness_vip_production_ready_recent_data_is_user_facing_ready(db):
+    db.add(
+        SourceConfig(
+            source="vip_auctions",
+            source_type="auction",
+            is_enabled=True,
+            user_eligible=True,
+            status="production_ready",
+            extra={"allowed_item_types": ["car"]},
+        )
+    )
+    db.add(
+        AuctionLot(
+            source="vip_auctions",
+            external_id="vip-recent",
+            item_type="car",
+            year=2023,
+            url="https://vip/recent",
+            current_bid=75000,
+            updated_at=datetime.now(timezone.utc),
+            status="live",
+            auction_start_at=datetime.now(timezone.utc),
+            auction_end_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+    out = build_auction_notification_readiness(db)
+    assert "vip_auctions" in out["summary"]["car_pilot_ready_sources"]
+    vip_summary = out["summary"]["source_car_pilot"]["vip_auctions"]
+    assert vip_summary["user_facing_ready_reason"] == "ok"
+
+
 def test_readiness_win_not_user_facing_even_with_recent_car(db):
     db.add(SourceConfig(source="win_auctions", source_type="auction", is_enabled=True, user_eligible=False, status="experimental_functional_vehicle", extra={"allowed_item_types":["car"]}))
     db.add(AuctionLot(source="win_auctions", external_id="win-car", item_type="car", year=2022, initial_bid=10000, url="https://win/car", status="live", auction_start_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc)))
@@ -192,3 +257,38 @@ def test_readiness_win_not_user_facing_even_with_recent_car(db):
     assert win_summary["with_auction_start_at_count"] == 1
     assert win_summary["with_auction_end_at_count"] == 0
     assert "win_auctions" not in out["summary"]["car_pilot_ready_sources"]
+    assert "experimental/status=experimental_functional_vehicle" in win_summary["user_facing_ready_reason"]
+    assert "user_eligible=false" in win_summary["user_facing_ready_reason"]
+
+
+def test_readiness_mega_experimental_reason_unchanged(db):
+    db.add(
+        SourceConfig(
+            source="mega_auctions",
+            source_type="auction",
+            is_enabled=True,
+            user_eligible=False,
+            status="experimental",
+            extra={"allowed_item_types": ["car"]},
+        )
+    )
+    db.add(
+        AuctionLot(
+            source="mega_auctions",
+            external_id="mega-car-live",
+            item_type="car",
+            year=2021,
+            initial_bid=15000,
+            url="https://mega/live",
+            status="live",
+            auction_start_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+    out = build_auction_notification_readiness(db)
+    mega_summary = out["summary"]["source_car_pilot"]["mega_auctions"]
+    assert mega_summary["source_ready_for_user_car_pilot"] is False
+    assert "experimental/status=experimental" in mega_summary["user_facing_ready_reason"]
+    assert "user_eligible=false" in mega_summary["user_facing_ready_reason"]
+    assert "sem_encerramento" in mega_summary["user_facing_ready_reason"]
