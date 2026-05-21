@@ -102,8 +102,19 @@ def test_parse_mega_fallback_alt_slug_absolute_url_and_external_id():
 
 def test_mega_helpers_item_type_and_compact_year():
     assert mega.infer_mega_item_type("Carro Hyundai I30 20 20092010 J122572", "https://www.megaleiloes.com.br/veiculos/carros/lote/x") == "car"
+    assert mega.infer_mega_item_type("Direitos Sobre Carro Renault Sandero Expr 16 2015", "https://www.megaleiloes.com.br/veiculos/carros/sp/santos/lote-j123123") == "car"
+    assert mega.infer_mega_item_type("Leiloes Judiciais", "https://www.megaleiloes.com.br/leiloes-judiciais") != "motorcycle"
     assert mega.parse_mega_compact_year("Carro Hyundai I30 20 20092010 J122572") == 2009
     assert mega.parse_mega_compact_year("Carro Volkswagen Gol 10 20122013 J123409") == 2012
+
+
+def test_mega_listing_rejects_generic_pages_and_missing_j_id():
+    html = """
+    <article class="card"><a href="/leiloes-judiciais">ver</a><h3>Leiloes Judiciais</h3></article>
+    <article class="card"><a href="/veiculos/carros/sp/sao-paulo/carro-hyundai">ver</a><h3>Carro Hyundai</h3></article>
+    """
+    lots = mega.parse_mega_listing_html(html, limit=10, listing_url="https://www.megaleiloes.com.br/veiculos/carros")
+    assert lots == []
 
 
 def test_mega_detail_kombi_fixture_extracts_minimum_fields():
@@ -179,3 +190,16 @@ def test_mega_detail_online_generic_and_logo_banner_image_are_ignored():
     lot = mega.parse_mega_detail_html(html, "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j100002")
     assert lot.status == "unknown"
     assert lot.thumbnail_url is None
+
+
+def test_mega_detail_invalid_location_slug_is_not_populated():
+    lot = mega.parse_mega_detail_html("<h1>Fiat Fiorino 2018</h1>", "https://www.megaleiloes.com.br/veiculos/carros/si/sem-informacao/x-j100003")
+    assert lot.city is None
+    assert lot.state is None
+    assert lot.location is None
+
+
+def test_mega_detail_valid_location_slug_is_populated():
+    lot = mega.parse_mega_detail_html("<h1>Audi Q3 2016</h1>", "https://www.megaleiloes.com.br/veiculos/carros/sp/sao-bernardo-do-campo/x-j100004")
+    assert lot.city == "Sao Bernardo Do Campo"
+    assert lot.state == "SP"

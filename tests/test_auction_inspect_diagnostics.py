@@ -40,3 +40,9 @@ def test_diagnostics_exposes_endpoint_candidates_list():
     assert not any('cdnjs' in x for x in endpoints)
     assert any('/item/4042/detalhes' in x for x in d['hints']['lot_detail_candidates'])
     assert any('watermark/bens' in x for x in d['hints']['lot_image_candidates'])
+
+
+def test_diagnostics_does_not_include_js_as_image_candidate():
+    html = '<script src="https://d123.cloudfront.net/loader-scripts/main.js"></script><img src="https://d123.cloudfront.net/watermark/bens/1.jpg">'
+    d = build_auction_source_fetch_diagnostics(_Resp(text=html), html, 'https://x/list')
+    assert not any(x.endswith(".js") for x in d["hints"]["lot_image_candidates"])
