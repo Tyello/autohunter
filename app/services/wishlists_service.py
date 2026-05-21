@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 import uuid
 import logging
@@ -29,6 +30,7 @@ from app.services.source_operational_policy import (
 from app.services.system_logs_service import log
 from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
+from app.core.settings import settings
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
 from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type, normalize_doors
 from app.sources.registry import get_source
@@ -36,6 +38,31 @@ from app.services.plan_capabilities import get_plan_capabilities, resolve_plan_c
 
 
 logger = logging.getLogger(__name__)
+_WISHLIST_SUMMARIES_CACHE: dict[str, tuple[datetime, list[dict[str, Any]]]] = {}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def invalidate_wishlist_summaries_cache(user_id=None) -> None:
+    if user_id is None:
+        _WISHLIST_SUMMARIES_CACHE.clear()
+        return
+    _WISHLIST_SUMMARIES_CACHE.pop(str(user_id), None)
+
+
+def _prune_wishlist_summaries_cache(now: datetime, ttl_seconds: int, max_entries: int) -> None:
+    if ttl_seconds > 0:
+        expired_keys = [k for k, (ts, _) in _WISHLIST_SUMMARIES_CACHE.items() if (now - ts).total_seconds() > ttl_seconds]
+        for key in expired_keys:
+            _WISHLIST_SUMMARIES_CACHE.pop(key, None)
+    if max_entries <= 0:
+        _WISHLIST_SUMMARIES_CACHE.clear()
+        return
+    while len(_WISHLIST_SUMMARIES_CACHE) > max_entries:
+        oldest_key = min(_WISHLIST_SUMMARIES_CACHE.items(), key=lambda item: item[1][0])[0]
+        _WISHLIST_SUMMARIES_CACHE.pop(oldest_key, None)
 
 # Fallback (quando não existir plano/assinatura no banco ainda)
 DEFAULT_MAX_WISHLISTS_PER_USER = 2
@@ -430,17 +457,11 @@ def list_wishlists(db: Session, user_id):
 
 
 
-def get_wishlist_summaries(db: Session, user_id):
-    """Return lightweight operational summary for each user wishlist.
-
-    v2 keeps low-cost signals only (filters + tracked slots + active flag + notifications sent 24h).
-    """
+def _compute_wishlist_summaries(db: Session, user_id) -> list[dict[str, Any]]:
     wishlists = list_wishlists(db, user_id)
     if not wishlists:
         return []
-
     wishlist_ids = [w.id for w in wishlists]
-
     filter_counts = {
         wishlist_id: count
         for wishlist_id, count in (
@@ -460,7 +481,6 @@ def get_wishlist_summaries(db: Session, user_id):
         filters_by_wishlist[row.wishlist_id].append(
             {"field": row.field, "operator": row.operator, "value": row.value}
         )
-
     tracked_counts = {
         wishlist_id: count
         for wishlist_id, count in (
@@ -470,8 +490,7 @@ def get_wishlist_summaries(db: Session, user_id):
             .all()
         )
     }
-
-    window_start = datetime.now(timezone.utc) - timedelta(hours=24)
+    window_start = _utcnow() - timedelta(hours=24)
     notifications_24h_counts = {
         wishlist_id: count
         for wishlist_id, count in (
@@ -484,7 +503,6 @@ def get_wishlist_summaries(db: Session, user_id):
             .all()
         )
     }
-
     out = []
     for i, wl in enumerate(wishlists, start=1):
         out.append({
@@ -502,6 +520,30 @@ def get_wishlist_summaries(db: Session, user_id):
     return out
 
 
+def get_wishlist_summaries(db: Session, user_id):
+    """Return lightweight operational summary for each user wishlist.
+
+    v2 keeps low-cost signals only (filters + tracked slots + active flag + notifications sent 24h).
+    notifications_24h_count can be stale for up to TTL seconds to avoid menu-driven query bursts.
+    """
+    ttl_seconds = int(getattr(settings, "wishlist_summaries_cache_ttl_seconds", 0) or 0)
+    max_entries = int(getattr(settings, "wishlist_summaries_cache_max_entries", 0) or 0)
+    cache_key = str(user_id)
+    now = _utcnow()
+    if ttl_seconds <= 0:
+        return _compute_wishlist_summaries(db, user_id)
+    cached = _WISHLIST_SUMMARIES_CACHE.get(cache_key)
+    if cached:
+        ts, payload = cached
+        if (now - ts).total_seconds() <= ttl_seconds:
+            return copy.deepcopy(payload)
+        _WISHLIST_SUMMARIES_CACHE.pop(cache_key, None)
+    computed = _compute_wishlist_summaries(db, user_id)
+    _WISHLIST_SUMMARIES_CACHE[cache_key] = (now, computed)
+    _prune_wishlist_summaries_cache(now, ttl_seconds, max_entries)
+    return copy.deepcopy(computed)
+
+
 def set_wishlist_active_state(db: Session, user_id, wishlist_index: int, is_active: bool) -> tuple[bool, str]:
     wishlists = list_wishlists(db, user_id)
     if wishlist_index < 1 or wishlist_index > len(wishlists):
@@ -510,6 +552,7 @@ def set_wishlist_active_state(db: Session, user_id, wishlist_index: int, is_acti
     wl.is_active = bool(is_active)
     db.add(wl)
     db.commit()
+    invalidate_wishlist_summaries_cache(user_id)
     return True, wl.query
 
 def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = True, include_auctions: bool = False):
@@ -550,6 +593,7 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
     except SQLAlchemyError:
         db.rollback()
         return False, "Erro ao salvar wishlist. Tente novamente."
+    invalidate_wishlist_summaries_cache(user_id)
 
     filters = []
     # IMPORTANTE: year range é INCLUSIVO => gte/lte
@@ -578,12 +622,14 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
         db.rollback()
 
     if not enqueue_initial_run:
+        invalidate_wishlist_summaries_cache(user_id)
         return True, (
             f"✅ Wishlist criada: {cleaned_query}\n\n"
             "Monitoramento salvo. A primeira busca será disparada quando o fluxo guiado concluir os filtros."
         )
 
     run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
+    invalidate_wishlist_summaries_cache(user_id)
 
     if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
         return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
@@ -920,6 +966,7 @@ def remove_wishlist(db: Session, user_id, index: int):
     except SQLAlchemyError:
         db.rollback()
         return False, "Erro ao remover wishlist por falha no banco de dados."
+    invalidate_wishlist_summaries_cache(user_id)
     return True, "Wishlist removida."
 
 
@@ -945,6 +992,7 @@ def remove_all_wishlists(db: Session, user_id):
     except SQLAlchemyError:
         db.rollback()
         return False, "Erro ao remover wishlists por falha no banco de dados."
+    invalidate_wishlist_summaries_cache(user_id)
     return True, f"{len(wishlists)} wishlists removidas."
 
 def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
@@ -962,6 +1010,9 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     db.add(row)
     try:
         db.commit()
+        wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
+        if wishlist:
+            invalidate_wishlist_summaries_cache(wishlist.user_id)
         return True, "Filtro adicionado."
     except Exception:
         db.rollback()
@@ -1026,8 +1077,11 @@ def remove_filter(db: Session, wishlist_id, index: int):
         return False, "Número inválido. Use /wishlist_filter_list <n>"
 
     f = filters[index - 1]
+    wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
     db.delete(f)
     db.commit()
+    if wishlist:
+        invalidate_wishlist_summaries_cache(wishlist.user_id)
     return True, "Filtro removido."
 
 

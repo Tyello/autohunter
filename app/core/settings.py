@@ -147,6 +147,8 @@ class Settings(BaseSettings):
     tracking_price_drop_alert_cooldown_hours: int = 24
     tracking_price_drop_alert_min_amount: int = 500
     tracking_price_drop_alert_min_pct: float = 1.0
+    wishlist_summaries_cache_ttl_seconds: int = 10
+    wishlist_summaries_cache_max_entries: int = 512
 
     # Auction notification pilot job (safe defaults)
     auction_notifications_enabled: bool = False
