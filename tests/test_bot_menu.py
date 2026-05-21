@@ -283,7 +283,15 @@ def test_callback_menu_tracked_empty_slots(monkeypatch):
     monkeypatch.setattr(
         handlers_core,
         "list_tracked_listings",
-        lambda _db, **kwargs: (True, "📌 Rastreados da wishlist 1 — civic\n1) (vazio)\n2) (vazio)\n3) (vazio)"),
+        lambda _db, **kwargs: (
+            True,
+            "Busca 1 — civic\n"
+            "Uso do plano: 0/3 rastreados\n"
+            "\nSlot 1 — vazio\nPara usar esse espaço, toque em ⭐ Rastrear em um anúncio.\n"
+            "\nSlot 2 — vazio\nPara usar esse espaço, toque em ⭐ Rastrear em um anúncio.\n"
+            "\nSlot 3 — vazio\nPara usar esse espaço, toque em ⭐ Rastrear em um anúncio.\n"
+            "Use /wishlist_track_remove <n> <slot>",
+        ),
     )
     q = _CallbackQuery("MENU:TRACKED")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
@@ -298,11 +306,26 @@ def test_callback_menu_tracked_keeps_real_content(monkeypatch):
     monkeypatch.setattr(
         handlers_core,
         "list_tracked_listings",
-        lambda _db, **kwargs: (True, "📌 Rastreados da wishlist 1 — civic\n1) https://example.com/ad/123"),
+        lambda _db, **kwargs: (
+            True,
+            "Busca 1 — civic\n"
+            "Uso do plano: 1/3 rastreados\n"
+            "\nSlot 1 — Civic Si 2008\n"
+            "Preço inicial: R$ 100.000\n"
+            "Preço atual: R$ 99.000\n"
+            "Variação: Caiu R$ 1.000\n"
+            "Status: ativo\n"
+            "Última vez visto: 2026-05-21 10:00 UTC\n"
+            "Alertas automáticos: ativos\n"
+            "\nSlot 2 — vazio\nPara usar esse espaço, toque em ⭐ Rastrear em um anúncio.\n"
+            "\nSlot 3 — vazio\nPara usar esse espaço, toque em ⭐ Rastrear em um anúncio.\n"
+            "Use /wishlist_track_remove <n> <slot>",
+        ),
     )
     q = _CallbackQuery("MENU:TRACKED")
     asyncio.run(handlers_core.cb_menu(_Update(q), types.SimpleNamespace()))
-    assert "https://example.com/ad/123" in q.edits[-1]
+    assert "Slot 1 — Civic Si 2008" in q.edits[-1]
+    assert "Preço atual: R$ 99.000" in q.edits[-1]
 
 
 def test_callback_menu_filters_legacy_redirect(monkeypatch):

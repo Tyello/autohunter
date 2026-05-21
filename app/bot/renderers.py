@@ -171,8 +171,16 @@ def render_all_tracked_listings(wishlists, tracked_messages: list[str], plan_usa
             "Quando receber ou encontrar um anúncio interessante, toque em ⭐ Rastrear para acompanhar preço e status."
         )
 
-    has_real_tracked = any("(vazio)" not in str(msg or "").lower() for msg in tracked_messages or [])
-    if tracked_messages and not has_real_tracked:
+    slot_lines: list[str] = []
+    for message in tracked_messages or []:
+        for raw_line in str(message or "").splitlines():
+            line = raw_line.strip()
+            if line.lower().startswith("slot "):
+                slot_lines.append(line.lower())
+
+    has_slot_details = bool(slot_lines)
+    all_slots_empty = has_slot_details and all("vazio" in line for line in slot_lines)
+    if tracked_messages and all_slots_empty:
         return (
             "⭐ Anúncios rastreados\n\n"
             "Você ainda não está acompanhando nenhum anúncio.\n\n"
