@@ -78,7 +78,7 @@ def test_start_creates_or_loads_user_without_deleting_wishlist(monkeypatch):
     msg = update.message.sent[0][0]
     assert "👋 Garagem Alvo" in msg
     assert "Seu monitoramento já está ativo." in msg
-    assert "Use /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual." in msg
+    assert "Use o botão abaixo ou /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual." in msg
     assert "/wishlist_add" not in msg
     assert "/wishlist_help" not in msg
 
@@ -136,6 +136,6 @@ def test_start_without_wishlist_points_to_guided_menu(monkeypatch):
     msg = update.message.sent[0][0]
     assert "👋 Bem-vindo ao Garagem Alvo" in msg
     assert "O buscador do entusiasta." in msg
-    assert "toque em /menu e depois em ➕ Criar busca." in msg
+    assert "toque no botão abaixo e crie sua primeira busca." in msg
     assert "/wishlist_add" not in msg
     assert "/wishlist_help" not in msg

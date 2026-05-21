@@ -113,7 +113,7 @@ def render_start_text(active_wishlists_count: int) -> str:
         return (
             "👋 Garagem Alvo\n\n"
             "Seu monitoramento já está ativo.\n\n"
-            "Use /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
+            "Use o botão abaixo ou /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
         )
     return (
         "👋 Bem-vindo ao Garagem Alvo\n\n"
@@ -121,8 +121,12 @@ def render_start_text(active_wishlists_count: int) -> str:
         "Crie buscas para carros especiais, versões raras e boas bases de projeto.\n"
         "A gente monitora anúncios e te avisa aqui no Telegram quando aparecer algo compatível.\n\n"
         "Para começar:\n"
-        "toque em /menu e depois em ➕ Criar busca."
+        "toque no botão abaixo e crie sua primeira busca."
     )
+
+
+def _plural_pt(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
 
 
 def render_user_wishlists(wishlists) -> str:
@@ -137,19 +141,15 @@ def render_user_wishlists(wishlists) -> str:
         for item in wishlists:
             status_icon = "✅" if item.get("is_active", True) else "⏸️"
             labels = _friendly_wishlist_filters(item.get("filters", []))
-            parts = [f"{len(labels)} filtros" if labels else "sem filtros"]
+            parts = [_plural_pt(len(labels), "filtro", "filtros") if labels else "sem filtros"]
 
             tracked_count = int(item.get("tracked_count", 0) or 0)
             if tracked_count > 0:
-                parts.append(f"{tracked_count} rastreado" if tracked_count == 1 else f"{tracked_count} rastreados")
+                parts.append(_plural_pt(tracked_count, "rastreado", "rastreados"))
 
             notifications_24h_count = int(item.get("notifications_24h_count", 0) or 0)
             if notifications_24h_count > 0:
-                parts.append(
-                    f"{notifications_24h_count} alerta hoje"
-                    if notifications_24h_count == 1
-                    else f"{notifications_24h_count} alertas hoje"
-                )
+                parts.append(_plural_pt(notifications_24h_count, "alerta hoje", "alertas hoje"))
 
             lines.append(f"{status_icon} {item['index']}. {item['query']} • " + " • ".join(parts))
         lines.extend(["", "Escolha uma busca para gerenciar:"])

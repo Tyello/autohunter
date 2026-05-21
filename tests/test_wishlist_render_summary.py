@@ -16,7 +16,7 @@ def test_render_user_wishlists_summary_counts_filters_and_tracked():
     ])
     assert "🎯 Minhas buscas" in text
     assert "✅ 1. civic si • sem filtros" in text
-    assert "✅ 2. miata • 1 filtros • 1 rastreado" in text
+    assert "✅ 2. miata • 1 filtro • 1 rastreado" in text
     assert "Escolha uma busca para gerenciar:" in text
 
 
@@ -48,7 +48,7 @@ def test_render_user_wishlists_legacy_numeric_values_are_tolerant():
             {"field": "year", "operator": "gte", "value": "abc"},
         ], "tracked_count": 0, "tracked_limit": 3},
     ])
-    assert "filtros" in text
+    assert "3 filtros" in text
 
 
 def test_render_user_wishlists_mixed_valid_invalid_filters_do_not_break():
@@ -59,7 +59,7 @@ def test_render_user_wishlists_mixed_valid_invalid_filters_do_not_break():
             {"field": "city", "operator": "eq", "value": "São Paulo"},
         ], "tracked_count": 0, "tracked_limit": 3},
     ])
-    assert "filtros" in text
+    assert "2 filtros" in text
 
 
 def test_render_user_wishlists_single_year_range_is_friendly():
@@ -69,7 +69,7 @@ def test_render_user_wishlists_single_year_range_is_friendly():
             {"field": "year", "operator": "lte", "value": "2019"},
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "filtros" in text
+    assert "1 filtro" in text
 
 
 def test_render_wishlist_filters_single_year_range_is_friendly():
@@ -100,7 +100,7 @@ def test_render_user_wishlists_filters_accept_object_shape():
             SimpleNamespace(value="broken"),
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "filtros" in text
+    assert "2 filtros" in text
 
 
 def test_render_user_wishlists_filters_mixed_dict_and_object():
@@ -110,4 +110,4 @@ def test_render_user_wishlists_filters_mixed_dict_and_object():
             SimpleNamespace(field="year", operator="lte", value="2020"),
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "filtros" in text
+    assert "1 filtro" in text
