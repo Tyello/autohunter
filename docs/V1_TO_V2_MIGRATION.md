@@ -247,8 +247,9 @@ Manter fora do escopo de migração curta v1→v2 até decidir estratégia espec
 `/admin runall <source> --impl dual` **não é suportado** no parser atual de `/admin runall`.
 
 ### Caminho correto hoje
-- Alterar `source_configs.extra.impl` para `v1`, `v2` ou `dual` via DB/admin tooling existente para `source_configs`.
-- Executar `/admin runall <source>` sem flag `--impl` para forçar run com a configuração persistida.
+- Alterar `source_configs.extra.impl` diretamente no banco, com cuidado operacional, por SQL controlado/script administrativo/migration pontual.
+- Hoje não há comando Telegram/admin seguro para alterar `source_configs.extra.impl`.
+- Depois da alteração persistida, executar `/admin runall <source>` sem flag `--impl`.
 
 ### Observação
 Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa específica para criar comando admin seguro e auditável.
