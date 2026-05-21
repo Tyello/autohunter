@@ -135,3 +135,48 @@ def test_claim_eager_loads_user_and_listing(db):
     assert row.user.id == user.id
     assert row.car_listing is not None
     assert row.car_listing.id == listing.id
+
+
+from sqlalchemy import event
+from sqlalchemy.dialects import postgresql
+
+
+def test_claim_with_for_update_sql_postgres_has_no_outer_join():
+    now = datetime.now(timezone.utc)
+    q = (
+        Notification.__table__.select()
+        .where(Notification.status == "queued")
+        .where((Notification.next_attempt_at.is_(None)) | (Notification.next_attempt_at <= now))
+        .order_by(Notification.created_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(10)
+    )
+    sql = str(q.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "LEFT OUTER JOIN" not in sql
+
+
+def test_claim_query_keeps_main_select_without_outer_join_and_eager_loads(db):
+    user, wl, listing = _seed(db)
+    queue_notifications_for_matches(db, wl, [listing])
+    db.commit()
+
+    statements: list[str] = []
+
+    def _before_cursor_execute(_conn, _cursor, statement, _params, _ctx, _executemany):
+        statements.append(statement)
+
+    event.listen(db.bind, "before_cursor_execute", _before_cursor_execute)
+    try:
+        row = claim_queued_notifications(db, owner="w", batch_size=1)[0]
+    finally:
+        event.remove(db.bind, "before_cursor_execute", _before_cursor_execute)
+
+    assert row.user is not None
+    assert row.user.id == user.id
+    assert row.car_listing is not None
+    assert row.car_listing.id == listing.id
+
+    lock_selects = [s for s in statements if "FOR UPDATE" in s.upper()]
+    if lock_selects:
+        assert all("LEFT OUTER JOIN" not in s.upper() for s in lock_selects)

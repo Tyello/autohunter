@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.settings import settings
 from app.models.notification import Notification
@@ -76,8 +76,8 @@ def claim_queued_notifications(
         .filter((Notification.next_attempt_at.is_(None)) | (Notification.next_attempt_at <= now))
         .order_by(Notification.created_at.asc())
         .options(
-            joinedload(Notification.user),
-            joinedload(Notification.car_listing),
+            selectinload(Notification.user),
+            selectinload(Notification.car_listing),
         )
     )
     try:
