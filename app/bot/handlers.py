@@ -33,6 +33,7 @@ from app.services.plan_capabilities import resolve_plan_capabilities
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.models.wishlist import Wishlist
 from app.services.admin_alerts_service import send_admin_text
+from app.services.tracking_callback_token_service import issue_tracking_callback_token
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
@@ -52,7 +53,8 @@ async def _notify_upgrade_intent_admin_safe(admin_msg: str, *, chat_id: int, pla
 
 def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, sources: list[str] | None) -> tuple[list[dict], dict]:
     with SessionLocal() as db:
-        _user = get_or_create_user_by_chat(db, chat_id, username)
+        user = get_or_create_user_by_chat(db, chat_id, username)
+        active_wishlists = [wl for wl in list_wishlists(db, user.id) if bool(getattr(wl, "is_active", True))]
         parsed = parse_wishlist_query_with_implicit_filters(query)
         cleaned_query, extra_price_filters = _extract_extra_price_filters(parsed.cleaned_query)
         cleaned_query, state_filters = _extract_state_filter_from_query(cleaned_query)
@@ -79,10 +81,27 @@ def _run_manual_search_sync(*, chat_id: int, username: str | None, query: str, s
 
             sres = score_ad(item, pseudo_wishlist, ms)
             payload = format_ad_message(_AdView(item, score_v2=sres.total, score_breakdown=sres.to_dict()))
+            inline_keyboard = payload.inline_keyboard or []
+            if active_wishlists and getattr(item, "id", None):
+                if len(active_wishlists) == 1:
+                    token = issue_tracking_callback_token(
+                        user_id=str(user.id),
+                        wishlist_id=str(active_wishlists[0].id),
+                        listing_id=str(item.id),
+                    )
+                    inline_keyboard = [
+                        *inline_keyboard,
+                        [{"text": "⭐ Rastrear", "callback_data": f"TRACK:ADDT:{token}"}],
+                    ]
+                else:
+                    inline_keyboard = [
+                        *inline_keyboard,
+                        [{"text": "⭐ Rastrear", "callback_data": f"TRACK:CHOOSE:{item.id}"}],
+                    ]
             payloads.append(
                 {
                     "text": payload.text,
-                    "inline_keyboard": payload.inline_keyboard or [],
+                    "inline_keyboard": inline_keyboard,
                 }
             )
         source_counts: dict[str, int] = {}

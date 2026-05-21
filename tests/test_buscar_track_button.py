@@ -42,6 +42,7 @@ def test_buscar_responds_immediately(monkeypatch):
 def test_run_manual_search_sync_preserves_open_link_button(monkeypatch):
     monkeypatch.setattr(handlers, "SessionLocal", lambda: _Session())
     monkeypatch.setattr(handlers, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers, "list_wishlists", lambda *_: [])
     monkeypatch.setattr(
         handlers,
         "manual_search",
@@ -59,6 +60,79 @@ def test_run_manual_search_sync_preserves_open_link_button(monkeypatch):
     assert payloads
     assert debug["cleaned_query"] == "civic"
     assert payloads[0]["inline_keyboard"][0][0]["url"] == "https://x"
+    assert all(b.get("text") != "⭐ Rastrear" for row in payloads[0]["inline_keyboard"] for b in row)
+
+
+def test_run_manual_search_sync_one_active_wishlist_adds_direct_track_button(monkeypatch):
+    monkeypatch.setattr(handlers, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", is_active=True)])
+    monkeypatch.setattr(handlers, "issue_tracking_callback_token", lambda **_kwargs: "tok123")
+    monkeypatch.setattr(
+        handlers,
+        "manual_search",
+        lambda *_args, **_kwargs: [types.SimpleNamespace(id="c1", title="t", price=1, source="olx", url="https://x", external_id="e1", thumbnail_url=None)],
+    )
+    monkeypatch.setattr(handlers, "batch_get_market_stats", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(handlers, "cohort_key_for_listing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handlers, "score_ad", lambda *_: types.SimpleNamespace(total=0, to_dict=lambda: {}))
+    monkeypatch.setattr(
+        handlers,
+        "format_ad_message",
+        lambda *_args, **_kwargs: types.SimpleNamespace(text="resultado", inline_keyboard=[[{"text": "Abrir anúncio", "url": "https://x"}]]),
+    )
+    payloads, _ = handlers._run_manual_search_sync(chat_id=1, username="u", query="civic", sources=None)
+    buttons = [b for row in payloads[0]["inline_keyboard"] for b in row]
+    assert any(b.get("text") == "Abrir anúncio" for b in buttons)
+    assert any(b.get("callback_data") == "TRACK:ADDT:tok123" for b in buttons)
+
+
+def test_run_manual_search_sync_multi_active_wishlist_adds_choose_track_button(monkeypatch):
+    monkeypatch.setattr(handlers, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(
+        handlers,
+        "list_wishlists",
+        lambda *_: [types.SimpleNamespace(id="w1", is_active=True), types.SimpleNamespace(id="w2", is_active=True)],
+    )
+    monkeypatch.setattr(
+        handlers,
+        "manual_search",
+        lambda *_args, **_kwargs: [types.SimpleNamespace(id="c1", title="t", price=1, source="olx", url="https://x", external_id="e1", thumbnail_url=None)],
+    )
+    monkeypatch.setattr(handlers, "batch_get_market_stats", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(handlers, "cohort_key_for_listing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handlers, "score_ad", lambda *_: types.SimpleNamespace(total=0, to_dict=lambda: {}))
+    monkeypatch.setattr(
+        handlers,
+        "format_ad_message",
+        lambda *_args, **_kwargs: types.SimpleNamespace(text="resultado", inline_keyboard=[[{"text": "Abrir anúncio", "url": "https://x"}]]),
+    )
+    payloads, _ = handlers._run_manual_search_sync(chat_id=1, username="u", query="civic", sources=None)
+    buttons = [b for row in payloads[0]["inline_keyboard"] for b in row]
+    assert any((b.get("callback_data") or "").startswith("TRACK:CHOOSE:c1") for b in buttons)
+
+
+def test_run_manual_search_sync_paused_wishlist_does_not_count(monkeypatch):
+    monkeypatch.setattr(handlers, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers, "list_wishlists", lambda *_: [types.SimpleNamespace(id="w1", is_active=False)])
+    monkeypatch.setattr(
+        handlers,
+        "manual_search",
+        lambda *_args, **_kwargs: [types.SimpleNamespace(id="c1", title="t", price=1, source="olx", url="https://x", external_id="e1", thumbnail_url=None)],
+    )
+    monkeypatch.setattr(handlers, "batch_get_market_stats", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(handlers, "cohort_key_for_listing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handlers, "score_ad", lambda *_: types.SimpleNamespace(total=0, to_dict=lambda: {}))
+    monkeypatch.setattr(
+        handlers,
+        "format_ad_message",
+        lambda *_args, **_kwargs: types.SimpleNamespace(text="resultado", inline_keyboard=[[{"text": "Abrir anúncio", "url": "https://x"}]]),
+    )
+    payloads, _ = handlers._run_manual_search_sync(chat_id=1, username="u", query="civic", sources=None)
+    buttons = [b for row in payloads[0]["inline_keyboard"] for b in row]
+    assert not any(b.get("text") == "⭐ Rastrear" for b in buttons)
 
 
 def test_buscar_sends_results_when_found(monkeypatch):

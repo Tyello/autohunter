@@ -41,6 +41,7 @@ from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
 from app.services.plan_capabilities import wishlist_limit_message, automation_unavailable_message
+from app.services.tracking_callback_token_service import issue_tracking_callback_token
 
 logger = logging.getLogger(__name__)
 
@@ -487,12 +488,20 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif not wishlists:
                     short_msg, full_msg = "Sem wishlist", "Você não tem wishlists. Use /wishlist_add para criar a primeira."
                 else:
-                    lines = ["Escolha uma wishlist para rastrear este anúncio:"]
-                    for i, _wl in enumerate(wishlists[:3], start=1):
-                        lines.append(f"/wishlist_track_add {i} {listing_id}")
-                    if len(wishlists) > 3:
-                        lines.append("Dica: use /wishlist para ver todos os índices disponíveis.")
-                    short_msg, full_msg = "Escolha wishlist", "\n".join(lines)
+                    keyboard_rows = []
+                    for wl in wishlists[:8]:
+                        token = issue_tracking_callback_token(
+                            user_id=str(user.id),
+                            wishlist_id=str(wl.id),
+                            listing_id=str(listing_id),
+                        )
+                        wl_label = (getattr(wl, "query", None) or f"Wishlist {wishlist_idx_by_id.get(str(wl.id), '?')}").strip()
+                        keyboard_rows.append([InlineKeyboardButton(f"⭐ {wl_label[:40]}", callback_data=f"TRACK:ADDT:{token}")])
+                    if len(wishlists) > 8:
+                        keyboard_rows.append([InlineKeyboardButton("📋 Ver todas", callback_data="MENU:WISHLISTS")])
+                    short_msg, full_msg = "Escolha wishlist", "Escolha uma wishlist para rastrear este anúncio:"
+                    await q.edit_message_text(full_msg, reply_markup=InlineKeyboardMarkup(keyboard_rows))
+                    return
             elif data.startswith("TRACK:ADDT:"):
                 from app.services.tracking_callback_token_service import resolve_tracking_callback_token
 

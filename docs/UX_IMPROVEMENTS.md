@@ -25,8 +25,11 @@
 ### Próximo pacote recomendado
 
 P1 — Fechar o loop busca manual → rastreamento:
-- item 4.1 — adicionar botão `⭐ Rastrear` nos resultados de `/buscar`
+- item 4.1 — adicionar botão `⭐ Rastrear` nos resultados de `/buscar` — ✅ Concluído no PR #264
 - objetivo: permitir que o usuário faça uma busca pontual, encontre um anúncio interessante e comece a rastrear sem voltar ao menu
+
+Novo próximo recomendado:
+- item 1.2 — Resultado imediato após criar busca
 
 ---
 

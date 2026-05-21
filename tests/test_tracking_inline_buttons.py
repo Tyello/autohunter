@@ -58,11 +58,12 @@ class _CallbackQuery:
     async def answer(self, text=None, show_alert=False):
         self.answers.append({"text": text, "show_alert": show_alert})
 
-    async def edit_message_text(self, text):
+    async def edit_message_text(self, text, reply_markup=None):
         if self.fail_edit:
             from telegram.error import BadRequest
             raise BadRequest("message can not be edited")
         self.edits.append(text)
+        self.reply_markup = reply_markup
 
 
 class _Update:
@@ -223,7 +224,7 @@ def test_callback_addwl_uses_selected_wishlist(monkeypatch):
     assert called["wishlist_index"] == 2
 
 
-def test_callback_choose_wishlist_shows_commands(monkeypatch):
+def test_callback_choose_wishlist_shows_inline_buttons(monkeypatch):
     _patch_common(
         monkeypatch,
         notification=None,
@@ -231,11 +232,10 @@ def test_callback_choose_wishlist_shows_commands(monkeypatch):
         listing=None,
         wishlists=[types.SimpleNamespace(id="w1"), types.SimpleNamespace(id="w2"), types.SimpleNamespace(id="w3"), types.SimpleNamespace(id="w4")],
     )
+    monkeypatch.setattr(handlers_wishlist_ui, "issue_tracking_callback_token", lambda **_kwargs: "tok123")
     q = _CallbackQuery(data="TRACK:CHOOSE:c1")
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
-    text = q.edits[-1]
-    assert "/wishlist_track_add 1 c1" in text
-    assert "/wishlist_track_add 2 c1" in text
+    assert q.edits[-1] == "Escolha uma wishlist para rastrear este anúncio:"
 
 
 def test_callback_addt_valid(monkeypatch):
