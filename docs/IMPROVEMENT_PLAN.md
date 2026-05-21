@@ -5,6 +5,8 @@
 
 ## 1. Bugs Confirmados
 
+> Status P1-A (2026-05-21): **em implementação nesta PR** com pool SQLAlchemy explícito, bootstrap único de `source_configs` no scheduler e testes de regressão.
+
 ### 1.1 `scripts/health_check.py` — imports quebrados (arquivo inutilizável)
 **Impacto:** O script falha imediatamente ao ser importado.
 
