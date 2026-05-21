@@ -39,17 +39,75 @@ from app.services.plan_capabilities import get_plan_capabilities, resolve_plan_c
 
 logger = logging.getLogger(__name__)
 _WISHLIST_SUMMARIES_CACHE: dict[str, tuple[datetime, list[dict[str, Any]]]] = {}
+_WISHLIST_SUMMARIES_CACHE_METRICS: dict[str, Any] = {
+    "hits": 0,
+    "misses": 0,
+    "invalidations": 0,
+    "global_invalidations": 0,
+    "prunes": 0,
+    "evictions": 0,
+    "started_at": None,
+}
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+
+
+def _reset_wishlist_summaries_cache_metrics() -> None:
+    _WISHLIST_SUMMARIES_CACHE_METRICS["hits"] = 0
+    _WISHLIST_SUMMARIES_CACHE_METRICS["misses"] = 0
+    _WISHLIST_SUMMARIES_CACHE_METRICS["invalidations"] = 0
+    _WISHLIST_SUMMARIES_CACHE_METRICS["global_invalidations"] = 0
+    _WISHLIST_SUMMARIES_CACHE_METRICS["prunes"] = 0
+    _WISHLIST_SUMMARIES_CACHE_METRICS["evictions"] = 0
+    _WISHLIST_SUMMARIES_CACHE_METRICS["started_at"] = _utcnow()
+
+
+def reset_wishlist_summaries_cache_stats() -> None:
+    _reset_wishlist_summaries_cache_metrics()
+
+
+def get_wishlist_summaries_cache_stats() -> dict[str, Any]:
+    now = _utcnow()
+    ttl_seconds = int(getattr(settings, "wishlist_summaries_cache_ttl_seconds", 0) or 0)
+    max_entries = int(getattr(settings, "wishlist_summaries_cache_max_entries", 0) or 0)
+    entries = list(_WISHLIST_SUMMARIES_CACHE.values())
+    ages = [max(0.0, (now - ts).total_seconds()) for ts, _ in entries]
+    hits = int(_WISHLIST_SUMMARIES_CACHE_METRICS.get("hits") or 0)
+    misses = int(_WISHLIST_SUMMARIES_CACHE_METRICS.get("misses") or 0)
+    total = hits + misses
+    started_at = _WISHLIST_SUMMARIES_CACHE_METRICS.get("started_at")
+    return {
+        "cache_enabled": ttl_seconds > 0,
+        "ttl_seconds": ttl_seconds,
+        "max_entries": max_entries,
+        "size": len(_WISHLIST_SUMMARIES_CACHE),
+        "hits": hits,
+        "misses": misses,
+        "invalidations": int(_WISHLIST_SUMMARIES_CACHE_METRICS.get("invalidations") or 0),
+        "global_invalidations": int(_WISHLIST_SUMMARIES_CACHE_METRICS.get("global_invalidations") or 0),
+        "prunes": int(_WISHLIST_SUMMARIES_CACHE_METRICS.get("prunes") or 0),
+        "evictions": int(_WISHLIST_SUMMARIES_CACHE_METRICS.get("evictions") or 0),
+        "hit_rate_pct": round((hits / total) * 100.0, 2) if total > 0 else 0.0,
+        "oldest_entry_age_seconds": max(ages) if ages else None,
+        "newest_entry_age_seconds": min(ages) if ages else None,
+        "started_at": started_at.isoformat() if isinstance(started_at, datetime) else None,
+        "since_seconds": max(0.0, (now - started_at).total_seconds()) if isinstance(started_at, datetime) else None,
+    }
+
+
+_reset_wishlist_summaries_cache_metrics()
 def invalidate_wishlist_summaries_cache(user_id=None) -> None:
     if user_id is None:
         _WISHLIST_SUMMARIES_CACHE.clear()
+        _WISHLIST_SUMMARIES_CACHE_METRICS["global_invalidations"] += 1
         return
-    _WISHLIST_SUMMARIES_CACHE.pop(str(user_id), None)
+    removed = _WISHLIST_SUMMARIES_CACHE.pop(str(user_id), None)
+    if removed is not None:
+        _WISHLIST_SUMMARIES_CACHE_METRICS["invalidations"] += 1
 
 
 def _prune_wishlist_summaries_cache(now: datetime, ttl_seconds: int, max_entries: int) -> None:
@@ -57,12 +115,18 @@ def _prune_wishlist_summaries_cache(now: datetime, ttl_seconds: int, max_entries
         expired_keys = [k for k, (ts, _) in _WISHLIST_SUMMARIES_CACHE.items() if (now - ts).total_seconds() > ttl_seconds]
         for key in expired_keys:
             _WISHLIST_SUMMARIES_CACHE.pop(key, None)
+        if expired_keys:
+            _WISHLIST_SUMMARIES_CACHE_METRICS["prunes"] += len(expired_keys)
     if max_entries <= 0:
+        evicted = len(_WISHLIST_SUMMARIES_CACHE)
         _WISHLIST_SUMMARIES_CACHE.clear()
+        if evicted:
+            _WISHLIST_SUMMARIES_CACHE_METRICS["evictions"] += evicted
         return
     while len(_WISHLIST_SUMMARIES_CACHE) > max_entries:
         oldest_key = min(_WISHLIST_SUMMARIES_CACHE.items(), key=lambda item: item[1][0])[0]
         _WISHLIST_SUMMARIES_CACHE.pop(oldest_key, None)
+        _WISHLIST_SUMMARIES_CACHE_METRICS["evictions"] += 1
 
 # Fallback (quando não existir plano/assinatura no banco ainda)
 DEFAULT_MAX_WISHLISTS_PER_USER = 2
@@ -536,8 +600,10 @@ def get_wishlist_summaries(db: Session, user_id):
     if cached:
         ts, payload = cached
         if (now - ts).total_seconds() <= ttl_seconds:
+            _WISHLIST_SUMMARIES_CACHE_METRICS["hits"] += 1
             return copy.deepcopy(payload)
         _WISHLIST_SUMMARIES_CACHE.pop(cache_key, None)
+    _WISHLIST_SUMMARIES_CACHE_METRICS["misses"] += 1
     computed = _compute_wishlist_summaries(db, user_id)
     _WISHLIST_SUMMARIES_CACHE[cache_key] = (now, computed)
     _prune_wishlist_summaries_cache(now, ttl_seconds, max_entries)

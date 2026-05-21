@@ -8,7 +8,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
-from app.services.wishlists_service import get_wishlist_summaries
+from app.services.wishlists_service import get_wishlist_summaries, get_wishlist_summaries_cache_stats
 from app.services import wishlists_service
 
 
@@ -248,3 +248,87 @@ def test_wishlist_summaries_cache_disabled_recomputes(db, monkeypatch):
     get_wishlist_summaries(db, user.id)
     get_wishlist_summaries(db, user.id)
     assert calls["n"] == 2
+
+
+def test_wishlist_summaries_cache_stats_hit_miss(db, monkeypatch):
+    user = _mk_user(db)
+    _mk_wishlist(db, user, "civic")
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    wishlists_service.reset_wishlist_summaries_cache_stats()
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_ttl_seconds", 10)
+
+    get_wishlist_summaries(db, user.id)
+    get_wishlist_summaries(db, user.id)
+
+    stats = get_wishlist_summaries_cache_stats()
+    assert stats["hits"] >= 1
+    assert stats["misses"] >= 1
+    assert stats["size"] >= 1
+    assert 0.0 <= float(stats["hit_rate_pct"]) <= 100.0
+
+
+def test_wishlist_summaries_cache_stats_invalidation(db, monkeypatch):
+    user = _mk_user(db)
+    _mk_wishlist(db, user, "civic")
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    wishlists_service.reset_wishlist_summaries_cache_stats()
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_ttl_seconds", 10)
+
+    get_wishlist_summaries(db, user.id)
+    before = get_wishlist_summaries_cache_stats()
+    wishlists_service.invalidate_wishlist_summaries_cache(user.id)
+    after = get_wishlist_summaries_cache_stats()
+
+    assert after["invalidations"] >= before["invalidations"] + 1
+    assert after["size"] == 0
+
+
+def test_wishlist_summaries_cache_stats_global_invalidation(db, monkeypatch):
+    user = _mk_user(db)
+    _mk_wishlist(db, user, "civic")
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    wishlists_service.reset_wishlist_summaries_cache_stats()
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_ttl_seconds", 10)
+
+    get_wishlist_summaries(db, user.id)
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    stats = get_wishlist_summaries_cache_stats()
+
+    assert stats["global_invalidations"] >= 1
+    assert stats["size"] == 0
+
+
+def test_wishlist_summaries_cache_stats_prune_and_eviction(db, monkeypatch):
+    user = _mk_user(db)
+    _mk_wishlist(db, user, "civic")
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    wishlists_service.reset_wishlist_summaries_cache_stats()
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_ttl_seconds", 10)
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    wishlists_service._WISHLIST_SUMMARIES_CACHE[str(user.id)] = (base - timedelta(seconds=20), [{"query": "old"}])
+    wishlists_service._WISHLIST_SUMMARIES_CACHE["extra_a"] = (base, [{"query": "extra-a"}])
+    wishlists_service._WISHLIST_SUMMARIES_CACHE["extra_b"] = (base, [{"query": "extra-b"}])
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_max_entries", 1)
+
+    wishlists_service._prune_wishlist_summaries_cache(base, 10, 1)
+    stats = get_wishlist_summaries_cache_stats()
+
+    assert stats["prunes"] >= 1
+    assert stats["evictions"] >= 1
+    assert stats["size"] <= 1
+
+
+def test_wishlist_summaries_cache_stats_disabled(db, monkeypatch):
+    user = _mk_user(db)
+    _mk_wishlist(db, user, "civic")
+    wishlists_service.invalidate_wishlist_summaries_cache()
+    wishlists_service.reset_wishlist_summaries_cache_stats()
+    monkeypatch.setattr(wishlists_service.settings, "wishlist_summaries_cache_ttl_seconds", 0)
+
+    get_wishlist_summaries(db, user.id)
+    stats = get_wishlist_summaries_cache_stats()
+
+    assert stats["cache_enabled"] is False
+    assert stats["ttl_seconds"] == 0
+
