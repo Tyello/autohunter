@@ -1391,7 +1391,40 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
             data = build_auction_notification_samples(db, limit=10)
             samples = data.get("samples") or []
             rejections = data.get("rejections") or []
+            summary = data.get("summary") or {}
             if not samples:
+                if (
+                    summary.get("previews", 0) == 0
+                    and summary.get("errors", 0) == 0
+                    and summary.get("wishlists_scanned", 0) > 0
+                    and summary.get("skipped_no_match", 0) > 0
+                ):
+                    lines = [
+                        "⚠️ Admin Leilões — últimas amostras dry-run",
+                        "",
+                        "Último dry-run executado, mas não houve alerta elegível.",
+                        "",
+                        "Resumo:",
+                        f"- buscas avaliadas: {summary.get('wishlists_scanned', 0)}",
+                        f"- buscas com match: {summary.get('wishlists_with_matches', 0)}",
+                        f"- sem match: {summary.get('skipped_no_match', 0)}",
+                        f"- score baixo: {summary.get('skipped_score_below_min', 0)}",
+                        f"- lote antigo: {summary.get('skipped_stale_lot', 0)}",
+                        f"- tipo bloqueado: {summary.get('skipped_item_type_not_allowed', 0)}",
+                        f"- duplicados: {summary.get('skipped_duplicate', 0)}",
+                        f"- erros: {summary.get('errors', 0)}",
+                        "",
+                        "Interpretação:",
+                        "- A source está operacional.",
+                        "- Nenhuma wishlist atual bateu com os lotes recentes.",
+                        "",
+                        "Próximo passo:",
+                        "- rode /admin auctions source vip",
+                        "- rode /admin auctions match wishlist <id|index> --debug",
+                        "- ou crie uma busca temporária com um modelo presente nos lotes recentes.",
+                    ]
+                    await update.message.reply_text("\n".join(lines))
+                    return
                 if rejections:
                     reasons = {str((r or {}).get("reason") or "").strip().lower() for r in rejections}
                     lines = [
@@ -1434,7 +1467,6 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                     "Rode:\n/admin auctions notify-run --source vip --limit-wishlists 5"
                 )
                 return
-            summary = data.get("summary") or {}
             lines = [
                 "⚠️ Admin Leilões — últimas amostras dry-run",
                 "",

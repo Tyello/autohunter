@@ -1422,6 +1422,41 @@ def test_admin_auctions_notify_samples_empty(monkeypatch, db):
     assert called["job"] == 0
 
 
+def test_admin_auctions_notify_samples_last_dry_run_no_match(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "build_auction_notification_samples",
+        lambda _db, limit=10: {
+            "created_at": "2026-05-21 11:10 UTC",
+            "summary": {
+                "wishlists_scanned": 2,
+                "wishlists_with_matches": 0,
+                "previews": 0,
+                "skipped_no_match": 2,
+                "skipped_score_below_min": 0,
+                "skipped_stale_lot": 0,
+                "skipped_item_type_not_allowed": 0,
+                "skipped_duplicate": 0,
+                "errors": 0,
+            },
+            "samples": [],
+            "rejections": [],
+        },
+    )
+
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "notify-samples")))
+    msg = up.message.sent[-1]
+    assert "Último dry-run executado, mas não houve alerta elegível." in msg
+    assert "- buscas avaliadas: 2" in msg
+    assert "- sem match: 2" in msg
+    assert "- erros: 0" in msg
+    assert "A source está operacional." in msg
+    assert "/admin auctions source vip" in msg
+
+
 def test_admin_auctions_notify_samples_render(monkeypatch, db):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
