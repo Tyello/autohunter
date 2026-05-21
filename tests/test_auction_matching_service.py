@@ -167,3 +167,56 @@ def test_debug_candidates_reports_item_type_blocked_before_score(db):
     assert row["reject_reason"] == "item_type_not_allowed"
     assert row["item_type_normalized"] == "motorcycle"
     assert row["allowed_item_types"] == ["car"]
+
+
+def test_auction_text_scoring_boosts_compound_models(db):
+    scenarios = [
+        ("L200 Triton", "L200 TRITON 3.5 G - 2007/2008"),
+        ("peugeot 208", "208 GRIFFE AT - 2017/2017"),
+        ("bmw x1", "X1 S20IACTIVE FLEX - 2014/2015"),
+        ("c4 pallas", "C4 PALLAS20EAF - 2010/2011"),
+    ]
+    for idx, (query, title) in enumerate(scenarios, start=1):
+        w = _mk_wishlist(db, query)
+        upsert_lot(db, {"source": "vip_auctions", "external_id": f"compound-{idx}", "title": title, "item_type": "car", "status": "open", "current_bid": Decimal("25000")})
+        db.commit()
+        out = match_auction_lots_for_wishlist(db, w, source="vip_auctions", limit=5)
+        assert out, (query, title)
+        assert out[0].score >= 60, (query, title, out[0].score)
+        assert any("matched_tokens=" in reason for reason in out[0].reasons)
+
+
+def test_auction_text_scoring_avoids_false_positives(db):
+    scenarios = [
+        ("touareg", "L200 TRITON 3.5 G"),
+        ("civic hatch", "GOL 1.0 GIV"),
+        ("argo", "L200 TRITON"),
+    ]
+    for idx, (query, title) in enumerate(scenarios, start=1):
+        w = _mk_wishlist(db, query)
+        upsert_lot(db, {"source": "vip_auctions", "external_id": f"no-fp-{idx}", "title": title, "item_type": "car", "status": "open", "current_bid": Decimal("25000")})
+        db.commit()
+        out = match_auction_lots_for_wishlist(db, w, source="vip_auctions", limit=5)
+        assert out == [], (query, title)
+
+
+def test_l200_triton_wishlist_matches_vip_lot_in_dry_run_context(db):
+    from app.services.wishlists_service import add_filter
+
+    w = _mk_wishlist(db, "L200 Triton")
+    add_filter(db, w.id, "max_price", "lte", "26000")
+    upsert_lot(
+        db,
+        {
+            "source": "vip_auctions",
+            "external_id": "vip-l200",
+            "title": "L200 TRITON 3.5 G",
+            "item_type": "car",
+            "status": "open",
+            "current_bid": Decimal("25000"),
+        },
+    )
+    db.commit()
+    out = match_auction_lots_for_wishlist(db, w, source="vip_auctions", limit=5)
+    assert out
+    assert out[0].score >= 60

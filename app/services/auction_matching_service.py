@@ -89,6 +89,22 @@ _GENERIC_SINGLE_TERM_TOKENS = {
     "2.0",
 }
 
+_QUERY_STOPWORDS = {
+    "ate",
+    "entre",
+    "de",
+    "do",
+    "da",
+    "com",
+    "em",
+    "para",
+    "flex",
+}
+
+_SHORT_AUTOMOTIVE_TOKENS = {
+    "si", "gti", "gli", "x1", "x3", "x5", "c3", "c4", "208", "308", "l200", "s10", "q3", "a3", "a5",
+}
+
 
 def _lot_city_state(lot: AuctionLot) -> tuple[str | None, str | None]:
     city = normalize(getattr(lot, "city", None) or "") or None
@@ -123,28 +139,80 @@ def _score_match(wishlist: Wishlist, lot: AuctionLot) -> tuple[int, list[str]]:
     title_tokens = set(tokens((getattr(lot, "title", "") or "") + " " + (getattr(lot, "make", "") or "") + " " + (getattr(lot, "model", "") or "")))
 
     non_year_q = [t for t in q_tokens if not (len(t) == 4 and t.isdigit())]
+    relevant_q_tokens = [t for t in non_year_q if t not in _QUERY_STOPWORDS and (len(t) > 1 or t in _SHORT_AUTOMOTIVE_TOKENS)]
 
-    token_hits = sum(1 for t in non_year_q if _term_satisfied(t, title_tokens, lot.year))
+    matched_tokens = [t for t in relevant_q_tokens if _term_satisfied(t, title_tokens, lot.year)]
+    missing_tokens = [t for t in relevant_q_tokens if t not in matched_tokens]
+    token_hits = len(matched_tokens)
     reasons: list[str] = []
     score = 0
     has_strong_text = False
+    scoring_reason = "no_strong_text"
     if token_hits:
         score += min(60, token_hits * 18)
         reasons.append(f"título contém {token_hits} termo(s) da busca")
         has_strong_text = True
+        scoring_reason = "token_overlap"
 
-    non_generic_single_term = len(non_year_q) == 1 and non_year_q[0] not in _GENERIC_SINGLE_TERM_TOKENS
-    if non_generic_single_term and non_year_q[0] in title_tokens:
+    q_norm = normalize(getattr(wishlist, "query", "") or "")
+    title_norm = normalize((getattr(lot, "title", "") or "") + " " + (getattr(lot, "make", "") or "") + " " + (getattr(lot, "model", "") or ""))
+    phrase_tokens = [t for t in tokens(q_norm) if t in relevant_q_tokens]
+    phrase_norm = " ".join(phrase_tokens).strip()
+    phrase_in_title = bool(phrase_norm and phrase_norm in title_norm)
+    phrase_boost_allowed = phrase_in_title and (
+        any(t in _SHORT_AUTOMOTIVE_TOKENS for t in phrase_tokens)
+        or any(any(ch.isdigit() for ch in t) and any(ch.isalpha() for ch in t) for t in phrase_tokens)
+        or len(phrase_tokens) >= 3
+    )
+    if phrase_boost_allowed:
+        score = max(score, 85)
+        has_strong_text = True
+        scoring_reason = "query_phrase_in_title"
+        reasons.append("frase da busca detectada no título")
+
+    if relevant_q_tokens and not missing_tokens:
+        score = max(score, 70)
+        has_strong_text = True
+        if scoring_reason == "token_overlap":
+            scoring_reason = "all_query_tokens_in_title"
+        reasons.append("todos os termos relevantes da busca presentes")
+
+    has_alnum_token = any(any(ch.isdigit() for ch in t) and any(ch.isalpha() for ch in t) for t in matched_tokens)
+    if has_alnum_token and token_hits >= 2:
+        score = max(score, 80)
+        has_strong_text = True
+        if scoring_reason != "query_phrase_in_title":
+            scoring_reason = "alnum_plus_strong_token"
+        reasons.append("token alfanumérico com suporte de termo forte")
+
+    if has_alnum_token and token_hits >= 1 and len(relevant_q_tokens) >= 2:
+        score = max(score, 65)
+        has_strong_text = True
+        if scoring_reason == "token_overlap":
+            scoring_reason = "alnum_model_token_present"
+        reasons.append("modelo alfanumérico relevante detectado")
+
+
+    has_short_auto_token = any(t in _SHORT_AUTOMOTIVE_TOKENS for t in matched_tokens)
+    if has_short_auto_token and token_hits >= 1 and len(relevant_q_tokens) >= 2:
+        score = max(score, 65)
+        has_strong_text = True
+        if scoring_reason == "token_overlap":
+            scoring_reason = "short_auto_token_present"
+        reasons.append("token automotivo curto relevante detectado")
+    non_generic_single_term = len(relevant_q_tokens) == 1 and relevant_q_tokens[0] not in _GENERIC_SINGLE_TERM_TOKENS
+    if non_generic_single_term and relevant_q_tokens[0] in title_tokens:
         score = max(score, 60)
         reasons.append("match forte de modelo/termo único")
         has_strong_text = True
+        if scoring_reason == "no_strong_text":
+            scoring_reason = "single_model_term"
 
     years = [int(t) for t in q_tokens if len(t) == 4 and t.isdigit()]
     if years and lot.year is not None and any(y == int(lot.year) for y in years):
         score += 12
         reasons.append("ano compatível")
 
-    q_norm = normalize(getattr(wishlist, "query", "") or "")
     make = normalize(getattr(lot, "make", "") or "")
     model = normalize(getattr(lot, "model", "") or "")
     if make and make in q_norm:
@@ -170,6 +238,9 @@ def _score_match(wishlist: Wishlist, lot: AuctionLot) -> tuple[int, list[str]]:
 
     if not has_strong_text:
         return 0, []
+    reasons.append(f"scoring_reason={scoring_reason}")
+    reasons.append(f"matched_tokens={matched_tokens}")
+    reasons.append(f"missing_tokens={missing_tokens}")
     return max(0, min(100, score)), reasons
 
 
