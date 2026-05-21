@@ -15,25 +15,16 @@ def test_render_user_wishlists_summary_counts_filters_and_tracked():
         {"index": 2, "query": "miata", "filters_count": 2, "filters": [{"field": "year", "operator": "gte", "value": "2017"}, {"field": "year", "operator": "lte", "value": "2021"}], "tracked_count": 1, "tracked_limit": 3, "is_active": True, "include_auctions": False},
     ])
     assert "🎯 Minhas buscas" in text
-    assert "1. civic si" in text
-    assert "Filtros:\n- Nenhum filtro" in text
-    assert "Anúncios rastreados: 0/3" in text
-    assert "Alertas enviados hoje: 0" in text
-    assert "2. miata" in text
-    assert "Filtros:\n- Ano entre 2017 e 2021" in text
-    assert "Anúncios rastreados: 1/3" in text
-    assert "Alertas enviados hoje: 0" in text
-    assert "Status: ativa" in text
-    assert "Leilões: ativado" in text
-    assert "Leilões: desativado" in text
-    assert "Escolha uma ação:" in text
+    assert "✅ 1. civic si • sem filtros" in text
+    assert "✅ 2. miata • 1 filtro • 1 rastreado" in text
+    assert "Escolha uma busca para gerenciar:" in text
 
 
 def test_render_user_wishlists_summary_shows_notifications_24h_count():
     text = render_user_wishlists([
         {"index": 1, "query": "civic si", "filters_count": 0, "filters": [], "tracked_count": 0, "tracked_limit": 3, "notifications_24h_count": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "Alertas enviados hoje: 3" in text
+    assert "3 alertas hoje" in text
 
 
 def test_render_user_wishlists_summary_limits_filters():
@@ -46,9 +37,7 @@ def test_render_user_wishlists_summary_limits_filters():
             {"field": "state", "operator": "eq", "value": "SP"},
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "Ano entre 2017 e 2021" in text
-    assert "Preço até R$ 150.000" in text
-    assert "+1 filtros" in text
+    assert "4 filtros" in text
 
 
 def test_render_user_wishlists_legacy_numeric_values_are_tolerant():
@@ -59,9 +48,7 @@ def test_render_user_wishlists_legacy_numeric_values_are_tolerant():
             {"field": "year", "operator": "gte", "value": "abc"},
         ], "tracked_count": 0, "tracked_limit": 3},
     ])
-    assert "Preço até R$ 150.000" in text
-    assert "KM até 90.000" in text
-    assert "year gte abc" in text
+    assert "3 filtros" in text
 
 
 def test_render_user_wishlists_mixed_valid_invalid_filters_do_not_break():
@@ -72,8 +59,7 @@ def test_render_user_wishlists_mixed_valid_invalid_filters_do_not_break():
             {"field": "city", "operator": "eq", "value": "São Paulo"},
         ], "tracked_count": 0, "tracked_limit": 3},
     ])
-    assert "Ano a partir de 2017" in text
-    assert "Cidade: São Paulo" in text
+    assert "2 filtros" in text
 
 
 def test_render_user_wishlists_single_year_range_is_friendly():
@@ -83,8 +69,7 @@ def test_render_user_wishlists_single_year_range_is_friendly():
             {"field": "year", "operator": "lte", "value": "2019"},
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "Ano 2019" in text
-    assert "Ano entre 2019 e 2019" not in text
+    assert "1 filtro" in text
 
 
 def test_render_wishlist_filters_single_year_range_is_friendly():
@@ -115,8 +100,7 @@ def test_render_user_wishlists_filters_accept_object_shape():
             SimpleNamespace(value="broken"),
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "Ano entre 2018 e 2020" in text
-    assert "Estado: SP" in text
+    assert "2 filtros" in text
 
 
 def test_render_user_wishlists_filters_mixed_dict_and_object():
@@ -126,4 +110,4 @@ def test_render_user_wishlists_filters_mixed_dict_and_object():
             SimpleNamespace(field="year", operator="lte", value="2020"),
         ], "tracked_count": 0, "tracked_limit": 3, "is_active": True, "include_auctions": True},
     ])
-    assert "Ano entre 2018 e 2020" in text
+    assert "1 filtro" in text

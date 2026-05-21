@@ -266,12 +266,20 @@ def _wishlist_help_text() -> str:
 
 
 
+
+
+def _start_markup(wishlist_count: int) -> InlineKeyboardMarkup:
+    if wishlist_count > 0:
+        return InlineKeyboardMarkup([[InlineKeyboardButton("🎯 Ver minhas buscas", callback_data="MENU:WISHLISTS")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("➕ Criar minha primeira busca", callback_data="MENU:CREATE_WISHLIST")]])
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         w = list_wishlists(db, user.id)
 
-    await reply_text(update, render_start_text(len(w)))
+    await reply_text(update, render_start_text(len(w)), reply_markup=_start_markup(len(w)))
 
 async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text(update, _wishlist_help_text())

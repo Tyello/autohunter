@@ -113,7 +113,7 @@ def render_start_text(active_wishlists_count: int) -> str:
         return (
             "👋 Garagem Alvo\n\n"
             "Seu monitoramento já está ativo.\n\n"
-            "Use /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
+            "Use o botão abaixo ou /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
         )
     return (
         "👋 Bem-vindo ao Garagem Alvo\n\n"
@@ -121,8 +121,12 @@ def render_start_text(active_wishlists_count: int) -> str:
         "Crie buscas para carros especiais, versões raras e boas bases de projeto.\n"
         "A gente monitora anúncios e te avisa aqui no Telegram quando aparecer algo compatível.\n\n"
         "Para começar:\n"
-        "toque em /menu e depois em ➕ Criar busca."
+        "toque no botão abaixo e crie sua primeira busca."
     )
+
+
+def _plural_pt(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
 
 
 def render_user_wishlists(wishlists) -> str:
@@ -135,27 +139,20 @@ def render_user_wishlists(wishlists) -> str:
     if isinstance(wishlists[0], dict):
         lines = ["🎯 Minhas buscas", ""]
         for item in wishlists:
+            status_icon = "✅" if item.get("is_active", True) else "⏸️"
             labels = _friendly_wishlist_filters(item.get("filters", []))
-            shown = labels[:3]
-            status = "ativa" if item.get("is_active", True) else "pausada"
-            lines.extend([
-                f"{item['index']}. {item['query']}",
-                f"Status: {status}",
-                f"Leilões: {'ativado' if item.get('include_auctions', False) else 'desativado'}",
-                "Filtros:",
-            ])
-            if shown:
-                lines.extend([f"- {label}" for label in shown])
-                if len(labels) > 3:
-                    lines.append(f"- +{len(labels) - 3} filtros")
-            else:
-                lines.append("- Nenhum filtro")
-            lines.extend([
-                f"Anúncios rastreados: {item.get('tracked_count', 0)}/{item.get('tracked_limit', 3)}",
-                f"Alertas enviados hoje: {item.get('notifications_24h_count', 0)}",
-                "",
-            ])
-        lines.append("Escolha uma ação:")
+            parts = [_plural_pt(len(labels), "filtro", "filtros") if labels else "sem filtros"]
+
+            tracked_count = int(item.get("tracked_count", 0) or 0)
+            if tracked_count > 0:
+                parts.append(_plural_pt(tracked_count, "rastreado", "rastreados"))
+
+            notifications_24h_count = int(item.get("notifications_24h_count", 0) or 0)
+            if notifications_24h_count > 0:
+                parts.append(_plural_pt(notifications_24h_count, "alerta hoje", "alertas hoje"))
+
+            lines.append(f"{status_icon} {item['index']}. {item['query']} • " + " • ".join(parts))
+        lines.extend(["", "Escolha uma busca para gerenciar:"])
         return "\n".join(lines).strip()
 
     lines = [f"{i + 1}. {x.query}" for i, x in enumerate(wishlists)]
@@ -172,6 +169,22 @@ def render_all_tracked_listings(wishlists, tracked_messages: list[str], plan_usa
             "Anúncio rastreado = eu acompanho preço/status de um anúncio específico.\n\n"
             "Você ainda não rastreou nenhum anúncio.\n\n"
             "Quando receber ou encontrar um anúncio interessante, toque em ⭐ Rastrear para acompanhar preço e status."
+        )
+
+    slot_lines: list[str] = []
+    for message in tracked_messages or []:
+        for raw_line in str(message or "").splitlines():
+            line = raw_line.strip()
+            if line.lower().startswith("slot "):
+                slot_lines.append(line.lower())
+
+    has_slot_details = bool(slot_lines)
+    all_slots_empty = has_slot_details and all("vazio" in line for line in slot_lines)
+    if tracked_messages and all_slots_empty:
+        return (
+            "⭐ Anúncios rastreados\n\n"
+            "Você ainda não está acompanhando nenhum anúncio.\n\n"
+            "Quando receber um alerta ou fizer uma busca, toque em ⭐ Rastrear para acompanhar preço e status daquele anúncio."
         )
 
     lines = ["⭐ Anúncios rastreados", "", "Aqui ficam anúncios específicos que você quer acompanhar de perto.", "", "Busca salva = eu encontro novos anúncios para você.", "Anúncio rastreado = eu acompanho preço/status de um anúncio específico.", ""]
