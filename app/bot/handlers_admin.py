@@ -583,9 +583,16 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 f"experimental: {'sim' if out.get('is_experimental') else 'não'}",
                 f"analisados: {out.get('analyzed', 0)}",
                 f"atualizados: {out.get('updated', 0)}",
+            ]
+            if out.get("blocked"):
+                lines.extend([
+                    "bloqueado: sim (source_not_experimental)",
+                    "nenhuma alteração aplicada: source não experimental",
+                ])
+            lines.extend([
                 "",
                 "issues:",
-            ]
+            ])
             counts = out.get("issue_counts") or {}
             for k in ("generic_page", "item_type_mismatch", "motorcycle_mismatch", "truck_mismatch", "invalid_location", "missing_lot_id"):
                 lines.append(f"- {k}: {counts.get(k, 0)}")

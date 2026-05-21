@@ -18,6 +18,8 @@ def run_mega_hygiene(db: Session, *, apply: bool = False, limit: int = 200) -> d
     issue_counts: Counter[str] = Counter()
     updates = 0
     examples: list[dict[str, Any]] = []
+    blocked = bool(apply and not is_experimental)
+    reason = "source_not_experimental" if blocked else None
     for lot in lots:
         audit = audit_mega_persisted_lot(lot)
         issues = list(audit["issues"])
@@ -31,7 +33,7 @@ def run_mega_hygiene(db: Session, *, apply: bool = False, limit: int = 200) -> d
                 "issues": issues,
                 "suggested_updates": audit["suggested_updates"],
             })
-        if apply and audit["suggested_updates"]:
+        if apply and (not blocked) and audit["suggested_updates"]:
             patch = dict(audit["suggested_updates"])
             extras_patch = patch.pop("extras", None)
             for key, value in patch.items():
@@ -41,7 +43,7 @@ def run_mega_hygiene(db: Session, *, apply: bool = False, limit: int = 200) -> d
                 existing.update(extras_patch)
                 lot.extras = existing
             updates += 1
-    if apply:
+    if apply and not blocked:
         db.commit()
     return {
         "source": source,
@@ -51,4 +53,6 @@ def run_mega_hygiene(db: Session, *, apply: bool = False, limit: int = 200) -> d
         "updated": updates,
         "examples": examples,
         "dry_run": not apply,
+        "blocked": blocked,
+        "reason": reason,
     }
