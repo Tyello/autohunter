@@ -7,7 +7,7 @@ def test_friendly_filters_with_dict_shape():
     text = render_user_wishlists([
         {"index": 1, "query": "dict", "filters": [{"field": "year", "operator": "gte", "value": "2018"}], "tracked_count": 0, "tracked_limit": 3, "is_active": True},
     ])
-    assert "filtros" in text
+    assert "1 filtro" in text
 
 
 def test_friendly_filters_with_object_shape_and_invalid_ignored():
