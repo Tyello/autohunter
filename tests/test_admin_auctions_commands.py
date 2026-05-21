@@ -204,6 +204,31 @@ def test_admin_auctions_run_exception_sends_friendly_error(monkeypatch, db):
     assert "Falha ao rodar ingestão de leilões: RuntimeError — boom" in up.message.sent[-1]
 
 
+def test_admin_auctions_inspect_mega_url_renders_detail_diagnostics(monkeypatch, db):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(
+        handlers_admin,
+        "inspect_auction_source",
+        lambda **kwargs: {
+            "source": "mega_auctions",
+            "fetched": 1,
+            "inserted": 0,
+            "updated": 0,
+            "skipped": 0,
+            "errors": 0,
+            "reason": None,
+            "candidates": [{"index": 1, "external_id": "J122290", "title": "Volkswagen Kombi", "detail_url": "https://mega/x", "item_type": "car", "year": 1999}],
+            "diagnostics": {"detail_diagnostics": {"mega_detail": {"status_candidates": ["Status: encerrado"]}}},
+        },
+    )
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "mega", "--url", "https://mega/x")))
+    text = up.message.sent[-1]
+    assert "detail_url: https://mega/x" in text
+    assert len(text) < 4096
+
+
 def test_admin_auctions_match_variants(monkeypatch, db):
     from app.models.user import User
     from app.models.wishlist import Wishlist
