@@ -3,6 +3,20 @@
 
 ---
 
+## Status de execução (P1-B) — 2026-05-21
+
+- **Status:** parcialmente concluído.
+- **Removidos nesta etapa:**
+  - `config/rpi_config.py`, `config/raspberry_pi_config.py`, `config/notification_config.py`
+  - `scripts/debug_icarros.py`, `scripts/debug_icarros_one.py`, `scripts/debug_icarros_urls.py`, `scripts/debug_manual_search.py`, `scripts/debug_mercadolivre.py`, `scripts/debug_turboclass.py`
+  - `scripts/test_ml_api.py`, `scripts/test_ml_api_raw.py`, `scripts/test_ml_client.py`, `scripts/test_ml_scraper.py`, `scripts/test_olx.py`, `scripts/health_check.py`
+  - `monitoring/resource_monitor.py`
+  - `app/services/mercado_livre/`
+  - `app/notifications/email.py`, `app/notifications/whatsapp.py`, `app/notifications/webhook.py`, `app/notifications/manager.py`
+  - `app/scheduler/jobs.py::queue_notifications_for_new_listings` e `tests/test_scheduler_notifications_queue.py`
+- **Mantidos por segurança operacional (validar depois):**
+  - `scripts/cache_manager.py` e `scripts/database_optimizer.py` (ainda referenciados em `config/raspberry-pi/crontab`).
+
 ## 1. Bugs Confirmados
 
 > Status P1-A (2026-05-21): **em implementação nesta PR** com pool SQLAlchemy explícito, bootstrap único de `source_configs` no scheduler e testes de regressão.
@@ -402,8 +416,6 @@ scripts/test_ml_client.py
 scripts/test_ml_scraper.py
 scripts/test_olx.py
 scripts/health_check.py           (imports quebrados)
-scripts/cache_manager.py          (não integrado)
-scripts/database_optimizer.py     (não integrado)
 monitoring/resource_monitor.py    (não integrado)
 app/services/mercado_livre/       (diretório inteiro)
 ```
