@@ -213,6 +213,13 @@ Contadores operacionais relevantes:
 /admin auctions upcoming
 ```
 
+Notas de operação:
+
+- `/admin auctions source <source>` oculta por padrão registros históricos inválidos (`status=invalid` ou `extras.skip_reason=generic_page`) para reduzir ruído operacional.
+- Use `/admin auctions source <source> --include-invalid` para auditoria explícita dos registros históricos inválidos.
+- O processo de hygiene não deleta registros persistidos; apenas marca/normaliza quando necessário.
+- Métricas úteis de quality/readiness ignoram inválidos para decisão operacional, mas o total histórico pode continuar contando registros persistidos.
+
 ### Matching/preview diagnóstico
 
 ```text

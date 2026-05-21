@@ -70,6 +70,86 @@ def test_admin_auctions_and_source_and_upcoming_and_motos(monkeypatch, db):
     assert "Total de lotes: 2" in up.message.sent[-1]
 
 
+def test_admin_auctions_source_hides_invalid_by_default(monkeypatch, db):
+    upsert_lot(
+        db,
+        {
+            "source": "mega_auctions",
+            "external_id": "m1",
+            "title": "Carro Audi Q3",
+            "status": "live",
+            "item_type": "car",
+            "extras": {"plate_final": "1"},
+        },
+    )
+    upsert_lot(
+        db,
+        {
+            "source": "mega_auctions",
+            "external_id": "m2",
+            "title": "Leiloes Judiciais",
+            "status": "invalid",
+            "item_type": "other",
+            "extras": {"skip_reason": "generic_page"},
+        },
+    )
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "mega")))
+    text = up.message.sent[-1]
+    assert "Carro Audi Q3" in text
+    assert "Leiloes Judiciais" not in text
+    assert "Registros históricos inválidos ocultos: 1" in text
+    assert "--include-invalid" in text
+
+
+def test_admin_auctions_source_include_invalid_shows_history(monkeypatch, db):
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "m1", "title": "Carro Audi Q3", "status": "live", "item_type": "car"})
+    upsert_lot(
+        db,
+        {
+            "source": "mega_auctions",
+            "external_id": "m2",
+            "title": "Leiloes Judiciais",
+            "status": "invalid",
+            "item_type": "other",
+            "extras": {"skip_reason": "generic_page"},
+        },
+    )
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "mega", "--include-invalid")))
+    text = up.message.sent[-1]
+    assert "Carro Audi Q3" in text
+    assert "Leiloes Judiciais" in text
+    assert "registro histórico inválido/generic_page" in text
+
+
+def test_admin_auctions_source_does_not_hide_other_when_not_invalid(monkeypatch, db):
+    upsert_lot(db, {"source": "mega_auctions", "external_id": "m1", "title": "Lote Outro Tipo", "status": "open", "item_type": "other"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "mega")))
+    text = up.message.sent[-1]
+    assert "Lote Outro Tipo" in text
+
+
+def test_admin_auctions_source_vip_still_works(monkeypatch, db):
+    upsert_lot(db, {"source": "vip_auctions", "external_id": "v1", "title": "UNO VIP", "status": "open", "item_type": "car"})
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "vip")))
+    assert "UNO VIP" in up.message.sent[-1]
+
+
 def test_admin_upcoming_orders_by_end_at_and_shows_sections(monkeypatch, db):
     upsert_lot(db, {"source": "vip_auctions", "external_id": "v1", "title": "A", "auction_end_at": datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc)})
     upsert_lot(db, {"source": "vip_auctions", "external_id": "v2", "title": "B", "auction_end_at": datetime(2026, 5, 15, 12, 0, tzinfo=timezone.utc)})
