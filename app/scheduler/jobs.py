@@ -171,58 +171,6 @@ def _ctx_fetch_diag(ctx) -> dict:
         "hybrid_blocked_status": getattr(ctx, "_hybrid_blocked_status", None),
     }
 
-def queue_notifications_for_new_listings(db: Session, component: str, new_listing_ids: list):
-    from datetime import datetime, timezone
-
-    from sqlalchemy.exc import IntegrityError
-
-    from app.core.settings import settings
-
-    listing_rows = db.query(CarListing.id).filter(CarListing.id.in_(new_listing_ids)).all()
-    listing_ids = [row[0] for row in listing_rows]
-    if not listing_ids:
-        return
-
-    wishlists = db.query(Wishlist).filter(Wishlist.is_active.is_(True)).all()
-    if not wishlists:
-        return
-
-    wishlist_ids = [w.id for w in wishlists]
-    existing = db.query(Notification.user_id, Notification.wishlist_id, Notification.car_listing_id).filter(
-        Notification.wishlist_id.in_(wishlist_ids),
-        Notification.car_listing_id.in_(listing_ids),
-    ).all()
-    existing_keys = {(row[0], row[1], row[2]) for row in existing}
-
-    queued_count = 0
-    for w in wishlists:
-        for listing_id in listing_ids:
-            key = (w.user_id, w.id, listing_id)
-            if key in existing_keys:
-                continue
-            try:
-                with db.begin_nested():
-                    db.add(Notification(
-                        user_id=w.user_id,
-                        wishlist_id=w.id,
-                        car_listing_id=listing_id,
-                        status="queued",
-                        next_attempt_at=datetime.now(timezone.utc),
-                        max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
-                    ))
-                    db.flush()
-                queued_count += 1
-            except IntegrityError:
-                continue
-
-    log(db, "info", component, "queued notifications", {
-        "queued": queued_count,
-        "listings": len(listing_ids),
-        "wishlists": len(wishlists),
-    })
-    db.commit()
-
-
 def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None, health: HealthCollector | None = None) -> dict:
     try:
         # Prefer keyword-arg calling. Some scrapers are defined as:
