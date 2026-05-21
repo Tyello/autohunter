@@ -483,13 +483,16 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             short_msg, full_msg = _format_track_result_message(result, str(getattr(wl, "query", "") or "wishlist"))
             elif data.startswith("TRACK:CHOOSE:"):
                 listing_id = data.split(":", 2)[2].strip()
+                active_wishlists = [wl for wl in wishlists if bool(getattr(wl, "is_active", True))]
                 if not listing_id:
                     short_msg, full_msg = "Inválido", "Não consegui rastrear agora. Tente novamente."
                 elif not wishlists:
                     short_msg, full_msg = "Sem wishlist", "Você não tem wishlists. Use /wishlist_add para criar a primeira."
+                elif not active_wishlists:
+                    short_msg, full_msg = "Sem wishlist ativa", "Suas buscas estão pausadas. Reative uma busca em /wishlist e tente novamente."
                 else:
                     keyboard_rows = []
-                    for wl in wishlists[:8]:
+                    for wl in active_wishlists[:8]:
                         token = issue_tracking_callback_token(
                             user_id=str(user.id),
                             wishlist_id=str(wl.id),
@@ -497,7 +500,7 @@ async def cb_track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         )
                         wl_label = (getattr(wl, "query", None) or f"Wishlist {wishlist_idx_by_id.get(str(wl.id), '?')}").strip()
                         keyboard_rows.append([InlineKeyboardButton(f"⭐ {wl_label[:40]}", callback_data=f"TRACK:ADDT:{token}")])
-                    if len(wishlists) > 8:
+                    if len(active_wishlists) > 8:
                         keyboard_rows.append([InlineKeyboardButton("📋 Ver todas", callback_data="MENU:WISHLISTS")])
                     short_msg, full_msg = "Escolha wishlist", "Escolha uma wishlist para rastrear este anúncio:"
                     await q.edit_message_text(full_msg, reply_markup=InlineKeyboardMarkup(keyboard_rows))

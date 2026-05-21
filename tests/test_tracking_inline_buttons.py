@@ -230,12 +230,31 @@ def test_callback_choose_wishlist_shows_inline_buttons(monkeypatch):
         notification=None,
         wishlist=None,
         listing=None,
-        wishlists=[types.SimpleNamespace(id="w1"), types.SimpleNamespace(id="w2"), types.SimpleNamespace(id="w3"), types.SimpleNamespace(id="w4")],
+        wishlists=[
+            types.SimpleNamespace(id="w1", is_active=True, query="ativa"),
+            types.SimpleNamespace(id="w2", is_active=False, query="pausada"),
+        ],
     )
     monkeypatch.setattr(handlers_wishlist_ui, "issue_tracking_callback_token", lambda **_kwargs: "tok123")
     q = _CallbackQuery(data="TRACK:CHOOSE:c1")
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
     assert q.edits[-1] == "Escolha uma wishlist para rastrear este anúncio:"
+    buttons = [btn for row in q.reply_markup.inline_keyboard for btn in row]
+    assert len(buttons) == 1
+    assert buttons[0].callback_data == "TRACK:ADDT:tok123"
+
+
+def test_callback_choose_wishlist_all_paused(monkeypatch):
+    _patch_common(
+        monkeypatch,
+        notification=None,
+        wishlist=None,
+        listing=None,
+        wishlists=[types.SimpleNamespace(id="w1", is_active=False), types.SimpleNamespace(id="w2", is_active=False)],
+    )
+    q = _CallbackQuery(data="TRACK:CHOOSE:c1")
+    asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
+    assert "pausadas" in q.edits[-1].lower()
 
 
 def test_callback_addt_valid(monkeypatch):
