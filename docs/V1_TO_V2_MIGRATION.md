@@ -1,4 +1,6 @@
 # V1 → V2: Gaps e Melhorias a Implementar
+> ⚠️ Status real de runtime deve ser conferido em `docs/SOURCES_ARCHITECTURE.md` (código atual é a fonte de verdade).
+
 > O que cada scraper v1 tem de battle-tested que a v2 ainda não herdou.
 > Documento de referência para migração incremental via modo `dual`.
 

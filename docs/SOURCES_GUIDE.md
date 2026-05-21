@@ -1,4 +1,6 @@
 # Garagem Alvo — Guia Técnico de Sources
+
+> Fonte de verdade técnica: ver `docs/SOURCES_ARCHITECTURE.md`.
 > Estado operacional, estratégia de desbloqueio e como validar cada fonte antes de colocar em produção.
 
 ---
