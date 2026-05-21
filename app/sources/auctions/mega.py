@@ -115,6 +115,24 @@ def build_mega_detail_diagnostics(html: str) -> dict[str, list[str]]:
     }
 
 
+def _extract_mega_datetime_after_label(clean_text: str, labels: tuple[str, ...]) -> object | None:
+    label_pattern = "|".join(labels)
+    pattern = (
+        rf"(?:{label_pattern})\s*:?\s*"
+        r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})"
+        r"(?:\s*(?:às|as|a|à|-)?\s*([0-9]{1,2})(?::|h)?([0-9]{2}))?"
+    )
+    m = re.search(pattern, clean_text, flags=re.I)
+    if not m:
+        return None
+    date_part = m.group(1)
+    hh = m.group(2)
+    mm = m.group(3)
+    if hh is not None and mm is not None:
+        return parse_datetime_br(f"{date_part} {hh}:{mm}")
+    return parse_datetime_br(date_part)
+
+
 def parse_mega_praca_line(line: str | None) -> tuple[object | None, object | None]:
     if not line:
         return None, None
@@ -282,8 +300,8 @@ def parse_mega_detail_html(html: str, url: str) -> NormalizedAuctionLot:
         state = m.group(1).upper()
         city = m.group(2).replace('-', ' ').title()
     clean_text = _normalize_mega_detail_text(html)
-    start_raw = _first_group(r"(?:Data\s+do\s+Leil[aã]o|In[ií]cio|Abertura)\s*:?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*[àa]\s*[0-9]{1,2}:[0-9]{2})?)", clean_text)
-    end_raw = _first_group(r"(?:Encerramento|Fim\s+do\s+Leil[aã]o|Data\s+Final|T[eé]rmino)\s*:?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}(?:\s*[àa]\s*[0-9]{1,2}:[0-9]{2})?)", clean_text)
+    start_at = _extract_mega_datetime_after_label(clean_text, ("Data\\s+do\\s+Leil[aã]o", "In[ií]cio", "Abertura"))
+    end_at = _extract_mega_datetime_after_label(clean_text, ("Encerramento", "Fim\\s+do\\s+Leil[aã]o", "Data\\s+Final", "T[eé]rmino"))
     initial_raw = _first_group(r"(?:Lance\s+Inicial|Valor\s+Inicial|Pre[cç]o\s+Inicial|Primeiro\s+Leil[aã]o|1º\s*Leil[aã]o|2º\s*Leil[aã]o)\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", clean_text)
     current_raw = _first_group(r"(?:Lance\s+Atual|Maior\s+Lance|[UÚ]ltimo\s+Lance|Lance\s+Vencedor|Melhor\s+Lance)\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", clean_text)
     status_label = _first_group(r"(?:Status|Situa[cç][aã]o)\s*:?\s*([A-Za-zÀ-ÿ ]{3,40})", clean_text) or _first_group(r"(aberto para lances|em andamento|recebendo lances|lances abertos|agendado|em breve|futuro|encerrado|finalizado|arrematado)", clean_text)
@@ -292,4 +310,4 @@ def parse_mega_detail_html(html: str, url: str) -> NormalizedAuctionLot:
     images = [absolute_url(clean_url, img) for img in ([og_img] if og_img else []) + aux_imgs]
     images = [img for img in images if img and not re.search(r"(logo|banner|placeholder|icon|pixel)", img, flags=re.I)]
     location = f"{city}/{state}" if city and state else None
-    return NormalizedAuctionLot(source=SOURCE_KEY, external_id=(external_id or clean_url).upper(), url=clean_url, title=title, item_type=infer_mega_item_type(title, clean_url), year=parse_mega_compact_year(title), city=city, state=state, location=location, initial_bid=parse_money_br(initial_raw or ""), current_bid=parse_money_br(current_raw or ""), auction_start_at=parse_datetime_br(start_raw or ""), auction_end_at=parse_datetime_br(end_raw or ""), thumbnail_url=images[0] if images else None, images=images or None, status=normalize_mega_status(status_label), raw_payload={"html_card": html[:1000]})
+    return NormalizedAuctionLot(source=SOURCE_KEY, external_id=(external_id or clean_url).upper(), url=clean_url, title=title, item_type=infer_mega_item_type(title, clean_url), year=parse_mega_compact_year(title), city=city, state=state, location=location, initial_bid=parse_money_br(initial_raw or ""), current_bid=parse_money_br(current_raw or ""), auction_start_at=start_at, auction_end_at=end_at, thumbnail_url=images[0] if images else None, images=images or None, status=normalize_mega_status(status_label), raw_payload={"html_card": html[:1000]})

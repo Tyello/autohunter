@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from pathlib import Path
@@ -132,9 +132,39 @@ def test_mega_detail_extracts_bids_dates_and_status_conservatively():
     lot = mega.parse_mega_detail_html(html, "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j100001")
     assert lot.initial_bid is not None and str(lot.initial_bid) == "25000.00"
     assert lot.current_bid is not None and str(lot.current_bid) == "30000.00"
-    assert lot.auction_start_at is not None
-    assert lot.auction_end_at is not None
+    assert lot.auction_start_at == datetime(2026, 5, 21, 13, 0, tzinfo=timezone.utc)
+    assert lot.auction_end_at == datetime(2026, 5, 22, 19, 30, tzinfo=timezone.utc)
     assert lot.status == "ended"
+
+
+def test_mega_detail_datetime_parsing_variants_and_field_mapping():
+    lot_space = mega.parse_mega_detail_html(
+        "<div>Data do Leilão: 21/05/2026 10:00</div>",
+        "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j100010",
+    )
+    assert lot_space.auction_start_at == datetime(2026, 5, 21, 13, 0, tzinfo=timezone.utc)
+    assert lot_space.auction_end_at is None
+
+    lot_as = mega.parse_mega_detail_html(
+        "<div>Data do Leilão: 21/05/2026 às 10:00</div>",
+        "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j100011",
+    )
+    assert lot_as.auction_start_at == datetime(2026, 5, 21, 13, 0, tzinfo=timezone.utc)
+    assert lot_as.auction_end_at is None
+
+    lot_dash = mega.parse_mega_detail_html(
+        "<div>Encerramento: 22/05/2026 - 16:30</div>",
+        "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j100012",
+    )
+    assert lot_dash.auction_start_at is None
+    assert lot_dash.auction_end_at == datetime(2026, 5, 22, 19, 30, tzinfo=timezone.utc)
+
+    lot_h = mega.parse_mega_detail_html(
+        "<div>Encerramento: 22/05/2026 às 16h30</div>",
+        "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j100013",
+    )
+    assert lot_h.auction_start_at is None
+    assert lot_h.auction_end_at == datetime(2026, 5, 22, 19, 30, tzinfo=timezone.utc)
 
 
 def test_mega_detail_online_generic_and_logo_banner_image_are_ignored():
