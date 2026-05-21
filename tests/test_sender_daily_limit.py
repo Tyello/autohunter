@@ -35,7 +35,8 @@ def _seed_base(db):
 def test_sender_marks_sent_when_allowed(db, monkeypatch):
     _user, _wl, listing, n = _seed_base(db)
 
-    monkeypatch.setattr("app.scheduler.jobs_send.can_send_more_today", lambda *_: True)
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 0)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
 
     sent_calls = []
 
@@ -55,7 +56,7 @@ def test_sender_marks_sent_when_allowed(db, monkeypatch):
 def test_sender_suppresses_when_daily_limit_reached_and_sends_notice_once(db, monkeypatch):
     user, _wl, _listing, n = _seed_base(db)
 
-    monkeypatch.setattr("app.scheduler.jobs_send.can_send_more_today", lambda *_: False)
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 10)
     monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: True)
     monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
 
@@ -81,3 +82,60 @@ def test_sender_suppresses_when_daily_limit_reached_and_sends_notice_once(db, mo
     assert len(notice_calls) == 1
     u2 = db.query(User).filter(User.id == user.id).one()
     assert u2.last_daily_limit_notice_at is not None
+
+
+def test_sender_uses_per_user_budget_cache_within_batch(db, monkeypatch):
+    _user, _wl, _listing, _n1 = _seed_base(db)
+    n2 = Notification(user_id=_user.id, wishlist_id=_wl.id, car_listing_id=_listing.id, status="queued")
+    db.add(n2)
+    db.commit()
+
+    calls = {"count": 0, "limit": 0, "sender": 0}
+
+    def _count(*_args, **_kwargs):
+        calls["count"] += 1
+        return 1
+
+    def _limit(*_args, **_kwargs):
+        calls["limit"] += 1
+        return 2
+
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", _count)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", _limit)
+    monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: False)
+
+    def _sender_fn(*_args, **_kwargs):
+        calls["sender"] += 1
+
+    sent = send_queued_notifications(db, component="test", sender_fn=_sender_fn)
+
+    assert sent == 1
+    assert calls == {"count": 1, "limit": 1, "sender": 1}
+    sent_rows = db.query(Notification).filter(Notification.status == "sent").all()
+    suppressed_rows = db.query(Notification).filter(Notification.status == "suppressed").all()
+    assert len(sent_rows) == 1
+    assert len(suppressed_rows) == 1
+    assert suppressed_rows[0].reason == "daily_limit_reached"
+
+
+def test_daily_limit_notice_reuses_cached_limit(db, monkeypatch):
+    _user, _wl, _listing, _n = _seed_base(db)
+
+    calls = {"limit": 0}
+
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 10)
+
+    def _limit(*_args, **_kwargs):
+        calls["limit"] += 1
+        return 10
+
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", _limit)
+    monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: True)
+
+    notice_limits = []
+    monkeypatch.setattr("app.scheduler.jobs_send.send_daily_limit_notice_http", lambda _u, limit: notice_limits.append(limit) or True)
+
+    sent = send_queued_notifications(db, component="test", sender_fn=lambda *_args, **_kwargs: None)
+    assert sent == 0
+    assert calls["limit"] == 1
+    assert notice_limits == [10]

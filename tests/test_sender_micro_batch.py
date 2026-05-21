@@ -22,7 +22,8 @@ def test_sender_micro_batch_commits_in_chunks(monkeypatch):
     queued = [_notification(1), _notification(2), _notification(3)]
 
     monkeypatch.setattr("app.scheduler.jobs_send.claim_queued_notifications", lambda *_args, **_kwargs: queued)
-    monkeypatch.setattr("app.scheduler.jobs_send.can_send_more_today", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_args, **_kwargs: 10)
     monkeypatch.setattr("app.scheduler.jobs_send.mark_notification_sent", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("app.scheduler.jobs_send.log", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("app.scheduler.jobs_send.settings", SimpleNamespace(notification_sender_commit_batch_size=2))

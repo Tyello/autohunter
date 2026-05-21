@@ -109,7 +109,8 @@ def test_sender_marks_retry_on_transient_error(db, monkeypatch):
     queue_notifications_for_matches(db, wl, [listing])
     db.commit()
 
-    monkeypatch.setattr("app.scheduler.jobs_send.can_send_more_today", lambda *_: True)
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 0)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
 
     def _sender(*_args, **_kwargs):
         raise RuntimeError("timeout from telegram")
@@ -121,3 +122,16 @@ def test_sender_marks_retry_on_transient_error(db, monkeypatch):
     assert row.status == "queued"
     assert row.reason == "retry_scheduled"
     assert row.attempts == 1
+
+
+def test_claim_eager_loads_user_and_listing(db):
+    user, wl, listing = _seed(db)
+    queue_notifications_for_matches(db, wl, [listing])
+    db.commit()
+
+    row = claim_queued_notifications(db, owner="w", batch_size=1)[0]
+
+    assert row.user is not None
+    assert row.user.id == user.id
+    assert row.car_listing is not None
+    assert row.car_listing.id == listing.id
