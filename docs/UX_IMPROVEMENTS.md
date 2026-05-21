@@ -4,6 +4,32 @@
 
 ---
 
+## Status de execução
+
+Última atualização: 2026-05-21
+
+### Concluído
+
+- [x] 1.1 — Botão CTA no `/start`
+  - Implementado no PR #260.
+  - `/start` agora mostra CTA contextual para criar primeira busca ou ver buscas existentes.
+
+- [x] 3.1 — Lista de buscas compacta
+  - Implementado no PR #260.
+  - `render_user_wishlists` passou a exibir 1 linha por busca com status, filtros, rastreados e alertas do dia.
+
+- [x] 6.2 — Tela vazia de anúncios rastreados
+  - Implementado no PR #260.
+  - Quando todos os slots estão vazios, o bot mostra orientação clara para usar `⭐ Rastrear`.
+
+### Próximo pacote recomendado
+
+P1 — Fechar o loop busca manual → rastreamento:
+- item 4.1 — adicionar botão `⭐ Rastrear` nos resultados de `/buscar`
+- objetivo: permitir que o usuário faça uma busca pontual, encontre um anúncio interessante e comece a rastrear sem voltar ao menu
+
+---
+
 ## Como ler este documento
 
 Cada item tem:
@@ -15,7 +41,9 @@ Cada item tem:
 
 ## Bloco 1 — Primeiros passos (afeta todo novo usuário)
 
-### 1.1 `/start` sem botão de ação
+### 1.1 `/start` sem botão de ação — ✅ Concluído no PR #260
+
+> Status: concluído no PR #260. O texto abaixo fica mantido como histórico da motivação e da solução proposta.
 
 **O problema hoje:**
 ```
@@ -282,7 +310,9 @@ Assim o usuário entende instantaneamente: "Excelente match (87/100)" comunica m
 
 ## Bloco 3 — Gestão de buscas (uso diário)
 
-### 3.1 Lista de buscas é muro de texto
+### 3.1 Lista de buscas é muro de texto — ✅ Concluído no PR #260
+
+> Status: concluído no PR #260. O texto abaixo fica mantido como histórico da motivação e da solução proposta.
 
 **O problema hoje:**
 Cada busca na lista ocupa 7 linhas de texto (query, status, leilões, filtros, rastreados, alertas, linha em branco). Com 3 buscas, é uma mensagem de 21 linhas antes de qualquer botão.
@@ -521,7 +551,9 @@ if context.user_data.get("session") and update.message.text.startswith("/"):
 
 ---
 
-### 6.2 "⭐ Anúncios rastreados" no menu mostra tela vazia sem orientação
+### 6.2 "⭐ Anúncios rastreados" no menu mostra tela vazia sem orientação — ✅ Concluído no PR #260
+
+> Status: concluído no PR #260. O texto abaixo fica mantido como histórico da motivação e da solução proposta.
 
 **O problema hoje:**
 Usuário toca em "⭐ Anúncios rastreados" sem ter nenhum rastreado. Vê:
@@ -598,23 +630,24 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 
 ## Resumo de prioridades
 
-| # | Item | Esforço | Impacto |
-|---|---|---|---|
-| 1.1 | Botão CTA no `/start` | Baixo | Alto — reduz abandono no onboarding |
-| 1.2 | Resultado imediato após criar busca | Médio | Alto — constrói confiança no primeiro uso |
-| 2.1 | Badge de recência com fallback para `created_at` | Baixo | Alto — o argumento central do produto reaparece |
-| 2.3 | Contexto mínimo garantido em todo alerta | Baixo | Médio — usuário sempre entende por que recebeu |
-| 3.1 | Lista de buscas compacta (1 linha por busca) | Baixo | Médio — reduz fricção no uso diário |
-| 4.1 | Botão rastrear nos resultados de `/buscar` | Médio | Médio — fecha o loop busca → rastreio |
-| 3.3 | Limite diário com contexto e CTA suave | Baixo | Alto para conversão Free → Premium |
-| 5.1 | Barra de progresso no `/plan` | Baixo | Médio — torna limites mais tangíveis |
-| 3.2 | "Buscar agora" inicia fluxo conversacional | Médio | Médio — UX consistente com o resto do bot |
-| 6.3 | Botões de sugestão nos filtros | Médio | Médio — elimina erros de formatação |
-| 2.4 | Label de score humanizado | Baixo | Baixo — clareza sem impacto em conversão |
-| 1.3 | Contexto de ausência no `/start` | Médio | Médio — retenção de usuários que voltam |
-| 6.1 | Detectar comando durante sessão aberta | Médio | Baixo — reduz confusão pontual |
-| 5.2 | Texto de upgrade orientado à dor | Baixo | Médio — testa mensagem alternativa |
+| # | Item | Status | Esforço | Impacto |
+|---|---|---|---|---|
+| 1.1 | Botão CTA no `/start` | ✅ Concluído PR #260 | Baixo | Alto — reduz abandono no onboarding |
+| 3.1 | Lista de buscas compacta | ✅ Concluído PR #260 | Baixo | Médio — reduz fricção no uso diário |
+| 6.2 | Tela vazia de anúncios rastreados | ✅ Concluído PR #260 | Baixo | Médio — reduz beco sem saída |
+| 4.1 | Botão rastrear nos resultados de `/buscar` | Próximo recomendado | Médio | Médio — fecha o loop busca → rastreio |
+| 1.2 | Resultado imediato após criar busca | Pendente | Médio | Alto — constrói confiança no primeiro uso |
+| 2.1 | Badge de recência com fallback para `created_at` | Pendente | Baixo | Alto — o argumento central do produto reaparece |
+| 2.3 | Contexto mínimo garantido em todo alerta | Pendente | Baixo | Médio — usuário sempre entende por que recebeu |
+| 3.3 | Limite diário com contexto e CTA suave | Pendente | Baixo | Alto para conversão Free → Premium |
+| 5.1 | Barra de progresso no `/plan` | Pendente | Baixo | Médio — torna limites mais tangíveis |
+| 3.2 | "Buscar agora" inicia fluxo conversacional | Pendente | Médio | Médio — UX consistente com o resto do bot |
+| 6.3 | Botões de sugestão nos filtros | Pendente | Médio | Médio — elimina erros de formatação |
+| 2.4 | Label de score humanizado | Pendente | Baixo | Baixo — clareza incremental |
+| 1.3 | Contexto de ausência no `/start` | Pendente | Médio | Médio — retenção de usuários que voltam |
+| 6.1 | Detectar comando durante sessão aberta | Pendente | Médio | Baixo — reduz confusão pontual |
+| 5.2 | Texto de upgrade orientado à dor | Pendente | Baixo | Médio — testa mensagem alternativa |
 
 ---
 
-*Documento gerado em 2026-05-21 com base em análise do código de `handlers_core.py`, `renderers.py`, `telegram_formatter.py`, `sender.py` e `listing_display.py`.*
+*Documento criado em 2026-05-21 e atualizado após o PR #260 para refletir o status real das melhorias de UX já implementadas.*
