@@ -327,6 +327,7 @@ def render_admin_auction_lot(lot) -> str:
     url = str(getattr(lot, "url", None) or "-")
     extras = getattr(lot, "extras", None) or {}
     plate_final = extras.get("plate_final") if isinstance(extras, dict) else None
+    skip_reason = extras.get("skip_reason") if isinstance(extras, dict) else None
 
     lines = [
         f"⚠️ Leilão — {source}",
@@ -351,6 +352,8 @@ def render_admin_auction_lot(lot) -> str:
         lines.append(f"Encerra: {auction_end_at}")
     if plate_final:
         lines.append(f"Placa final: {plate_final}")
+    if status == "invalid" or skip_reason == "generic_page":
+        lines.append("⚠️ registro histórico inválido/generic_page")
     lines.append(f"Link: {url}")
     return "\n".join(lines)
 

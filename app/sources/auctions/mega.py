@@ -203,6 +203,47 @@ def _is_generic_mega_page(title: str | None, url: str | None) -> bool:
         return True
     return False
 
+
+def audit_mega_persisted_lot(lot) -> dict[str, object]:
+    url = str(getattr(lot, "url", "") or "")
+    item_type = str(getattr(lot, "item_type", "") or "").strip().lower()
+    city = getattr(lot, "city", None)
+    state = getattr(lot, "state", None)
+    location = getattr(lot, "location", None)
+    low_url = url.lower()
+    issues: list[str] = []
+    suggested_updates: dict[str, object] = {}
+    has_lot_id = bool(re.search(r"j\d{4,}", low_url, flags=re.I))
+
+    if any(k in low_url for k in ("/leiloes-judiciais", "/leiloes-extrajudiciais", "/como-funciona", "/login", "/cadastro")) and not has_lot_id:
+        issues.append("generic_page")
+        suggested_updates["status"] = "invalid"
+        suggested_updates["item_type"] = "other"
+        suggested_updates.setdefault("extras", {})["skip_reason"] = "generic_page"
+
+    if "/veiculos/carros/" in low_url and item_type != "car":
+        issues.append("item_type_mismatch")
+        suggested_updates["item_type"] = "car"
+    if ("/veiculos/motos/" in low_url or "/veiculos/motocicletas/" in low_url) and item_type != "motorcycle":
+        issues.append("motorcycle_mismatch")
+        suggested_updates["item_type"] = "motorcycle"
+    if "/veiculos/caminhoes/" in low_url and item_type != "truck":
+        issues.append("truck_mismatch")
+        suggested_updates["item_type"] = "truck"
+
+    if "/si/sem-informacao/" in low_url and any(v for v in (city, state, location)):
+        issues.append("invalid_location")
+        suggested_updates.update({"city": None, "state": None, "location": None})
+
+    if "/veiculos/" in low_url and "/si/sem-informacao/" not in low_url and not has_lot_id:
+        issues.append("missing_lot_id")
+
+    return {
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "suggested_updates": suggested_updates,
+    }
+
 def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
     cards = re.findall(r'<article[^>]*class="[^"]*(?:card|lot)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S)
     if not cards:

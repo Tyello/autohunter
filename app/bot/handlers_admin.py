@@ -63,6 +63,7 @@ from app.services.auction_matching_service import (
     match_auction_lots_for_wishlist,
 )
 from app.services.auction_quality_service import build_auction_quality_report
+from app.services.auction_mega_hygiene_service import run_mega_hygiene
 from app.services.auction_source_history_service import build_auction_source_history
 from app.services.auction_notification_service import (
     build_auction_notifications_for_wishlist,
@@ -561,6 +562,46 @@ async def _admin_auctions(update: Update, raw_args: List[str]):
                 return
             report = build_auction_quality_report(db, source=source)
             await update.message.reply_text(render_admin_auction_quality_report(report))
+            return
+        if sub == "hygiene":
+            if len(args) < 2 or args[1].lower() != "mega":
+                await update.message.reply_text("Use: /admin auctions hygiene mega [--dry-run|--apply] [--limit N]")
+                return
+            apply_mode = "--apply" in args[2:]
+            limit = 200
+            if "--limit" in args[2:]:
+                i = args.index("--limit")
+                if i + 1 < len(args):
+                    try:
+                        limit = max(1, min(2000, int(args[i + 1])))
+                    except Exception:
+                        pass
+            out = run_mega_hygiene(db, apply=apply_mode, limit=limit)
+            lines = [
+                f"🧹 Admin Leilões — hygiene {out['source']}",
+                f"modo: {'apply' if apply_mode else 'dry-run'}",
+                f"experimental: {'sim' if out.get('is_experimental') else 'não'}",
+                f"analisados: {out.get('analyzed', 0)}",
+                f"atualizados: {out.get('updated', 0)}",
+            ]
+            if out.get("blocked"):
+                lines.extend([
+                    "bloqueado: sim (source_not_experimental)",
+                    "nenhuma alteração aplicada: source não experimental",
+                ])
+            lines.extend([
+                "",
+                "issues:",
+            ])
+            counts = out.get("issue_counts") or {}
+            for k in ("generic_page", "item_type_mismatch", "motorcycle_mismatch", "truck_mismatch", "invalid_location", "missing_lot_id"):
+                lines.append(f"- {k}: {counts.get(k, 0)}")
+            examples = out.get("examples") or []
+            if examples:
+                lines.extend(["", "exemplos:"])
+                for ex in examples[:3]:
+                    lines.append(f"- {ex.get('external_id') or '-'} | issues={','.join(ex.get('issues') or [])} | url={ex.get('url') or '-'}")
+            await update.message.reply_text("\n".join(lines))
             return
         if sub in {"source-history", "monitor"}:
             if len(args) < 2:
