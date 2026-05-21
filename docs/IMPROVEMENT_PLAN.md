@@ -25,6 +25,13 @@
   - wishlist sem filtro `source=eq` segue elegível apenas em sources default monitoráveis/implementadas;
   - wishlist com filtro `source=eq` segue restrita às sources explicitamente escolhidas.
 
+## Status de execução (P2-B) — 2026-05-21
+
+- **Status:** implementado.
+- `get_wishlist_summaries(db, user_id)` agora usa cache em memória por `user_id` com TTL curto (default: 10s) e limite de entradas (default: 512).
+- Invalidação automática adicionada nas principais mutações de wishlist/filtros/tracking, sem acoplamento com sender.
+- Decisão operacional: `notifications_24h_count` pode ficar levemente stale por até o TTL do cache, aceitável para fluxos de menu/listagem.
+
 ## 1. Bugs Confirmados
 
 > Status P1-A (2026-05-21): **concluído na PR #248** (pool SQLAlchemy explícito, bootstrap único de `source_configs` no scheduler e testes de regressão).

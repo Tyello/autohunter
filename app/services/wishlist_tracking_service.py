@@ -16,6 +16,7 @@ from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.core.settings import settings
 from app.services.notifications_queue_service import queue_tracked_price_drop_alert
+from app.services.wishlists_service import invalidate_wishlist_summaries_cache
 from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.plan_capabilities import (
     get_plan_capabilities,
@@ -356,6 +357,7 @@ def add_tracked_listing_result(
             slot=slot,
             automation_enabled=automation_allowed,
         )
+    invalidate_wishlist_summaries_cache(user_id)
 
     if automation_allowed:
         message = "✅ Anúncio rastreado.\nVou acompanhar preço/status e te avisar sobre mudanças importantes."
@@ -471,6 +473,7 @@ def remove_tracked_listing(db: Session, *, user_id, wishlist_index: int, slot: i
 
     db.delete(row)
     db.commit()
+    invalidate_wishlist_summaries_cache(user_id)
     return True, f"Rastreamento removido do slot {slot}. Use /wishlist_track_list <n> para conferir."
 
 
