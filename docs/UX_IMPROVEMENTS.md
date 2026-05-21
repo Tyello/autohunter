@@ -1,0 +1,620 @@
+# Garagem Alvo — Melhorias de UX
+> Baseado em análise do código real dos handlers, renderers e formatters.
+> Organizado por impacto no usuário, do mais crítico ao incremental.
+
+---
+
+## Como ler este documento
+
+Cada item tem:
+- **O problema** — o que acontece hoje
+- **O que fazer** — implementação específica com localização no código
+- **Impacto** — por que isso importa para conversão e retenção
+
+---
+
+## Bloco 1 — Primeiros passos (afeta todo novo usuário)
+
+### 1.1 `/start` sem botão de ação
+
+**O problema hoje:**
+```
+👋 Bem-vindo ao Garagem Alvo
+...
+Para começar: toque em /menu e depois em ➕ Criar busca.
+```
+O usuário precisa fechar a mensagem, digitar `/menu`, esperar o menu carregar, e então tocar em "Criar busca". São 3 passos extras onde cada um tem chance de abandono.
+
+**O que fazer** — `renderers.py::render_start_text` + `handlers_core.py::cmd_start`:
+
+```python
+# cmd_start — adicionar reply_markup direto no /start
+async def cmd_start(update, context):
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(...)
+        w = list_wishlists(db, user.id)
+
+    if not w:
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("➕ Criar minha primeira busca",
+                                 callback_data="MENU:CREATE_WISHLIST")
+        ]])
+    else:
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎯 Ver minhas buscas",
+                                 callback_data="MENU:WISHLISTS")
+        ]])
+
+    await reply_text(update, render_start_text(len(w)), reply_markup=markup)
+```
+
+**Impacto:** Remove 3 passos da jornada de onboarding. O usuário novo toca em 1 botão e já está criando busca.
+
+---
+
+### 1.2 Silêncio após criar busca
+
+**O problema hoje:**
+Usuário cria busca → recebe "✅ Busca criada" → espera. Pode esperar 5 minutos ou 2 horas dependendo do scheduler. Sem feedback, a pergunta óbvia é "funcionou?".
+
+**O que fazer** — `handlers_core.py`, após confirmar criação da wishlist:
+
+```python
+# Após criar a wishlist, antes do _post_creation_markup:
+await update.effective_message.reply_text(
+    "⏳ Procurando agora...",
+)
+
+# Disparar busca imediata (já existe trigger_initial_run_for_wishlist)
+from app.services.wishlists_service import trigger_initial_run_for_wishlist
+results_count = await trigger_initial_run_for_wishlist(db, wishlist.id)
+
+if results_count > 0:
+    confirmation = (
+        f"✅ Busca criada: {query}\n\n"
+        f"📡 Encontrei {results_count} anúncio(s) agora.\n"
+        f"Você vai receber os alertas em instantes.\n\n"
+        f"A partir de agora monitoro continuamente."
+    )
+else:
+    # Carro raro — mensagem honesta
+    confirmation = (
+        f"✅ Busca criada: {query}\n\n"
+        f"Nenhum anúncio encontrado agora.\n"
+        f"Esse parece ser um carro difícil de achar — pode demorar dias.\n"
+        f"Estou monitorando e você será o primeiro a saber."
+    )
+
+await update.effective_message.reply_text(confirmation, reply_markup=_post_creation_markup())
+```
+
+**Impacto:** Resolve o maior gap de confiança do produto. Usuário sabe que o bot funcionou.
+
+---
+
+### 1.3 Retorno após ausência — sem contexto do que aconteceu
+
+**O problema hoje:**
+Usuário some por 3 dias e manda `/start`. Recebe:
+```
+👋 Garagem Alvo
+Seu monitoramento já está ativo.
+Use /menu para ver suas buscas...
+```
+Nenhum sinal do que aconteceu durante a ausência.
+
+**O que fazer** — `handlers_core.py::cmd_start`, adicionar resumo contextual:
+
+```python
+async def cmd_start(update, context):
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(...)
+        w = list_wishlists(db, user.id)
+        if w:
+            # Alertas enviados nos últimos 7 dias
+            recent = count_notifications_sent_last_n_days(db, user.id, days=7)
+            # Anúncios monitorados ativamente
+            active_tracked = count_active_tracked_listings(db, user.id)
+
+    if w and recent > 0:
+        ctx_line = f"Enviei {recent} alerta(s) para você nos últimos 7 dias."
+    elif w:
+        ctx_line = "Nenhum alerta esta semana — mercado calmo para suas buscas."
+    else:
+        ctx_line = None
+
+    text = render_start_text(len(w), context_line=ctx_line)
+    await reply_text(update, text, reply_markup=markup)
+```
+
+**Impacto:** Usuário que volta sente que o bot estava trabalhando. Aumenta percepção de valor mesmo sem ter aberto o app.
+
+---
+
+## Bloco 2 — Notificação de alerta (o momento mais importante do produto)
+
+### 2.1 Badge de recência invisível para a maioria dos alertas
+
+**O problema hoje:**
+`build_recency_badge` só mostra "⏱️ Há 2h" quando `published_at_reliable=True` nos `extras` do listing. A maioria das fontes não seta esse flag. Resultado: o badge temporal — que é um dos argumentos mais fortes do produto ("chegou antes de todo mundo") — aparece em uma fração dos alertas.
+
+**O que fazer** — `telegram_formatter.py::build_recency_badge`:
+
+```python
+def build_recency_badge(ad: Any) -> str | None:
+    extras = getattr(ad, "extras", None) or {}
+    
+    candidates = [
+        getattr(ad, "published_at", None),
+        extras.get("published_at") if isinstance(extras, dict) else None,
+        getattr(ad, "created_at", None),  # fallback: quando o sistema viu
+    ]
+    
+    dt = None
+    is_reliable = bool(
+        extras.get("published_at_reliable") or
+        extras.get("is_fresh_reliable") or
+        extras.get("published_at")  # se a fonte enviou a data, confiar
+    )
+    
+    for c in candidates:
+        dt = _parse_datetime(c)
+        if dt:
+            break
+    
+    if not dt:
+        return None
+
+    # Se só temos created_at (quando o sistema viu), usar com label diferente
+    if not is_reliable:
+        # Usar created_at como "visto há X" — menos preciso mas útil
+        now = datetime.now(timezone.utc)
+        diff = now - dt
+        hours = int(diff.total_seconds() // 3600)
+        if hours < 2:
+            return "🆕 Novo"       # recém ingerido
+        if hours < 6:
+            return "🕐 Recente"   # sem afirmar hora exata
+        return None               # mais de 6h: não vale mostrar
+
+    # Com data confiável: mostrar hora exata
+    # ... lógica existente ...
+```
+
+**Impacto:** Badge temporal passa a aparecer na maioria dos alertas. É o argumento central do produto ("antes de todo mundo") e estava invisível.
+
+---
+
+### 2.2 Contexto de mercado ausente quando `market_stats` está vazio
+
+**O problema hoje:**
+`build_badges` tenta mostrar `💰 18% abaixo da média` via `delta_vs_median_pct` do `score_breakdown`. Mas se `market_stats_cohorts` não tem dados para aquele make/model/year, o badge não aparece. Não há fallback.
+
+**O que fazer** — enriquecer o badge de preço com contexto relativo mesmo sem stats de mercado:
+
+```python
+def build_price_context_badge(ad: Any, score_breakdown: dict) -> str | None:
+    # Opção 1: delta vs mediana (quando temos market_stats)
+    delta_pct = score_breakdown.get("delta_vs_median_pct")
+    if delta_pct is not None:
+        return _delta_badge_text(delta_pct)
+
+    # Opção 2: delta vs FIPE (quando temos fipe_price no breakdown)
+    fipe_delta = score_breakdown.get("delta_vs_fipe_pct")
+    if fipe_delta is not None:
+        if fipe_delta < -10:
+            return f"💰 {abs(fipe_delta):.0f}% abaixo da FIPE"
+        if fipe_delta > 10:
+            return f"📈 {fipe_delta:.0f}% acima da FIPE"
+
+    # Opção 3: preço absoluto como referência (sem comparação)
+    # Não adicionar badge — melhor nada que dado errado
+    return None
+```
+
+E alimentar `market_stats_cohorts` continuamente: toda ingestão de listing com `make + model + year + price` deve atualizar as estatísticas. Hoje isso provavelmente não acontece automaticamente.
+
+---
+
+### 2.3 "Por que você recebeu" invisível para matches de score baixo
+
+**O problema hoje:**
+```python
+if score_i > 0 and (main_reason or matched_filters):
+    lines.append("Por que você recebeu (resumo):")
+```
+Se `score_i == 0` ou `reasons` estiver vazio, o usuário não sabe por que recebeu o alerta. Para buscas sem score calculado, toda a seção de contexto desaparece.
+
+**O que fazer** — sempre mostrar pelo menos o critério que foi atingido:
+
+```python
+# Sempre mostrar pelo menos a query que gerou o alerta
+query = getattr(ad, "wishlist_query", None)
+matched_filters = _compact_filters(ad)
+
+# Bloco de contexto mínimo garantido
+context_lines = []
+
+if main_reason:
+    context_lines.append(f"• {main_reason}")
+elif query:
+    context_lines.append(f"• Busca: {query}")
+
+for ftxt in matched_filters:
+    context_lines.append(f"• Filtro: {ftxt}")
+
+if context_lines:
+    lines.append("─────────────────")
+    lines.extend(context_lines)
+```
+
+---
+
+### 2.4 Score `/100` sem legenda
+
+**O problema hoje:**
+`🔥 73/100 — Honda Civic Si 2018` aparece no topo da notificação. O usuário não sabe o que é 73, o que significa em relação a 50, nem o que influenciou.
+
+**O que fazer** — adicionar legenda compacta condicional:
+
+```python
+# build_score_label — nova função
+def _score_label(score_i: int) -> str:
+    if score_i >= 85:
+        return "🔥 Excelente match"
+    if score_i >= 70:
+        return "✅ Bom match"
+    if score_i >= 55:
+        return "👍 Match razoável"
+    return ""
+
+# Em format_ad_message:
+label = _score_label(score_i)
+if label and score_i > 0:
+    line1 = f"{label} ({score_i}/100) — {title}"
+else:
+    line1 = title
+```
+
+Assim o usuário entende instantaneamente: "Excelente match (87/100)" comunica muito mais que "🔥 87/100".
+
+---
+
+## Bloco 3 — Gestão de buscas (uso diário)
+
+### 3.1 Lista de buscas é muro de texto
+
+**O problema hoje:**
+Cada busca na lista ocupa 7 linhas de texto (query, status, leilões, filtros, rastreados, alertas, linha em branco). Com 3 buscas, é uma mensagem de 21 linhas antes de qualquer botão.
+
+**O que fazer** — formato compacto por busca:
+
+```python
+# render_user_wishlists — formato card por busca
+def render_user_wishlists(wishlists) -> str:
+    lines = ["🎯 Minhas buscas\n"]
+    for item in wishlists:
+        status_icon = "✅" if item.get("is_active") else "⏸️"
+        filters = item.get("filters", [])
+        filter_summary = f" • {len(filters)} filtro(s)" if filters else ""
+        tracked = item.get("tracked_count", 0)
+        tracked_summary = f" • {tracked} rastreado(s)" if tracked else ""
+        alerts_today = item.get("notifications_24h_count", 0)
+        alerts_summary = f" • {alerts_today} alerta(s) hoje" if alerts_today else ""
+
+        lines.append(
+            f"{status_icon} {item['index']}. {item['query']}"
+            f"{filter_summary}{tracked_summary}{alerts_summary}"
+        )
+    lines.append("\nEscolha uma busca para gerenciar:")
+    return "\n".join(lines)
+```
+
+Resultado: cada busca vira 1 linha. Com 3 buscas = 4 linhas totais. Scannable.
+
+---
+
+### 3.2 "Buscar agora" abre instrução de texto, não uma busca
+
+**O problema hoje:**
+Botão "🔎 Buscar agora" no menu principal abre:
+```
+Essa é uma busca pontual. Eu procuro uma vez e não salvo monitoramento.
+Exemplo: /buscar civic si até 120000 sp
+Para receber alertas todos os dias, use ➕ Criar busca.
+```
+O usuário foi no menu, tocou no botão, e recebeu uma instrução de como digitar um comando. Não há nada de interativo.
+
+**O que fazer** — iniciar estado conversacional direto:
+
+```python
+# cb_menu handler para MENU:SEARCH
+if data == "MENU:SEARCH":
+    context.user_data["session"] = {"type": "quick_search"}
+    await _safe_edit_or_send(
+        update,
+        "🔎 Busca rápida\n\nO que você procura? (ex: civic si, golf gti, wrx 2020)",
+    )
+    return
+# Próxima mensagem do usuário é processada como termo de busca
+```
+
+---
+
+### 3.3 Atingiu o limite diário — mensagem sem saída
+
+**O problema hoje:**
+```
+⚠️ Você atingiu seu limite de 5 alertas hoje.
+Amanhã libera de novo.
+Para aumentar o limite, use /upgrade
+```
+É uma parede. O usuário não sabe o que não recebeu, e a menção ao `/upgrade` parece punição.
+
+**O que fazer** — contexto + CTA suave:
+
+```python
+def send_daily_limit_notice_http(user, limit: int, missed_count: int = 0):
+    missed_line = (
+        f"Encontrei mais {missed_count} anúncio(s) que não foram enviados.\n"
+        if missed_count > 0 else ""
+    )
+    text = (
+        f"Você atingiu seu limite de {limit} alertas hoje.\n"
+        f"{missed_line}"
+        f"Amanhã o limite renova automaticamente.\n\n"
+        f"Com o Premium você recebe até 200 alertas por dia por busca."
+    )
+    # + botão inline "Ver Premium" com callback MENU:UPGRADE
+```
+
+**Impacto:** Transforma o limite de parede em contexto. "Encontrei mais 3 que não enviei" cria urgência real para upgrade.
+
+---
+
+## Bloco 4 — Rastreamento de anúncios
+
+### 4.1 Botão "⭐ Rastrear" não aparece em `/buscar`
+
+**O problema hoje:**
+O botão "⭐ Rastrear" aparece nos alertas automáticos (notificações), mas não nos resultados de `/buscar` (busca manual). Usuário faz busca pontual, vê um anúncio interessante, e não tem como rastrear sem voltar ao menu.
+
+**O que fazer** — `handlers_search.py`, adicionar botão rastrear nos resultados de busca:
+
+```python
+# Para cada listing nos resultados do /buscar:
+buttons = [
+    [{"text": "Abrir anúncio", "url": listing.url}]
+]
+# Se tiver wishlist ativa, oferecer rastreamento
+if user_has_active_wishlist and listing.external_id:
+    buttons[0].append({
+        "text": "⭐ Rastrear",
+        "callback_data": f"TRACK:ADD_FROM_SEARCH:{listing.source}:{listing.external_id}"
+    })
+
+reply_markup = InlineKeyboardMarkup(buttons)
+```
+
+---
+
+### 4.2 Mudança de preço no rastreado sem contexto histórico
+
+**O problema hoje:**
+O alerta de queda de preço diz "💰 Preço caiu R$ 5.000". Não mostra o histórico: quando começou a rastrear, quantas vezes o preço mudou, se está em tendência de queda.
+
+**O que fazer** — `telegram_formatter.py`, enriquecer alerta de preço rastreado:
+
+```python
+def format_price_drop_alert(tracked, listing) -> str:
+    drop_pct = abs(tracked.last_price_change_pct or 0)
+    drop_abs = abs(tracked.last_price_change_amount or 0)
+    
+    lines = [
+        f"💰 Queda de preço — {listing.title}",
+        f"",
+        f"Era: {_format_price_brl(tracked.initial_price)}",
+        f"Agora: {_format_price_brl(listing.price)}",
+        f"Queda: R$ {drop_abs:,.0f} ({drop_pct:.1f}%)",
+    ]
+    
+    # Contexto temporal
+    if tracked.created_at:
+        days_tracking = (datetime.now() - tracked.created_at).days
+        lines.append(f"Rastreando há {days_tracking} dia(s)")
+    
+    return "\n".join(lines)
+```
+
+---
+
+## Bloco 5 — Plano e upgrade
+
+### 5.1 `/plan` mostra números, não progresso
+
+**O problema hoje:**
+```
+Plano: Free
+Buscas: 1/2
+Alertas hoje: 3/5
+```
+Números sem visualização. O usuário não sente o limite até bater nele.
+
+**O que fazer** — adicionar barra de progresso simples:
+
+```python
+def _progress_bar(current: int, total: int, width: int = 10) -> str:
+    filled = round((current / total) * width) if total else 0
+    empty = width - filled
+    pct = int((current / total) * 100) if total else 0
+    return f"{'█' * filled}{'░' * empty} {current}/{total} ({pct}%)"
+
+# Em render_plan_text:
+f"Buscas: {_progress_bar(used_wishlists, max_wishlists)}\n"
+f"Alertas hoje: {_progress_bar(alerts_today, daily_limit)}\n"
+```
+
+Resultado:
+```
+Buscas:       ████░░░░░░ 2/5 (40%)
+Alertas hoje: ██░░░░░░░░ 1/5 (20%)
+```
+
+---
+
+### 5.2 Upgrade: lista de features vs motivação real
+
+**O problema hoje:**
+```
+Benefícios:
+- até 15 buscas salvas
+- até 5 anúncios rastreados no total
+- alertas automáticos de preço/status
+- até 200 notificações por dia por busca
+```
+Features como bullet list. Funciona para quem já quer comprar. Não converte quem está em dúvida.
+
+**O que fazer** — texto orientado à dor:
+
+```python
+def render_upgrade_text(has_payment_links: bool) -> str:
+    return (
+        "🚀 Garagem Alvo Premium\n\n"
+        "Para quem já perdeu o carro certo porque alguém chegou primeiro.\n\n"
+        "Mensal — R$ 5,99/mês\n"
+        "• Até 15 buscas (monitorar vários modelos ao mesmo tempo)\n"
+        "• Até 200 alertas por busca por dia\n"
+        "• Acompanhar até 5 anúncios específicos com alerta de queda de preço\n\n"
+        "Anual — R$ 59,99/ano (= R$ 4,99/mês)\n"
+        "• Tudo do mensal\n"
+        "• Preço travado enquanto a assinatura estiver ativa\n\n"
+        "Após pagar, envie o comprovante aqui. Ativação em até 1h.\n"
+    )
+```
+
+---
+
+## Bloco 6 — Pequenos ajustes de alto impacto
+
+### 6.1 Cancelar criação de busca é invisível
+
+**O problema hoje:**
+O botão "❌ Cancelar" existe na tela de resumo da criação, mas se o usuário simplesmente parar de responder, a sessão fica aberta indefinidamente. Se mandar `/menu`, pode interromper o fluxo de forma inesperada.
+
+**O que fazer** — detectar comandos durante sessão aberta e perguntar:
+
+```python
+# No handler de mensagens de texto:
+if context.user_data.get("session") and update.message.text.startswith("/"):
+    cmd = update.message.text.split()[0]
+    if cmd in ("/menu", "/buscar", "/start"):
+        await update.message.reply_text(
+            "Você tem uma busca em andamento.\n\n"
+            "O que prefere?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Continuar criando", callback_data="CWL:RESUME")],
+                [InlineKeyboardButton("Descartar e ir para o menu", callback_data="CWL:CANCEL_GOTO_MENU")],
+            ])
+        )
+        return
+```
+
+---
+
+### 6.2 "⭐ Anúncios rastreados" no menu mostra tela vazia sem orientação
+
+**O problema hoje:**
+Usuário toca em "⭐ Anúncios rastreados" sem ter nenhum rastreado. Vê:
+```
+Slot 1 — vazio
+Slot 2 — vazio
+Slot 3 — vazio
+```
+E um botão "Voltar". Não sabe o que fazer.
+
+**O que fazer:**
+
+```python
+# Quando todos os slots estão vazios:
+if not any_tracked:
+    text = (
+        "⭐ Anúncios rastreados\n\n"
+        "Você ainda não está acompanhando nenhum anúncio.\n\n"
+        "Quando receber um alerta ou fizer uma busca, toque em "
+        "⭐ Rastrear para acompanhar o preço e o status daquele anúncio."
+    )
+```
+
+---
+
+### 6.3 Filtros de busca sem exemplos inline
+
+**O problema hoje:**
+O fluxo de adicionar filtro pergunta "Qual filtro?" e lista opções (preço, ano, km, cidade, estado). Quando o usuário escolhe "preço", recebe:
+```
+Qual preço? Ex.: até 150000, entre 70000 e 90000
+```
+Se digitar errado, recebe mensagem de erro. Não há dica de formatação visível antes de digitar.
+
+**O que fazer** — mostrar exemplos como botões de sugestão:
+
+```python
+# Ao perguntar o preço:
+await update.message.reply_text(
+    "Qual o limite de preço?\n\nDigite um valor ou escolha:",
+    reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("até R$ 50.000", callback_data="FILTER:PRICE:lte:50000")],
+        [InlineKeyboardButton("até R$ 80.000", callback_data="FILTER:PRICE:lte:80000")],
+        [InlineKeyboardButton("até R$ 120.000", callback_data="FILTER:PRICE:lte:120000")],
+        [InlineKeyboardButton("Digitar valor", callback_data="FILTER:PRICE:MANUAL")],
+    ])
+)
+```
+Usuário pode tocar em um valor comum ou digitar livremente. Elimina 80% dos erros de formatação.
+
+---
+
+### 6.4 Mensagem de limite diário não diz "amanhã que horas"
+
+**O problema hoje:**
+"Amanhã libera de novo." Mas o usuário não sabe se é à meia-noite, às 6h, ou quando foi o primeiro alerta.
+
+**O que fazer:**
+
+```python
+# Calcular quando renova (meia-noite UTC ou horário configurado):
+from datetime import datetime, timezone, timedelta
+tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+    hour=0, minute=0, second=0, microsecond=0
+)
+# Converter para horário do Brasil (UTC-3)
+renews_at_brt = tomorrow - timedelta(hours=3)
+renews_str = renews_at_brt.strftime("%Hh%M de amanhã")
+
+text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
+```
+
+---
+
+## Resumo de prioridades
+
+| # | Item | Esforço | Impacto |
+|---|---|---|---|
+| 1.1 | Botão CTA no `/start` | Baixo | Alto — reduz abandono no onboarding |
+| 1.2 | Resultado imediato após criar busca | Médio | Alto — constrói confiança no primeiro uso |
+| 2.1 | Badge de recência com fallback para `created_at` | Baixo | Alto — o argumento central do produto reaparece |
+| 2.3 | Contexto mínimo garantido em todo alerta | Baixo | Médio — usuário sempre entende por que recebeu |
+| 3.1 | Lista de buscas compacta (1 linha por busca) | Baixo | Médio — reduz fricção no uso diário |
+| 4.1 | Botão rastrear nos resultados de `/buscar` | Médio | Médio — fecha o loop busca → rastreio |
+| 3.3 | Limite diário com contexto e CTA suave | Baixo | Alto para conversão Free → Premium |
+| 5.1 | Barra de progresso no `/plan` | Baixo | Médio — torna limites mais tangíveis |
+| 3.2 | "Buscar agora" inicia fluxo conversacional | Médio | Médio — UX consistente com o resto do bot |
+| 6.3 | Botões de sugestão nos filtros | Médio | Médio — elimina erros de formatação |
+| 2.4 | Label de score humanizado | Baixo | Baixo — clareza sem impacto em conversão |
+| 1.3 | Contexto de ausência no `/start` | Médio | Médio — retenção de usuários que voltam |
+| 6.1 | Detectar comando durante sessão aberta | Médio | Baixo — reduz confusão pontual |
+| 5.2 | Texto de upgrade orientado à dor | Baixo | Médio — testa mensagem alternativa |
+
+---
+
+*Documento gerado em 2026-05-21 com base em análise do código de `handlers_core.py`, `renderers.py`, `telegram_formatter.py`, `sender.py` e `listing_display.py`.*
