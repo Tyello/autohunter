@@ -54,6 +54,7 @@ Fonte: `app/sources/builtins.py` + scrapers legados.
 `build_scrape_context` em `app/services/source_configs_service.py` hidrata:
 - colunas diretas: `proxy_server`, `browser_fallback_enabled`, `force_browser`;
 - knobs de `extra` para timeouts/delays/wait-until;
+- knob `browser_block_resources` (bool opcional) para controlar bloqueio de `image/media/font` no Playwright;
 - e mantém `extra` completo em `ctx.extra`.
 
 Portanto, `source_configs.extra` **chega de fato** ao `ScrapeContext` em dois níveis:
@@ -102,7 +103,7 @@ Precedência prática:
 | `__NEXT_DATA__` OLX | migration/guide | `_extract_next_data_json` + parser OLX | alinhado | baixo | manter doc. |
 | health tracking da OLX | guide | arquivo health + funções `olx_health_*` | alinhado | baixo | manter doc operacional. |
 | ano/local/km/srcset em iCarros | guide/migration | funções dedicadas no scraper | alinhado | baixo | manter doc. |
-| `block_resources` configurável por source | migration implícito | `unified_fetch` fixa `block_resources=True` | divergente | médio | documentar como limitação atual. |
+| `block_resources` configurável por source | migration implícito | `browser_block_resources` lido de `source_configs.extra` e aplicado no unified + pool | alinhado | baixo | default econômico segue `true`; defaults `false` para webmotors/icarros/mobiauto/facebook_marketplace preservam anti-bot/challenge assets. |
 | warmup Webmotors | guide | serviço `browser_warmup_service` + pool `warmup` + comando admin | alinhado | baixo | manter e citar fluxo correto. |
 | comando `/admin runall <source> --impl dual` | `V1_TO_V2_MIGRATION.md` | `_admin_runall` não parseia flag `--impl` | divergente | alto (operação enganosa) | corrigir doc primeiro; depois decidir implementação real. |
 

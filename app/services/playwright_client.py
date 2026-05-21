@@ -54,6 +54,7 @@ class PlaywrightRemoteClient:
         wait_until: str = "networkidle",
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
+        block_resources: Optional[bool] = None,
     ) -> RemoteFetchResult:
         payload = {
             "url": url,
@@ -63,6 +64,7 @@ class PlaywrightRemoteClient:
             "wait_until": wait_until,
             "min_delay_ms": min_delay_ms,
             "max_delay_ms": max_delay_ms,
+            "block_resources": block_resources,
         }
         r = self._s.post(f"{self.endpoint}/v1/fetch", json=payload, headers=self._headers(), timeout=max(10, int(timeout_ms / 1000) + 5))
         r.raise_for_status()
@@ -80,6 +82,7 @@ class PlaywrightRemoteClient:
         capture_mode: str = "any_json",
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
+        block_resources: Optional[bool] = None,
     ) -> RemoteJsonFetchResult:
         payload = {
             "url": url,
@@ -90,6 +93,7 @@ class PlaywrightRemoteClient:
             "capture_mode": capture_mode,
             "min_delay_ms": min_delay_ms,
             "max_delay_ms": max_delay_ms,
+            "block_resources": block_resources,
         }
         r = self._s.post(f"{self.endpoint}/v1/fetch_json", json=payload, headers=self._headers(), timeout=max(10, int(timeout_ms / 1000) + 5))
         r.raise_for_status()

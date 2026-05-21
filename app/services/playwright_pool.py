@@ -111,7 +111,7 @@ class _PlaywrightCore:
         safe_source = source.replace(":", "_").replace("/", "_")
         return str(base / f"storage_{safe_source}__{safe_proxy}.json")
 
-    def _block_heavy_resources(self, page: Any, *, source: str) -> None:
+    def _block_heavy_resources(self, page: Any, *, source: str, block_resources: bool = True) -> None:
         """Block heavy resources to reduce RAM/CPU on small machines.
 
         IMPORTANT: Some anti-bot challenges rely on fetching images or other
@@ -353,7 +353,7 @@ class _PlaywrightCore:
             ctx.storage_state(path=storage_path)
 
             # Invalidate cached context for this (proxy,source) so next fetch reloads storage_state
-            key = (proxy_key, src)
+            key = (proxy_key, src, bool(block_resources))
             try:
                 old = self._contexts.pop(key, None)
                 self._ctx_last_used.pop(key, None)
@@ -378,12 +378,12 @@ class _PlaywrightCore:
             except Exception:
                 pass
 
-    def _get_or_create_context(self, *, proxy_server: Optional[str], source: str) -> Any:
+    def _get_or_create_context(self, *, proxy_server: Optional[str], source: str, block_resources: bool = True) -> Any:
         # keep memory stable
         self._cleanup_contexts()
         src = (source or "unknown").lower().strip() or "unknown"
         proxy_key = proxy_server or "__no_proxy__"
-        key = (proxy_key, src)
+        key = (proxy_key, src, bool(block_resources))
         ctx = self._contexts.get(key)
         if ctx is not None:
             self._ctx_last_used[key] = time.time()
@@ -437,7 +437,10 @@ class _PlaywrightCore:
         # challenge from completing. Keep them for these sources.
         try:
             heavy_ok_sources = {"mobiauto", "icarros", "facebook_marketplace"}
-            if src not in heavy_ok_sources:
+            should_block = bool(block_resources)
+            if src in heavy_ok_sources and bool(block_resources):
+                should_block = False
+            if should_block:
                 def _route(route):
                     rtype = route.request.resource_type
                     if rtype in ("image", "media", "font"):
@@ -492,7 +495,7 @@ class _PlaywrightCore:
 
         # Close browsers that no longer have contexts
         try:
-            alive_proxy_keys = {proxy_key for (proxy_key, _src) in self._contexts.keys()}
+            alive_proxy_keys = {proxy_key for (proxy_key, _src, _blk) in self._contexts.keys()}
             for proxy_key, br in list(self._browsers.items()):
                 if proxy_key not in alive_proxy_keys:
                     try:
@@ -513,15 +516,16 @@ class _PlaywrightCore:
         wait_until: str,
         min_delay_ms: int,
         max_delay_ms: int,
+        block_resources: bool = True,
     ) -> PoolFetchResult:
         time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
-        ctx = self._get_or_create_context(proxy_server=proxy_server, source=source)
+        ctx = self._get_or_create_context(proxy_server=proxy_server, source=source, block_resources=block_resources)
 
         page = ctx.new_page()
         # Context-level routing is preferred, but keep this as a safety net.
         try:
-            self._block_heavy_resources(page, source=source)
+            self._block_heavy_resources(page, source=source, block_resources=block_resources)
         except Exception:
             pass
         try:
@@ -575,10 +579,11 @@ class _PlaywrightCore:
         json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
         min_delay_ms: int,
         max_delay_ms: int,
+        block_resources: bool = True,
     ) -> PoolJsonFetchResult:
         time.sleep(random.randint(min_delay_ms, max_delay_ms) / 1000.0)
 
-        ctx = self._get_or_create_context(proxy_server=proxy_server, source=source)
+        ctx = self._get_or_create_context(proxy_server=proxy_server, source=source, block_resources=block_resources)
 
         captured_data: Optional[dict] = None
         captured_url: str = ""
@@ -622,7 +627,7 @@ class _PlaywrightCore:
         pred = json_url_predicate or _pred_from_capture_mode(capture_mode)
 
         page = ctx.new_page()
-        self._block_heavy_resources(page, source=source)
+        self._block_heavy_resources(page, source=source, block_resources=block_resources)
 
         final_url = url
         try:
@@ -817,6 +822,7 @@ class PlaywrightPool:
         wait_until: str = "networkidle",
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
+        block_resources: bool = True,
     ) -> PoolFetchResult:
         hard_timeout_s = max(10.0, (timeout_ms / 1000.0) + 20.0)
         return self._call(
@@ -829,6 +835,7 @@ class PlaywrightPool:
             wait_until=wait_until,
             min_delay_ms=min_delay_ms,
             max_delay_ms=max_delay_ms,
+            block_resources=block_resources,
         )
 
     def fetch_json(
@@ -843,6 +850,7 @@ class PlaywrightPool:
         json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
+        block_resources: bool = True,
     ) -> PoolJsonFetchResult:
         hard_timeout_s = max(10.0, (timeout_ms / 1000.0) + 20.0)
         return self._call(
@@ -857,6 +865,7 @@ class PlaywrightPool:
             json_url_predicate=json_url_predicate,
             min_delay_ms=min_delay_ms,
             max_delay_ms=max_delay_ms,
+            block_resources=block_resources,
         )
 
     def warmup(
