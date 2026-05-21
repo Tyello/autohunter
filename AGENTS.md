@@ -60,8 +60,11 @@ A API/FastAPI é superfície **auxiliar** (health/admin/integrativa). A jornada 
 ## Ordem de leitura recomendada
 
 1. `README.md`
-2. `docs/PROJECT_GUIDELINE.md`
-3. `docs/AUCTION_RUNTIME.md`
-4. `docs/OPERATIONS_RUNBOOK.md`
-5. `docs/LEGACY_INVENTORY.md`
-6. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`
+2. `docs/LLM_CONTEXT.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/PROJECT_GUIDELINE.md`
+5. `docs/AUCTION_RUNTIME.md`
+6. `docs/OPERATIONS_RUNBOOK.md`
+7. `docs/DOCUMENTATION_AUDIT.md`
+8. `docs/LEGACY_INVENTORY.md`
+9. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`
