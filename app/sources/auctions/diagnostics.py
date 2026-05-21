@@ -34,7 +34,9 @@ def build_auction_source_fetch_diagnostics(response: Any | None, html: str | Non
             lot_document_candidates.append(t)
             continue
         if "cloudfront" in low or "/watermark/" in low or "/bens/" in low:
-            if asset_ext_re.search(low) or "/watermark/" in low or "/bens/" in low:
+            is_script_or_style = any(k in low for k in (".js", ".css", "loader-scripts", "scripts", "analytics", "tracking", "pixel"))
+            is_real_image = bool(re.search(r"\.(jpg|jpeg|png|webp)(?:\?|$)", low))
+            if not is_script_or_style and is_real_image:
                 lot_image_candidates.append(t)
         is_asset = bool(asset_ext_re.search(low)) or any(k in low for k in ("cdnjs", "bootstrap", "jquery", "popper", "cloudfront"))
         if is_asset:

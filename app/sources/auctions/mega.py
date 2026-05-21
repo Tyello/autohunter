@@ -166,13 +166,42 @@ def parse_mega_compact_year(text: str | None) -> int | None:
     return parse_year_from_title(raw)
 
 def infer_mega_item_type(title: str | None, url: str | None) -> str:
-    t=(title or "").lower(); u=(url or "").lower()
-    if "/veiculos/carros" in u or t.startswith("carro ") or " carro " in f" {t} ": return "car"
-    if "/veiculos/motos" in u or t.startswith("moto ") or " moto " in f" {t} ": return "motorcycle"
-    if any(k in t+u for k in ("caminh","onibus","ônibus","utilit","van")): return "truck"
-    if any(k in t+u for k in ("imovel","imóvel","apartamento","terreno")): return "real_estate"
-    if any(k in t+u for k in ("pesad","máquina","maquina")): return "heavy"
+    t = (title or "").lower()
+    u = (url or "").lower()
+    if "/veiculos/carros/" in u:
+        return "car"
+    if "/veiculos/motos/" in u or "/veiculos/motocicletas/" in u:
+        return "motorcycle"
+    if any(k in u for k in ("/veiculos/caminhoes/", "/veiculos/caminhao/", "/veiculos/caminhão/")):
+        return "truck"
+    if t.startswith("carro ") or " carro " in f" {t} ":
+        return "car"
+    if t.startswith("moto ") or " moto " in f" {t} ":
+        return "motorcycle"
+    if any(k in t + u for k in ("caminh", "onibus", "ônibus", "utilit", "van")):
+        return "truck"
+    if any(k in t + u for k in ("imovel", "imóvel", "apartamento", "terreno")):
+        return "real_estate"
+    if any(k in t + u for k in ("pesad", "máquina", "maquina")):
+        return "heavy"
     return normalize_item_type(" ".join([title or "", url or ""]))
+
+
+def _is_generic_mega_page(title: str | None, url: str | None) -> bool:
+    normalized_title = (normalize_title(title or "") or "").lower()
+    clean_url = (url or "").lower()
+    if normalized_title in {"leiloes judiciais", "leilões judiciais", "mega leiloes", "mega leilões", "veiculos", "veículos", "carros"}:
+        return True
+    if "/leiloes-judiciais" in clean_url or "/leiloes-extrajudiciais" in clean_url:
+        return True
+    has_lot_shape = any(k in clean_url for k in ("/veiculos/", "/lote/", "/lotes/"))
+    if not has_lot_shape:
+        return True
+    if "/veiculos/" in clean_url and not re.search(r"j\d{4,}", clean_url, flags=re.I):
+        return True
+    if not re.search(r"j\d{4,}", clean_url, flags=re.I) and any(k in clean_url for k in ("/leiloes-", "/categoria/", "/evento/")):
+        return True
+    return False
 
 def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAULT_LISTING_URL) -> list[NormalizedAuctionLot]:
     cards = re.findall(r'<article[^>]*class="[^"]*(?:card|lot)[^"]*"[^>]*>(.*?)</article>', html, flags=re.I | re.S)
@@ -188,10 +217,9 @@ def parse_mega_listing_html(html: str, limit: int = 50, listing_url: str = DEFAU
         url = absolute_url(listing_url, href) if href and href.strip() != "-" else None
         if not url or url == "-":
             continue
-        if any(
-            blocked in url.lower()
-            for blocked in ("/leiloes-judiciais", "/leiloes-extrajudiciais", "/como-funciona", "/cadastro", "/login", "/contato")
-        ):
+        if any(blocked in url.lower() for blocked in ("/como-funciona", "/cadastro", "/login", "/contato")):
+            continue
+        if _is_generic_mega_page(title, url):
             continue
         raw_code = _strip_html(_first_group(r"\b(J\d{4,})\b", card) or "") or None
         external_id = raw_code or external_id_from_url(url) or _first_group(r"/([A-Z]\d{4,})/?$", href or "") or _first_group(r"/([A-Z]\d{4,})/?$", url) or url
@@ -309,5 +337,8 @@ def parse_mega_detail_html(html: str, url: str) -> NormalizedAuctionLot:
     aux_imgs = re.findall(r"<img[^>]+(?:data-src|data-bg|src)=['\"]([^'\"]+)['\"]", html, flags=re.I)
     images = [absolute_url(clean_url, img) for img in ([og_img] if og_img else []) + aux_imgs]
     images = [img for img in images if img and not re.search(r"(logo|banner|placeholder|icon|pixel)", img, flags=re.I)]
+    if state == "SI" or (city or "").strip().lower() in {"sem informacao", "sem informação", "si", "-", "nao informado", "não informado"} or "/si/sem-informacao/" in clean_url.lower():
+        city = None
+        state = None
     location = f"{city}/{state}" if city and state else None
     return NormalizedAuctionLot(source=SOURCE_KEY, external_id=(external_id or clean_url).upper(), url=clean_url, title=title, item_type=infer_mega_item_type(title, clean_url), year=parse_mega_compact_year(title), city=city, state=state, location=location, initial_bid=parse_money_br(initial_raw or ""), current_bid=parse_money_br(current_raw or ""), auction_start_at=start_at, auction_end_at=end_at, thumbnail_url=images[0] if images else None, images=images or None, status=normalize_mega_status(status_label), raw_payload={"html_card": html[:1000]})
