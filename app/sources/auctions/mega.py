@@ -41,6 +41,12 @@ def _strip_html(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text)).strip()
 
 
+def _normalize_mega_detail_text(html: str) -> str:
+    text = re.sub(r"<(script|style|noscript)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S)
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))
+    return text.strip()
+
+
 def _first_group(pattern: str, text: str) -> str | None:
     m = re.search(pattern, text, flags=re.I | re.S)
     return m.group(1).strip() if m else None
@@ -48,11 +54,83 @@ def _first_group(pattern: str, text: str) -> str | None:
 
 def normalize_mega_status(text: str | None) -> str:
     val = (text or "").lower()
-    if "aberto para lances" in val:
-        return "open"
+    if any(k in val for k in ("aberto para lances", "em andamento", "recebendo lances", "lances abertos", "aberto")):
+        return "live"
+    if any(k in val for k in ("encerrado", "finalizado", "arrematado")):
+        return "ended"
+    if any(k in val for k in ("agendado", "em breve", "futuro")):
+        return "scheduled"
+    if "online" in val and val.strip() == "online":
+        return "unknown"
     if "em breve" in val:
         return "scheduled"
     return "unknown"
+
+
+def _sanitize_snippet(text: str, max_len: int = 120) -> str:
+    clean = _strip_html(text)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if len(clean) <= max_len:
+        return clean
+    return f"{clean[: max_len - 3].rstrip()}..."
+
+
+_MEGA_DETAIL_NOISE_TERMS = ("menu", "header", "footer", "login", "cadastro", "compartilhar", "facebook", "whatsapp", "banner")
+
+
+def _is_noise_snippet(text: str) -> bool:
+    low = (text or "").lower()
+    return not low or any(term in low for term in _MEGA_DETAIL_NOISE_TERMS)
+
+
+def _collect_keyword_snippets(html: str, keywords: tuple[str, ...], max_items: int = 5) -> list[str]:
+    snippets: list[str] = []
+    seen: set[str] = set()
+    compact = re.sub(r"\s+", " ", html)
+    for kw in keywords:
+        pattern = re.compile(rf"(.{{0,120}}{re.escape(kw)}.{{0,120}})", flags=re.I)
+        for m in pattern.finditer(compact):
+            snippet = _sanitize_snippet(m.group(1))
+            if snippet and snippet not in seen:
+                seen.add(snippet)
+                snippets.append(snippet)
+                if len(snippets) >= max_items:
+                    return snippets
+    return snippets
+
+
+def build_mega_detail_diagnostics(html: str) -> dict[str, list[str]]:
+    def _filter(values: list[str], max_items: int) -> list[str]:
+        out = [v for v in values if not _is_noise_snippet(v)]
+        return out[:max_items]
+
+    return {
+        "status_candidates": _filter(_collect_keyword_snippets(html, ("status", "aberto", "encerrado", "finalizado", "arrematado", "em andamento", "em breve", "agendado")), 3),
+        "date_candidates": _filter(_collect_keyword_snippets(html, ("data do leilão", "início", "abertura", "encerramento", "fim do leilão", "data final", "término")), 3),
+        "bid_candidates": _filter(_collect_keyword_snippets(html, ("lance inicial", "valor inicial", "preço inicial", "avaliação", "lance atual", "maior lance", "último lance", "lance vencedor")), 3),
+        "image_candidates": _filter(_collect_keyword_snippets(html, ("og:image", "data-src", "data-bg", "lazy", "<img")), 3),
+        "location_candidates": _filter(_collect_keyword_snippets(html, ("/veiculos/carros/", "cidade", "local", "bairro", "atibaia", "sp")), 3),
+        "json_like_blocks": _filter(_collect_keyword_snippets(html, ('"@context"', '"@type"', "application/ld+json", "window.__", '{"')), 1),
+        "data_attributes": _filter(_collect_keyword_snippets(html, ("data-",)), 1),
+    }
+
+
+def _extract_mega_datetime_after_label(clean_text: str, labels: tuple[str, ...]) -> object | None:
+    label_pattern = "|".join(labels)
+    pattern = (
+        rf"(?:{label_pattern})\s*:?\s*"
+        r"([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})"
+        r"(?:\s*(?:às|as|a|à|-)?\s*([0-9]{1,2})(?::|h)?([0-9]{2}))?"
+    )
+    m = re.search(pattern, clean_text, flags=re.I)
+    if not m:
+        return None
+    date_part = m.group(1)
+    hh = m.group(2)
+    mm = m.group(3)
+    if hh is not None and mm is not None:
+        return parse_datetime_br(f"{date_part} {hh}:{mm}")
+    return parse_datetime_br(date_part)
 
 
 def parse_mega_praca_line(line: str | None) -> tuple[object | None, object | None]:
@@ -221,5 +299,15 @@ def parse_mega_detail_html(html: str, url: str) -> NormalizedAuctionLot:
     if m:
         state = m.group(1).upper()
         city = m.group(2).replace('-', ' ').title()
-    imgs = re.findall(r"<meta[^>]+property=['\"]og:image['\"][^>]+content=['\"]([^'\"]+)", html, flags=re.I)
-    return NormalizedAuctionLot(source=SOURCE_KEY, external_id=external_id or clean_url, url=clean_url, title=title, item_type=infer_mega_item_type(title, clean_url), year=parse_mega_compact_year(title), city=city, state=state, initial_bid=parse_money_br(_first_group(r"Lance\s*inicial[^R]*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""), current_bid=parse_money_br(_first_group(r"(?:Lance\s*atual|Maior\s*lance)[^R]*(R\$\s*[0-9.]+,[0-9]{2})", html) or ""), thumbnail_url=absolute_url(clean_url, imgs[0]) if imgs else None, images=[absolute_url(clean_url, i) for i in imgs] or None, status=normalize_mega_status(_first_group(r"(Aberto para lances|Em breve)", html)), raw_payload={"html_card": html[:1000]})
+    clean_text = _normalize_mega_detail_text(html)
+    start_at = _extract_mega_datetime_after_label(clean_text, ("Data\\s+do\\s+Leil[aã]o", "In[ií]cio", "Abertura"))
+    end_at = _extract_mega_datetime_after_label(clean_text, ("Encerramento", "Fim\\s+do\\s+Leil[aã]o", "Data\\s+Final", "T[eé]rmino"))
+    initial_raw = _first_group(r"(?:Lance\s+Inicial|Valor\s+Inicial|Pre[cç]o\s+Inicial|Primeiro\s+Leil[aã]o|1º\s*Leil[aã]o|2º\s*Leil[aã]o)\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", clean_text)
+    current_raw = _first_group(r"(?:Lance\s+Atual|Maior\s+Lance|[UÚ]ltimo\s+Lance|Lance\s+Vencedor|Melhor\s+Lance)\s*:?\s*(R\$\s*[0-9.]+,[0-9]{2})", clean_text)
+    status_label = _first_group(r"(?:Status|Situa[cç][aã]o)\s*:?\s*([A-Za-zÀ-ÿ ]{3,40})", clean_text) or _first_group(r"(aberto para lances|em andamento|recebendo lances|lances abertos|agendado|em breve|futuro|encerrado|finalizado|arrematado)", clean_text)
+    og_img = _first_group(r"<meta[^>]+property=['\"]og:image['\"][^>]+content=['\"]([^'\"]+)", html)
+    aux_imgs = re.findall(r"<img[^>]+(?:data-src|data-bg|src)=['\"]([^'\"]+)['\"]", html, flags=re.I)
+    images = [absolute_url(clean_url, img) for img in ([og_img] if og_img else []) + aux_imgs]
+    images = [img for img in images if img and not re.search(r"(logo|banner|placeholder|icon|pixel)", img, flags=re.I)]
+    location = f"{city}/{state}" if city and state else None
+    return NormalizedAuctionLot(source=SOURCE_KEY, external_id=(external_id or clean_url).upper(), url=clean_url, title=title, item_type=infer_mega_item_type(title, clean_url), year=parse_mega_compact_year(title), city=city, state=state, location=location, initial_bid=parse_money_br(initial_raw or ""), current_bid=parse_money_br(current_raw or ""), auction_start_at=start_at, auction_end_at=end_at, thumbnail_url=images[0] if images else None, images=images or None, status=normalize_mega_status(status_label), raw_payload={"html_card": html[:1000]})

@@ -221,6 +221,10 @@ def inspect_auction_source(source: str, limit: int = 5, enrich_details: bool = F
                     reason = None if lots else "detail_without_extractable_signals"
             elif source == "mega_auctions":
                 lot = mega.parse_mega_detail_html(html, detail_url)
+                diagnostics = diagnostics or {}
+                detail_diagnostics = diagnostics.get("detail_diagnostics") or {}
+                detail_diagnostics["mega_detail"] = mega.build_mega_detail_diagnostics(html)
+                diagnostics["detail_diagnostics"] = detail_diagnostics
                 lots = [lot] if (lot.title or lot.current_bid is not None or lot.initial_bid is not None) else []
                 reason = None if lots else "detail_without_extractable_signals"
             elif source == "sodre_auctions":

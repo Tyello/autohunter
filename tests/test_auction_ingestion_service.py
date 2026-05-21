@@ -250,6 +250,29 @@ def test_inspect_auction_source_detail_url_unsupported_source_returns_reason(mon
     assert out["reason"] == "detail_inspect_not_supported_for_source"
 
 
+def test_inspect_auction_source_mega_detail_includes_diagnostics(monkeypatch):
+    class _Resp:
+        status_code = 200
+        url = "https://www.megaleiloes.com.br/veiculos/carros/sp/atibaia/x-j122290"
+        headers = {"content-type": "text/html"}
+        text = "<html><head><meta property='og:image' content='https://cdn.mega/car.jpg'></head><body><h1>Volkswagen Kombi 1999</h1><div>Status: encerrado</div></body></html>"
+    class _Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def get(self, _url):
+            return _Resp()
+    monkeypatch.setattr(svc.httpx, "Client", _Client)
+    monkeypatch.setattr(svc, "get_auction_source_definition", lambda _s: _Def("mega_auctions", lambda limit, enrich=False: [], lambda: None, True))
+    out = svc.inspect_auction_source("mega_auctions", detail_url=_Resp.url)
+    assert out["fetched"] == 1
+    mega_diag = (((out.get("diagnostics") or {}).get("detail_diagnostics") or {}).get("mega_detail") or {})
+    assert "status_candidates" in mega_diag
+
+
 def test_run_auction_ingestion_does_not_include_detail_diagnostics(monkeypatch):
     class FakeDB:
         def commit(self): return None
