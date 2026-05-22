@@ -42,10 +42,14 @@
   - Implementado no PR #273.
   - A tela /plan agora mostra uso visual de buscas salvas e anúncios rastreados, facilitando entender proximidade dos limites.
 
+- [x] 3.2 — "Buscar agora" inicia fluxo conversacional
+  - Implementado no PR #276.
+  - O botão "Buscar agora" agora pergunta o que o usuário procura e reutiliza o fluxo de /buscar para enviar os resultados.
+
 ### Próximo pacote recomendado
 
-3.2 — "Buscar agora" inicia fluxo conversacional
-- motivo: depois de melhorar plano/limites, o maior atrito restante de uso diário é o botão "Buscar agora" ainda devolver instrução textual em vez de iniciar um fluxo guiado.
+6.3 — Botões de sugestão nos filtros
+- motivo: depois de transformar "Buscar agora" em conversa, o próximo atrito de UX está na criação/edição de filtros, onde botões de sugestão reduzem erro de formatação.
 
 ---
 
@@ -346,7 +350,7 @@ Resultado: cada busca vira 1 linha. Com 3 buscas = 4 linhas totais. Scannable.
 
 ---
 
-### 3.2 "Buscar agora" abre instrução de texto, não uma busca
+### 3.2 "Buscar agora" abre instrução de texto, não uma busca — ✅ Concluído no PR #276
 
 **O problema hoje:**
 Botão "🔎 Buscar agora" no menu principal abre:
@@ -647,7 +651,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 2.3 | Contexto mínimo garantido em todo alerta | ✅ Concluído PR #269 | Baixo | Médio — usuário sempre entende por que recebeu |
 | 3.3 | Limite diário com contexto e CTA suave | ✅ Concluído PR #272 | Baixo | Alto para conversão Free → Premium |
 | 5.1 | Barra de progresso no `/plan` | ✅ Concluído PR #273 | Baixo | Médio — torna limites mais tangíveis |
-| 3.2 | "Buscar agora" inicia fluxo conversacional | Pendente | Médio | Médio — UX consistente com o resto do bot |
+| 3.2 | "Buscar agora" inicia fluxo conversacional | ✅ Concluído PR #276 | Médio | Médio — UX consistente com o resto do bot |
 | 6.3 | Botões de sugestão nos filtros | Pendente | Médio | Médio — elimina erros de formatação |
 | 2.4 | Label de score humanizado | Pendente | Baixo | Baixo — clareza incremental |
 | 1.3 | Contexto de ausência no `/start` | Pendente | Médio | Médio — retenção de usuários que voltam |
