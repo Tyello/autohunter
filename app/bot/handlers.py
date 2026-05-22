@@ -2,7 +2,7 @@ import re
 import asyncio
 from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from app.bot.listing_sender import send_listing_message
 from app.notifications.telegram_formatter import format_ad_message
@@ -289,15 +289,17 @@ async def _ensure_admin(update: Update) -> bool:
     await reply_text(update, "Sem permissão.")
     return False
 
-async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query, sources = _parse_query_and_sources(context.args)
-    if not query:
-        await reply_text(
-            update,
-            "🔎 Buscar agora\n\nUse assim:\n`/buscar civic si até 120000 sp`\n\nEssa busca procura uma vez e não salva monitoramento.\n\nPara receber alertas contínuos, use /menu → ➕ Criar busca.",
-        )
-        return
 
+QUICK_SEARCH_QUERY = 1001
+
+
+async def start_manual_search_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    query: str,
+    sources: list[str] | None = None,
+) -> None:
     chat_id = update.effective_chat.id
     user_name = update.effective_user.username
     await reply_text(update, "🔎 Busca recebida.\n\nVou procurar agora e te envio até 5 resultados, se encontrar.\n\nEssa busca não fica salva.\nPara monitorar continuamente, use /menu → ➕ Criar busca.")
@@ -340,7 +342,66 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
     asyncio.create_task(_run_background_search())
+
+
+async def cb_quick_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    await q.message.reply_text(
+        "🔎 Buscar agora\n\nO que você procura?\n\nExemplos:\n- civic si até 120000 sp\n- golf gti manual\n- audi a5 2018"
+    )
+    return QUICK_SEARCH_QUERY
+
+
+async def quick_search_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = (update.message.text or "").strip()
+    if not query:
+        await reply_text(update, "Me diga o que você quer buscar. Exemplo: civic si até 120000 sp")
+        return QUICK_SEARCH_QUERY
+
+    await start_manual_search_flow(update, context, query=query, sources=None)
+    return ConversationHandler.END
+
+
+async def quick_search_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await reply_text(update, "Busca rápida cancelada.")
+    return ConversationHandler.END
+
+
+def quick_search_conversation() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(cb_quick_search_start, pattern=r"^MENU:SEARCH$")
+        ],
+        states={
+            QUICK_SEARCH_QUERY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, quick_search_on_text),
+                MessageHandler(filters.COMMAND, quick_search_cancel),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancelar", quick_search_cancel),
+            CommandHandler("cancel", quick_search_cancel),
+        ],
+        name="quick_search",
+        persistent=False,
+        per_chat=True,
+        per_user=True,
+        per_message=False,
+    )
+
+async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query, sources = _parse_query_and_sources(context.args)
+    if not query:
+        await reply_text(
+            update,
+            "🔎 Buscar agora\n\nUse assim:\n`/buscar civic si até 120000 sp`\n\nEssa busca procura uma vez e não salva monitoramento.\n\nPara receber alertas contínuos, use /menu → ➕ Criar busca.",
+        )
+        return
+
+    await start_manual_search_flow(update, context, query=query, sources=sources)
     return
+
 
 
 async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
