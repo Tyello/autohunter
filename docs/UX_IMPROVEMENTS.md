@@ -26,14 +26,15 @@
   - Implementado no PR #266.
   - O bot exibe o status da primeira varredura agendada via fila, sem scraping síncrono no callback.
 
+- [x] 2.1 — Badge de recência com fallback para `created_at`
+  - Implementado no PR #267.
+  - Quando há data confiável de publicação, o bot mostra recência assertiva; quando só há `created_at`, mostra fallback conservador como 🆕 Novo ou 🕐 Recente.
+
 ### Próximo pacote recomendado
 
-P1 — Fechar o loop busca manual → rastreamento:
-- item 4.1 — adicionar botão `⭐ Rastrear` nos resultados de `/buscar` — ✅ Concluído no PR #264
-- objetivo: permitir que o usuário faça uma busca pontual, encontre um anúncio interessante e comece a rastrear sem voltar ao menu
-
-Novo próximo recomendado:
+P2 — Contexto mínimo garantido em todo alerta:
 - item 2.3 — Contexto mínimo garantido em todo alerta
+- objetivo: garantir que todo alerta explique minimamente por que o usuário recebeu aquele anúncio.
 
 ---
 
