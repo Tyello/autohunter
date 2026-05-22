@@ -28,7 +28,7 @@ Fonte: `app/sources/builtins.py` + scrapers legados.
 | mobiauto | `mobiauto_url` | `scrape_mobiauto` | `app/scrapers/mobiauto.py` | browser | true | true | true | 60 | 0 | 0 | fragile | sim | sim (híbrido) | sim | não visto | Usa `fetch_html_with_browser_fallback`. |
 | kavak | `kavak_url` | `scrape_kavak` | `app/scrapers/kavak.py` | browser | true | true | false | 60 | 0 | 0 | experimental | sim | não | n/a | não visto | Browser-only na prática. |
 | facebook_marketplace | `facebook_marketplace_url` | `scrape_facebook_marketplace` | `app/scrapers/facebook_marketplace.py` | browser | true | true | false | 60 | 180 | 0 | experimental | sim | não | n/a | não visto | `supports_manual_search=False`. |
-| turboclass | `turboclass_url` | `_scrape_turboclass` -> `scrape_turboclass` | `app/scrapers/turboclass.py` | http | false | false | true | 90 | 0 | 0 | experimental | não (shim não usa browser) | sim | lógico=sim, efetivo=não | não visto | Default desabilitada; extras de ingest incremental. |
+| turboclass | `turboclass_url` | `_scrape_turboclass` -> `scrape_turboclass` | `app/scrapers/turboclass.py` | http | true | false | true | 90 | 0 | 0 | experimental | não (shim não usa browser) | sim | lógico=sim, efetivo=não | não visto | Default habilitada; extras de ingest incremental. |
 
 > Nota: defaults numéricos ausentes no plugin usam defaults do dataclass `SourcePlugin` (`enabled=True`, `sched=60`, `cooldown=0`, `rate_limit=0`).
 
