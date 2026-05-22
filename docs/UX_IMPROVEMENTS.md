@@ -6,7 +6,7 @@
 
 ## Status de execução
 
-Última atualização: 2026-05-21
+Última atualização: 2026-05-22
 
 ### Concluído
 
@@ -35,6 +35,8 @@
 P2 — Contexto mínimo garantido em todo alerta:
 - item 2.3 — Contexto mínimo garantido em todo alerta
 - objetivo: garantir que todo alerta explique minimamente por que o usuário recebeu aquele anúncio.
+
+> Status: concluído no PR #268. O formatter agora tenta mostrar motivo, critério ou busca em todo alerta normal, inclusive quando score é zero ou ausente.
 
 ---
 
@@ -235,7 +237,7 @@ E alimentar `market_stats_cohorts` continuamente: toda ingestão de listing com 
 
 ---
 
-### 2.3 "Por que você recebeu" invisível para matches de score baixo
+### 2.3 "Por que você recebeu" invisível para matches de score baixo — ✅ Concluído no PR #268
 
 **O problema hoje:**
 ```python
@@ -633,7 +635,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 4.1 | Botão rastrear nos resultados de `/buscar` | ✅ Concluído PR #264 | Médio | Médio — fecha o loop busca → rastreio |
 | 1.2 | Resultado imediato após criar busca | ✅ Concluído PR #266 | Médio | Alto — constrói confiança no primeiro uso |
 | 2.1 | Badge de recência com fallback para `created_at` | ✅ Concluído PR #267 | Baixo | Alto — o argumento central do produto reaparece |
-| 2.3 | Contexto mínimo garantido em todo alerta | Pendente | Baixo | Médio — usuário sempre entende por que recebeu |
+| 2.3 | Contexto mínimo garantido em todo alerta | ✅ Concluído PR #268 | Baixo | Médio — usuário sempre entende por que recebeu |
 | 3.3 | Limite diário com contexto e CTA suave | Pendente | Baixo | Alto para conversão Free → Premium |
 | 5.1 | Barra de progresso no `/plan` | Pendente | Baixo | Médio — torna limites mais tangíveis |
 | 3.2 | "Buscar agora" inicia fluxo conversacional | Pendente | Médio | Médio — UX consistente com o resto do bot |
