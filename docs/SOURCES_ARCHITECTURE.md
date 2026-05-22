@@ -72,6 +72,16 @@ Precedência prática:
 
 ## 4) Status do modo v1/v2/dual
 
+## Criticidade operacional por `operational_role`
+
+- `primary` → crítico global.
+- `fragile` → warning operacional e considerado no bloco crítico de stale.
+- `auxiliary` → informativo (não crítico global).
+- `deprioritized` → informativo (não crítico global), mantendo visibilidade no admin.
+- `experimental` → informativo (não crítico global).
+- `disabled` → ignorado no health global enquanto desabilitado.
+- `unknown`/legado sem role explícita → tratado de forma conservadora (warning/primary fallback), até normalização da source.
+
 ### Evidências
 - Leitura de flag: `read_source_impl_flags(extra)` em `app/sources/flags.py` (`impl` aceita `v1|v2|dual`).
 - Aplicação no runner principal: `build_scrape_dispatch` em `app/services/source_execution_helpers.py`.

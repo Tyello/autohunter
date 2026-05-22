@@ -76,6 +76,21 @@ def classify_source_operational_role(
     return SourceOperationalClassification("primary", True, "wishlist+implemented+enabled")
 
 
+def source_operational_severity(role: str | None, enabled: bool = True) -> str:
+    if not enabled:
+        return "ignored"
+    normalized = str(role or "").strip().lower()
+    if normalized in {"", "primary"}:
+        return "critical"
+    if normalized == "fragile":
+        return "warning"
+    if normalized in {"auxiliary", "experimental", "deprioritized"}:
+        return "info"
+    if normalized == "disabled":
+        return "ignored"
+    return "warning"
+
+
 def should_include_in_critical_stale(plugin: SourcePlugin, cfg: Any = None) -> bool:
     return classify_source_operational_role(plugin, cfg=cfg).include_in_critical_stale
 

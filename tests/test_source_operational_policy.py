@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.services.source_operational_policy import (
     ALLOWED_OPERATIONAL_ROLES,
     classify_source_operational_role,
+    source_operational_severity,
     should_include_in_critical_stale,
     source_operational_hint,
 )
@@ -94,3 +95,14 @@ def test_webmotors_blocked_state_receives_antibot_hint():
     hint = source_operational_hint(plugin, state=state)
     assert hint is not None
     assert "anti-bot" in hint
+
+
+def test_source_operational_severity_matrix():
+    assert source_operational_severity("primary", enabled=True) == "critical"
+    assert source_operational_severity("fragile", enabled=True) == "warning"
+    assert source_operational_severity("auxiliary", enabled=True) == "info"
+    assert source_operational_severity("deprioritized", enabled=True) == "info"
+    assert source_operational_severity("experimental", enabled=True) == "info"
+    assert source_operational_severity("disabled", enabled=True) == "ignored"
+    assert source_operational_severity("unknown", enabled=True) == "warning"
+    assert source_operational_severity("primary", enabled=False) == "ignored"

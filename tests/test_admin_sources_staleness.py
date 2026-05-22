@@ -22,9 +22,9 @@ class _Update:
 
 
 class _Plugin:
-    def __init__(self, name: str):
+    def __init__(self, name: str, *, role: str = "primary"):
         self.name = name
-        self.scrape = object()
+        self.scrape = lambda _url, _ctx: []
         self.default_enabled = True
         self.default_sched_minutes = 60
         self.default_cooldown_minutes = 0
@@ -32,6 +32,7 @@ class _Plugin:
         self.default_proxy_server = None
         self.default_browser_fallback_enabled = False
         self.default_force_browser = False
+        self.default_extra = {"operational_role": role}
 
 
 def _add_source(db, *, source: str, enabled: bool = True, sched_m: int = 60, status: str = "success", age_minutes: int = 10):
@@ -103,3 +104,22 @@ def test_admin_sources_preserves_disabled_and_error_states(db, monkeypatch):
     out = "\n".join(update.message.sent)
     assert "DISABLED" in out
     assert "ERR" in out or "BUG" in out or "NET" in out or "DATA" in out
+
+
+def test_admin_sources_deprioritized_blocked_is_non_critical(db, monkeypatch):
+    _add_source(db, source="olx", status="blocked", age_minutes=10)
+    _add_source(db, source="webmotors", status="blocked", age_minutes=10)
+    db.commit()
+
+    monkeypatch.setattr(
+        handlers_admin,
+        "list_sources",
+        lambda: [_Plugin("olx", role="primary"), _Plugin("webmotors", role="deprioritized")],
+    )
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+    assert "webmotors" in out
+    assert "role=deprioritized não crítico global" in out
+    assert "Blocked 24h: crítico=1 não_crítico=1" in out
