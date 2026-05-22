@@ -1,8 +1,28 @@
 from __future__ import annotations
 
+import json
+
 from app.bot.text_sanitize import sanitize_for_telegram
 from app.db.session import SessionLocal
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
+
+_SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
+
+
+def _sanitize_source_extra(extra: dict | None) -> str:
+    if not isinstance(extra, dict):
+        return "-"
+    out: dict[str, object] = {}
+    for k in sorted(extra.keys(), key=lambda x: str(x)):
+        key = str(k)
+        v = extra.get(k)
+        low = key.lower()
+        if any(part in low for part in _SENSITIVE_EXTRA_KEY_PARTS):
+            out[key] = "***"
+        else:
+            out[key] = v
+    rendered = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
+    return rendered if len(rendered) <= 320 else rendered[:317] + "..."
 
 
 async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_sources_show_fn, admin_sources_set_simple_fn, admin_sources_reset_fn):
@@ -92,6 +112,7 @@ async def admin_sources_show(update, source: str):
             f"proxy_server={cfg.proxy_server or '-'}",
             f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
             f"force_browser={bool(cfg.force_browser)}",
+            f"extra={_sanitize_source_extra(cfg.extra)}",
         ]
         await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
 

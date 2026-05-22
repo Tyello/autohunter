@@ -38,6 +38,10 @@ Para sources browser-first, adicionar warmup antes do runall:
 /admin runall <source>
 ```
 
+Notas operacionais rápidas:
+- `/admin sources show <source>` agora exibe `extra=` (sanitizado) para facilitar validação de flags DB-driven como `browser_block_resources`.
+- Em `webmotors`, quando `/admin runall webmotors` vier `blocked http=200` com diagnóstico PerimeterX (ex.: `Access to this page has been denied` / `Pressione e segure...`), trate como bloqueio anti-bot/fingerprint (não como falha primária de proxy/config local).
+
 ---
 
 ## Webmotors — Plano de desbloqueio

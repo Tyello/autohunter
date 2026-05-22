@@ -101,6 +101,7 @@ from app.services.auction_source_config_service import (
 )
 from app.services.auction_source_categories_service import get_auction_allowed_item_types, normalize_item_type
 from app.services.system_logs_service import log
+from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 
 
 @dataclass
@@ -2361,6 +2362,8 @@ async def _admin_runall(update: Update, raw_args: List[str]):
                     lines.append(
                         f"- {src}: 🟠 blocked http={res.get('http_status')} backoff={res.get('backoff_minutes')}m dur={res.get('duration_ms')}ms"
                     )
+                    for extra in _render_webmotors_blocked_diag_lines(res.get("payload")):
+                        lines.append(f"  {extra}")
                 elif st == "error":
                     lines.append(
                         f"- {src}: ⚪ error backoff={res.get('backoff_minutes')}m dur={res.get('duration_ms')}ms err={_short(str(res.get('error')), 160)}"
@@ -2439,6 +2442,51 @@ def _render_run_summary_lines(run_summary: Optional[dict]) -> list[str]:
         s = str(n or "").strip()
         if s.startswith("wm_diag "):
             lines.append(s)
+
+    return lines
+
+
+def _render_webmotors_blocked_diag_lines(payload: Any) -> list[str]:
+    data = extract_webmotors_diag_from_payload(payload if isinstance(payload, dict) else {})
+    if not isinstance(data, dict):
+        return []
+
+    lines: list[str] = []
+    bucket = str(data.get("bucket") or "-")
+    fetch_path = str(data.get("fetch_path") or "-")
+    attempt = str(data.get("attempt") or "-")
+    lines.append(f"wm_diag: {bucket} / {fetch_path} / attempt={attempt}")
+
+    blocked_reason = str(data.get("blocked_reason") or data.get("reason") or "-")
+    evidence = str(data.get("evidence") or "")
+    provider = "-"
+    for sig in (data.get("detected_signals") or []):
+        ss = str(sig or "")
+        if ss.startswith("provider="):
+            provider = ss.split("=", 1)[1] or "-"
+            break
+    if provider == "-":
+        joined = f"{blocked_reason} {evidence}".lower()
+        m = re.search(r"provider=([a-z0-9_-]+)", joined)
+        if m:
+            provider = m.group(1)
+    lines.append(f"reason: {blocked_reason} provider={provider}")
+
+    title = _short(str(data.get("page_title") or ""), 120)
+    if title != "-":
+        lines.append(f"title: {title}")
+
+    final_url = _short(str(data.get("final_url") or ""), 140)
+    if final_url != "-":
+        lines.append(f"url: {final_url}")
+
+    signals_blob = " ".join(str(x or "") for x in (data.get("detected_signals") or []))
+    reason_blob = f"{blocked_reason} {str(data.get('reason') or '')}"
+    low_blob = f"{title.lower()} {signals_blob.lower()} {reason_blob.lower()} {evidence.lower()}"
+    if bucket.upper() == "BLOCKED" and ("perimeterx" in low_blob or "bot_challenge_fingerprint" in low_blob) and (
+        "access to this page has been denied" in low_blob or "pressione e segure" in low_blob or "bot_challenge_fingerprint" in low_blob
+    ):
+        lines.append("leitura: bloqueio anti-bot/fingerprint; Webmotors pode exigir sessão assistida/storage state válido ou permanecer despriorizada.")
 
     return lines
 
