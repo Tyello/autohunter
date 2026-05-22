@@ -121,3 +121,135 @@ def test_warmup_sync_consent_clicked(monkeypatch):
     core._ctx_last_used = {('__no_proxy__', 'webmotors', True): 1.0}
     out = core.warmup(source='webmotors', proxy_server=None, behavior={'webmotors_warmup_behavior_enabled': True})
     assert 'consent_clicked' in out.get('steps_completed', [])
+
+
+def test_warmup_behavior_disabled_skips_substeps(monkeypatch):
+    from app.services.playwright_pool import _PlaywrightCore
+
+    class _Page:
+        url = 'https://www.webmotors.com.br/carros'
+        def goto(self, *a, **k): return None
+        def wait_for_timeout(self, *_a, **_k): return None
+        def evaluate(self, *_a, **_k): return None
+        class mouse:
+            @staticmethod
+            def move(*_a, **_k): return None
+        def query_selector(self, _selector): return None
+        def content(self): return 'ok'
+        def title(self): return 'ok'
+
+    class _Ctx:
+        def new_page(self): return _Page()
+        def storage_state(self, path=None): return None
+        def close(self): return None
+
+    class _Browser:
+        def new_context(self, **_k): return _Ctx()
+
+    core = _PlaywrightCore()
+    monkeypatch.setattr(core, '_get_or_create_browser', lambda _p: _Browser())
+    monkeypatch.setattr(core, '_storage_path', lambda *_a: '/tmp/warmup_test.json')
+    out = core.warmup(source='webmotors', proxy_server=None, behavior={'webmotors_warmup_behavior_enabled': False})
+    steps = out.get('steps_completed', [])
+    assert 'scroll' not in steps
+    assert 'mouse' not in steps
+    assert 'consent_attempted' not in steps and 'consent_clicked' not in steps
+    assert 'extra_wait' not in steps
+
+
+def test_warmup_none_subflags_do_not_disable_defaults(monkeypatch):
+    from app.services.playwright_pool import _PlaywrightCore
+
+    class _Page:
+        url = 'https://www.webmotors.com.br/carros'
+        wait_calls = []
+        def goto(self, *a, **k): return None
+        def wait_for_timeout(self, ms, **_k): self.wait_calls.append(ms)
+        def evaluate(self, *_a, **_k): return None
+        class mouse:
+            @staticmethod
+            def move(*_a, **_k): return None
+        def query_selector(self, _selector): return None
+        def content(self): return 'ok'
+        def title(self): return 'ok'
+
+    class _Ctx:
+        def __init__(self):
+            self.page = _Page()
+        def new_page(self): return self.page
+        def storage_state(self, path=None): return None
+        def close(self): return None
+
+    class _Browser:
+        def __init__(self):
+            self.ctx = _Ctx()
+        def new_context(self, **_k): return self.ctx
+
+    browser = _Browser()
+    core = _PlaywrightCore()
+    monkeypatch.setattr(core, '_get_or_create_browser', lambda _p: browser)
+    monkeypatch.setattr(core, '_storage_path', lambda *_a: '/tmp/warmup_test.json')
+    out = core.warmup(
+        source='webmotors',
+        proxy_server=None,
+        behavior={
+            'webmotors_warmup_behavior_enabled': True,
+            'webmotors_warmup_scroll_enabled': None,
+            'webmotors_warmup_mouse_enabled': None,
+            'webmotors_warmup_consent_enabled': None,
+            'webmotors_warmup_extra_wait_ms': None,
+        },
+    )
+    steps = out.get('steps_completed', [])
+    assert 'scroll' in steps
+    assert 'mouse' in steps
+    assert ('consent_attempted' in steps) or ('consent_clicked' in steps)
+    assert 'extra_wait' in steps
+    assert 1500 in browser.ctx.page.wait_calls
+
+
+def test_warmup_subflag_false_and_wait_clamp(monkeypatch):
+    from app.services.playwright_pool import _PlaywrightCore
+
+    class _Page:
+        url = 'https://www.webmotors.com.br/carros'
+        wait_calls = []
+        def goto(self, *a, **k): return None
+        def wait_for_timeout(self, ms, **_k): self.wait_calls.append(ms)
+        def evaluate(self, *_a, **_k): return None
+        class mouse:
+            @staticmethod
+            def move(*_a, **_k): return None
+        def query_selector(self, _selector): return None
+        def content(self): return 'ok'
+        def title(self): return 'ok'
+
+    class _Ctx:
+        def __init__(self):
+            self.page = _Page()
+        def new_page(self): return self.page
+        def storage_state(self, path=None): return None
+        def close(self): return None
+
+    class _Browser:
+        def __init__(self):
+            self.ctx = _Ctx()
+        def new_context(self, **_k): return self.ctx
+
+    browser = _Browser()
+    core = _PlaywrightCore()
+    monkeypatch.setattr(core, '_get_or_create_browser', lambda _p: browser)
+    monkeypatch.setattr(core, '_storage_path', lambda *_a: '/tmp/warmup_test.json')
+    out = core.warmup(
+        source='webmotors',
+        proxy_server=None,
+        behavior={
+            'webmotors_warmup_behavior_enabled': True,
+            'webmotors_warmup_scroll_enabled': False,
+            'webmotors_warmup_extra_wait_ms': 99999,
+        },
+    )
+    steps = out.get('steps_completed', [])
+    assert 'scroll' not in steps
+    assert 'extra_wait' in steps
+    assert 5000 in browser.ctx.page.wait_calls

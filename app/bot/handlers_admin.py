@@ -559,13 +559,16 @@ async def _admin_warmup(update: Update, raw_args: List[str]):
         ensure_source_configs(db)
         cfg = get_source_config(db, source)
         extra = (cfg.extra if cfg and isinstance(cfg.extra, dict) else {}) or {}
-        behavior = {k: extra.get(k) for k in (
+        behavior = {}
+        for key in (
             "webmotors_warmup_behavior_enabled",
             "webmotors_warmup_scroll_enabled",
             "webmotors_warmup_mouse_enabled",
             "webmotors_warmup_consent_enabled",
             "webmotors_warmup_extra_wait_ms",
-        )}
+        ):
+            if key in extra and extra.get(key) is not None:
+                behavior[key] = extra.get(key)
         proxy = cfg.proxy_server if cfg else None
     await update.message.reply_text(sanitize_for_telegram(f"🧪 warmup iniciado… source={source}"))
     res = await asyncio.to_thread(warmup_source, source=source, proxy_server=proxy, behavior=behavior)
