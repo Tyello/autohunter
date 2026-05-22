@@ -209,11 +209,72 @@ def test_missing_price_shows_dash_and_no_invented_data():
     assert "— • Fonte: webmotors" in payload.text
 
 
-def test_missing_delta_omits_badge():
+def test_missing_delta_shows_conservative_price_context_badge():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "reasons": ["ok"]}))
-    assert "💰" not in payload.text
+    assert "💰 Preço informado — sem base de" in payload.text
+
+
+def test_delta_badge_below_median_kept_when_delta_exists():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_median_pct": -0.18, "reasons": ["ok"]}))
+    assert "-18% vs mediana" in payload.text
+    assert "sem base de mercado" not in payload.text
+    assert "base de mercado pequena" not in payload.text
+
+
+def test_delta_badge_above_median_kept_when_delta_exists():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_median_pct": 0.12, "reasons": ["ok"]}))
+    assert "+12% vs mediana" in payload.text
+    assert "Preço informado" not in payload.text
+
+
+def test_price_context_without_market_context():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "reasons": ["ok"]}))
+    assert "Preço informado" in payload.text
+    assert "sem base de" in payload.text
+
+
+def test_price_context_with_small_market_sample():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(
+        _base_ad(score_breakdown={"total": 80, "reasons": ["ok"], "market_context": {"sample_size": 3, "delta_pct": None}})
+    )
+    assert "Preço informado" in payload.text
+    assert "Preço informado — base de" in payload.text
+
+
+def test_price_context_with_enough_sample_but_missing_delta():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(
+        _base_ad(score_breakdown={"total": 80, "reasons": ["ok"], "market_context": {"sample_size": 10, "delta_pct": None}})
+    )
+    assert "Preço informado — comparação" in payload.text
+
+
+def test_missing_price_does_not_show_price_context_fallback():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(price=None, score_breakdown={"total": 80, "reasons": ["ok"]}))
+    assert "Preço informado" not in payload.text
+    assert "sem base de mercado" not in payload.text
+
+
+def test_fipe_badge_when_delta_exists_in_breakdown():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload_below = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": -12, "reasons": ["ok"]}))
+    payload_above = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": 15, "reasons": ["ok"]}))
+    assert "12% abaixo da FIPE" in payload_below.text
+    assert "15% acima da FIPE" in payload_above.text
 
 
 def test_long_title_truncates_intelligently():
