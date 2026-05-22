@@ -120,3 +120,24 @@ def extract_webmotors_diag(err: Optional[str]) -> Optional[dict[str, Any]]:
     except Exception:
         return None
     return data if isinstance(data, dict) else None
+
+
+def extract_webmotors_diag_from_payload(payload: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    direct = payload.get("webmotors_diag")
+    if isinstance(direct, dict):
+        return direct
+
+    run_summary = payload.get("run_summary")
+    if isinstance(run_summary, dict):
+        last_error = run_summary.get("last_error")
+        if isinstance(last_error, dict):
+            parsed = extract_webmotors_diag(str(last_error.get("message") or ""))
+            if parsed:
+                return parsed
+        for note in run_summary.get("notes") or []:
+            parsed = extract_webmotors_diag(str(note or ""))
+            if parsed:
+                return parsed
+    return None

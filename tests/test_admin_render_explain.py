@@ -1,4 +1,4 @@
-from app.bot.handlers_admin import _render_run_summary_lines
+from app.bot.handlers_admin import _render_run_summary_lines, _render_webmotors_blocked_diag_lines
 
 
 def test_admin_render_includes_queued_zero_explain():
@@ -35,3 +35,28 @@ def test_admin_render_includes_webmotors_diag_note():
     }
     lines = _render_run_summary_lines(summary)
     assert any("wm_diag bucket=PROXY" in l for l in lines)
+
+
+def test_admin_render_blocked_wm_diag_structured():
+    payload = {
+        "webmotors_diag": {
+            "bucket": "BLOCKED",
+            "fetch_path": "browser_direct",
+            "attempt": 1,
+            "blocked_reason": "bot_challenge_fingerprint",
+            "page_title": "Access to this page has been denied",
+            "detected_signals": [
+                "provider=perimeterx",
+                "snippet=Pressione e segure para confirmar que você é um humano",
+            ],
+        }
+    }
+    lines = _render_webmotors_blocked_diag_lines(payload)
+    text = "\n".join(lines)
+    assert "provider=perimeterx" in text
+    assert "Access to this page has been denied" in text
+    assert "bloqueio anti-bot/fingerprint" in text
+
+
+def test_admin_render_blocked_without_wm_diag_keeps_empty():
+    assert _render_webmotors_blocked_diag_lines({"run_summary": {"notes": ["x"]}}) == []
