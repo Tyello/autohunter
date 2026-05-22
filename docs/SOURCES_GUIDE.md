@@ -17,7 +17,7 @@
 | `icarros` | Browser-first | fragile | ⚠️ Instável |
 | `mobiauto` | Browser-first | fragile | ⚠️ Instável |
 | `kavak` | Browser-first | experimental | 🔬 Em validação |
-| `turboclass` | HTTP (feed) | experimental | 🔬 Em validação |
+| `turboclass` | HTTP (feed) | experimental | ✅ Habilitada por default (em validação) |
 | `facebook_marketplace` | Browser + sessão manual | experimental | ❌ Fora do piloto |
 
 ---

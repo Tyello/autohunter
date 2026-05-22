@@ -71,9 +71,9 @@
 | GOG-03 | divergência comentário histórico vs config | GoGarage | `runtime_gap` | comentário antigo menciona HTTP-first | config atual é browser-first | divergência em comentários/docs vs plugin real | Baixo | Priorizar código como fonte de verdade e ajustar docs. |
 | KAV-01 | browser-only/browser-first real | Kavak | `implemented_active` | browser-first com `force_browser` e sem fallback padrão | implemented_v2 | plugin + scraper ativo confirmam perfil browser | Baixo | Manter experimental e monitorar custo. |
 | KAV-02 | status experimental | Kavak | `implemented_active` | `operational_role=experimental` | implemented_v2 | default extra do plugin | Baixo | Manter fora de metas de piloto. |
-| TUR-01 | HTTP/feed | TurboClass | `implemented_active` | scraper HTTP/feed ativo | implemented_v2 | plugin `fetch_mode=http` + função dedicada | Baixo | Manter desabilitada por default até validação. |
+| TUR-01 | HTTP/feed | TurboClass | `implemented_active` | scraper HTTP/feed ativo | implemented_v2 | plugin `fetch_mode=http` + função dedicada | Baixo | Manter habilitada por default com validação controlada de ingest incremental e duplicidade. |
 | TUR-02 | ingest incremental | TurboClass | `needs_validation` | existe menção de extras operacionais no plugin/docs | needs_validation | requer validação por execução/DB | Médio | Validar com run de amostra e métricas de duplicidade. |
-| TUR-03 | experimental/desabilitado por default | TurboClass | `implemented_active` | `default_enabled=false` | implemented_v2 | plugin builtins | Baixo | Manter status experimental. |
+| TUR-03 | experimental/habilitado por default | TurboClass | `implemented_active` | `default_enabled=true` | implemented_v2 | plugin builtins | Baixo | Manter status experimental. |
 | TUR-04 | presença no v2 registry | TurboClass | `implemented_v2` | n/a | v2 registrado | `app/scrapers/sources/__init__.py` registra `TurboClassScraper` | Baixo | Nenhuma imediata. |
 | FBM-01 | no registry principal | Facebook Marketplace | `implemented_active` | está em builtins e runner principal | pending_v2 | não aparece no registry v2 auto-registrado | Médio | Definir se haverá v2 dedicado ou manter fora da migração curta. |
 | FBM-02 | fora do piloto | Facebook Marketplace | `implemented_active` | `operational_role=experimental`; `supports_manual_search=False` | not_applicable | plugin e docs operacionais | Baixo | Manter explicitamente fora do piloto. |
@@ -225,12 +225,12 @@ Manter fora de metas principais de migração até estabilização.
 ## TurboClass
 
 ### Status atual
-Source HTTP/feed, experimental e desabilitada por default.
+Source HTTP/feed, experimental e habilitada por default.
 
 ### Já implementado no caminho ativo
 - caminho HTTP/feed.
 - presença no v2 registry.
-- status experimental (default disabled).
+- status experimental (default enabled).
 
 ### Pendente no v2/unified
 - validar ingest incremental com evidência operacional.

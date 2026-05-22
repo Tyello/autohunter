@@ -75,6 +75,17 @@ def test_webmotors_is_deprioritized_disabled_and_noted():
     assert "deprioritized" in webmotors["notes"]
 
 
+def test_turboclass_dual_experimental_and_enabled_by_default():
+    inv = build_source_v2_inventory(db=None)
+    turboclass = _row_by_source(inv, "turboclass")
+
+    assert turboclass["default_enabled"] is True
+    assert turboclass["has_v1"] is True
+    assert turboclass["has_v2"] is True
+    assert turboclass["supports_dual"] is True
+    assert turboclass["current_impl"] == "v1"
+    assert turboclass["operational_role"] == "experimental"
+
 def test_current_impl_defaults_and_db_override_and_invalid_fallback(monkeypatch):
     inv = build_source_v2_inventory(db=None)
     row = _row_by_source(inv, "mercadolivre")

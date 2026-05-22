@@ -276,7 +276,7 @@ register_source(
 )
 
 
-# TurboClass: SSR estável e barato. Começa desabilitado por default.
+# TurboClass: SSR estável e barato. Habilitada por default por decisão operacional.
 register_source(
     SourcePlugin(
         name="turboclass",
@@ -289,7 +289,7 @@ register_source(
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="http",
-        default_enabled=False,
+        default_enabled=True,
         default_sched_minutes=90,
         default_browser_fallback_enabled=True,
         default_extra={
