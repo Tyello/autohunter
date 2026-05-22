@@ -71,7 +71,7 @@
   - O aviso de limite diário agora informa quando o limite renova, usando o timezone configurado.
 
 - [x] 4.2 — Contexto histórico em queda de preço rastreado
-  - Implementado no PR #287.
+  - Implementado no PR #288.
   - Alertas de queda de preço agora mostram contexto histórico quando disponível, como preço inicial, queda total e tempo de rastreamento.
 
 
@@ -467,7 +467,7 @@ reply_markup = InlineKeyboardMarkup(buttons)
 
 ---
 
-### 4.2 Mudança de preço no rastreado sem contexto histórico — ✅ Concluído no PR #287
+### 4.2 Mudança de preço no rastreado sem contexto histórico — ✅ Concluído no PR #288
 
 **O problema hoje:**
 O alerta de queda de preço diz "💰 Preço caiu R$ 5.000". Não mostra o histórico: quando começou a rastrear, quantas vezes o preço mudou, se está em tendência de queda.
@@ -687,6 +687,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 6.1 | Detectar comando durante sessão aberta | ✅ Concluído PR #282 | Médio | Baixo — reduz confusão pontual |
 | 5.2 | Texto de upgrade orientado à dor | ✅ Concluído PR #284 | Baixo | Médio — testa mensagem alternativa |
 | 6.4 | Horário de renovação do limite diário | ✅ Concluído PR #286 | Baixo | Baixo — reduz dúvida operacional |
+| 4.2 | Contexto histórico em queda de preço rastreado | ✅ Concluído PR #288 | Médio | Médio — aumenta valor percebido do rastreamento |
 
 ---
 
