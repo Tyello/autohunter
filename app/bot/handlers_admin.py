@@ -2656,7 +2656,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
     lines: List[str] = []
     stale_sources = 0
-    enabled_sources = 0
+    critical_enabled_sources = 0
     critical_blocked = 0
     noncritical_blocked = 0
     lines.append("🧰 Admin — Sources")
@@ -2696,8 +2696,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
             else:
                 state = "✅ ok"
 
-        if enabled and implemented:
-            enabled_sources += 1
+        if enabled and implemented and op_class.include_in_critical_stale:
+            critical_enabled_sources += 1
 
         flags: list[str] = []
         flags.append("impl✅" if implemented else "impl❌")
@@ -2892,11 +2892,11 @@ async def _admin_sources(update: Update, verbose: bool = False):
     if critical_blocked or noncritical_blocked:
         lines.insert(4, f"Blocked 24h: crítico={critical_blocked} não_crítico={noncritical_blocked}")
 
-    stale_ratio = (stale_sources / enabled_sources) if enabled_sources else 0.0
+    stale_ratio = (stale_sources / critical_enabled_sources) if critical_enabled_sources else 0.0
     stale_min_sources = int(getattr(settings, "scheduler_global_stale_min_sources", 3) or 3)
     stale_ratio_cut = float(getattr(settings, "scheduler_global_stale_ratio", 0.6) or 0.6)
     if stale_sources > 0:
-        lines.insert(4, f"Stale sources: {stale_sources}/{enabled_sources} ({int(round(stale_ratio * 100))}%)")
+        lines.insert(4, f"Sources críticas stale: {stale_sources}/{critical_enabled_sources} ({int(round(stale_ratio * 100))}%)")
     if stale_sources >= stale_min_sources and stale_ratio >= stale_ratio_cut:
         lines.insert(5, "🚨 indício global: várias sources stale simultaneamente (scheduler/orquestrador)")
 
