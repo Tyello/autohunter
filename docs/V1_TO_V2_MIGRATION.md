@@ -272,8 +272,13 @@ Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa esp
   - Status: concluído nesta PR de documentação.
 
 - **P1 — Criar inventário automático de cobertura V1/V2.**
-  - Objetivo: gerar matriz `source | has_v1 | has_v2 | supports_dual | current_impl | operational_role | default_enabled`.
-  - Entrega possível: `scripts/source_v2_inventory.py` ou artefato de doc/teste gerado automaticamente.
+  - Status: concluído com `scripts/source_v2_inventory.py`.
+  - Comandos:
+    - `python scripts/source_v2_inventory.py --no-db`
+    - `python scripts/source_v2_inventory.py --format json --no-db`
+  - Matriz gerada: `source | has_v1 | has_v2 | supports_dual | current_impl | operational_role | default_enabled`.
+  - O inventário é read-only: não executa scrapers, não usa browser e não altera runtime/DB.
+  - Esta saída é a base para o **P2 dual-run controlado**.
 
 - **P2 — Criar/rodar dual-run controlado nas sources principais.**
   - Sources: `mercadolivre`, `olx`, `icarros`, `chavesnamao`, `mobiauto`.
