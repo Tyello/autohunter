@@ -525,6 +525,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _render_warmup_result(source: str, payload: dict) -> str:
     steps = payload.get("steps_completed") or []
+    signals = payload.get("challenge_signals") or []
     lines = [
         f"🧪 Warmup — {source}",
         "",
@@ -533,12 +534,14 @@ def _render_warmup_result(source: str, payload: dict) -> str:
         f"still_challenge={bool(payload.get('still_challenge'))}",
         f"provider={payload.get('challenge_provider') or '-'}",
         f"reason={payload.get('challenge_reason') or '-'}",
+        f"signals={','.join([str(s) for s in signals]) if signals else '-'}",
         f"title={payload.get('title') or '-'}",
         f"final_url={payload.get('final_url') or '-'}",
         f"duration_ms={int(payload.get('duration_ms') or 0)}",
-        "",
-        "steps:",
     ]
+    if not bool(payload.get("ok")) and payload.get("error"):
+        lines.append(f"error={_short(str(payload.get('error')), 240)}")
+    lines.extend(["", "steps:"])
     for s in steps:
         lines.append(f"- {s}")
     lines.extend(["", "leitura:"])
@@ -564,9 +567,12 @@ async def _admin_warmup(update: Update, raw_args: List[str]):
             "webmotors_warmup_extra_wait_ms",
         )}
         proxy = cfg.proxy_server if cfg else None
-    res = warmup_source(source=source, proxy_server=proxy, behavior=behavior)
+    await update.message.reply_text(sanitize_for_telegram(f"🧪 warmup iniciado… source={source}"))
+    res = await asyncio.to_thread(warmup_source, source=source, proxy_server=proxy, behavior=behavior)
     payload = dict(res.data or {})
     payload.setdefault("ok", bool(res.ok))
+    if not res.ok and res.error:
+        payload["error"] = res.error
     await update.message.reply_text(sanitize_for_telegram(_render_warmup_result(source, payload)))
 
 

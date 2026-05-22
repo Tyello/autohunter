@@ -7,7 +7,6 @@ import re
 import threading
 import time
 import traceback
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -354,9 +353,23 @@ class _PlaywrightCore:
                         steps_completed.append("mouse_failed")
                 if bool(behavior_cfg.get("webmotors_warmup_consent_enabled", True)):
                     try:
-                        from app.services.webmotors_consent import try_click_consent
-                        asyncio.run(try_click_consent(page))
-                        steps_completed.append("consent_attempted")
+                        clicked = False
+                        for t in ("aceitar", "concordo", "entendi", "permitir", "ok"):
+                            for selector in (
+                                f"button:has-text('{t}')",
+                                f"a:has-text('{t}')",
+                                f"input[type='button'][value*='{t}' i]",
+                                f"input[type='submit'][value*='{t}' i]",
+                            ):
+                                el = page.query_selector(selector)
+                                if el:
+                                    el.click(timeout=1500)
+                                    page.wait_for_timeout(600)
+                                    clicked = True
+                        if clicked:
+                            steps_completed.append("consent_clicked")
+                        else:
+                            steps_completed.append("consent_attempted")
                     except Exception:
                         steps_completed.append("consent_failed")
                 try:
