@@ -186,3 +186,20 @@ def test_webmotors_curl_cffi_impersonate_default_and_custom():
         )
         == "safari"
     )
+
+
+def test_webmotors_curl_cffi_challenge_then_browser_block_keeps_curl_diag(monkeypatch):
+    challenge = "<html><body>Access to this page has been denied provider=perimeterx</body></html>"
+    blocked_html = "<html><head><title>Just a moment...</title></head><body>checking your browser</body></html>"
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (200, challenge))
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: SimpleNamespace(html=blocked_html, final_url=url))
+
+    with pytest.raises(RuntimeError) as exc:
+        scrape_webmotors(
+            "https://www.webmotors.com.br/carros/estoque",
+            ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}),
+        )
+
+    reason = str(exc.value)
+    assert "WM_DIAG::" in reason
+    assert "curl_cffi_fallback_reason=challenge" in reason

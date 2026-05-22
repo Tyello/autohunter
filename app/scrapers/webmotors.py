@@ -281,6 +281,18 @@ def _fetch_webmotors_html_curl_cffi(search_url: str, ctx: ScrapeContext) -> tupl
     return int(getattr(resp, "status_code", 0) or 0), str(getattr(resp, "text", "") or "")
 
 
+def _format_curl_cffi_diag(*, enabled: bool, attempted: bool, impersonate: str, status: int | None, fallback_reason: str | None) -> str:
+    if not enabled:
+        return ""
+    return (
+        f"curl_cffi_attempted={str(attempted).lower()};"
+        f"curl_cffi_enabled={str(enabled).lower()};"
+        f"curl_cffi_impersonate={impersonate};"
+        f"curl_cffi_status={status};"
+        f"curl_cffi_fallback_reason={fallback_reason}"
+    )
+
+
 def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """Webmotors (Playwright-first) com HTML fallback sempre.
 
@@ -295,8 +307,8 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     curl_impersonate = _extra_str(ctx, "webmotors_curl_cffi_impersonate", "chrome")
     curl_fetch_path = "browser_direct"
     curl_fallback_reason: Optional[str] = None
+    curl_status: int | None = None
     if curl_cffi_enabled:
-        curl_status: int | None = None
         try:
             curl_status, curl_html = _fetch_webmotors_html_curl_cffi(search_url, ctx)
             blocked, _blocked_reason = _looks_like_webmotors_challenge(curl_html)
@@ -317,10 +329,15 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
             curl_fallback_reason = "error"
             curl_fetch_path = "curl_cffi_then_browser"
         if curl_fallback_reason:
-            last_diag_err = RuntimeError(
-                f"curl_cffi_attempted=true;curl_cffi_enabled=true;curl_cffi_impersonate={curl_impersonate};"
-                f"curl_cffi_status={curl_status};curl_cffi_fallback_reason={curl_fallback_reason}"
-            )
+            last_diag_err = RuntimeError(_format_curl_cffi_diag(enabled=True, attempted=True, impersonate=curl_impersonate, status=curl_status, fallback_reason=curl_fallback_reason))
+
+    curl_diag = _format_curl_cffi_diag(
+        enabled=curl_cffi_enabled,
+        attempted=curl_cffi_enabled,
+        impersonate=curl_impersonate,
+        status=curl_status,
+        fallback_reason=curl_fallback_reason,
+    )
 
     wait_modes = [str(getattr(ctx, "browser_wait_until", None) or "domcontentloaded"), "networkidle"]
     if wait_modes[0] == wait_modes[1]:
@@ -358,6 +375,8 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 page_title = _extract_title(res.html)
                 signals = _detect_block_signals(res.html, final_url=res.final_url or search_url)
                 strong_signals = [s for s in signals if s != "suspicious_html_too_small"]
+                if curl_diag:
+                    strong_signals.append(curl_diag)
                 if strong_signals:
                     diag = classify_webmotors_error(
                         FetchBlocked(200, search_url, reason="soft_block_or_challenge_200"),
@@ -367,7 +386,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                         http_status=200,
                         final_url=res.final_url or search_url,
                         page_title=page_title,
-                        blocked_reason="soft_block_or_challenge_200",
+                        blocked_reason=f"soft_block_or_challenge_200;{curl_diag}" if curl_diag else "soft_block_or_challenge_200",
                         detected_signals=strong_signals,
                         cards_found=len(items),
                         fallback_used=fallback_used,
@@ -380,7 +399,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                         final_url=res.final_url,
                         html=res.html,
                         cards_found=len(items),
-                        blocked_reason="soft_block_or_challenge_200",
+                        blocked_reason=f"soft_block_or_challenge_200;{curl_diag}" if curl_diag else "soft_block_or_challenge_200",
                         detected_signals=strong_signals,
                         fallback_used=fallback_used,
                         attempt=attempt,
@@ -398,7 +417,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                     http_status=200,
                     final_url=res.final_url or search_url,
                     page_title=page_title,
-                    blocked_reason="no_cards_parsed",
+                    blocked_reason=f"no_cards_parsed;{curl_diag}" if curl_diag else "no_cards_parsed",
                     detected_signals=[],
                     cards_found=len(items),
                 )
@@ -416,7 +435,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                     attempt=attempt,
                     fallback_used=fallback_used,
                     http_status=int(getattr(e, "status_code", 0) or 0) or None,
-                    blocked_reason=str(getattr(e, "reason", "") or "fetch_blocked"),
+                    blocked_reason=f"{str(getattr(e, 'reason', '') or 'fetch_blocked')};{curl_diag}" if curl_diag else str(getattr(e, "reason", "") or "fetch_blocked"),
                 )
                 # blocked on direct path is terminal; proxy path can fallback to direct once.
                 if fetch_path == "browser_direct":

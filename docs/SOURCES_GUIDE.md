@@ -49,6 +49,10 @@ Notas operacionais rápidas:
 - Objetivo: testar fetch HTTP com fingerprint de browser antes de Playwright.
 - Se detectar challenge PerimeterX, o fluxo cai para browser e mantém diagnóstico.
 - Não altera `force_browser` automaticamente.
+- Instalação opcional no Raspberry (para realmente executar o experimento HTTP):
+  - `/opt/autohunter/.venv/bin/pip install curl_cffi`
+  - `sudo systemctl restart autohunter-bot autohunter-scheduler`
+- Se `curl_cffi` não estiver instalado, a execução cai para Playwright sem quebrar o fluxo.
 
 ---
 
