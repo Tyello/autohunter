@@ -513,23 +513,24 @@ def render_admin_auctions_summary(stats: dict, latest_lots: list) -> str:
 def render_upgrade_text(has_payment_links: bool) -> str:
     text = (
         "🚀 Garagem Alvo Premium\n\n"
-        "Para quem procura carro especial de verdade e não quer perder anúncio bom.\n\n"
-        "Escolha seu plano:\n\n"
-        "Mensal\n"
-        "De R$ 9,99 por R$ 5,99/mês no lançamento.\n\n"
-        "Anual\n"
-        "De R$ 89,99 por R$ 59,99/ano.\n"
+        "Para quem já perdeu o carro certo porque alguém chegou primeiro.\n\n"
+        "No Free, você testa o monitoramento.\n"
+        "No Premium, você aumenta o radar.\n\n"
+        "O que muda na prática:\n"
+        "• Mais buscas salvas para monitorar vários modelos/configurações ao mesmo tempo.\n"
+        "• Mais alertas por dia por busca, reduzindo a chance de perder oportunidade boa por limite.\n"
+        "• Mais anúncios rastreados para acompanhar preço e status de carros específicos.\n"
+        "• Prioridade nas próximas melhorias do Garagem Alvo.\n\n"
+        "Planos de lançamento:\n"
+        "Mensal — R$ 5,99/mês\n"
+        "Anual — R$ 59,99/ano\n"
         "Equivale a R$ 4,99/mês.\n\n"
-        "Benefícios:\n"
-        "- até 15 buscas salvas\n"
-        "- até 5 anúncios rastreados no total\n"
-        "- alertas automáticos de preço/status\n"
-        "- até 200 notificações por dia por busca\n"
-        "- prioridade em novas funcionalidades\n\n"
-        "Após pagar, envie o comprovante aqui no Telegram.\n"
-        "A ativação é feita manualmente."
+        "Depois de pagar, envie o comprovante aqui no Telegram.\n"
+        "A ativação é manual."
     )
-    if not has_payment_links:
+    if has_payment_links:
+        text += "\n\nEscolha uma opção abaixo para continuar."
+    else:
         text += "\n\nOs links de pagamento ainda não estão configurados. Fale com o admin para ativação manual."
     return text
 

@@ -10,6 +10,10 @@
 
 ### Concluído
 
+- [x] 5.2 — Texto de upgrade orientado à dor
+  - Implementado no PR #283.
+  - O /upgrade agora comunica melhor a dor de perder boas oportunidades, sem alterar planos, preços ou pagamento.
+
 - [x] 1.1 — Botão CTA no `/start`
   - Implementado no PR #260.
   - `/start` agora mostra CTA contextual para criar primeira busca ou ver buscas existentes.
@@ -64,8 +68,8 @@
 
 ### Próximo pacote recomendado
 
-5.2 — Texto de upgrade orientado à dor
-- motivo: depois de reduzir atrito de fluxo, o próximo ganho pequeno é melhorar a mensagem de upgrade para comunicar valor com menos cara de cobrança.
+6.4 — Mensagem de limite diário não diz "amanhã que horas"
+- motivo: depois de melhorar o upgrade, o próximo ajuste pequeno é deixar o limite diário mais claro sobre quando renova.
 
 ---
 
@@ -518,7 +522,7 @@ Alertas hoje: ██░░░░░░░░ 1/5 (20%)
 
 ---
 
-### 5.2 Upgrade: lista de features vs motivação real
+### 5.2 Upgrade: lista de features vs motivação real — ✅ Concluído no PR #283
 
 **O problema hoje:**
 ```
@@ -672,7 +676,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 2.4 | Label de score humanizado | ✅ Concluído PR #279 | Baixo | Baixo — clareza incremental |
 | 1.3 | Contexto de ausência no `/start` | ✅ Concluído PR #280 | Médio | Médio — retenção de usuários que voltam |
 | 6.1 | Detectar comando durante sessão aberta | ✅ Concluído PR #282 | Médio | Baixo — reduz confusão pontual |
-| 5.2 | Texto de upgrade orientado à dor | Pendente | Baixo | Médio — testa mensagem alternativa |
+| 5.2 | Texto de upgrade orientado à dor | ✅ Concluído PR #283 | Baixo | Médio — testa mensagem alternativa |
 
 ---
 
