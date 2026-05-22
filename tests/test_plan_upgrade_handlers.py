@@ -122,5 +122,5 @@ def test_cmd_plan_uses_db_capabilities(db, monkeypatch):
     asyncio.run(handlers.cmd_plan(_Update(), types.SimpleNamespace()))
     text = sent[-1]
     assert "📦 Seu plano: Premium" in text
-    assert "Buscas salvas: 0/9" in text
-    assert "Alertas: até 12 por dia por busca" in text
+    assert "Buscas salvas\n0/9" in text
+    assert "Alertas\nAté 12 por dia por busca" in text

@@ -129,6 +129,98 @@ def _plural_pt(count: int, singular: str, plural: str) -> str:
     return f"{count} {singular if count == 1 else plural}"
 
 
+def _to_int_safe(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _render_usage_bar(current: int, limit: int, width: int = 10) -> str:
+    safe_width = max(_to_int_safe(width, 10), 1)
+    safe_limit = _to_int_safe(limit, 0)
+    if safe_limit <= 0:
+        return "─" * safe_width
+
+    safe_current = _to_int_safe(current, 0)
+    clamped_current = min(max(safe_current, 0), safe_limit)
+    filled = round((clamped_current / safe_limit) * safe_width)
+    filled = min(max(filled, 0), safe_width)
+    return ("█" * filled) + ("░" * (safe_width - filled))
+
+
+def render_plan_text(
+    *,
+    plan_code: str,
+    premium: bool,
+    total_wishlists: int,
+    max_wishlists: int,
+    total_tracked: int,
+    max_tracked: int,
+    daily_notifications_per_wishlist: int,
+    current_period_end=None,
+) -> str:
+    plan_name = "Premium" if premium else "Free"
+    safe_total_wishlists = max(_to_int_safe(total_wishlists), 0)
+    safe_max_wishlists = max(_to_int_safe(max_wishlists), 0)
+    safe_total_tracked = max(_to_int_safe(total_tracked), 0)
+    safe_max_tracked = max(_to_int_safe(max_tracked), 0)
+    safe_daily = max(_to_int_safe(daily_notifications_per_wishlist), 0)
+
+    lines = [
+        f"📦 Seu plano: {plan_name}",
+        "",
+        "Uso atual:",
+        "Buscas salvas",
+        f"{safe_total_wishlists}/{safe_max_wishlists}",
+        _render_usage_bar(safe_total_wishlists, safe_max_wishlists),
+        "",
+        "Anúncios rastreados",
+        f"{safe_total_tracked}/{safe_max_tracked}",
+        _render_usage_bar(safe_total_tracked, safe_max_tracked),
+        "",
+        "Alertas",
+        f"Até {safe_daily} por dia por busca",
+    ]
+
+    if premium:
+        valid_until = "—"
+        if current_period_end:
+            try:
+                valid_until = current_period_end.astimezone(timezone.utc).strftime("%d/%m/%Y")
+            except Exception:
+                valid_until = "—"
+        lines.extend(["", f"Válido até: {valid_until}", "Renovação: manual"])
+        return "\n".join(lines)
+
+    wishlist_remaining = max(safe_max_wishlists - safe_total_wishlists, 0)
+    tracked_remaining = max(safe_max_tracked - safe_total_tracked, 0)
+    if wishlist_remaining <= 0:
+        lines.append("")
+        lines.append("Você atingiu o limite de buscas salvas do Free.")
+    else:
+        lines.append("")
+        lines.append(
+            f"Você ainda tem {wishlist_remaining} busca(s) salva(s) disponível(is)."
+        )
+
+    if tracked_remaining <= 0:
+        lines.append("Você atingiu o limite de anúncios rastreados do Free.")
+    else:
+        lines.append(
+            f"Você ainda tem {tracked_remaining} anúncio(s) rastreado(s) disponível(is)."
+        )
+
+    lines.extend(
+        [
+            "Com Premium, você libera mais buscas, mais rastreados e mais alertas por dia.",
+            "",
+            "Para ver os planos: /upgrade",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_user_wishlists(wishlists) -> str:
     if not wishlists:
         return (

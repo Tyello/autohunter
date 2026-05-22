@@ -12,6 +12,7 @@ from app.bot.utils import normalize_args, parse_int, reply_text
 from app.bot.renderers import (
     render_user_wishlists,
     render_upgrade_text,
+    render_plan_text,
     build_upgrade_choice_keyboard,
     build_upgrade_payment_link_keyboard,
 )
@@ -473,26 +474,16 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caps = resolve_plan_capabilities(db, snap.get("plan_code"))
         total_wishlists = len(list_wishlists(db, user.id))
 
-    if caps.premium:
-        text = (
-            "📦 Seu plano: Premium\n\n"
-            "Uso atual:\n"
-            f"- Buscas salvas: {total_wishlists}/{caps.max_active_wishlists}\n"
-            f"- Anúncios rastreados: {total_tracked}/{caps.max_tracked_total}\n"
-            f"- Alertas: até {caps.daily_notifications_per_wishlist} por dia por busca\n\n"
-            f"Válido até: {snap['current_period_end'].astimezone(timezone.utc).strftime('%d/%m/%Y') if snap.get('current_period_end') else '—'}\n"
-            "Renovação: manual"
-        )
-    else:
-        text = (
-            "📦 Seu plano: Free\n\n"
-            "Uso atual:\n"
-            f"- Buscas salvas: {total_wishlists}/{caps.max_active_wishlists}\n"
-            f"- Anúncios rastreados: {total_tracked}/{caps.max_tracked_total}\n"
-            f"- Alertas: até {caps.daily_notifications_per_wishlist} por dia por busca\n\n"
-            "Com o Premium, você libera mais buscas, mais rastreados e alertas automáticos de queda de preço/status.\n\n"
-            "Para ver os planos: /upgrade"
-        )
+    text = render_plan_text(
+        plan_code=snap.get("plan_code", "free"),
+        premium=bool(caps.premium),
+        total_wishlists=total_wishlists,
+        max_wishlists=caps.max_active_wishlists,
+        total_tracked=total_tracked,
+        max_tracked=caps.max_tracked_total,
+        daily_notifications_per_wishlist=caps.daily_notifications_per_wishlist,
+        current_period_end=snap.get("current_period_end"),
+    )
     await reply_text(update, text)
 
 
