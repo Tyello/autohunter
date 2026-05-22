@@ -38,6 +38,7 @@ from app.services.tracking_callback_token_service import issue_tracking_callback
 
 from app.bot.admin import is_admin
 from app.bot.open_ad import normalize_listing_url
+from app.bot.handlers_core import maybe_guard_active_session_command
 
 from types import SimpleNamespace
 import logging
@@ -347,6 +348,7 @@ async def start_manual_search_flow(
 async def cb_quick_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    context.user_data["quick_search_active"] = True
     await q.message.reply_text(
         "🔎 Buscar agora\n\nO que você procura?\n\nExemplos:\n- civic si até 120000 sp\n- golf gti manual\n- audi a5 2018"
     )
@@ -360,10 +362,12 @@ async def quick_search_on_text(update: Update, context: ContextTypes.DEFAULT_TYP
         return QUICK_SEARCH_QUERY
 
     await start_manual_search_flow(update, context, query=query, sources=None)
+    context.user_data.pop("quick_search_active", None)
     return ConversationHandler.END
 
 
 async def quick_search_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("quick_search_active", None)
     await reply_text(update, "Busca rápida cancelada.")
     return ConversationHandler.END
 
@@ -391,6 +395,9 @@ def quick_search_conversation() -> ConversationHandler:
     )
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maybe_guard_active_session_command(update, context, target="search"):
+        return
+
     query, sources = _parse_query_and_sources(context.args)
     if not query:
         await reply_text(
