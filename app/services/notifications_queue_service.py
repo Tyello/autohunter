@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -204,12 +205,33 @@ def queue_notifications_for_matches_diag(
     }
 
 
+def _to_float(value):
+    if value is None:
+        return None
+    try:
+        if isinstance(value, Decimal):
+            return float(value)
+        return float(value)
+    except Exception:
+        return None
+
+
+def _iso_datetime(value):
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        return None
+    dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
     listing_id = getattr(tracked, "car_listing_id", None)
     wishlist_id = getattr(tracked, "wishlist_id", None)
     if not listing_id or not wishlist_id:
         return False
     current_price = getattr(tracked, "last_observed_price", None)
+    current_price_f = _to_float(current_price)
     existing = (
         db.query(Notification.id)
         .filter(Notification.wishlist_id == wishlist_id)
@@ -226,12 +248,29 @@ def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
         return False
     drop_amount = None
     raw_amount = getattr(tracked, "last_price_change_amount", None)
-    if raw_amount is not None:
-        drop_amount = abs(int(raw_amount))
+    raw_amount_f = _to_float(raw_amount)
+    if raw_amount_f is not None:
+        drop_amount = abs(int(raw_amount_f))
     drop_pct = None
     raw_pct = getattr(tracked, "last_price_change_pct", None)
-    if raw_pct is not None:
-        drop_pct = round(abs(float(raw_pct)) * 100, 2)
+    raw_pct_f = _to_float(raw_pct)
+    if raw_pct_f is not None:
+        drop_pct = round(abs(raw_pct_f) * 100, 2)
+
+    initial_price = _to_float(getattr(tracked, "initial_price", None))
+    tracked_since = _iso_datetime(getattr(tracked, "created_at", None))
+    last_price_change_at = _iso_datetime(getattr(tracked, "last_price_change_at", None))
+    last_seen_at = _iso_datetime(getattr(tracked, "last_seen_at", None))
+    last_price_drop_alert_price = _to_float(getattr(tracked, "last_price_drop_alert_price", None))
+
+    total_drop_amount = None
+    total_drop_pct = None
+    if initial_price is not None and current_price_f is not None:
+        computed_drop = int(round(initial_price - current_price_f))
+        if computed_drop > 0:
+            total_drop_amount = computed_drop
+            if initial_price > 0:
+                total_drop_pct = round((computed_drop / initial_price) * 100, 2)
     db.add(
         Notification(
             user_id=wishlist.user_id,
@@ -243,15 +282,22 @@ def queue_tracked_price_drop_alert(db: Session, *, tracked) -> bool:
             score_breakdown={
                 "type": "tracked_price_drop",
                 "slot": getattr(tracked, "slot", None),
-                "previous_price": int(getattr(tracked, "last_observed_price", 0) - raw_amount) if (getattr(tracked, "last_observed_price", None) is not None and raw_amount is not None) else None,
-                "current_price": int(current_price) if current_price is not None else None,
+                "previous_price": int(round(current_price_f - raw_amount_f)) if (current_price_f is not None and raw_amount_f is not None) else None,
+                "current_price": int(round(current_price_f)) if current_price_f is not None else None,
                 "drop_amount": drop_amount,
                 "drop_pct": drop_pct,
                 "tracked_listing_id": str(getattr(tracked, "id", "")) or None,
                 "wishlist_query": getattr(wishlist, "query", None),
+                "initial_price": int(round(initial_price)) if initial_price is not None else None,
+                "tracked_since": tracked_since,
+                "last_price_change_at": last_price_change_at,
+                "last_seen_at": last_seen_at,
+                "last_price_drop_alert_price": int(round(last_price_drop_alert_price)) if last_price_drop_alert_price is not None else None,
+                "total_drop_amount": total_drop_amount,
+                "total_drop_pct": total_drop_pct,
             },
             # Reuse score_v2 for exact-price dedupe (no schema change).
-            score_v2=int(current_price) if current_price is not None else None,
+            score_v2=int(round(current_price_f)) if current_price_f is not None else None,
             next_attempt_at=datetime.now(timezone.utc),
             max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
         )

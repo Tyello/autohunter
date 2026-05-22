@@ -211,6 +211,28 @@ def _parse_datetime(value: Any | None) -> datetime | None:
     return None
 
 
+
+
+def _parse_meta_datetime(value: Any) -> datetime | None:
+    return _parse_datetime(value)
+
+
+def _days_since(value: Any) -> int | None:
+    dt = _parse_meta_datetime(value)
+    if not dt:
+        return None
+    now = datetime.now(timezone.utc)
+    if dt > now:
+        return 0
+    return (now - dt).days
+
+
+def _format_short_date(value: Any) -> str | None:
+    dt = _parse_meta_datetime(value)
+    if not dt:
+        return None
+    return dt.astimezone(timezone.utc).strftime("%d/%m")
+
 def build_recency_badge(ad: Any) -> str | None:
     extras = getattr(ad, "extras", None) or {}
     extras_dict = extras if isinstance(extras, dict) else {}
@@ -586,6 +608,47 @@ def format_tracked_price_drop_message(notification: Any, ad: Any) -> TelegramMes
     if drop_amount is not None:
         pct_txt = f" (-{str(drop_pct).replace('.', ',')}%)" if drop_pct is not None else ""
         lines.append(f"Caiu {_format_price_brl(drop_amount)}{pct_txt}")
+
+    initial_price = meta.get("initial_price")
+    total_drop_amount = meta.get("total_drop_amount")
+    total_drop_pct = meta.get("total_drop_pct")
+    tracked_since = meta.get("tracked_since")
+    last_price_change_at = meta.get("last_price_change_at")
+    last_seen_at = meta.get("last_seen_at")
+
+    history_lines: list[str] = []
+    show_initial = initial_price is not None and (previous_price is None or initial_price != previous_price)
+    if show_initial:
+        history_lines.append(f"• Preço inicial: {_format_price_brl(initial_price)}")
+
+    if total_drop_amount not in (None, 0):
+        same_drop = (
+            drop_amount is not None
+            and previous_price is not None
+            and initial_price == previous_price
+            and total_drop_amount == drop_amount
+        )
+        if not same_drop:
+            pct_txt = f" (-{str(total_drop_pct).replace('.', ',')}%)" if total_drop_pct is not None else ""
+            history_lines.append(f"• Queda total: {_format_price_brl(total_drop_amount)}{pct_txt}")
+
+    days = _days_since(tracked_since)
+    if days is not None:
+        history_lines.append(f"• Rastreando há {days} dia" + ("s" if days != 1 else ""))
+
+    change_date = _format_short_date(last_price_change_at)
+    if change_date:
+        history_lines.append(f"• Mudança detectada em: {change_date}")
+
+    seen_date = _format_short_date(last_seen_at)
+    if seen_date and seen_date != change_date:
+        history_lines.append(f"• Última verificação: {seen_date}")
+
+    if history_lines:
+        lines.append("")
+        lines.append("Desde que você começou a rastrear:")
+        lines.extend(history_lines)
+
     lines.append("")
     lines.append(f"Busca: {wishlist_query}")
     lines.append(f"Slot: {slot if slot is not None else '-'}")
