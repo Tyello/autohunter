@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -76,6 +76,24 @@ def get_daily_limit_for_user(db: Session, user_id) -> int:
     """
     return get_active_subscription_limit_for_user(db, user_id)
 
+
+
+def count_notifications_sent_last_n_days(db: Session, user_id, days: int = 7) -> int:
+    """Conta notificações realmente enviadas nos últimos N dias (janela UTC)."""
+    safe_days = max(int(days or 0), 1)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=safe_days)
+
+    count = (
+        db.query(func.count(Notification.id))
+        .filter(Notification.user_id == user_id)
+        .filter(Notification.status == "sent")
+        .filter(Notification.sent_at.isnot(None))
+        .filter(Notification.sent_at >= cutoff)
+        .filter(Notification.sent_at <= now)
+        .scalar()
+    )
+    return int(count or 0)
 
 def can_send_more_today(db: Session, user_id) -> bool:
     """

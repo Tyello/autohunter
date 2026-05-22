@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 
+
 from app.bot.utils import reply_text
 from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters, render_upgrade_text, build_upgrade_choice_keyboard
@@ -12,6 +13,7 @@ from app.core.settings import settings
 from app.services.users_service import get_or_create_user_by_chat
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist, set_wishlist_active_state, add_wishlist_with_initial_summary, create_wishlist_with_filters_and_initial_summary
 from app.services.wishlist_tracking_service import list_tracked_listings
+from app.services.limits_service import count_notifications_sent_last_n_days
 
 MENU_CREATE_WISHLIST_QUERY = 1
 MENU_FILTER_SELECT_VALUE = 2
@@ -342,7 +344,32 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         w = list_wishlists(db, user.id)
 
-    await reply_text(update, render_start_text(len(w)), reply_markup=_start_markup(len(w)))
+        active_wishlists = [wl for wl in w if getattr(wl, "is_active", True)]
+        active_count = len(active_wishlists)
+        context_line: str | None = None
+
+        if active_count > 0:
+            try:
+                sent_count = count_notifications_sent_last_n_days(db, user.id, days=7)
+                if sent_count > 0:
+                    context_line = f"Enviei {sent_count} alerta(s) para você nos últimos 7 dias."
+                else:
+                    context_line = "Nenhum alerta nos últimos 7 dias — o mercado pode estar calmo para suas buscas."
+            except Exception:
+                logger.warning("Falha ao calcular alertas recentes no /start", exc_info=True)
+
+    if w and active_count == 0:
+        start_text = (
+            "👋 Garagem Alvo\n\n"
+            "Seu monitoramento já está ativo.\n\n"
+            "Você tem buscas salvas, mas nenhuma ativa no momento.\n"
+            "Abra suas buscas para reativar e voltar a receber alertas.\n\n"
+            "Use o botão abaixo ou /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
+        )
+    else:
+        start_text = render_start_text(active_count, context_line=context_line)
+
+    await reply_text(update, start_text, reply_markup=_start_markup(len(w)))
 
 async def cmd_wishlist_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text(update, _wishlist_help_text())

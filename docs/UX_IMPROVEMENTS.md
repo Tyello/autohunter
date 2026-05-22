@@ -54,10 +54,14 @@
   - Implementado no PR #279.
   - Alertas com score agora mostram uma etiqueta curta como "Excelente oportunidade", "Forte oportunidade" ou "Boa compatibilidade", sem alterar o cálculo do score.
 
+- [x] 1.3 — Contexto de ausência no /start
+  - Implementado no PR #280.
+  - Usuários que já têm buscas agora veem resumo de buscas ativas e contexto recente ao voltar pelo /start.
+
 ### Próximo pacote recomendado
 
-1.3 — Contexto de ausência no /start
-- motivo: depois de melhorar leitura dos alertas, o próximo ganho é retenção: quando o usuário volta sem alertas recentes, o /start deve explicar o que está acontecendo e orientar a ação.
+6.1 — Detectar comando durante sessão aberta
+- motivo: depois de melhorar retorno pelo /start, o próximo atrito é o usuário mandar /menu, /start ou /buscar durante uma sessão aberta e perder contexto.
 
 ---
 
@@ -132,7 +136,7 @@ Usuário cria busca → recebe "✅ Busca criada" → espera. Pode esperar 5 min
 
 ---
 
-### 1.3 Retorno após ausência — sem contexto do que aconteceu
+### 1.3 Retorno após ausência — sem contexto do que aconteceu — ✅ Concluído no PR #280
 
 **O problema hoje:**
 Usuário some por 3 dias e manda `/start`. Recebe:
@@ -662,7 +666,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 3.2 | "Buscar agora" inicia fluxo conversacional | ✅ Concluído PR #276 | Médio | Médio — UX consistente com o resto do bot |
 | 6.3 | Botões de sugestão nos filtros | ✅ Concluído PR #278 | Médio | Médio — elimina erros de formatação |
 | 2.4 | Label de score humanizado | ✅ Concluído PR #279 | Baixo | Baixo — clareza incremental |
-| 1.3 | Contexto de ausência no `/start` | Pendente | Médio | Médio — retenção de usuários que voltam |
+| 1.3 | Contexto de ausência no `/start` | ✅ Concluído PR #280 | Médio | Médio — retenção de usuários que voltam |
 | 6.1 | Detectar comando durante sessão aberta | Pendente | Médio | Baixo — reduz confusão pontual |
 | 5.2 | Texto de upgrade orientado à dor | Pendente | Baixo | Médio — testa mensagem alternativa |
 

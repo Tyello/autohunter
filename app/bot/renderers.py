@@ -108,13 +108,22 @@ def _friendly_wishlist_filters(filters: list[dict]) -> list[str]:
     return labels
 
 
-def render_start_text(active_wishlists_count: int) -> str:
+def render_start_text(active_wishlists_count: int, *, context_line: str | None = None) -> str:
     if active_wishlists_count > 0:
-        return (
-            "👋 Garagem Alvo\n\n"
-            "Seu monitoramento já está ativo.\n\n"
-            "Use o botão abaixo ou /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual."
-        )
+        lines = [
+            "👋 Garagem Alvo",
+            "",
+            "Seu monitoramento já está ativo.",
+            "",
+            f"Você tem {active_wishlists_count} busca(s) ativa(s).",
+        ]
+        if context_line:
+            lines.append(context_line)
+        lines.extend([
+            "",
+            "Use o botão abaixo ou /menu para ver suas buscas, anúncios rastreados, plano atual ou fazer uma busca manual.",
+        ])
+        return "\n".join(lines)
     return (
         "👋 Bem-vindo ao Garagem Alvo\n\n"
         "O buscador do entusiasta.\n\n"
