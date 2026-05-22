@@ -33,7 +33,7 @@ P1 — Fechar o loop busca manual → rastreamento:
 - objetivo: permitir que o usuário faça uma busca pontual, encontre um anúncio interessante e comece a rastrear sem voltar ao menu
 
 Novo próximo recomendado:
-- item 2.1 — Badge de recência com fallback para created_at
+- item 2.3 — Contexto mínimo garantido em todo alerta
 
 ---
 
@@ -150,6 +150,8 @@ async def cmd_start(update, context):
 ## Bloco 2 — Notificação de alerta (o momento mais importante do produto)
 
 ### 2.1 Badge de recência invisível para a maioria dos alertas
+
+> Status: concluído no PR #267. Quando a fonte informa data confiável de publicação, o bot mostra recência assertiva; quando só há `created_at`, mostra fallback conservador como 🆕 Novo ou 🕐 Recente.
 
 **O problema hoje:**
 `build_recency_badge` só mostra "⏱️ Há 2h" quando `published_at_reliable=True` nos `extras` do listing. A maioria das fontes não seta esse flag. Resultado: o badge temporal — que é um dos argumentos mais fortes do produto ("chegou antes de todo mundo") — aparece em uma fração dos alertas.
@@ -629,7 +631,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 6.2 | Tela vazia de anúncios rastreados | ✅ Concluído PR #260 | Baixo | Médio — reduz beco sem saída |
 | 4.1 | Botão rastrear nos resultados de `/buscar` | ✅ Concluído PR #264 | Médio | Médio — fecha o loop busca → rastreio |
 | 1.2 | Resultado imediato após criar busca | ✅ Concluído PR #266 | Médio | Alto — constrói confiança no primeiro uso |
-| 2.1 | Badge de recência com fallback para `created_at` | Próximo recomendado | Baixo | Alto — o argumento central do produto reaparece |
+| 2.1 | Badge de recência com fallback para `created_at` | ✅ Concluído PR #267 | Baixo | Alto — o argumento central do produto reaparece |
 | 2.3 | Contexto mínimo garantido em todo alerta | Pendente | Baixo | Médio — usuário sempre entende por que recebeu |
 | 3.3 | Limite diário com contexto e CTA suave | Pendente | Baixo | Alto para conversão Free → Premium |
 | 5.1 | Barra de progresso no `/plan` | Pendente | Baixo | Médio — torna limites mais tangíveis |

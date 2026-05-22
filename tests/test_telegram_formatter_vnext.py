@@ -21,6 +21,7 @@ class _Ad:
     description: str | None = None
     seller_type: str | None = None
     published_at: datetime | None = None
+    created_at: datetime | None = None
     extras: dict = field(default_factory=dict)
     score_v2: int | None = None
     score_breakdown: dict | None = None
@@ -138,12 +139,87 @@ def test_recency_badge_when_reliable():
     assert "⏱️ Ontem" in payload.text
 
 
-def test_no_recency_badge_when_unreliable():
+def test_no_recency_badge_when_unreliable_without_created_at_fallback_window():
     from app.notifications.telegram_formatter import format_ad_message
 
     ad = _base_ad(published_at=datetime.now(timezone.utc) - timedelta(hours=4), extras={"trim": "SI"})
     payload = format_ad_message(ad)
     assert "⏱️" not in payload.text
+
+
+def test_recency_badge_from_reliable_ad_published_at():
+    from app.notifications.telegram_formatter import build_recency_badge
+
+    ad = _base_ad(
+        published_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        extras={"published_at_reliable": True},
+    )
+    assert build_recency_badge(ad) == "⏱️ Há 2h"
+
+
+def test_recency_badge_from_reliable_extras_published_at():
+    from app.notifications.telegram_formatter import build_recency_badge
+
+    ad = _base_ad(
+        published_at=None,
+        extras={"published_at": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
+    )
+    assert build_recency_badge(ad) == "⏱️ Há 3h"
+
+
+def test_recency_badge_fallback_created_at_new():
+    from app.notifications.telegram_formatter import build_recency_badge
+
+    ad = _base_ad(
+        published_at=None,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+        extras={},
+    )
+    assert build_recency_badge(ad) == "🆕 Novo"
+
+
+def test_recency_badge_fallback_created_at_recent():
+    from app.notifications.telegram_formatter import build_recency_badge
+
+    ad = _base_ad(
+        published_at=None,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=4),
+        extras={},
+    )
+    assert build_recency_badge(ad) == "🕐 Recente"
+
+
+def test_recency_badge_fallback_created_at_old_returns_none():
+    from app.notifications.telegram_formatter import build_recency_badge
+
+    ad = _base_ad(
+        published_at=None,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=8),
+        extras={},
+    )
+    assert build_recency_badge(ad) is None
+
+
+def test_recency_badge_future_reliable_date_returns_none():
+    from app.notifications.telegram_formatter import build_recency_badge
+
+    ad = _base_ad(
+        published_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        extras={"published_at_reliable": True},
+    )
+    assert build_recency_badge(ad) is None
+
+
+def test_format_ad_message_includes_created_at_fallback_badge():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(
+        published_at=None,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+        extras={"trim": "SI"},
+    )
+    payload = format_ad_message(ad)
+    assert "🆕 Novo" in payload.text or "🕐 Recente" in payload.text
 
 
 def test_detect_leilao_positive():

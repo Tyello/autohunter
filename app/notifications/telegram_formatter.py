@@ -194,38 +194,50 @@ def _parse_datetime(value: Any | None) -> datetime | None:
 
 def build_recency_badge(ad: Any) -> str | None:
     extras = getattr(ad, "extras", None) or {}
-    reliable = False
-    if isinstance(extras, dict):
-        reliable = bool(extras.get("published_at_reliable") or extras.get("is_fresh_reliable"))
+    extras_dict = extras if isinstance(extras, dict) else {}
 
-    candidates = [
-        getattr(ad, "published_at", None),
-        getattr(ad, "created_at", None),
-        extras.get("published_at") if isinstance(extras, dict) else None,
-    ]
-    dt = None
-    for c in candidates:
-        dt = _parse_datetime(c)
-        if dt:
-            break
-    if not dt or not reliable:
-        return None
+    ad_published = _parse_datetime(getattr(ad, "published_at", None))
+    extras_published = _parse_datetime(extras_dict.get("published_at"))
+    created_at = _parse_datetime(getattr(ad, "created_at", None))
+
+    reliable = bool(
+        extras_dict.get("published_at_reliable")
+        or extras_dict.get("is_fresh_reliable")
+        or extras_published
+    )
 
     now = datetime.now(timezone.utc)
-    if dt > now:
-        return None
-    diff = now - dt
-    hours = int(diff.total_seconds() // 3600)
-    days = diff.days
 
-    if hours < 1:
-        return "⏱️ Agora"
-    if hours < 24:
-        return f"⏱️ Há {hours}h"
-    if days == 1:
-        return "⏱️ Ontem"
-    if days <= 14:
-        return f"⏱️ Há {days} dias"
+    if reliable:
+        for dt in (ad_published, extras_published):
+            if not dt:
+                continue
+            if dt > now:
+                return None
+            diff = now - dt
+            hours = int(diff.total_seconds() // 3600)
+            days = diff.days
+
+            if hours < 1:
+                return "⏱️ Agora"
+            if hours < 24:
+                return f"⏱️ Há {hours}h"
+            if days == 1:
+                return "⏱️ Ontem"
+            if days <= 14:
+                return f"⏱️ Há {days} dias"
+            return None
+        return None
+
+    if not created_at or created_at > now:
+        return None
+
+    diff = now - created_at
+    hours = diff.total_seconds() / 3600
+    if hours < 2:
+        return "🆕 Novo"
+    if hours < 6:
+        return "🕐 Recente"
     return None
 
 
