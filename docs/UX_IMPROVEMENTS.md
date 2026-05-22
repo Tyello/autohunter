@@ -67,7 +67,7 @@
   - Comandos globais como /menu, /start e /buscar agora avisam quando existe uma ação em andamento e permitem continuar ou descartar com segurança.
 
 - [x] 6.4 — Horário de renovação do limite diário
-  - Implementado no PR #285.
+  - Implementado no PR #286.
   - O aviso de limite diário agora informa quando o limite renova, usando o timezone configurado.
 
 ### Próximo pacote recomendado
@@ -640,7 +640,7 @@ Usuário pode tocar em um valor comum ou digitar livremente. Elimina 80% dos err
 
 ---
 
-### 6.4 Mensagem de limite diário não diz "amanhã que horas" — ✅ Concluído no PR #285
+### 6.4 Mensagem de limite diário não diz "amanhã que horas" — ✅ Concluído no PR #286
 
 **O problema hoje:**
 "Amanhã libera de novo." Mas o usuário não sabe se é à meia-noite, às 6h, ou quando foi o primeiro alerta.
@@ -681,7 +681,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 1.3 | Contexto de ausência no `/start` | ✅ Concluído PR #280 | Médio | Médio — retenção de usuários que voltam |
 | 6.1 | Detectar comando durante sessão aberta | ✅ Concluído PR #282 | Médio | Baixo — reduz confusão pontual |
 | 5.2 | Texto de upgrade orientado à dor | ✅ Concluído PR #284 | Baixo | Médio — testa mensagem alternativa |
-| 6.4 | Horário de renovação do limite diário | ✅ Concluído PR #285 | Baixo | Baixo — reduz dúvida operacional |
+| 6.4 | Horário de renovação do limite diário | ✅ Concluído PR #286 | Baixo | Baixo — reduz dúvida operacional |
 
 ---
 
