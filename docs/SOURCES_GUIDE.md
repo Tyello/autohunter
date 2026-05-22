@@ -42,6 +42,18 @@ Notas operacionais rápidas:
 - `/admin sources show <source>` agora exibe `extra=` (sanitizado) para facilitar validação de flags DB-driven como `browser_block_resources`.
 - Em `webmotors`, quando `/admin runall webmotors` vier `blocked http=200` com diagnóstico PerimeterX (ex.: `Access to this page has been denied` / `Pressione e segure...`), trate como bloqueio anti-bot/fingerprint (não como falha primária de proxy/config local).
 
+### Webmotors — experimento `curl_cffi`
+
+- Desligado por default (`source_configs.extra.webmotors_curl_cffi_enabled=false`).
+- Ativar com `source_configs.extra.webmotors_curl_cffi_enabled=true`.
+- Objetivo: testar fetch HTTP com fingerprint de browser antes de Playwright.
+- Se detectar challenge PerimeterX, o fluxo cai para browser e mantém diagnóstico.
+- Não altera `force_browser` automaticamente.
+- Instalação opcional no Raspberry (para realmente executar o experimento HTTP):
+  - `/opt/autohunter/.venv/bin/pip install curl_cffi`
+  - `sudo systemctl restart autohunter-bot autohunter-scheduler`
+- Se `curl_cffi` não estiver instalado, a execução cai para Playwright sem quebrar o fluxo.
+
 ---
 
 ## Webmotors — Plano de desbloqueio

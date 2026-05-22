@@ -222,6 +222,77 @@ def _detect_block_signals(html: str, *, final_url: str) -> list[str]:
     return signals
 
 
+def _extra_bool(ctx: ScrapeContext, key: str, default: bool = False) -> bool:
+    extra = getattr(ctx, "extra", None) or {}
+    val = extra.get(key, default)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    if isinstance(val, str):
+        low = val.strip().lower()
+        if low in {"1", "true", "yes", "on"}:
+            return True
+        if low in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _extra_str(ctx: ScrapeContext, key: str, default: str) -> str:
+    extra = getattr(ctx, "extra", None) or {}
+    val = extra.get(key, default)
+    if val is None:
+        return default
+    s = str(val).strip()
+    return s or default
+
+
+def _looks_like_webmotors_challenge(html: str) -> tuple[bool, str | None]:
+    low = (html or "").lower()
+    checks: list[tuple[str, list[str]]] = [
+        ("access_denied", ["access to this page has been denied"]),
+        ("press_and_hold", ["pressione e segure"]),
+        ("perimeterx", ["perimeterx", "provider=perimeterx"]),
+        ("px_captcha", ["px-captcha"]),
+        ("captcha", ["captcha"]),
+        ("bot", ["bot_challenge_fingerprint", "bot"]),
+        ("human_check", ["humano", "humano"]),
+    ]
+    for reason, needles in checks:
+        if any(n in low for n in needles):
+            return True, reason
+    return False, None
+
+
+def _fetch_webmotors_html_curl_cffi(search_url: str, ctx: ScrapeContext) -> tuple[int | None, str]:
+    from curl_cffi import requests as curl_requests  # type: ignore
+
+    kwargs = {
+        "impersonate": _extra_str(ctx, "webmotors_curl_cffi_impersonate", "chrome"),
+        "timeout": float(_extra_str(ctx, "webmotors_curl_cffi_timeout_s", "22")),
+        "headers": {
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+    }
+    if getattr(ctx, "proxy_server", None):
+        kwargs["proxy"] = str(getattr(ctx, "proxy_server"))
+    resp = curl_requests.get(search_url, **kwargs)
+    return int(getattr(resp, "status_code", 0) or 0), str(getattr(resp, "text", "") or "")
+
+
+def _format_curl_cffi_diag(*, enabled: bool, attempted: bool, impersonate: str, status: int | None, fallback_reason: str | None) -> str:
+    if not enabled:
+        return ""
+    return (
+        f"curl_cffi_attempted={str(attempted).lower()};"
+        f"curl_cffi_enabled={str(enabled).lower()};"
+        f"curl_cffi_impersonate={impersonate};"
+        f"curl_cffi_status={status};"
+        f"curl_cffi_fallback_reason={fallback_reason}"
+    )
+
+
 def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """Webmotors (Playwright-first) com HTML fallback sempre.
 
@@ -230,6 +301,43 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     Nota: isso elimina a fragilidade do capture de XHR (endpoints mudam, bloqueios variam).
     """
+
+    last_diag_err: Optional[Exception] = None
+    curl_cffi_enabled = _extra_bool(ctx, "webmotors_curl_cffi_enabled", default=False)
+    curl_impersonate = _extra_str(ctx, "webmotors_curl_cffi_impersonate", "chrome")
+    curl_fetch_path = "browser_direct"
+    curl_fallback_reason: Optional[str] = None
+    curl_status: int | None = None
+    if curl_cffi_enabled:
+        try:
+            curl_status, curl_html = _fetch_webmotors_html_curl_cffi(search_url, ctx)
+            blocked, _blocked_reason = _looks_like_webmotors_challenge(curl_html)
+            if blocked:
+                curl_fallback_reason = "challenge"
+            else:
+                curl_items = _parse_listings_from_html(curl_html, search_url)
+                if curl_items:
+                    return finalize_listings("webmotors", curl_items)
+                if _looks_like_zero_results(curl_html):
+                    return []
+                curl_fallback_reason = "no_items"
+            curl_fetch_path = "curl_cffi_then_browser"
+        except ImportError:
+            curl_fallback_reason = "not_installed"
+            curl_fetch_path = "curl_cffi_then_browser"
+        except Exception:
+            curl_fallback_reason = "error"
+            curl_fetch_path = "curl_cffi_then_browser"
+        if curl_fallback_reason:
+            last_diag_err = RuntimeError(_format_curl_cffi_diag(enabled=True, attempted=True, impersonate=curl_impersonate, status=curl_status, fallback_reason=curl_fallback_reason))
+
+    curl_diag = _format_curl_cffi_diag(
+        enabled=curl_cffi_enabled,
+        attempted=curl_cffi_enabled,
+        impersonate=curl_impersonate,
+        status=curl_status,
+        fallback_reason=curl_fallback_reason,
+    )
 
     wait_modes = [str(getattr(ctx, "browser_wait_until", None) or "domcontentloaded"), "networkidle"]
     if wait_modes[0] == wait_modes[1]:
@@ -241,10 +349,11 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     attempt = 0
     fallback_used = False
-    last_diag_err: Optional[Exception] = None
     debug_enabled = bool((getattr(ctx, "extra", None) or {}).get("webmotors_debug_capture", settings.webmotors_debug_capture_enabled))
 
     for path_idx, (fetch_path, run_ctx) in enumerate(path_ctxs):
+        if path_idx == 0 and curl_fetch_path == "curl_cffi_then_browser":
+            fetch_path = "curl_cffi_then_browser"
         if path_idx > 0:
             fallback_used = True
         for wait_until in wait_modes:
@@ -266,6 +375,8 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 page_title = _extract_title(res.html)
                 signals = _detect_block_signals(res.html, final_url=res.final_url or search_url)
                 strong_signals = [s for s in signals if s != "suspicious_html_too_small"]
+                if curl_diag:
+                    strong_signals.append(curl_diag)
                 if strong_signals:
                     diag = classify_webmotors_error(
                         FetchBlocked(200, search_url, reason="soft_block_or_challenge_200"),
@@ -275,7 +386,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                         http_status=200,
                         final_url=res.final_url or search_url,
                         page_title=page_title,
-                        blocked_reason="soft_block_or_challenge_200",
+                        blocked_reason=f"soft_block_or_challenge_200;{curl_diag}" if curl_diag else "soft_block_or_challenge_200",
                         detected_signals=strong_signals,
                         cards_found=len(items),
                         fallback_used=fallback_used,
@@ -288,7 +399,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                         final_url=res.final_url,
                         html=res.html,
                         cards_found=len(items),
-                        blocked_reason="soft_block_or_challenge_200",
+                        blocked_reason=f"soft_block_or_challenge_200;{curl_diag}" if curl_diag else "soft_block_or_challenge_200",
                         detected_signals=strong_signals,
                         fallback_used=fallback_used,
                         attempt=attempt,
@@ -306,7 +417,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                     http_status=200,
                     final_url=res.final_url or search_url,
                     page_title=page_title,
-                    blocked_reason="no_cards_parsed",
+                    blocked_reason=f"no_cards_parsed;{curl_diag}" if curl_diag else "no_cards_parsed",
                     detected_signals=[],
                     cards_found=len(items),
                 )
@@ -324,7 +435,7 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                     attempt=attempt,
                     fallback_used=fallback_used,
                     http_status=int(getattr(e, "status_code", 0) or 0) or None,
-                    blocked_reason=str(getattr(e, "reason", "") or "fetch_blocked"),
+                    blocked_reason=f"{str(getattr(e, 'reason', '') or 'fetch_blocked')};{curl_diag}" if curl_diag else str(getattr(e, "reason", "") or "fetch_blocked"),
                 )
                 # blocked on direct path is terminal; proxy path can fallback to direct once.
                 if fetch_path == "browser_direct":

@@ -151,6 +151,8 @@ register_source(
         default_extra={
             "operational_role": "deprioritized",
             "browser_block_resources": False,
+            "webmotors_curl_cffi_enabled": False,
+            "webmotors_curl_cffi_impersonate": "chrome",
         },
     )
 )
