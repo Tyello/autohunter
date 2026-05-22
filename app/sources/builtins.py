@@ -153,6 +153,11 @@ register_source(
             "browser_block_resources": False,
             "webmotors_curl_cffi_enabled": False,
             "webmotors_curl_cffi_impersonate": "chrome",
+            "webmotors_warmup_behavior_enabled": False,
+            "webmotors_warmup_scroll_enabled": True,
+            "webmotors_warmup_mouse_enabled": True,
+            "webmotors_warmup_consent_enabled": True,
+            "webmotors_warmup_extra_wait_ms": 1500,
         },
     )
 )

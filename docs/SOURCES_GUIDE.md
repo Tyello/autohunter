@@ -404,3 +404,11 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 ---
 
 *Documento criado em 2026-05-21. Atualizar seção de cada source após cada validação operacional.*
+
+## Webmotors — warmup mensurável
+
+- `/admin warmup webmotors` exibe `still_challenge`, `provider`, `reason`, `title`, `final_url`, `duration_ms` e etapas executadas.
+- Comportamento extra (scroll/mouse/consent) fica desligado por default.
+- Ative via `source_configs.extra.webmotors_warmup_behavior_enabled=true`.
+- Mesmo com warmup bem-sucedido, a validação real continua sendo `/admin runall webmotors`.
+- Não há promessa de desbloqueio.

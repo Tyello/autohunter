@@ -141,3 +141,47 @@ def extract_webmotors_diag_from_payload(payload: Any) -> Optional[dict[str, Any]
             if parsed:
                 return parsed
     return None
+
+
+def detect_webmotors_challenge(html: str = "", title: str = "", final_url: str = "") -> dict[str, Any]:
+    try:
+        low = " ".join([str(html or ""), str(title or ""), str(final_url or "")]).lower()
+    except Exception:
+        low = ""
+
+    signals: list[str] = []
+    provider: str | None = None
+    reason: str | None = None
+
+    checks = {
+        "access_denied": "access to this page has been denied",
+        "press_and_hold": "pressione e segure",
+        "perimeterx": "perimeterx",
+        "px_captcha": "px-captcha",
+        "captcha": "captcha",
+        "bot": "bot",
+        "humano": "humano",
+    }
+    for key, marker in checks.items():
+        if marker in low:
+            signals.append(key)
+    if any(k in (final_url or "").lower() for k in ("/challenge", "captcha", "blocked")):
+        signals.append("challenge_url")
+
+    if "perimeterx" in signals or "px_captcha" in signals:
+        provider = "perimeterx"
+    if "access_denied" in signals:
+        reason = "access_denied"
+    elif "press_and_hold" in signals:
+        reason = "press_and_hold"
+    elif "captcha" in signals or "px_captcha" in signals:
+        reason = "captcha"
+    elif signals:
+        reason = "unknown"
+
+    return {
+        "still_challenge": bool(signals),
+        "provider": provider,
+        "reason": reason,
+        "signals": signals,
+    }
