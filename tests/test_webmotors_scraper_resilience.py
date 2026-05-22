@@ -119,3 +119,70 @@ def test_webmotors_debug_artifacts_created_when_enabled(monkeypatch, tmp_path):
     assert data["cards_found"] == 0
     assert data["url_initial"].startswith("https://www.webmotors.com.br/")
     assert "blocked_reason" in data
+
+
+def test_webmotors_curl_cffi_flag_absent_does_not_attempt(monkeypatch):
+    called = {"curl": 0}
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: called.__setitem__("curl", 1))
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: SimpleNamespace(html=HTML_WITH_ITEM, final_url=url))
+    scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ScrapeContext(source="webmotors"))
+    assert called["curl"] == 0
+
+
+def test_webmotors_curl_cffi_flag_false_does_not_attempt(monkeypatch):
+    called = {"curl": 0}
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: called.__setitem__("curl", 1))
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: SimpleNamespace(html=HTML_WITH_ITEM, final_url=url))
+    scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": False}))
+    assert called["curl"] == 0
+
+
+def test_webmotors_curl_cffi_flag_true_attempts(monkeypatch):
+    called = {"curl": 0}
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (called.__setitem__("curl", 1) or (200, HTML_WITH_ITEM)))
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("browser should not be called")))
+    out = scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}))
+    assert called["curl"] == 1
+    assert len(out) == 1
+
+
+def test_webmotors_curl_cffi_import_error_fallbacks_to_browser(monkeypatch):
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (_ for _ in ()).throw(ImportError("missing")))
+    called = {"browser": 0}
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: (called.__setitem__("browser", called["browser"] + 1) or SimpleNamespace(html=HTML_WITH_ITEM, final_url=url)))
+    out = scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}))
+    assert called["browser"] == 1
+    assert len(out) == 1
+
+
+def test_webmotors_curl_cffi_challenge_fallbacks_to_browser(monkeypatch):
+    challenge = "<html><body>Access to this page has been denied provider=perimeterx</body></html>"
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (200, challenge))
+    called = {"browser": 0}
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: (called.__setitem__("browser", called["browser"] + 1) or SimpleNamespace(html=HTML_WITH_ITEM, final_url=url)))
+    out = scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}))
+    assert called["browser"] == 1
+    assert len(out) == 1
+
+
+def test_webmotors_curl_cffi_no_items_ambiguous_fallbacks_to_browser(monkeypatch):
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (200, "<html><body>layout mudou</body></html>"))
+    called = {"browser": 0}
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: (called.__setitem__("browser", called["browser"] + 1) or SimpleNamespace(html=HTML_WITH_ITEM, final_url=url)))
+    out = scrape_webmotors("https://www.webmotors.com.br/carros/estoque", ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}))
+    assert called["browser"] == 1
+    assert len(out) == 1
+
+
+def test_webmotors_curl_cffi_impersonate_default_and_custom():
+    from app.scrapers.webmotors import _extra_str
+
+    assert _extra_str(ScrapeContext(source="webmotors", extra={}), "webmotors_curl_cffi_impersonate", "chrome") == "chrome"
+    assert (
+        _extra_str(
+            ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_impersonate": "safari"}),
+            "webmotors_curl_cffi_impersonate",
+            "chrome",
+        )
+        == "safari"
+    )
