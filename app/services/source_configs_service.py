@@ -334,6 +334,25 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
             s = str(v).strip()
             return s or None
 
+        def _get_bool(key: str):
+            v = extra.get(key)
+            if v is None:
+                return None
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                if int(v) == 1:
+                    return True
+                if int(v) == 0:
+                    return False
+                return None
+            s = str(v).strip().lower()
+            if s in {"true", "1", "yes", "on"}:
+                return True
+            if s in {"false", "0", "no", "off"}:
+                return False
+            return None
+
         return ScrapeContext(
             source=src,
             proxy_server=_normalize_proxy_server(getattr(plugin, "default_proxy_server", None) if plugin else None),
@@ -348,6 +367,7 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
             browser_wait_until=_get_str("browser_wait_until"),
             browser_min_delay_ms=_get_int("browser_min_delay_ms"),
             browser_max_delay_ms=_get_int("browser_max_delay_ms"),
+            browser_block_resources=_get_bool("browser_block_resources"),
             extra=extra if extra else None,
         )
 
@@ -377,6 +397,25 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
             return None
         s = str(v).strip()
         return s or None
+    
+    def _get_bool(key: str) -> bool | None:
+        v = extra.get(key)
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            if int(v) == 1:
+                return True
+            if int(v) == 0:
+                return False
+            return None
+        s = str(v).strip().lower()
+        if s in {"true", "1", "yes", "on"}:
+            return True
+        if s in {"false", "0", "no", "off"}:
+            return False
+        return None
 
     return ScrapeContext(
         source=src,
@@ -392,6 +431,7 @@ def build_scrape_context(db: Session, source: str) -> ScrapeContext:
         browser_wait_until=_get_str("browser_wait_until"),
         browser_min_delay_ms=_get_int("browser_min_delay_ms"),
         browser_max_delay_ms=_get_int("browser_max_delay_ms"),
+        browser_block_resources=_get_bool("browser_block_resources"),
         extra=extra if extra else None,
     )
 

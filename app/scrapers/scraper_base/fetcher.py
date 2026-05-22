@@ -124,9 +124,7 @@ def _fetch_browser(url: str, ctx: ScrapeContext, source: str) -> tuple[str, str]
     timeout_ms = ctx.browser_timeout_ms or 30000
     wait_until = ctx.browser_wait_until or "domcontentloaded"
     
-    # Block recursos por padrão (economia de RAM/CPU)
-    # Exceto para fontes que precisam de recursos para anti-bot
-    block_resources = True
+    block_resources = True if ctx.browser_block_resources is None else bool(ctx.browser_block_resources)
     
     result = browser_mgr.fetch_html(
         url=url,

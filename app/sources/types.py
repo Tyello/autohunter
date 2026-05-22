@@ -44,6 +44,7 @@ class ScrapeContext:
     browser_wait_until: Optional[str] = None
     browser_min_delay_ms: Optional[int] = None
     browser_max_delay_ms: Optional[int] = None
+    browser_block_resources: Optional[bool] = None
 
     # Free-form extra (keep it small)
     extra: Optional[Dict[str, Any]] = None

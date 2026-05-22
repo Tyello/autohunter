@@ -114,6 +114,14 @@ def _effective_timeout_ms(source: str, timeout_ms: int) -> int:
     return int(timeout_ms or 0)
 
 
+def _resolve_block_resources(ctx: "ScrapeContext", block_resources: Optional[bool]) -> bool:
+    if block_resources is not None:
+        return bool(block_resources)
+    if getattr(ctx, "browser_block_resources", None) is not None:
+        return bool(ctx.browser_block_resources)
+    return True
+
+
 def fetch_html_browser(
         url: str,
         *,
@@ -122,6 +130,7 @@ def fetch_html_browser(
         wait_until: str = "networkidle",
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
+        block_resources: Optional[bool] = None,
 ) -> BrowserFetchResult:
     """Render a page in a real browser (Playwright) and return the resulting HTML.
 
@@ -169,6 +178,7 @@ def fetch_html_browser(
                 wait_until=wait_until,
                 min_delay_ms=min_delay_ms,
                 max_delay_ms=max_delay_ms,
+                block_resources=_resolve_block_resources(ctx, block_resources),
             )
             break
         except Exception as e:  # pragma: no cover
@@ -241,6 +251,7 @@ def fetch_json_browser(
         json_url_predicate: Optional[Callable[[str, dict, int], bool]] = None,
         min_delay_ms: int = 250,
         max_delay_ms: int = 900,
+        block_resources: Optional[bool] = None,
 ) -> BrowserJsonFetchResult:
     """Navigate in a real browser and capture a JSON response.
 
@@ -281,6 +292,7 @@ def fetch_json_browser(
                 json_url_predicate=json_url_predicate,
                 min_delay_ms=min_delay_ms,
                 max_delay_ms=max_delay_ms,
+                block_resources=_resolve_block_resources(ctx, block_resources),
             )
             break
         except Exception as e:  # pragma: no cover
