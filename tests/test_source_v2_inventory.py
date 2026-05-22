@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 import json
+from pathlib import Path
 
 from app.services.source_v2_inventory import build_source_v2_inventory, render_markdown
 
@@ -13,8 +15,7 @@ class _FakeCfg:
 
 
 class _FakeDB:
-    def __init__(self, rows: list[_FakeCfg]):
-        self._rows = rows
+    pass
 
 
 def _row_by_source(inv: list[dict], source: str) -> dict:
@@ -79,21 +80,33 @@ def test_current_impl_defaults_and_db_override_and_invalid_fallback(monkeypatch)
     row = _row_by_source(inv, "mercadolivre")
     assert row["current_impl"] == "v1"
 
-    def _fake_list_source_configs(_db):
-        return [_FakeCfg("mercadolivre", True, {"impl": "dual"})]
+    def _fake_import_dual(name, *args, **kwargs):
+        if name == "app.services.source_configs_service":
+            class _Mod:
+                @staticmethod
+                def list_source_configs(_db):
+                    return [_FakeCfg("mercadolivre", True, {"impl": "dual"})]
 
-    monkeypatch.setattr("app.services.source_v2_inventory.list_source_configs", _fake_list_source_configs)
-    inv_db = build_source_v2_inventory(db=_FakeDB([]))
-    row_db = _row_by_source(inv_db, "mercadolivre")
+            return _Mod()
+        return __import__(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _fake_import_dual)
+    row_db = _row_by_source(build_source_v2_inventory(db=_FakeDB()), "mercadolivre")
     assert row_db["current_impl"] == "dual"
 
-    def _fake_invalid_impl(_db):
-        return [_FakeCfg("mercadolivre", True, {"impl": "invalid"})]
 
-    monkeypatch.setattr("app.services.source_v2_inventory.list_source_configs", _fake_invalid_impl)
-    inv_invalid = build_source_v2_inventory(db=_FakeDB([]))
-    row_invalid = _row_by_source(inv_invalid, "mercadolivre")
-    assert row_invalid["current_impl"] == "v1"
+def test_db_failure_falls_back_to_static_with_db_unavailable(monkeypatch):
+    real_import = __import__
+
+    def _failing_import(name, *args, **kwargs):
+        if name == "app.services.source_configs_service":
+            raise RuntimeError("db unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _failing_import)
+    inv = build_source_v2_inventory(db=_FakeDB())
+    assert inv
+    assert all("db_unavailable" in row["notes"] for row in inv)
 
 
 def test_markdown_header_and_json_serializable():
@@ -104,3 +117,25 @@ def test_markdown_header_and_json_serializable():
 
     payload = json.dumps(inv)
     assert isinstance(payload, str)
+
+
+def test_script_main_no_db_without_database_url_no_sessionlocal_import(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    real_import = __import__
+
+    def _guarded_import(name, *args, **kwargs):
+        if name == "app.db.session":
+            raise AssertionError("app.db.session should not be imported in --no-db mode")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _guarded_import)
+
+    script = importlib.import_module("scripts.source_v2_inventory")
+    rc = script.main(["--no-db"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "| source | has_v1 |" in out
+    assert not Path("autohunter.db").exists()

@@ -5,7 +5,6 @@ from typing import Any
 from app.scrapers.sources import list_scrapers
 from app.sources.flags import read_source_impl_flags
 from app.sources.registry import list_sources
-from app.services.source_configs_service import list_source_configs
 
 
 REQUIRED_COLUMNS = [
@@ -32,15 +31,16 @@ def _build_config_index(db: Any) -> tuple[dict[str, Any], bool]:
     if db is None:
         return {}, False
 
-    rows = list_source_configs(db)
-    return {str(row.source).strip().lower(): row for row in rows}, True
+    try:
+        from app.services.source_configs_service import list_source_configs
+
+        rows = list_source_configs(db)
+        return {str(row.source).strip().lower(): row for row in rows}, True
+    except Exception:
+        return {}, False
 
 
 def build_source_v2_inventory(db: Any = None) -> list[dict[str, Any]]:
-    """Builds a source coverage inventory for V1/V2 implementation paths.
-
-    The function is intentionally read-only and can run without DB access.
-    """
     config_by_source, db_available = _build_config_index(db)
     v2_scrapers = list_scrapers()
 
