@@ -337,7 +337,7 @@ def test_add_wishlist_enqueue_failure_in_one_source_does_not_block_others(db, mo
 
     monkeypatch.setattr(
         "app.services.wishlists_service.allowed_sources_for_wishlists",
-        lambda _db, wishlists: {wishlists[0].id: {"olx", "webmotors"}},
+        lambda _db, wishlists: {wishlists[0].id: {"olx", "mercadolivre"}},
     )
     monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
 
@@ -353,7 +353,7 @@ def test_add_wishlist_enqueue_failure_in_one_source_does_not_block_others(db, mo
 
     assert ok is True
     assert "primeira busca em segundo plano" in msg
-    assert {src for src, _queue in calls} == {"olx", "webmotors"}
+    assert {src for src, _queue in calls} == {"olx", "mercadolivre"}
 
 
 def test_create_wishlist_with_filters_returns_success_when_initial_enqueue_fails(db, monkeypatch):

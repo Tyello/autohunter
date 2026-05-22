@@ -80,6 +80,7 @@ def test_builtin_sources_must_declare_operational_role_explicitly():
 def test_builtin_role_specific_expectations():
     by_name = {p.name: p for p in list_sources()}
     assert by_name["webmotors"].default_extra["operational_role"] in {"fragile", "deprioritized"}
+    assert by_name["webmotors"].default_enabled is False
     assert by_name["webmotors"].default_extra["webmotors_curl_cffi_enabled"] is False
 
 

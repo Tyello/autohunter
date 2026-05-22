@@ -4,6 +4,7 @@ import json
 
 from app.bot.text_sanitize import sanitize_for_telegram
 from app.db.session import SessionLocal
+from app.models.source_state import SourceState
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 
 _SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
@@ -103,6 +104,7 @@ async def admin_sources_show(update, source: str):
         if not cfg:
             await update.message.reply_text("Source não encontrada.")
             return
+        st = db.query(SourceState).filter(SourceState.source == cfg.source).one_or_none()
         lines = [
             f"🧰 Admin — Source: {cfg.source}",
             f"enabled={bool(cfg.is_enabled)}",
@@ -114,6 +116,17 @@ async def admin_sources_show(update, source: str):
             f"force_browser={bool(cfg.force_browser)}",
             f"extra={_sanitize_source_extra(cfg.extra)}",
         ]
+        role = None
+        if isinstance(cfg.extra, dict):
+            role = str(cfg.extra.get("operational_role") or "").strip().lower()
+        blocked_provider = None
+        if st is not None and isinstance(st.last_payload, dict):
+            blocked_provider = str(st.last_payload.get("blocked_provider") or st.last_payload.get("provider") or "").strip().lower()
+        if role == "deprioritized" and str(getattr(st, "last_status", "") or "").lower() == "blocked":
+            if blocked_provider == "perimeterx":
+                lines.append("leitura=source despriorizada por bloqueio PerimeterX/fingerprint; execução manual disponível, sem falha crítica global.")
+            else:
+                lines.append("leitura=source despriorizada; último status blocked; execução manual disponível, sem falha crítica global.")
         await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
 
 
