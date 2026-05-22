@@ -330,8 +330,31 @@ class _PlaywrightCore:
                     )
                     page.wait_for_timeout(2000)
                     steps_completed.append("cars_page")
-            if src == "webmotors" and bool(behavior_cfg.get("webmotors_warmup_behavior_enabled", False)):
-                if bool(behavior_cfg.get("webmotors_warmup_scroll_enabled", True)):
+            def _behavior_bool(cfg: Dict[str, Any], key: str, default: bool) -> bool:
+                value = cfg.get(key)
+                if value is None:
+                    return default
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, str):
+                    normalized = value.strip().lower()
+                    if normalized in {"1", "true", "yes", "on", "sim"}:
+                        return True
+                    if normalized in {"0", "false", "no", "off", "nao", "não"}:
+                        return False
+                return bool(value)
+
+            def _behavior_int(cfg: Dict[str, Any], key: str, default: int) -> int:
+                value = cfg.get(key)
+                if value is None:
+                    return default
+                try:
+                    return int(value)
+                except Exception:
+                    return default
+
+            if src == "webmotors" and _behavior_bool(behavior_cfg, "webmotors_warmup_behavior_enabled", False):
+                if _behavior_bool(behavior_cfg, "webmotors_warmup_scroll_enabled", True):
                     try:
                         page.evaluate("window.scrollTo({top: 300, behavior: 'smooth'})")
                         page.wait_for_timeout(250)
@@ -341,7 +364,7 @@ class _PlaywrightCore:
                         steps_completed.append("scroll")
                     except Exception:
                         steps_completed.append("scroll_failed")
-                if bool(behavior_cfg.get("webmotors_warmup_mouse_enabled", True)):
+                if _behavior_bool(behavior_cfg, "webmotors_warmup_mouse_enabled", True):
                     try:
                         page.mouse.move(120, 140)
                         page.wait_for_timeout(120)
@@ -351,7 +374,7 @@ class _PlaywrightCore:
                         steps_completed.append("mouse")
                     except Exception:
                         steps_completed.append("mouse_failed")
-                if bool(behavior_cfg.get("webmotors_warmup_consent_enabled", True)):
+                if _behavior_bool(behavior_cfg, "webmotors_warmup_consent_enabled", True):
                     try:
                         clicked = False
                         for t in ("aceitar", "concordo", "entendi", "permitir", "ok"):
@@ -372,10 +395,7 @@ class _PlaywrightCore:
                             steps_completed.append("consent_attempted")
                     except Exception:
                         steps_completed.append("consent_failed")
-                try:
-                    extra_wait_ms = int(behavior_cfg.get("webmotors_warmup_extra_wait_ms", 1500) or 0)
-                except Exception:
-                    extra_wait_ms = 1500
+                extra_wait_ms = _behavior_int(behavior_cfg, "webmotors_warmup_extra_wait_ms", 1500)
                 extra_wait_ms = max(0, min(extra_wait_ms, 5000))
                 if extra_wait_ms:
                     page.wait_for_timeout(extra_wait_ms)
