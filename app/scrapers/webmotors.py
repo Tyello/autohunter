@@ -17,6 +17,7 @@ from app.sources.types import ScrapeContext
 from app.scrapers.webmotors_ops import (
     classify_webmotors_error,
     encode_webmotors_diag,
+    extract_webmotors_diag,
 )
 
 WEBMOTORS_BASE = "https://www.webmotors.com.br"
@@ -293,6 +294,11 @@ def _format_curl_cffi_diag(*, enabled: bool, attempted: bool, impersonate: str, 
     )
 
 
+def _is_webmotors_blocked_diag(reason: str | None) -> bool:
+    diag = extract_webmotors_diag(reason)
+    return isinstance(diag, dict) and str(diag.get("bucket") or "").upper() == "BLOCKED"
+
+
 def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
     """Webmotors (Playwright-first) com HTML fallback sempre.
 
@@ -423,10 +429,11 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 )
                 last_diag_err = RuntimeError(encode_webmotors_diag(diag))
             except FetchBlocked as e:
-                if "WM_DIAG::" in str(getattr(e, "reason", "") or ""):
-                    if fetch_path == "browser_direct":
+                reason = str(getattr(e, "reason", "") or "")
+                if "WM_DIAG::" in reason:
+                    if fetch_path == "browser_direct" or _is_webmotors_blocked_diag(reason):
                         raise
-                    last_diag_err = RuntimeError(str(getattr(e, "reason", "") or "blocked"))
+                    last_diag_err = RuntimeError(reason or "blocked")
                     break
                 diag = classify_webmotors_error(
                     e,
@@ -454,4 +461,10 @@ def scrape_webmotors(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 if diag.bucket in {"BLOCKED", "PROXY"}:
                     break
 
+    if _is_webmotors_blocked_diag(str(last_diag_err or "")):
+        diag = extract_webmotors_diag(str(last_diag_err))
+        status = 200
+        if isinstance(diag, dict):
+            status = int(diag.get("http_status") or 200)
+        raise FetchBlocked(status, search_url, reason=str(last_diag_err)) from last_diag_err
     raise last_diag_err or RuntimeError("webmotors_html_fallback_failed")

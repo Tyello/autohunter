@@ -194,12 +194,30 @@ def test_webmotors_curl_cffi_challenge_then_browser_block_keeps_curl_diag(monkey
     monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (200, challenge))
     monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: SimpleNamespace(html=blocked_html, final_url=url))
 
-    with pytest.raises(RuntimeError) as exc:
+    with pytest.raises(FetchBlocked) as exc:
         scrape_webmotors(
             "https://www.webmotors.com.br/carros/estoque",
             ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}),
         )
 
-    reason = str(exc.value)
+    reason = str(exc.value.reason or "")
     assert "WM_DIAG::" in reason
+    assert '"bucket":"BLOCKED"' in reason
     assert "curl_cffi_fallback_reason=challenge" in reason
+
+
+def test_webmotors_curl_cffi_import_error_then_browser_block_is_fetch_blocked(monkeypatch):
+    blocked_html = "<html><head><title>Access denied</title></head><body>Access to this page has been denied provider=perimeterx</body></html>"
+    monkeypatch.setattr("app.scrapers.webmotors._fetch_webmotors_html_curl_cffi", lambda *_a, **_k: (_ for _ in ()).throw(ImportError("missing")))
+    monkeypatch.setattr("app.scrapers.webmotors.fetch_html_browser", lambda url, *, ctx, **kwargs: SimpleNamespace(html=blocked_html, final_url=url))
+
+    with pytest.raises(FetchBlocked) as exc:
+        scrape_webmotors(
+            "https://www.webmotors.com.br/carros/estoque",
+            ScrapeContext(source="webmotors", extra={"webmotors_curl_cffi_enabled": True}),
+        )
+
+    reason = str(exc.value.reason or "")
+    assert "WM_DIAG::" in reason
+    assert '"bucket":"BLOCKED"' in reason
+    assert "curl_cffi_fallback_reason=not_installed" in reason
