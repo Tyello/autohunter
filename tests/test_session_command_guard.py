@@ -91,6 +91,7 @@ def test_session_discard_menu_clears_context(monkeypatch):
         {
             "menu_create_wishlist_query": "civic",
             "menu_create_wishlist_draft_filters": [{"field": "price", "operator": "lte", "value": "100000"}],
+            "menu_create_wishlist_include_auctions": True,
             "menu_filter_wishlist_id": "w1",
             "menu_filter_type": "price",
             "quick_search_active": True,
@@ -108,6 +109,7 @@ def test_session_discard_menu_clears_context(monkeypatch):
 
     assert "menu_create_wishlist_query" not in ctx.user_data
     assert "menu_create_wishlist_draft_filters" not in ctx.user_data
+    assert "menu_create_wishlist_include_auctions" not in ctx.user_data
     assert "menu_filter_wishlist_id" not in ctx.user_data
     assert "menu_filter_type" not in ctx.user_data
     assert "quick_search_active" not in ctx.user_data

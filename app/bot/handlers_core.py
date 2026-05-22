@@ -19,7 +19,7 @@ MENU_CREATE_WISHLIST_QUERY = 1
 MENU_FILTER_SELECT_VALUE = 2
 
 MENU_FILTER_USER_DATA_KEYS = ("menu_filter_wishlist_index", "menu_filter_wishlist_id", "menu_filter_type")
-MENU_CREATE_WISHLIST_DRAFT_KEYS = ("menu_create_wishlist_query", "menu_create_wishlist_draft_filters", "menu_create_wishlist_draft_filter_type")
+MENU_CREATE_WISHLIST_DRAFT_KEYS = ("menu_create_wishlist_query", "menu_create_wishlist_draft_filters", "menu_create_wishlist_draft_filter_type", "menu_create_wishlist_include_auctions")
 logger = logging.getLogger(__name__)
 
 FILTER_TYPE_TO_SPEC = {
@@ -1298,6 +1298,7 @@ async def cb_session_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _clear_menu_create_wishlist_draft_context(context)
         _clear_menu_filter_context(context)
         context.user_data.pop("quick_search_active", None)
+        context.user_data.pop("menu_create_wishlist_include_auctions", None)
         context.user_data.pop("menu_create_wishlist_creating", None)
         context.user_data.pop("menu_create_wishlist_completed", None)
         context.user_data.pop("menu_create_wishlist_last_create_key", None)
