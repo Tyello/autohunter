@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Tuple
+from zoneinfo import ZoneInfo
 
 from app.core.settings import settings
 from app.bot.media import download_image_bytes
@@ -14,6 +16,29 @@ from app.services.http_session import get_shared_session
 # Telegram limits
 TELEGRAM_CAPTION_MAX = 1024
 TELEGRAM_TEXT_MAX = 4096
+
+
+def _daily_limit_renews_text(now: datetime | None = None) -> str:
+    tz_name = getattr(settings, "default_user_timezone", None) or "America/Sao_Paulo"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name = "America/Sao_Paulo"
+        tz = ZoneInfo(tz_name)
+
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+
+    local_now = base.astimezone(tz)
+    next_midnight = (local_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    time_label = "00h" if next_midnight.minute == 0 else next_midnight.strftime("%Hh%M")
+    tz_label = "horário de São Paulo" if tz_name == "America/Sao_Paulo" else f"horário local ({tz_name})"
+
+    if next_midnight.date() == (local_now.date() + timedelta(days=1)):
+        return f"O limite renova amanhã às {time_label} ({tz_label})."
+    return f"O limite renova em {next_midnight.strftime('%d/%m')} às {time_label} ({tz_label})."
 
 
 class _AdView:
@@ -269,7 +294,7 @@ def send_daily_limit_notice_http(user, limit: int):
         raise RuntimeError("TELEGRAM_BOT_TOKEN não configurado")
 
     chat_id = user.telegram_chat_id
-    text = render_daily_limit_notice(limit=limit)
+    text = render_daily_limit_notice(limit=limit, renews_text=_daily_limit_renews_text())
     reply_markup = json.dumps(
         {"inline_keyboard": [[{"text": "🚀 Ver Premium", "callback_data": "MENU:UPGRADE"}]]},
         ensure_ascii=False,
