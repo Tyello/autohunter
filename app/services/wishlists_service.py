@@ -719,6 +719,13 @@ class ParsedWishlistDraft:
     cleaned_query: str
     filters: list[NormalizedWishlistFilter]
 
+@dataclass(frozen=True)
+class WishlistCreateResult:
+    ok: bool
+    message: str
+    wishlist_id: Optional[uuid.UUID] = None
+    initial_run_summary: Optional[dict[str, Any]] = None
+
 
 def parse_wishlist_filter_expression(field: str, raw_text: str) -> list[NormalizedWishlistFilter]:
     canonical_field = {
@@ -1128,6 +1135,91 @@ def create_wishlist_with_filters(
 
     trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
     return True, "Wishlist e filtros criados com sucesso.", wishlist.id
+
+
+def add_wishlist_with_initial_summary(
+    db: Session,
+    user_id,
+    query: str,
+    include_auctions: bool = False,
+) -> WishlistCreateResult:
+    ok, msg = add_wishlist(
+        db,
+        user_id,
+        query,
+        enqueue_initial_run=False,
+        include_auctions=include_auctions,
+    )
+    if not ok:
+        return WishlistCreateResult(ok=False, message=msg)
+
+    wishlist = (
+        db.query(Wishlist)
+        .filter(Wishlist.user_id == user_id)
+        .order_by(Wishlist.created_at.desc())
+        .first()
+    )
+    if not wishlist:
+        return WishlistCreateResult(ok=False, message="Erro ao localizar wishlist criada.")
+
+    summary = trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
+    return WishlistCreateResult(
+        ok=True,
+        message="Wishlist criada com sucesso.",
+        wishlist_id=wishlist.id,
+        initial_run_summary=summary,
+    )
+
+
+def create_wishlist_with_filters_and_initial_summary(
+    db: Session,
+    user_id,
+    query: str,
+    filters: list[dict | tuple],
+    include_auctions: bool = False,
+) -> WishlistCreateResult:
+    normalized_filters: list[NormalizedWishlistFilter] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in filters or []:
+        if isinstance(item, dict):
+            raw_field, raw_op, raw_value = item.get("field"), item.get("operator"), item.get("value")
+        else:
+            raw_field, raw_op, raw_value = item
+        try:
+            n = normalize_wishlist_filter_input(str(raw_field), str(raw_op), str(raw_value))
+        except ValueError as exc:
+            return WishlistCreateResult(ok=False, message=str(exc))
+        key = (n.field, n.operator, n.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_filters.append(n)
+
+    ok, msg = add_wishlist(db, user_id, query, enqueue_initial_run=False, include_auctions=include_auctions)
+    if not ok:
+        return WishlistCreateResult(ok=False, message=msg)
+
+    wishlist = (
+        db.query(Wishlist)
+        .filter(Wishlist.user_id == user_id)
+        .order_by(Wishlist.created_at.desc())
+        .first()
+    )
+    if not wishlist:
+        return WishlistCreateResult(ok=False, message="Erro ao localizar wishlist criada.")
+
+    for n in normalized_filters:
+        f_ok, f_msg = add_filter(db, wishlist.id, n.field, n.operator, n.value)
+        if not f_ok and "duplicado" not in f_msg.lower():
+            return WishlistCreateResult(ok=False, message=f_msg)
+
+    summary = trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
+    return WishlistCreateResult(
+        ok=True,
+        message="Wishlist e filtros criados com sucesso.",
+        wishlist_id=wishlist.id,
+        initial_run_summary=summary,
+    )
 
 
 def list_filters(db: Session, wishlist_id):
