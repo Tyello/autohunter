@@ -2,10 +2,11 @@
 
 ## 1. Resumo executivo
 
-- O runtime atual é **misto**: o registry de sources é declarativo (`app/sources/builtins.py`), mas o caminho principal ainda usa scrapers legados ativos (`app/scrapers/*.py`) por padrão.
-- O framework v2/unified existe e está ativo no código (`app.scrapers.sources` + adapters v2), mas o uso por source depende de `source_configs.extra.impl` (`v1|v2|dual`).
-- `impl=dual` existe e roda comparação real quando há scraper v2 registrado para a source; sem v2 registrado, o dispatch cai no caminho v1.
-- Parte dos gaps históricos já está implementada no caminho ativo (especialmente Mercado Livre, OLX e iCarros).
+- O runtime atual é **misto**: registry declarativo em `app/sources/builtins.py`, com scrapers legados `app/scrapers/*.py` ainda como caminho principal em várias sources.
+- O framework v2/unified existe e está ativo, mas a seleção por source depende de `source_configs.extra.impl` (`v1|v2|dual`) e cobertura v2 disponível.
+- `impl=dual` é configuração persistida por source; não existe flag `--impl dual` no `/admin runall`.
+- A trilha V1→V2 é **técnica de estabilização** e **não** substitui as prioridades de produto (wishlist/filtros).
+- Próxima etapa **não** é flip geral para `v2`: é inventário automático + dual-run controlado + paridade por source principal.
 - Este documento separa explicitamente:
   - o que já está implementado no caminho ativo;
   - o que ainda está pendente no caminho v2/unified;
@@ -22,16 +23,19 @@
 - `doc_only`: estava documentado, mas não há evidência de implementação no código.
 - `not_applicable`: não faz sentido para aquela source.
 - `needs_validation`: há indício estático, mas precisa validação por execução real.
+- `deprioritized`: implementado, porém fora do caminho crítico operacional no momento.
+- `blocked_by_antibot`: bloqueio operacional confirmado por camada anti-bot/challenge.
+- `operational_decision`: status definido por decisão operacional explícita.
 
 ## 3. Matriz geral dos gaps
 
 | ID | Tema | Source(s) | Status | Caminho ativo | Caminho v2/unified | Evidência no código | Risco | Próxima ação |
 |---|---|---|---|---|---|---|---|---|
-| FND-01 | `curl_cffi` no `unified_fetch` | Fundação | `pending_v2` | ML/OLX já têm `curl_cffi` no scraper legado | `app/scrapers/scraper_base/fetcher.py` não usa `curl_cffi` | fetcher unificado só faz HTTP->browser; ML/OLX ativos fazem etapa intermediária | Médio | Decidir política única (manter por-source vs portar para unified). |
+| FND-01 | `curl_cffi` no `unified_fetch` | Fundação | `pending_v2` | ML/OLX já têm `curl_cffi` no scraper legado | `app/scrapers/scraper_base/fetcher.py` não usa `curl_cffi` | fetcher unificado só faz HTTP->browser; ML/OLX ativos fazem etapa intermediária | Médio | Decidir política após dual-run/medição; não globalizar agora. |
 | FND-02 | `block_resources` configurável por source | Fundação | `implemented_both` | Knob por source via `source_configs.extra.browser_block_resources` no contexto | unified e pool Playwright respeitam valor efetivo | `build_scrape_context` hidrata flag + fetch/browser pool usam `block_resources` por source/contexto | Baixo | Manter defaults econômicos e exceções anti-bot documentadas. |
 | FND-03 | `impl=v1|v2|dual` via `source_configs.extra` | Fundação | `implemented_both` | Flags lidas e aplicadas no runner principal | idem | `read_source_impl_flags` + `build_scrape_dispatch` | Baixo | Manter e documentar precedência DB/config. |
 | FND-04 | `/admin runall <source> --impl dual` | Fundação | `runtime_gap` | `/admin runall` aceita só nomes de source | sem parser de flag `--impl` | `_admin_runall` não parseia `--impl`; operação real é via `source_configs.extra.impl` | Alto | Remover instrução enganosa; trocar por fluxo de config persistida. |
-| FND-05 | Cobertura real de scrapers v2 registrados | Fundação | `implemented_both` | V1 ativo para todas registradas em builtins | v2 registrado para: mercadolivre, olx, icarros, webmotors, chavesnamao, kavak, gogarage, mobiauto, turboclass | `app/scrapers/sources/__init__.py` auto-registra essas sources; Facebook Marketplace não aparece | Médio | Publicar inventário automático de cobertura v2 por source. |
+| FND-05 | Cobertura real de scrapers v2 registrados | Fundação | `implemented_both` | V1 ativo para todas registradas em builtins | v2 registrado para: mercadolivre, olx, icarros, webmotors, chavesnamao, kavak, gogarage, mobiauto, turboclass | `app/scrapers/sources/__init__.py` auto-registra essas sources; Facebook Marketplace não aparece | Médio | **Próxima ação principal:** gerar inventário automático v1/v2 por source. |
 | FND-06 | Hidratação de `source_configs.extra` em `ScrapeContext` | Fundação | `implemented_both` | Contexto recebe knobs conhecidos + `ctx.extra` | idem | `build_scrape_context` com flatten + payload extra | Baixo | Manter; reforçar em docs operacionais. |
 | ML-01 | `curl_cffi` | Mercado Livre | `implemented_active` | `_fetch_html_ml` usa HTTP -> `curl_cffi` -> browser fallback | sem evidência equivalente na v2/unified | scraper legado contém import e fallback por camadas | Médio | Trazer para v2/unified ou manter exceção documentada. |
 | ML-02 | POLYCARD extraction | Mercado Livre | `implemented_active` | `_parse_polycard_items` implementado | não confirmado no v2 | parser regex de `"polycard"` ativo | Médio | Portar para v2 se paridade exigir. |
@@ -57,11 +61,11 @@
 | ICA-06 | fallback detail/listing | iCarros | `implemented_active` | resolve URL real e enriquece detalhe | não confirmado no v2 | `_resolve_listing_url_from_fallback_page` + `_detail_enrich` | Médio | Reproduzir no v2 com limite de custo. |
 | MOB-01 | `srcset`/thumbnail robusto | Mobiauto | `implemented_active` | parser tenta `srcset` + enrich em detalhe | needs_validation | expansão de srcset e backfill de thumb | Baixo | Validar taxa de thumbnail em produção. |
 | MOB-02 | HTTP/browser/híbrido | Mobiauto | `implemented_active` | usa `fetch_html_with_browser_fallback` (híbrido) com `force_browser` possível | needs_validation | caminho híbrido estático confirmado | Baixo | Medir frequência real de fallback browser. |
-| WEB-01 | diagnóstico de bloqueio | Webmotors | `implemented_active` | documentação e serviços indicam detecção de bloqueio/challenge | needs_validation | integração com serviços de diagnóstico | Médio | Validar cobertura atual em execuções recentes. |
-| WEB-02 | PerimeterX/challenge detection | Webmotors | `implemented_active` | detecção existe em serviços auxiliares | needs_validation | referências em documentação/serviços operacionais | Médio | Correlacionar detecção com ações automáticas. |
-| WEB-03 | warmup real vs recomendado | Webmotors | `needs_validation` | warmup existe, eficácia variável | not_applicable | `/admin warmup` existe; eficácia depende de bloqueio atual | Médio | Medir sucesso pós-warmup por janela de tempo. |
+| WEB-01 | diagnóstico de bloqueio | Webmotors | `implemented_both` | diagnóstico admin de bloqueio/challenge implementado e em uso | implemented_v2 | serviços de diagnóstico + classificação WM_DIAG em bucket `BLOCKED` | Baixo | Manter como fixture de blocked/challenge e execução manual/admin. |
+| WEB-02 | PerimeterX/challenge detection | Webmotors | `implemented_both` | detecção de challenge PerimeterX implementada e validada | implemented_v2 | resultado operacional consolidado: challenge com HTTP 200 | Baixo | Nenhuma ação imediata no roadmap V1→V2. |
+| WEB-03 | warmup (básico/comportamental) | Webmotors | `operational_decision` | warmup implementado e testado; não removeu challenge | not_applicable | browser direto + assets liberados + warmup básico/comportamental testados | Médio | Não priorizar novas iterações agora; manter diagnóstico/manual. |
 | WEB-04 | browser-first | Webmotors | `implemented_active` | plugin está `fetch_mode=browser` + `force_browser=True` | implemented_v2 | mesma diretriz no plugin/arquitetura | Baixo | Manter. |
-| WEB-05 | captura HTML/XHR | Webmotors | `needs_validation` | há indicação de fluxo com XHR no diagnóstico, não consolidado neste doc como garantido | needs_validation | depende de execução real da source | Médio | Validar com logs controlados. |
+| WEB-05 | status operacional | Webmotors | `deprioritized` | source implementada com execução manual/admin disponível | not_applicable | `operational_role=deprioritized` + `default_enabled=false` no seed novo | Baixo | Fora do caminho crítico da migração V1→V2. |
 | GOG-01 | browser-first real | GoGarage | `implemented_active` | plugin é browser-first | implemented_v2 | `fetch_mode=browser` e `force_browser=True` | Baixo | Corrigir comentário histórico para evitar confusão. |
 | GOG-02 | dependência de seletores/cards | GoGarage | `needs_validation` | scraper depende de estrutura HTML renderizada | needs_validation | natureza do parser por seletores | Médio | Validar estabilidade de seletores por amostra. |
 | GOG-03 | divergência comentário histórico vs config | GoGarage | `runtime_gap` | comentário antigo menciona HTTP-first | config atual é browser-first | divergência em comentários/docs vs plugin real | Baixo | Priorizar código como fonte de verdade e ajustar docs. |
@@ -134,18 +138,26 @@ Rodar checklist curto de paridade em consultas representativas.
 ## Webmotors
 
 ### Status atual
-Browser-first e com instrumentação de bloqueio/challenge; eficácia real depende de warmup e contexto de execução.
+Source tecnicamente implementada, com diagnóstico admin funcional e execução manual disponível, mas **bloqueada operacionalmente** por challenge de anti-bot (PerimeterX/fingerprint).
 
-### Já implementado no caminho ativo
-- Browser-first.
-- diagnóstico de bloqueio/challenge (inclui PerimeterX no ecossistema operacional).
-- warmup administrativo disponível.
+### Evidência consolidada
+- testado browser direto;
+- testado `browser_block_resources=false`;
+- testado warmup básico;
+- testado warmup comportamental;
+- testado `curl_cffi` experimental;
+- resultado recorrente: HTTP 200 com challenge (`provider=perimeterx`, `Access to this page has been denied`, `Pressione e segure`).
 
-### Pendente no v2/unified
-- Evidência objetiva de paridade funcional em cenário de bloqueio real.
+### Decisão operacional
+- `operational_role=deprioritized`;
+- `default_enabled=false` para seed novo;
+- não entra como falha crítica global de saúde;
+- não priorizar Webmotors no caminho V1→V2 agora.
 
-### Próxima ação recomendada
-Validar eficácia do warmup com métrica de sucesso por janela (ex.: 6h/24h).
+### Papel da Webmotors nesta trilha
+- usar como fixture/diagnóstico de `blocked/challenge`;
+- não usar como critério de sucesso da migração v2;
+- manter execução manual e diagnóstico/admin para observabilidade operacional.
 
 ## GoGarage
 
@@ -254,16 +266,45 @@ Manter fora do escopo de migração curta v1→v2 até decidir estratégia espec
 ### Observação
 Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa específica para criar comando admin seguro e auditável.
 
-## 6. Próximas tarefas recomendadas (baseadas em evidência)
+## 6. Próximas tarefas recomendadas (ordem sugerida)
 
-- **P0** — corrigir documentação e comandos enganosos de dual (concluído neste documento; propagar para guias correlatos).
-- **P1** — implementar `browser_block_resources` configurável por source no caminho unified.
-- **P2** — decidir se `curl_cffi` deve entrar no `unified_fetch` (estratégia global) ou ficar como otimização por source.
-- **P3** — inventariar automaticamente cobertura v2 por source e publicar artefato de controle (doc/check).
-- **P4** — melhorar warmup Webmotors **se** validação operacional confirmar gap real recorrente.
-- **P5** — criar comando admin seguro para alterar `impl` por source (opcional, se houver demanda operacional real).
+- **P0 — Alinhar documentação V1→V2 ao estado real.**
+  - Status: concluído nesta PR de documentação.
 
-## 7. Arquivos analisados nesta auditoria
+- **P1 — Criar inventário automático de cobertura V1/V2.**
+  - Objetivo: gerar matriz `source | has_v1 | has_v2 | supports_dual | current_impl | operational_role | default_enabled`.
+  - Entrega possível: `scripts/source_v2_inventory.py` ou artefato de doc/teste gerado automaticamente.
+
+- **P2 — Criar/rodar dual-run controlado nas sources principais.**
+  - Sources: `mercadolivre`, `olx`, `icarros`, `chavesnamao`, `mobiauto`.
+  - Comparar: quantidade de itens, `title`, `price`, `year`, `km`, `city/uf`, `url`, `external_id`, `thumbnail`, campos normalizados e `reason` de divergência.
+
+- **P3 — Paridade Mercado Livre no v2.**
+  - Garantir: `curl_cffi` (ou decisão explícita de não portar), POLYCARD, merge POLYCARD+HTML, filtro anti-peças, tracking/sponsored URL, VIP price fallback, canonicalização e guardrail de vertical veículos.
+
+- **P4 — Paridade OLX no v2.**
+  - Garantir: `__NEXT_DATA__`, fallback HTML, dedupe, policy de force-browser/fallback e decisão sobre `curl_cffi`.
+
+- **P5 — Paridade iCarros/Mobiauto/Chaves na Mão.**
+  - Foco: cidade/UF, ano, km, thumbnail/`srcset`, detail fallback, taxa de thumbnail e estabilidade de parser.
+
+- **P6 — Decisão arquitetural sobre `curl_cffi`.**
+  - Opções: manter por source, adicionar ao `unified_fetch` como etapa opcional, ou não globalizar sem métrica.
+  - Recomendação atual: **não globalizar agora**; decidir após dual-run/fixtures.
+
+- **P7 — Comando admin seguro para impl (se houver demanda real).**
+  - Exemplo futuro: `/admin sources impl mercadolivre dual|v1|v2`.
+  - Observação: não implementar agora sem necessidade; hoje o caminho oficial é `source_configs.extra.impl`.
+
+## 7. Não metas
+
+- Não migrar todas as sources para v2 de uma vez.
+- Não usar Webmotors como bloqueador da migração.
+- Não globalizar `curl_cffi` sem medição.
+- Não adicionar Patchright nesta trilha.
+- Não alterar scheduler/matching/notificações nesta documentação.
+
+## 8. Arquivos analisados nesta auditoria
 
 - `docs/SOURCES_ARCHITECTURE.md`
 - `docs/V1_TO_V2_MIGRATION.md`

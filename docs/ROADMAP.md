@@ -293,6 +293,14 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - linguagem alinhada ao público entusiasta;
 - separação clara Free/Premium, se aplicável.
 
+## 4.1 Trilha técnica paralela — V1→V2 das sources
+
+- A trilha V1→V2 é **técnica de estabilização**, não um flip imediato de arquitetura.
+- Ela **não substitui** o P1 de produto, que continua sendo filtros de wishlist por cor/cidade/UF.
+- Próxima ação técnica: inventário automático de cobertura V1/V2 + dual-run controlado nas sources principais.
+- Webmotors está fora do caminho crítico da migração (source deprioritized, útil como fixture de blocked/challenge).
+- Referência: `docs/V1_TO_V2_MIGRATION.md`.
+
 ## 5. Fora do roadmap imediato
 
 - Webmotors avançada/Patchright.
@@ -330,3 +338,4 @@ Esses itens só entram após decisão explícita.
 - `docs/OPERATIONS_RUNBOOK.md`
 - `docs/DOCUMENTATION_AUDIT.md`
 - `docs/LEGACY_INVENTORY.md`
+- `docs/V1_TO_V2_MIGRATION.md`
