@@ -50,10 +50,14 @@
   - Implementado no PR #278.
   - Filtros comuns como preço, ano e KM agora oferecem botões de sugestão, mantendo digitação livre para casos específicos.
 
+- [x] 2.4 — Label de score humanizado
+  - Implementado no PR #279.
+  - Alertas com score agora mostram uma etiqueta curta como "Excelente oportunidade", "Forte oportunidade" ou "Boa compatibilidade", sem alterar o cálculo do score.
+
 ### Próximo pacote recomendado
 
-2.4 — Label de score humanizado
-- motivo: depois de reduzir atrito de criação/edição com sugestões de filtro, o próximo passo é melhorar leitura dos alertas sem alterar score.
+1.3 — Contexto de ausência no /start
+- motivo: depois de melhorar leitura dos alertas, o próximo ganho é retenção: quando o usuário volta sem alertas recentes, o /start deve explicar o que está acontecendo e orientar a ação.
 
 ---
 
@@ -288,7 +292,7 @@ if context_lines:
 
 ---
 
-### 2.4 Score `/100` sem legenda
+### 2.4 Score aparece como número cru — ✅ Concluído no PR #279
 
 **O problema hoje:**
 `🔥 73/100 — Honda Civic Si 2018` aparece no topo da notificação. O usuário não sabe o que é 73, o que significa em relação a 50, nem o que influenciou.
@@ -657,7 +661,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 5.1 | Barra de progresso no `/plan` | ✅ Concluído PR #273 | Baixo | Médio — torna limites mais tangíveis |
 | 3.2 | "Buscar agora" inicia fluxo conversacional | ✅ Concluído PR #276 | Médio | Médio — UX consistente com o resto do bot |
 | 6.3 | Botões de sugestão nos filtros | ✅ Concluído PR #278 | Médio | Médio — elimina erros de formatação |
-| 2.4 | Label de score humanizado | Pendente | Baixo | Baixo — clareza incremental |
+| 2.4 | Label de score humanizado | ✅ Concluído PR #279 | Baixo | Baixo — clareza incremental |
 | 1.3 | Contexto de ausência no `/start` | Pendente | Médio | Médio — retenção de usuários que voltam |
 | 6.1 | Detectar comando durante sessão aberta | Pendente | Médio | Baixo — reduz confusão pontual |
 | 5.2 | Texto de upgrade orientado à dor | Pendente | Baixo | Médio — testa mensagem alternativa |
