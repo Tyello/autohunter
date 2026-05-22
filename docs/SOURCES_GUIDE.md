@@ -73,6 +73,13 @@ Notas operacionais rápidas:
 - Efeito esperado: não tratar bloqueio da Webmotors como falha crítica global; manter visível como blocked/deprioritized no detalhamento admin.
 - Próximas tentativas (ex.: Patchright/sessão assistida) exigem POC isolada e decisão explícita antes de qualquer rollout.
 
+## Sources despriorizadas e saúde global
+
+- Sources com `operational_role=deprioritized` permanecem visíveis no admin (`/admin sources` e `/admin sources show`).
+- Bloqueios/erros dessas sources devem aparecer no detalhamento, mas não devem ser tratados como falha crítica global do produto.
+- Caso atual: Webmotors permanece bloqueada por PerimeterX/fingerprint e mantida para execução manual/investigação via `/admin runall webmotors`.
+- Sources `primary` (e `fragile`, quando explicitamente classificadas como críticas) continuam sendo o principal sinal de saúde operacional global.
+
 ## Webmotors — Plano de desbloqueio
 
 ### Por que está bloqueado

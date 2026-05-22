@@ -40,6 +40,7 @@ from app.services.source_operational_policy import (
     classify_source_operational_role,
     should_include_in_critical_stale,
     source_operational_hint,
+    source_operational_severity,
 )
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config, invalidate_source_config_cache
 from app.services.source_execution_service import run_source_for_all_wishlists
@@ -2655,7 +2656,9 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
     lines: List[str] = []
     stale_sources = 0
-    enabled_sources = 0
+    critical_enabled_sources = 0
+    critical_blocked = 0
+    noncritical_blocked = 0
     lines.append("🧰 Admin — Sources")
     lines.append(f"Agora (UTC): {_fmt_dt(now)}")
     lines.append(f"Janela: 24h desde {_fmt_dt(since)}")
@@ -2693,8 +2696,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
             else:
                 state = "✅ ok"
 
-        if enabled and implemented:
-            enabled_sources += 1
+        if enabled and implemented and op_class.include_in_critical_stale:
+            critical_enabled_sources += 1
 
         flags: list[str] = []
         flags.append("impl✅" if implemented else "impl❌")
@@ -2740,7 +2743,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0),
                 min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180),
             )
-            if stale_eval.stale:
+            if stale_eval.stale and op_class.include_in_critical_stale:
                 stale_sources += 1
 
             if lr_cause is None:
@@ -2755,6 +2758,10 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 elif lr_cause.status == "blocked":
                     kind = "BLOCKED"
                     emoji = "🟠"
+                    if source_operational_severity(op_class.role, enabled=enabled) == "critical":
+                        critical_blocked += 1
+                    else:
+                        noncritical_blocked += 1
                     hs = lr_cause.http_status or 403
                     e_l = (lr_cause.error or "").lower()
                     if hs == 200 and ("no_json_capture" in e_l):
@@ -2848,7 +2855,10 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 for extra in _render_run_summary_lines(payload.get("run_summary")):
                     lines.append(f"   {extra}")
 
-        lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind} | " + " ".join(flags))
+        role_note = ""
+        if kind == "BLOCKED" and source_operational_severity(op_class.role, enabled=enabled) != "critical":
+            role_note = f" | role={op_class.role} não crítico global"
+        lines.append(f"[{i}] {p.name} — {state} | {emoji} {kind}{role_note} | " + " ".join(flags))
         if st:
             if st.consecutive_blocks:
                 lines.append(f"   blocks seguidos: {st.consecutive_blocks}")
@@ -2879,11 +2889,14 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
         lines.append("")
 
-    stale_ratio = (stale_sources / enabled_sources) if enabled_sources else 0.0
+    if critical_blocked or noncritical_blocked:
+        lines.insert(4, f"Blocked 24h: crítico={critical_blocked} não_crítico={noncritical_blocked}")
+
+    stale_ratio = (stale_sources / critical_enabled_sources) if critical_enabled_sources else 0.0
     stale_min_sources = int(getattr(settings, "scheduler_global_stale_min_sources", 3) or 3)
     stale_ratio_cut = float(getattr(settings, "scheduler_global_stale_ratio", 0.6) or 0.6)
     if stale_sources > 0:
-        lines.insert(4, f"Stale sources: {stale_sources}/{enabled_sources} ({int(round(stale_ratio * 100))}%)")
+        lines.insert(4, f"Sources críticas stale: {stale_sources}/{critical_enabled_sources} ({int(round(stale_ratio * 100))}%)")
     if stale_sources >= stale_min_sources and stale_ratio >= stale_ratio_cut:
         lines.insert(5, "🚨 indício global: várias sources stale simultaneamente (scheduler/orquestrador)")
 
