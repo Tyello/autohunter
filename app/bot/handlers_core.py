@@ -127,6 +127,44 @@ def _clear_menu_create_wishlist_draft_context(context: ContextTypes.DEFAULT_TYPE
         context.user_data.pop(key, None)
 
 
+def _active_session_kind(context: ContextTypes.DEFAULT_TYPE) -> str | None:
+    user_data = getattr(context, "user_data", None) or {}
+
+    has_create_wishlist_context = any(key in user_data for key in MENU_CREATE_WISHLIST_DRAFT_KEYS)
+    is_create_wishlist_in_transient_step = bool(user_data.get("menu_create_wishlist_completed")) or bool(user_data.get("menu_create_wishlist_creating"))
+    if has_create_wishlist_context and not is_create_wishlist_in_transient_step:
+        return "create_wishlist"
+
+    if any(key in user_data for key in MENU_FILTER_USER_DATA_KEYS):
+        return "filter"
+
+    if bool(user_data.get("quick_search_active")):
+        return "quick_search"
+
+    return None
+
+
+async def maybe_guard_active_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, target: str) -> bool:
+    _ = target
+    if not _active_session_kind(context):
+        return False
+
+    markup = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Continuar de onde parei", callback_data="SESSION:RESUME")],
+            [InlineKeyboardButton("Descartar e abrir menu", callback_data="SESSION:DISCARD:MENU")],
+        ]
+    )
+    await reply_text(
+        update,
+        "Você tem uma ação em andamento.\n\n"
+        "Se abrir outra tela agora, posso perder o que você estava fazendo.\n\n"
+        "O que prefere?",
+        reply_markup=markup,
+    )
+    return True
+
+
 def _build_wishlist_create_key(chat_id: int, query: str, filters: list[dict]) -> str:
     normalized_filters = sorted(
         [
@@ -340,6 +378,9 @@ def _start_markup(wishlist_count: int) -> InlineKeyboardMarkup:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maybe_guard_active_session_command(update, context, target="start"):
+        return
+
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
         w = list_wishlists(db, user.id)
@@ -380,6 +421,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maybe_guard_active_session_command(update, context, target="menu"):
+        return
+
     await _show_main_menu(update)
 
 
@@ -1235,6 +1279,30 @@ async def menu_filter_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     _clear_menu_filter_context(context)
     await reply_text(update, "Configuração de filtro cancelada.")
     return ConversationHandler.END
+
+
+async def cb_session_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await _safe_answer_callback(q)
+    data = (q.data or "").strip()
+
+    if data == "SESSION:RESUME":
+        await _safe_edit_or_send(
+            update,
+            "Tudo bem — continue pela última pergunta acima.\n"
+            "Se preferir cancelar, use /cancelar.",
+        )
+        return
+
+    if data == "SESSION:DISCARD:MENU":
+        _clear_menu_create_wishlist_draft_context(context)
+        _clear_menu_filter_context(context)
+        context.user_data.pop("quick_search_active", None)
+        context.user_data.pop("menu_create_wishlist_creating", None)
+        context.user_data.pop("menu_create_wishlist_completed", None)
+        context.user_data.pop("menu_create_wishlist_last_create_key", None)
+        await _show_main_menu(update)
+        return
 
 
 async def menu_upgrade_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):

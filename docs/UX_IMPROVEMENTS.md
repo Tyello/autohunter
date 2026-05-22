@@ -58,10 +58,14 @@
   - Implementado no PR #280.
   - Usuários que já têm buscas agora veem resumo de buscas ativas e contexto recente ao voltar pelo /start.
 
+- [x] 6.1 — Detectar comando durante sessão aberta
+  - Implementado no PR #281.
+  - Comandos globais como /menu, /start e /buscar agora avisam quando existe uma ação em andamento e permitem continuar ou descartar com segurança.
+
 ### Próximo pacote recomendado
 
-6.1 — Detectar comando durante sessão aberta
-- motivo: depois de melhorar retorno pelo /start, o próximo atrito é o usuário mandar /menu, /start ou /buscar durante uma sessão aberta e perder contexto.
+5.2 — Texto de upgrade orientado à dor
+- motivo: depois de reduzir atrito de fluxo, o próximo ganho pequeno é melhorar a mensagem de upgrade para comunicar valor com menos cara de cobrança.
 
 ---
 
@@ -548,7 +552,7 @@ def render_upgrade_text(has_payment_links: bool) -> str:
 
 ## Bloco 6 — Pequenos ajustes de alto impacto
 
-### 6.1 Cancelar criação de busca é invisível
+### 6.1 Cancelar criação de busca é invisível — ✅ Concluído no PR #281
 
 **O problema hoje:**
 O botão "❌ Cancelar" existe na tela de resumo da criação, mas se o usuário simplesmente parar de responder, a sessão fica aberta indefinidamente. Se mandar `/menu`, pode interromper o fluxo de forma inesperada.
@@ -667,7 +671,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 6.3 | Botões de sugestão nos filtros | ✅ Concluído PR #278 | Médio | Médio — elimina erros de formatação |
 | 2.4 | Label de score humanizado | ✅ Concluído PR #279 | Baixo | Baixo — clareza incremental |
 | 1.3 | Contexto de ausência no `/start` | ✅ Concluído PR #280 | Médio | Médio — retenção de usuários que voltam |
-| 6.1 | Detectar comando durante sessão aberta | Pendente | Médio | Baixo — reduz confusão pontual |
+| 6.1 | Detectar comando durante sessão aberta | ✅ Concluído PR #281 | Médio | Baixo — reduz confusão pontual |
 | 5.2 | Texto de upgrade orientado à dor | Pendente | Baixo | Médio — testa mensagem alternativa |
 
 ---

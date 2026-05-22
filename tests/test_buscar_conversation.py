@@ -36,9 +36,11 @@ class _Message:
 def test_menu_search_starts_conversation():
     q = _CallbackQuery()
     upd = types.SimpleNamespace(callback_query=q)
-    state = asyncio.run(handlers.cb_quick_search_start(upd, types.SimpleNamespace()))
+    ctx = types.SimpleNamespace(user_data={})
+    state = asyncio.run(handlers.cb_quick_search_start(upd, ctx))
     assert state == handlers.QUICK_SEARCH_QUERY
     assert q.answers == 1
+    assert ctx.user_data["quick_search_active"] is True
     assert "O que você procura?" in q.message.sent[-1]
     assert "civic si" in q.message.sent[-1]
 
@@ -52,8 +54,10 @@ def test_quick_search_on_text_runs_manual_search_and_ends(monkeypatch):
 
     monkeypatch.setattr(handlers, "start_manual_search_flow", _start)
     upd = types.SimpleNamespace(message=_Message("golf gti manual sp"))
-    state = asyncio.run(handlers.quick_search_on_text(upd, types.SimpleNamespace()))
+    ctx = types.SimpleNamespace(user_data={"quick_search_active": True})
+    state = asyncio.run(handlers.quick_search_on_text(upd, ctx))
     assert called == {"query": "golf gti manual sp", "sources": None}
+    assert "quick_search_active" not in ctx.user_data
     assert state == ConversationHandler.END
 
 
@@ -77,6 +81,8 @@ def test_quick_search_cancel(monkeypatch):
         sent.append(_args[1])
 
     monkeypatch.setattr(handlers, "reply_text", _reply)
-    state = asyncio.run(handlers.quick_search_cancel(types.SimpleNamespace(), types.SimpleNamespace()))
+    ctx = types.SimpleNamespace(user_data={"quick_search_active": True})
+    state = asyncio.run(handlers.quick_search_cancel(types.SimpleNamespace(), ctx))
     assert "Busca rápida cancelada" in sent[-1]
+    assert "quick_search_active" not in ctx.user_data
     assert state == ConversationHandler.END
