@@ -8,6 +8,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.scheduler.jobs_send import send_queued_notifications
+from app.bot.sender import render_daily_limit_notice, send_daily_limit_notice_http
 
 
 def _seed_base(db):
@@ -139,3 +140,50 @@ def test_daily_limit_notice_reuses_cached_limit(db, monkeypatch):
     assert sent == 0
     assert calls["limit"] == 1
     assert notice_limits == [10]
+
+
+def test_render_daily_limit_notice_with_missed_count():
+    text = render_daily_limit_notice(limit=5, missed_count=3)
+    assert "Limite diário atingido" in text
+    assert "Você já recebeu 5 alertas hoje" in text
+    assert "Encontrei mais 3 anúncio" in text
+    assert "não foram enviados" in text
+    assert "Premium" in text
+
+
+def test_render_daily_limit_notice_without_missed_count():
+    text = render_daily_limit_notice(limit=5, missed_count=None)
+    assert "Limite diário atingido" in text
+    assert "Você já recebeu 5 alertas hoje" in text
+    assert "Encontrei mais" not in text
+    assert "renova automaticamente" in text
+    assert "Premium" in text
+
+
+def test_render_daily_limit_notice_with_premium_limit():
+    text = render_daily_limit_notice(limit=5, premium_limit=200)
+    assert "até 200 alertas" in text
+
+
+def test_send_daily_limit_notice_http_includes_upgrade_button(monkeypatch):
+    class _U:
+        telegram_chat_id = 123
+
+    class _Resp:
+        status_code = 200
+        text = "ok"
+
+    sent = {}
+
+    class _S:
+        def post(self, _url, data, timeout):
+            sent["data"] = data
+            sent["timeout"] = timeout
+            return _Resp()
+
+    monkeypatch.setattr("app.bot.sender.settings.telegram_bot_token", "token")
+    monkeypatch.setattr("app.bot.sender.get_shared_session", lambda *_: _S())
+    ok = send_daily_limit_notice_http(_U(), 5)
+    assert ok is True
+    assert "🚀 Ver Premium" in sent["data"]["reply_markup"]
+    assert "MENU:UPGRADE" in sent["data"]["reply_markup"]

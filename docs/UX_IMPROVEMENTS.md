@@ -34,13 +34,14 @@
   - Implementado no PR #269.
   - O formatter agora tenta mostrar motivo, critério ou busca em todo alerta normal, inclusive quando score é zero ou ausente.
 
+- [x] 3.3 — Limite diário com contexto e CTA suave
+  - Implementado no PR #<número>.
+  - O aviso de limite diário agora explica o limite, contextualiza oportunidades não enviadas quando essa informação existe e conduz para Premium sem tom punitivo.
+
 ### Próximo pacote recomendado
 
-P3 — Limite diário com contexto e CTA suave:
-- item 3.3 — Limite diário com contexto e CTA suave
-- objetivo: transformar limite diário em explicação clara e oportunidade de upgrade sem parecer punição.
-
-> Status: concluído no PR #269. O formatter agora tenta mostrar motivo, critério ou busca em todo alerta normal, inclusive quando score é zero ou ausente.
+5.1 — Barra de progresso no `/plan`
+- motivo: depois de melhorar o momento do limite, faz sentido melhorar a tela onde o usuário entende o plano e uso atual.
 
 ---
 
@@ -368,7 +369,7 @@ if data == "MENU:SEARCH":
 
 ---
 
-### 3.3 Atingiu o limite diário — mensagem sem saída
+### 3.3 Atingiu o limite diário — mensagem sem saída — ✅ Concluído no PR #<número>
 
 **O problema hoje:**
 ```
@@ -640,7 +641,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 1.2 | Resultado imediato após criar busca | ✅ Concluído PR #266 | Médio | Alto — constrói confiança no primeiro uso |
 | 2.1 | Badge de recência com fallback para `created_at` | ✅ Concluído PR #267 | Baixo | Alto — o argumento central do produto reaparece |
 | 2.3 | Contexto mínimo garantido em todo alerta | ✅ Concluído PR #269 | Baixo | Médio — usuário sempre entende por que recebeu |
-| 3.3 | Limite diário com contexto e CTA suave | Próximo recomendado | Baixo | Alto para conversão Free → Premium |
+| 3.3 | Limite diário com contexto e CTA suave | ✅ Concluído PR #<número> | Baixo | Alto para conversão Free → Premium |
 | 5.1 | Barra de progresso no `/plan` | Pendente | Baixo | Médio — torna limites mais tangíveis |
 | 3.2 | "Buscar agora" inicia fluxo conversacional | Pendente | Médio | Médio — UX consistente com o resto do bot |
 | 6.3 | Botões de sugestão nos filtros | Pendente | Médio | Médio — elimina erros de formatação |
