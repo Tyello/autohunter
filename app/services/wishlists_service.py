@@ -1165,7 +1165,7 @@ def add_wishlist_with_initial_summary(
     summary = trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
     return WishlistCreateResult(
         ok=True,
-        message=msg,
+        message="Wishlist criada com sucesso.",
         wishlist_id=wishlist.id,
         initial_run_summary=summary,
     )

@@ -22,6 +22,10 @@
   - Implementado no PR #260.
   - Quando todos os slots estão vazios, o bot mostra orientação clara para usar `⭐ Rastrear`.
 
+- [x] 1.2 — Resultado imediato após criar busca
+  - Implementado no PR #266.
+  - O bot exibe o status da primeira varredura agendada via fila, sem scraping síncrono no callback.
+
 ### Próximo pacote recomendado
 
 P1 — Fechar o loop busca manual → rastreamento:
@@ -83,40 +87,21 @@ async def cmd_start(update, context):
 
 ---
 
-### 1.2 Silêncio após criar busca — ✅ Concluído no PR #TODO
+### 1.2 Silêncio após criar busca — ✅ Concluído no PR #266
+
+> Status: concluído no PR #266. A implementação real não executa scraping síncrono no callback; ela mostra o status da primeira varredura agendada via fila.
 
 **O problema hoje:**
 Usuário cria busca → recebe "✅ Busca criada" → espera. Pode esperar 5 minutos ou 2 horas dependendo do scheduler. Sem feedback, a pergunta óbvia é "funcionou?".
 
-**O que fazer** — `handlers_core.py`, após confirmar criação da wishlist:
+**O que foi feito** — `handlers_core.py`, após confirmar criação da wishlist:
 
 ```python
-# Após criar a wishlist, antes do _post_creation_markup:
-await update.effective_message.reply_text(
-    "⏳ Procurando agora...",
-)
-
-# Disparar busca imediata (já existe trigger_initial_run_for_wishlist)
-from app.services.wishlists_service import trigger_initial_run_for_wishlist
-results_count = await trigger_initial_run_for_wishlist(db, wishlist.id)
-
-if results_count > 0:
-    confirmation = (
-        f"✅ Busca criada: {query}\n\n"
-        f"📡 Encontrei {results_count} anúncio(s) agora.\n"
-        f"Você vai receber os alertas em instantes.\n\n"
-        f"A partir de agora monitoro continuamente."
-    )
-else:
-    # Carro raro — mensagem honesta
-    confirmation = (
-        f"✅ Busca criada: {query}\n\n"
-        f"Nenhum anúncio encontrado agora.\n"
-        f"Esse parece ser um carro difícil de achar — pode demorar dias.\n"
-        f"Estou monitorando e você será o primeiro a saber."
-    )
-
-await update.effective_message.reply_text(confirmation, reply_markup=_post_creation_markup())
+# O callback mantém execução rápida:
+# - cria a wishlist
+# - agenda primeira varredura via trigger_initial_run_for_wishlist(...)
+# - renderiza feedback com base em initial_run_summary (triggered/failed/skipped)
+# - sem scraping síncrono no callback
 ```
 
 **Impacto:** Resolve o maior gap de confiança do produto. Usuário sabe que o bot funcionou.
@@ -643,8 +628,8 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 3.1 | Lista de buscas compacta | ✅ Concluído PR #260 | Baixo | Médio — reduz fricção no uso diário |
 | 6.2 | Tela vazia de anúncios rastreados | ✅ Concluído PR #260 | Baixo | Médio — reduz beco sem saída |
 | 4.1 | Botão rastrear nos resultados de `/buscar` | ✅ Concluído PR #264 | Médio | Médio — fecha o loop busca → rastreio |
-| 1.2 | Resultado imediato após criar busca | Próximo recomendado | Médio | Alto — constrói confiança no primeiro uso |
-| 2.1 | Badge de recência com fallback para `created_at` | Pendente | Baixo | Alto — o argumento central do produto reaparece |
+| 1.2 | Resultado imediato após criar busca | ✅ Concluído PR #266 | Médio | Alto — constrói confiança no primeiro uso |
+| 2.1 | Badge de recência com fallback para `created_at` | Próximo recomendado | Baixo | Alto — o argumento central do produto reaparece |
 | 2.3 | Contexto mínimo garantido em todo alerta | Pendente | Baixo | Médio — usuário sempre entende por que recebeu |
 | 3.3 | Limite diário com contexto e CTA suave | Pendente | Baixo | Alto para conversão Free → Premium |
 | 5.1 | Barra de progresso no `/plan` | Pendente | Baixo | Médio — torna limites mais tangíveis |
