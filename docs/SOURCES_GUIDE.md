@@ -56,6 +56,20 @@ Notas operacionais rápidas:
 
 ---
 
+
+## Webmotors — decisão operacional atual
+
+- Implementada tecnicamente no runtime, com execução manual preservada via `/admin runall webmotors`.
+- Bloqueada operacionalmente por PerimeterX/fingerprint na navegação real.
+- Testes já executados em produção:
+  - browser com assets liberados (`browser_block_resources=false`);
+  - warmup completo (storage_state + scroll/mouse/consent/extra_wait);
+  - tentativa HTTP com `curl_cffi` (`impersonate=chrome`).
+- Resultado consolidado: `status=blocked` com HTTP 200 + challenge (`provider=perimeterx`, `title=Access to this page has been denied`, snippet “Pressione e segure para confirmar que você é um humano”).
+- Decisão operacional: manter Webmotors como `operational_role=deprioritized` e `default_enabled=false` por padrão de seed.
+- Efeito esperado: não tratar bloqueio da Webmotors como falha crítica global; manter visível como blocked/deprioritized no detalhamento admin.
+- Próximas tentativas (ex.: Patchright/sessão assistida) exigem POC isolada e decisão explícita antes de qualquer rollout.
+
 ## Webmotors — Plano de desbloqueio
 
 ### Por que está bloqueado

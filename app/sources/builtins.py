@@ -145,6 +145,7 @@ register_source(
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="browser",
+        default_enabled=False,
         default_sched_minutes=90,
         default_browser_fallback_enabled=True,
         default_force_browser=True,
