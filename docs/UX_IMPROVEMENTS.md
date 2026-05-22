@@ -46,10 +46,14 @@
   - Implementado no PR #276.
   - O botão "Buscar agora" agora pergunta o que o usuário procura e reutiliza o fluxo de /buscar para enviar os resultados.
 
+- [x] 6.3 — Botões de sugestão nos filtros
+  - Implementado no PR #278.
+  - Filtros comuns como preço, ano e KM agora oferecem botões de sugestão, mantendo digitação livre para casos específicos.
+
 ### Próximo pacote recomendado
 
-6.3 — Botões de sugestão nos filtros
-- motivo: depois de transformar "Buscar agora" em conversa, o próximo atrito de UX está na criação/edição de filtros, onde botões de sugestão reduzem erro de formatação.
+2.4 — Label de score humanizado
+- motivo: depois de reduzir atrito de criação/edição com sugestões de filtro, o próximo passo é melhorar leitura dos alertas sem alterar score.
 
 ---
 
@@ -589,7 +593,7 @@ if not any_tracked:
 
 ---
 
-### 6.3 Filtros de busca sem exemplos inline
+### 6.3 Filtros de busca sem exemplos inline — ✅ Concluído no PR #278
 
 **O problema hoje:**
 O fluxo de adicionar filtro pergunta "Qual filtro?" e lista opções (preço, ano, km, cidade, estado). Quando o usuário escolhe "preço", recebe:
@@ -652,7 +656,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 3.3 | Limite diário com contexto e CTA suave | ✅ Concluído PR #272 | Baixo | Alto para conversão Free → Premium |
 | 5.1 | Barra de progresso no `/plan` | ✅ Concluído PR #273 | Baixo | Médio — torna limites mais tangíveis |
 | 3.2 | "Buscar agora" inicia fluxo conversacional | ✅ Concluído PR #276 | Médio | Médio — UX consistente com o resto do bot |
-| 6.3 | Botões de sugestão nos filtros | Pendente | Médio | Médio — elimina erros de formatação |
+| 6.3 | Botões de sugestão nos filtros | ✅ Concluído PR #278 | Médio | Médio — elimina erros de formatação |
 | 2.4 | Label de score humanizado | Pendente | Baixo | Baixo — clareza incremental |
 | 1.3 | Contexto de ausência no `/start` | Pendente | Médio | Médio — retenção de usuários que voltam |
 | 6.1 | Detectar comando durante sessão aberta | Pendente | Médio | Baixo — reduz confusão pontual |

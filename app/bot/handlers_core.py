@@ -39,6 +39,43 @@ DRAFT_FILTER_PROMPTS = {
     "city": "Em qual cidade você quer buscar?\nExemplo: São Paulo\n\nVocê também pode deixar sem cidade e filtrar só por estado.",
     "state": "Em qual estado?\nExemplos:\n- SP\n- São Paulo\n- RJ\n- Paraná",
 }
+FILTER_SUGGESTIONS = {
+    "price": [
+        ("até R$ 80.000", "até 80000"),
+        ("até R$ 120.000", "até 120000"),
+        ("R$ 90.000 a R$ 130.000", "entre 90000 e 130000"),
+    ],
+    "year": [
+        ("a partir de 2015", "a partir de 2015"),
+        ("a partir de 2018", "a partir de 2018"),
+        ("até 2021", "até 2021"),
+    ],
+    "mileage": [
+        ("até 60.000 km", "até 60000"),
+        ("até 80.000 km", "até 80000"),
+        ("até 120.000 km", "até 120000"),
+    ],
+}
+
+
+def _draft_filter_suggestions_markup(filter_type: str) -> InlineKeyboardMarkup | None:
+    suggestions = FILTER_SUGGESTIONS.get(filter_type)
+    if not suggestions:
+        return None
+    buttons = [[InlineKeyboardButton(label, callback_data=f"CWLF:SUG:{filter_type}:{idx}")] for idx, (label, _raw_value) in enumerate(suggestions)]
+    buttons.append([InlineKeyboardButton("✍️ Digitar outro valor", callback_data=f"CWLF:SUG:{filter_type}:manual")])
+    buttons.append([InlineKeyboardButton("↩️ Voltar aos filtros", callback_data="CWLF:BACK")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _menu_filter_suggestions_markup(filter_type: str) -> InlineKeyboardMarkup | None:
+    suggestions = FILTER_SUGGESTIONS.get(filter_type)
+    if not suggestions:
+        return None
+    buttons = [[InlineKeyboardButton(label, callback_data=f"FILTER:SUG:{filter_type}:{idx}")] for idx, (label, _raw_value) in enumerate(suggestions)]
+    buttons.append([InlineKeyboardButton("✍️ Digitar outro valor", callback_data=f"FILTER:SUG:{filter_type}:manual")])
+    buttons.append([InlineKeyboardButton("❌ Cancelar", callback_data="FILTER:CANCEL")])
+    return InlineKeyboardMarkup(buttons)
 
 def _format_brl(value: str) -> str:
     return f"R$ {int(value):,}".replace(",", ".")
@@ -708,8 +745,29 @@ async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _safe_edit_or_send(update, "Tipo de filtro inválido. Use /menu → ⚙️ Filtros novamente.")
             return ConversationHandler.END
         context.user_data["menu_filter_type"] = filter_type
-        await _safe_edit_or_send(update, spec[2])
+        await _safe_edit_or_send(update, spec[2], reply_markup=_menu_filter_suggestions_markup(filter_type))
         return MENU_FILTER_SELECT_VALUE
+
+    if data.startswith("FILTER:SUG:"):
+        parts = data.split(":")
+        if len(parts) != 4:
+            await _safe_edit_or_send(update, "Sugestão inválida. Tente novamente.")
+            return MENU_FILTER_SELECT_VALUE
+        filter_type = parts[2]
+        idx = parts[3]
+        context.user_data["menu_filter_type"] = filter_type
+        spec = FILTER_TYPE_TO_SPEC.get(filter_type)
+        if not spec:
+            await _safe_edit_or_send(update, "Tipo de filtro inválido. Use /menu → ⚙️ Filtros novamente.")
+            return ConversationHandler.END
+        if idx == "manual":
+            await _safe_edit_or_send(update, f"{spec[2]}\n\nDigite o valor desejado.")
+            return MENU_FILTER_SELECT_VALUE
+        suggestions = FILTER_SUGGESTIONS.get(filter_type) or []
+        if not idx.isdigit() or int(idx) >= len(suggestions):
+            await _safe_edit_or_send(update, "Sugestão inválida. Tente novamente.")
+            return MENU_FILTER_SELECT_VALUE
+        return await _apply_menu_filter_value(update, context, suggestions[int(idx)][1], use_reply=False)
 
     await _safe_edit_or_send(update, "Ação inválida. Use /menu → ⚙️ Filtros novamente.")
     return ConversationHandler.END
@@ -717,7 +775,11 @@ async def cb_menu_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value = (update.message.text or "").strip()
-    if not value:
+    return await _apply_menu_filter_value(update, context, value, use_reply=True)
+
+
+async def _apply_menu_filter_value(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_value: str, use_reply: bool = True):
+    if not raw_value:
         await reply_text(update, "Valor inválido. Envie novamente ou /cancelar.")
         return MENU_FILTER_SELECT_VALUE
 
@@ -738,7 +800,7 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
 
         try:
-            parsed = parse_wishlist_filter_expression(spec[0], value)
+            parsed = parse_wishlist_filter_expression(spec[0], raw_value)
         except ValueError as exc:
             await reply_text(update, f"{exc}\n\nEnvie outro valor ou /cancelar.")
             return MENU_FILTER_SELECT_VALUE
@@ -782,7 +844,10 @@ async def menu_filter_on_value(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🎯 Escolher outra busca", callback_data="WL:FILTERS_MENU")],
         [InlineKeyboardButton("↩️ Voltar para Minhas buscas", callback_data="MENU:WISHLISTS")],
     ])
-    await reply_text(update, text, reply_markup=kb)
+    if use_reply:
+        await reply_text(update, text, reply_markup=kb)
+    else:
+        await _safe_edit_or_send(update, text, reply_markup=kb)
     return MENU_FILTER_SELECT_VALUE
 
 
@@ -869,22 +934,7 @@ async def _menu_filter_remove_from_callback(update: Update, context: ContextType
 async def menu_create_wishlist_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value_input_mode = context.user_data.get("menu_create_wishlist_draft_filter_type")
     if value_input_mode:
-        field = DRAFT_FILTER_TYPE_TO_FIELD[value_input_mode]
-        raw_value = (update.message.text or "").strip()
-        try:
-            parsed = parse_wishlist_filter_expression(field, raw_value)
-        except ValueError as exc:
-            await reply_text(update, f"Valor inválido: {exc}\nEnvie outro valor ou use /cancelar.")
-            return MENU_CREATE_WISHLIST_QUERY
-
-        draft_filters = context.user_data.setdefault("menu_create_wishlist_draft_filters", [])
-        filters_payload = [{"field": n.field, "operator": n.operator, "value": n.value} for n in parsed]
-        label = _build_draft_group_label(field, filters_payload)
-        draft_filters = [g for g in draft_filters if g.get("group") != field]
-        draft_filters.append({"group": field, "label": label, "filters": filters_payload})
-        context.user_data["menu_create_wishlist_draft_filters"] = draft_filters
-        context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
-        return await _show_draft_filters_screen(update, context, feedback="✅ Filtro adicionado/atualizado.")
+        return await _apply_draft_filter_value(update, context, (update.message.text or "").strip())
 
     if "menu_create_wishlist_draft_filters" in context.user_data:
         await reply_text(
@@ -1024,8 +1074,26 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             await _safe_edit_or_send(update, "Tipo de filtro inválido.")
             return MENU_CREATE_WISHLIST_QUERY
         context.user_data["menu_create_wishlist_draft_filter_type"] = ftype
-        await _safe_edit_or_send(update, DRAFT_FILTER_PROMPTS[ftype])
+        await _safe_edit_or_send(update, DRAFT_FILTER_PROMPTS[ftype], reply_markup=_draft_filter_suggestions_markup(ftype))
         return MENU_CREATE_WISHLIST_QUERY
+
+    if data.startswith("CWLF:SUG:"):
+        parts = data.split(":")
+        if len(parts) != 4:
+            await _safe_edit_or_send(update, "Sugestão inválida. Tente novamente.")
+            return MENU_CREATE_WISHLIST_QUERY
+        filter_type = parts[2]
+        idx = parts[3]
+        context.user_data["menu_create_wishlist_draft_filter_type"] = filter_type
+        if idx == "manual":
+            await _safe_edit_or_send(update, f"{DRAFT_FILTER_PROMPTS.get(filter_type, 'Digite o valor desejado.')}\n\nDigite o valor desejado.")
+            return MENU_CREATE_WISHLIST_QUERY
+        suggestions = FILTER_SUGGESTIONS.get(filter_type) or []
+        if not idx.isdigit() or int(idx) >= len(suggestions):
+            await _safe_edit_or_send(update, "Sugestão inválida. Tente novamente.")
+            return MENU_CREATE_WISHLIST_QUERY
+        return await _apply_draft_filter_value(update, context, suggestions[int(idx)][1], use_reply=False)
+
     if data == "CWLF:BACK":
         context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
         return await _show_create_wishlist_summary_screen(update, context)
@@ -1114,6 +1182,28 @@ async def menu_create_wishlist_cancel(update: Update, context: ContextTypes.DEFA
     return ConversationHandler.END
 
 
+async def _apply_draft_filter_value(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_value: str, use_reply: bool = True):
+    value_input_mode = context.user_data.get("menu_create_wishlist_draft_filter_type")
+    field = DRAFT_FILTER_TYPE_TO_FIELD[value_input_mode]
+    try:
+        parsed = parse_wishlist_filter_expression(field, raw_value)
+    except ValueError as exc:
+        if use_reply:
+            await reply_text(update, f"Valor inválido: {exc}\nEnvie outro valor ou use /cancelar.")
+        else:
+            await _safe_edit_or_send(update, f"Valor inválido: {exc}\n\nEscolha uma sugestão ou digite outro valor.")
+        return MENU_CREATE_WISHLIST_QUERY
+
+    draft_filters = context.user_data.setdefault("menu_create_wishlist_draft_filters", [])
+    filters_payload = [{"field": n.field, "operator": n.operator, "value": n.value} for n in parsed]
+    label = _build_draft_group_label(field, filters_payload)
+    draft_filters = [g for g in draft_filters if g.get("group") != field]
+    draft_filters.append({"group": field, "label": label, "filters": filters_payload})
+    context.user_data["menu_create_wishlist_draft_filters"] = draft_filters
+    context.user_data.pop("menu_create_wishlist_draft_filter_type", None)
+    return await _show_draft_filters_screen(update, context, feedback="✅ Filtro adicionado/atualizado.")
+
+
 async def menu_filter_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _clear_menu_filter_context(context)
     await reply_text(update, "Configuração de filtro cancelada.")
@@ -1133,7 +1223,7 @@ def menu_create_wishlist_conversation() -> ConversationHandler:
         entry_points=[CallbackQueryHandler(cb_menu, pattern=r"^MENU:CREATE_WISHLIST$")],
         states={
             MENU_CREATE_WISHLIST_QUERY: [
-                CallbackQueryHandler(cb_menu_create_wishlist, pattern=r"^(CWL:(?:CREATE|CREATE_FILTERS|CANCEL|AUCTIONS:(?:YES|NO))|CWLF:(?:ACTION:(?:add|list)|TYPE:[a-z_]+|RM:\d+|DONE|CANCEL|BACK))$"),
+                CallbackQueryHandler(cb_menu_create_wishlist, pattern=r"^(CWL:(?:CREATE|CREATE_FILTERS|CANCEL|AUCTIONS:(?:YES|NO))|CWLF:(?:ACTION:(?:add|list)|TYPE:[a-z_]+|SUG:[a-z_]+:(?:\d+|manual)|RM:\d+|DONE|CANCEL|BACK))$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_create_wishlist_on_text),
                 MessageHandler(filters.COMMAND, menu_create_wishlist_cancel),
             ],
@@ -1166,7 +1256,7 @@ def menu_filter_conversation() -> ConversationHandler:
                     cb_menu,
                     pattern=r"^(WL:FILTER:AUCTIONS:TOGGLE|WL:AUCTIONS:(?:ENABLE|DISABLE)|WL:FILTERS_ID:[^:]+|WL:FILTERS_MENU|MENU:WISHLISTS)$",
                 ),
-                CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|ACTION:(?:add|list)|RM:[^:]+:\d+|BACK|CANCEL)$"),
+                CallbackQueryHandler(cb_menu_filter, pattern=r"^FILTER:(WL:\d+|TYPE:[a-z_]+|SUG:[a-z_]+:(?:\d+|manual)|ACTION:(?:add|list)|RM:[^:]+:\d+|BACK|CANCEL)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_filter_on_value),
             ],
         },
