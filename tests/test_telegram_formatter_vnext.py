@@ -436,16 +436,34 @@ def test_positive_score_with_reason_keeps_main_reason():
 
 
 def test_tracked_price_drop_formatter_full_payload():
+    from datetime import datetime, timedelta, timezone
     from types import SimpleNamespace
     from app.notifications.telegram_formatter import format_tracked_price_drop_message
 
-    ad = _base_ad(title="Honda Civic EXL 2020", price=86900)
-    n = SimpleNamespace(score_breakdown={"slot": 1, "previous_price": 89900, "current_price": 86900, "drop_amount": 3000, "drop_pct": 3.3, "wishlist_query": "civic"})
+    ad = _base_ad(title="Honda Civic SI 1994", price=114000)
+    n = SimpleNamespace(score_breakdown={
+        "slot": 1,
+        "previous_price": 120000,
+        "current_price": 114000,
+        "drop_amount": 6000,
+        "drop_pct": 5.0,
+        "initial_price": 125000,
+        "total_drop_amount": 11000,
+        "total_drop_pct": 8.8,
+        "tracked_since": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(),
+        "last_price_change_at": datetime.now(timezone.utc).isoformat(),
+        "wishlist_query": "civic si",
+    })
     payload = format_tracked_price_drop_message(n, ad)
     assert "📉 Queda de preço no anúncio rastreado" in payload.text
-    assert "De R$ 89.900,00 por R$ 86.900,00" in payload.text
-    assert "Caiu R$ 3.000,00 (-3,3%)" in payload.text
-    assert "Busca: civic" in payload.text
+    assert "De R$ 120.000,00 por R$ 114.000,00" in payload.text
+    assert "Caiu R$ 6.000,00 (-5,0%)" in payload.text
+    assert "Desde que você começou a rastrear" in payload.text
+    assert "Preço inicial: R$ 125.000,00" in payload.text
+    assert "Queda total: R$ 11.000,00" in payload.text
+    assert "Rastreando há" in payload.text
+    assert "Busca: civic si" in payload.text
+    assert "Slot: 1" in payload.text
 
 
 def test_tracked_price_drop_formatter_partial_payload():
@@ -457,3 +475,51 @@ def test_tracked_price_drop_formatter_partial_payload():
     payload = format_tracked_price_drop_message(n, ad)
     assert "queda detectada" in payload.text
     assert "Busca: sua wishlist" in payload.text
+
+
+def test_tracked_price_drop_formatter_no_extra_history_block():
+    from types import SimpleNamespace
+    from app.notifications.telegram_formatter import format_tracked_price_drop_message
+
+    ad = _base_ad(title="Honda Civic EXL 2020", price=86900)
+    n = SimpleNamespace(score_breakdown={"slot": 1, "previous_price": 89900, "current_price": 86900, "drop_amount": 3000, "drop_pct": 3.3, "wishlist_query": "civic"})
+    payload = format_tracked_price_drop_message(n, ad)
+    assert "Desde que você começou a rastrear" not in payload.text
+
+
+def test_tracked_price_drop_formatter_avoid_repeating_initial_price_when_equal_previous():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from app.notifications.telegram_formatter import format_tracked_price_drop_message
+
+    ad = _base_ad(title="Civic", price=114000)
+    n = SimpleNamespace(score_breakdown={
+        "slot": 1,
+        "previous_price": 120000,
+        "current_price": 114000,
+        "drop_amount": 6000,
+        "initial_price": 120000,
+        "total_drop_amount": 6000,
+        "tracked_since": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(),
+    })
+    payload = format_tracked_price_drop_message(n, ad)
+    assert "Preço inicial:" not in payload.text
+    assert "Queda total:" not in payload.text
+    assert "Rastreando há" in payload.text
+
+
+def test_tracked_price_drop_formatter_invalid_dates_do_not_break():
+    from types import SimpleNamespace
+    from app.notifications.telegram_formatter import format_tracked_price_drop_message
+
+    ad = _base_ad(title="Civic", price=114000)
+    n = SimpleNamespace(score_breakdown={
+        "slot": 1,
+        "current_price": 114000,
+        "drop_amount": 6000,
+        "tracked_since": "invalid",
+        "last_price_change_at": "invalid",
+    })
+    payload = format_tracked_price_drop_message(n, ad)
+    assert "Mudança detectada em" not in payload.text
+    assert "Rastreando há" not in payload.text

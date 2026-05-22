@@ -55,6 +55,10 @@ def test_dedupe_same_price_and_allow_new_lower_price_after_cooldown(db):
 def test_queue_payload_contains_deterministic_fields(db):
     _u, _w, _l, t = _mk(db)
     t.price_drop_alert_enabled = True
+    t.created_at = datetime.now(timezone.utc) - timedelta(days=5)
+    t.last_price_change_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    t.last_seen_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    t.last_price_drop_alert_price = Decimal('95000')
     assert evaluate_price_drop_alert(db, t, {'direction': 'dropped'}) is True
     n = db.query(Notification).filter(Notification.reason == 'tracked_price_drop').first()
     assert n is not None
@@ -62,3 +66,9 @@ def test_queue_payload_contains_deterministic_fields(db):
     assert n.score_breakdown["slot"] == 1
     assert n.score_breakdown["current_price"] == 90000
     assert n.score_breakdown["previous_price"] == 100000
+    assert n.score_breakdown["initial_price"] == 100000
+    assert n.score_breakdown["tracked_since"] is not None
+    assert n.score_breakdown["last_price_change_at"] is not None
+    assert n.score_breakdown["last_seen_at"] is not None
+    assert n.score_breakdown["total_drop_amount"] == 10000
+    assert n.score_breakdown["total_drop_pct"] == 10.0

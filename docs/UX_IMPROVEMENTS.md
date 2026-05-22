@@ -70,10 +70,15 @@
   - Implementado no PR #286.
   - O aviso de limite diário agora informa quando o limite renova, usando o timezone configurado.
 
+- [x] 4.2 — Contexto histórico em queda de preço rastreado
+  - Implementado no PR #287.
+  - Alertas de queda de preço agora mostram contexto histórico quando disponível, como preço inicial, queda total e tempo de rastreamento.
+
+
 ### Próximo pacote recomendado
 
-4.2 — Mudança de preço no rastreado sem contexto histórico
-- motivo: depois de fechar os pequenos ajustes de fluxo/plano/limite, o próximo maior ganho de valor percebido está nos alertas de rastreamento: queda de preço com histórico comunica muito mais valor.
+2.2 — Contexto de mercado ausente quando market_stats está vazio
+- motivo: depois de melhorar o alerta de tracking, o próximo ganho de inteligência está nos alertas normais: dar contexto de preço quando a mediana de mercado não existe, sem inventar comparação.
 
 ---
 
@@ -462,7 +467,7 @@ reply_markup = InlineKeyboardMarkup(buttons)
 
 ---
 
-### 4.2 Mudança de preço no rastreado sem contexto histórico
+### 4.2 Mudança de preço no rastreado sem contexto histórico — ✅ Concluído no PR #287
 
 **O problema hoje:**
 O alerta de queda de preço diz "💰 Preço caiu R$ 5.000". Não mostra o histórico: quando começou a rastrear, quantas vezes o preço mudou, se está em tendência de queda.
