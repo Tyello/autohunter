@@ -2458,12 +2458,18 @@ def _render_webmotors_blocked_diag_lines(payload: Any) -> list[str]:
     lines.append(f"wm_diag: {bucket} / {fetch_path} / attempt={attempt}")
 
     blocked_reason = str(data.get("blocked_reason") or data.get("reason") or "-")
+    evidence = str(data.get("evidence") or "")
     provider = "-"
     for sig in (data.get("detected_signals") or []):
         ss = str(sig or "")
         if ss.startswith("provider="):
             provider = ss.split("=", 1)[1] or "-"
             break
+    if provider == "-":
+        joined = f"{blocked_reason} {evidence}".lower()
+        m = re.search(r"provider=([a-z0-9_-]+)", joined)
+        if m:
+            provider = m.group(1)
     lines.append(f"reason: {blocked_reason} provider={provider}")
 
     title = _short(str(data.get("page_title") or ""), 120)
@@ -2475,9 +2481,10 @@ def _render_webmotors_blocked_diag_lines(payload: Any) -> list[str]:
         lines.append(f"url: {final_url}")
 
     signals_blob = " ".join(str(x or "") for x in (data.get("detected_signals") or []))
-    low_blob = f"{title.lower()} {signals_blob.lower()}"
-    if bucket.upper() == "BLOCKED" and ("perimeterx" in low_blob) and (
-        "access to this page has been denied" in low_blob or "pressione e segure" in low_blob
+    reason_blob = f"{blocked_reason} {str(data.get('reason') or '')}"
+    low_blob = f"{title.lower()} {signals_blob.lower()} {reason_blob.lower()} {evidence.lower()}"
+    if bucket.upper() == "BLOCKED" and ("perimeterx" in low_blob or "bot_challenge_fingerprint" in low_blob) and (
+        "access to this page has been denied" in low_blob or "pressione e segure" in low_blob or "bot_challenge_fingerprint" in low_blob
     ):
         lines.append("leitura: bloqueio anti-bot/fingerprint; Webmotors pode exigir sessão assistida/storage state válido ou permanecer despriorizada.")
 

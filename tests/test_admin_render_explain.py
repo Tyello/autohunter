@@ -60,3 +60,20 @@ def test_admin_render_blocked_wm_diag_structured():
 
 def test_admin_render_blocked_without_wm_diag_keeps_empty():
     assert _render_webmotors_blocked_diag_lines({"run_summary": {"notes": ["x"]}}) == []
+
+
+def test_admin_render_blocked_wm_diag_realistic_blocked_reason_string():
+    payload = {
+        "webmotors_diag": {
+            "bucket": "BLOCKED",
+            "fetch_path": "browser_direct",
+            "attempt": 1,
+            "page_title": None,
+            "detected_signals": [],
+            "blocked_reason": "bot_challenge_fingerprint provider=perimeterx title=Access to this page has been denied snippet=Pressione e segure para confirmar que você é um humano",
+        }
+    }
+    lines = _render_webmotors_blocked_diag_lines(payload)
+    text = "\n".join(lines)
+    assert "provider=perimeterx" in text
+    assert "bloqueio anti-bot/fingerprint" in text

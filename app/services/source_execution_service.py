@@ -341,6 +341,16 @@ def run_source_for_all_wishlists(
                     http_status=res.get("status_code"),
                     url=res.get("url") or url,
                 )
+                payload = build_run_payload(
+                    run_summary=run_summary_err,
+                    run_reason=reason,
+                    hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                    hybrid_blocked=bool(res.get("hybrid_blocked")),
+                    hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                    backoff_minutes=minutes,
+                    webmotors_diag=wm_diag,
+                    dual_report=getattr(ctx, "_dual_run_report_path", None),
+                )
                 run_row = record_run(
                     db,
                     source=src,
@@ -355,16 +365,7 @@ def run_source_for_all_wishlists(
                     browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
                     force_browser=bool(ctx.force_browser),
                     error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload=build_run_payload(
-                        run_summary=run_summary_err,
-                        run_reason=reason,
-                        hybrid_browser_used=bool(res.get("hybrid_browser_used")),
-                        hybrid_blocked=bool(res.get("hybrid_blocked")),
-                        hybrid_blocked_status=res.get("hybrid_blocked_status"),
-                        backoff_minutes=minutes,
-                        webmotors_diag=wm_diag,
-                        dual_report=getattr(ctx, "_dual_run_report_path", None),
-                    ),
+                    payload=payload,
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
                 emit_event(
@@ -379,7 +380,7 @@ def run_source_for_all_wishlists(
                 )
                 log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, reason, "blocked"])
                 db.commit()
-                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
+                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason, "payload": payload}
 
             if bool(res.get("is_bug")):
                 err = res.get("error") or "scrape_failed"
