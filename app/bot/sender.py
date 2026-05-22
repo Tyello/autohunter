@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from typing import Tuple
 
 from app.core.settings import settings
@@ -268,16 +269,16 @@ def send_daily_limit_notice_http(user, limit: int):
         raise RuntimeError("TELEGRAM_BOT_TOKEN não configurado")
 
     chat_id = user.telegram_chat_id
-    text = (
-        f"⚠️ Você atingiu seu limite de {limit} alertas hoje.\n"
-        "Amanhã libera de novo.\n"
-        "Para aumentar o limite, use /upgrade"
+    text = render_daily_limit_notice(limit=limit)
+    reply_markup = json.dumps(
+        {"inline_keyboard": [[{"text": "🚀 Ver Premium", "callback_data": "MENU:UPGRADE"}]]},
+        ensure_ascii=False,
     )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     resp = get_shared_session("telegram").post(
         url,
-        data={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+        data={"chat_id": chat_id, "text": text, "disable_web_page_preview": True, "reply_markup": reply_markup},
         timeout=15,
     )
 
@@ -285,6 +286,37 @@ def send_daily_limit_notice_http(user, limit: int):
         return False
 
     return True
+
+
+def render_daily_limit_notice(
+    limit: int,
+    missed_count: int | None = None,
+    renews_text: str | None = None,
+    premium_limit: int | None = None,
+) -> str:
+    renews_line = renews_text or "O limite renova automaticamente amanhã."
+
+    lines = [
+        "⚠️ Limite diário atingido",
+        "",
+        f"Você já recebeu {int(limit)} alertas hoje nesta busca.",
+    ]
+
+    if missed_count is not None and int(missed_count) > 0:
+        lines.append(
+            f"Encontrei mais {int(missed_count)} anúncio(s) compatíveis, mas eles não foram enviados por causa do limite do plano."
+        )
+
+    lines.extend(["", renews_line, ""])
+
+    if premium_limit is not None and int(premium_limit) > 0:
+        lines.append(f"Com Premium, você recebe até {int(premium_limit)} alertas por dia por busca.")
+    elif missed_count is not None and int(missed_count) > 0:
+        lines.append("Com Premium, você recebe mais alertas por dia e reduz a chance de perder oportunidade boa.")
+    else:
+        lines.append("Com Premium, você recebe mais alertas por dia e acompanha mais oportunidades sem esperar o dia seguinte.")
+
+    return "\n".join(lines)
 
 
 def send_plain_text_to_user(chat_id: int, text: str) -> bool:
