@@ -29,7 +29,7 @@ P1 — Fechar o loop busca manual → rastreamento:
 - objetivo: permitir que o usuário faça uma busca pontual, encontre um anúncio interessante e comece a rastrear sem voltar ao menu
 
 Novo próximo recomendado:
-- item 1.2 — Resultado imediato após criar busca
+- item 2.1 — Badge de recência com fallback para created_at
 
 ---
 
@@ -83,7 +83,7 @@ async def cmd_start(update, context):
 
 ---
 
-### 1.2 Silêncio após criar busca
+### 1.2 Silêncio após criar busca — ✅ Concluído no PR #TODO
 
 **O problema hoje:**
 Usuário cria busca → recebe "✅ Busca criada" → espera. Pode esperar 5 minutos ou 2 horas dependendo do scheduler. Sem feedback, a pergunta óbvia é "funcionou?".

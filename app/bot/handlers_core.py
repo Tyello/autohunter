@@ -10,7 +10,7 @@ from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters, render_upgrade_text, build_upgrade_choice_keyboard
 from app.core.settings import settings
 from app.services.users_service import get_or_create_user_by_chat
-from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist, set_wishlist_active_state
+from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist, set_wishlist_active_state, add_wishlist_with_initial_summary, create_wishlist_with_filters_and_initial_summary
 from app.services.wishlist_tracking_service import list_tracked_listings
 
 MENU_CREATE_WISHLIST_QUERY = 1
@@ -118,6 +118,32 @@ def _normalize_create_feedback(msg: object) -> str:
     if lines[0].startswith("✅ Busca criada com sucesso.") or lines[0].startswith("✅ Wishlist criada:"):
         lines = lines[1:]
     return "\n".join(lines).strip()
+
+
+def _render_initial_run_feedback(summary: dict | None) -> str:
+    if not summary:
+        return "Primeira varredura:\n📡 Busca inicial agendada para processamento em segundo plano."
+    triggered = int(summary.get("triggered") or 0)
+    failed = int(summary.get("failed") or 0)
+    skipped = int(summary.get("skipped") or 0)
+    if triggered > 0:
+        return (
+            "Primeira varredura:\n"
+            f"📡 Busca inicial agendada em {triggered} fonte(s).\n"
+            "Você receberá os alertas assim que os resultados forem processados."
+        )
+    if failed > 0:
+        return (
+            "Primeira varredura:\n"
+            "⚠️ Não consegui agendar a primeira busca agora.\n"
+            "Mesmo assim, o monitoramento contínuo segue ativo."
+        )
+    if skipped > 0:
+        return (
+            "Primeira varredura:\n"
+            "⏳ Monitoramento salvo. A próxima execução automática fará a varredura."
+        )
+    return "Primeira varredura:\n📡 Monitoramento salvo para processamento em segundo plano."
 
 
 def _post_creation_markup() -> InlineKeyboardMarkup:
@@ -925,11 +951,13 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             try:
                 if draft_groups:
-                    ok, msg, _ = create_wishlist_with_filters(
+                    create_result = create_wishlist_with_filters_and_initial_summary(
                         db, user.id, query, flat, include_auctions=include_auctions
                     )
                 else:
-                    ok, msg = add_wishlist(db, user.id, query, include_auctions=include_auctions)
+                    create_result = add_wishlist_with_initial_summary(
+                        db, user.id, query, include_auctions=include_auctions
+                    )
             except Exception as exc:
                 logger.exception(
                     "Unexpected error creating wishlist via CWL:CREATE",
@@ -946,17 +974,18 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 context.user_data.pop("menu_create_wishlist_last_create_key", None)
                 await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
                 return MENU_CREATE_WISHLIST_QUERY
-        if not ok:
+        if not create_result.ok:
             context.user_data["menu_create_wishlist_creating"] = False
             context.user_data.pop("menu_create_wishlist_last_create_key", None)
-            await _safe_edit_or_send(update, msg)
+            await _safe_edit_or_send(update, create_result.message)
             return MENU_CREATE_WISHLIST_QUERY
         context.user_data["menu_create_wishlist_completed"] = True
         context.user_data["menu_create_wishlist_creating"] = False
         labels = [g.get("label") for g in draft_groups if g.get("label")]
         filters_text = "\n".join(f"- {label}" for label in labels) if labels else "- Sem filtros adicionais"
-        service_feedback = _normalize_create_feedback(msg)
+        service_feedback = _normalize_create_feedback(create_result.message)
         feedback_block = f"{service_feedback}\n\n" if service_feedback else ""
+        initial_run_feedback = _render_initial_run_feedback(create_result.initial_run_summary)
         _clear_menu_create_wishlist_draft_context(context)
         await _safe_edit_or_send(
             update,
@@ -966,7 +995,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 f"Leilões: {_render_auctions_status(include_auctions)}\n"
                 f"Filtros:\n{filters_text}\n\n"
                 f"{feedback_block}"
-                "Próximo passo:\nVocê receberá alertas quando encontrarmos anúncios compatíveis." + ("\n\nAtenção: em leilões, lance não é preço final. Confira edital, taxas, documentação e vistoria antes de participar." if include_auctions else "")
+                f"{initial_run_feedback}" + ("\n\nAtenção: em leilões, lance não é preço final. Confira edital, taxas, documentação e vistoria antes de participar." if include_auctions else "")
             ),
             reply_markup=_post_creation_markup(),
         )
@@ -1046,7 +1075,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         with SessionLocal() as db:
             user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
             try:
-                ok, msg, _wid = create_wishlist_with_filters(
+                create_result = create_wishlist_with_filters_and_initial_summary(
                     db, user.id, query, filters_draft, include_auctions=include_auctions
                 )
             except Exception:
@@ -1058,18 +1087,19 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 context.user_data.pop("menu_create_wishlist_last_create_key", None)
                 await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
                 return MENU_CREATE_WISHLIST_QUERY
-        if not ok:
+        if not create_result.ok:
             context.user_data["menu_create_wishlist_creating"] = False
             context.user_data.pop("menu_create_wishlist_last_create_key", None)
-            await _safe_edit_or_send(update, msg)
+            await _safe_edit_or_send(update, create_result.message)
             return MENU_CREATE_WISHLIST_QUERY
         context.user_data["menu_create_wishlist_completed"] = True
         context.user_data["menu_create_wishlist_creating"] = False
         labels = "\n".join(f"- {g.get('label')}" for g in draft_groups if g.get("label")) or "- Sem filtros adicionais"
+        initial_run_feedback = _render_initial_run_feedback(create_result.initial_run_summary)
         _clear_menu_create_wishlist_draft_context(context)
         await _safe_edit_or_send(
             update,
-            f"✅ Busca criada com sucesso.\n\nBusca: {query}\nLeilões: {_render_auctions_status(include_auctions)}\nFiltros:\n{labels}\n\nPróximo passo: acompanhe suas buscas ou crie uma nova.",
+            f"✅ Busca criada com sucesso.\n\nBusca: {query}\nLeilões: {_render_auctions_status(include_auctions)}\nFiltros:\n{labels}\n\n{initial_run_feedback}",
             reply_markup=_post_creation_markup(),
         )
         return ConversationHandler.END

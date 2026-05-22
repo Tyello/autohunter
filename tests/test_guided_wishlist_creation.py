@@ -53,6 +53,10 @@ def _patch_user(monkeypatch):
     monkeypatch.setattr(handlers_core, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
 
 
+def _create_result(ok=True, message="ok", summary=None):
+    return types.SimpleNamespace(ok=ok, message=message, wishlist_id="wid" if ok else None, initial_run_summary=summary)
+
+
 def test_create_flow_query_text_shows_create_options():
     msg = _Message("a5 entre 2017 e 2021")
     ctx = types.SimpleNamespace(user_data={})
@@ -97,10 +101,23 @@ def test_create_flow_query_text_parses_implicit_single_year():
     assert "Ano 2019" in text
 
 
+def test_render_initial_run_feedback_success():
+    text = handlers_core._render_initial_run_feedback({"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["a"]})
+    assert "Primeira varredura" in text
+    assert "agendada em 5 fonte" in text
+    assert "resultados forem processados" in text
+
+
+def test_render_initial_run_feedback_failure():
+    text = handlers_core._render_initial_run_feedback({"triggered": 0, "ok": 0, "skipped": 0, "failed": 2, "sources": ["a"]})
+    assert "Não consegui agendar" in text
+    assert "monitoramento contínuo segue ativo" in text
+
+
 def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     _patch_user(monkeypatch)
     called = {}
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda _db, _uid, q, **kwargs: (called.setdefault("q", q) or True, "ok"))
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda _db, _uid, q, **kwargs: _create_result(summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]}) if called.setdefault("q", q) is not None else _create_result())
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
     q = _CallbackQuery("CWL:CREATE")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -117,7 +134,7 @@ def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
 def test_cwl_create_auctions_opt_in_persists_true(monkeypatch):
     _patch_user(monkeypatch)
     called = {}
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda _db, _uid, q, **kwargs: (called.setdefault("include", kwargs.get("include_auctions")) or True, "ok"))
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda _db, _uid, q, **kwargs: _create_result(summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]}) if called.setdefault("include", kwargs.get("include_auctions")) is not None else _create_result())
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_include_auctions": True})
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
     assert state == ConversationHandler.END
@@ -126,7 +143,7 @@ def test_cwl_create_auctions_opt_in_persists_true(monkeypatch):
 
 def test_cwl_create_auctions_enabled_shows_disclaimer(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda *_a, **_k: _create_result(summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]}))
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "touareg", "menu_create_wishlist_include_auctions": True})
     q = _CallbackQuery("CWL:CREATE")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -162,8 +179,8 @@ def test_cwl_create_auctions_opt_out_persists_false(monkeypatch):
     called = {}
     def _add(_db, _uid, _query, **kwargs):
         called["include"] = kwargs.get("include_auctions")
-        return True, "ok"
-    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+        return types.SimpleNamespace(ok=True, message="ok", wishlist_id="wid", initial_run_summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]})
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", _add)
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_include_auctions": False})
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
     assert state == ConversationHandler.END
@@ -172,8 +189,8 @@ def test_cwl_create_auctions_opt_out_persists_false(monkeypatch):
 
 def test_cwl_create_filters_enters_draft_without_creation(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters_and_initial_summary", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
     q = _CallbackQuery("CWL:CREATE_FILTERS")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -213,9 +230,9 @@ def test_draft_done_calls_create_wishlist_with_filters(monkeypatch):
     def _create(_db, _uid, query, filters, **kwargs):
         called["query"] = query
         called["filters"] = filters
-        return True, "ok", "wid"
+        return types.SimpleNamespace(ok=True, message="ok", wishlist_id="wid", initial_run_summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]})
 
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", _create)
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters_and_initial_summary", _create)
     ctx = types.SimpleNamespace(user_data={
         "menu_create_wishlist_query": "civic si",
         "menu_create_wishlist_draft_filters": [{"group": "state", "label": "Estado SP", "filters": [{"field": "state", "operator": "eq", "value": "SP"}]}],
@@ -241,7 +258,7 @@ def test_draft_done_without_query_expires_session():
 
 
 def test_draft_cancel_clears_context_and_does_not_create(monkeypatch):
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters_and_initial_summary", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si", "menu_create_wishlist_draft_filters": [{"field": "state", "operator": "eq", "value": "SP"}]})
     q = _CallbackQuery("CWLF:CANCEL")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -273,8 +290,8 @@ def test_draft_price_replaces_previous_group():
 def test_cwl_create_with_mixed_implicit_filters_calls_create_with_filters(monkeypatch):
     _patch_user(monkeypatch)
     called = {}
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", lambda _db, _uid, q, fs, **kwargs: (called.setdefault("query", q) or True, called.setdefault("filters", fs) or "ok", "wid"))
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters_and_initial_summary", lambda _db, _uid, q, fs, **kwargs: _create_result(summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]}) if (called.setdefault("query", q) is not None and called.setdefault("filters", fs) is not None) else _create_result())
     ctx = types.SimpleNamespace(user_data={})
     asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("corolla a partir de 2018 até 120000")), ctx))
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=_CallbackQuery("CWL:CREATE")), ctx))
@@ -290,10 +307,10 @@ def test_cwl_create_is_idempotent_for_repeated_callback(monkeypatch):
 
     def _create(_db, _uid, query, filters, **kwargs):
         calls["count"] += 1
-        return True, "ok", "wid"
+        return types.SimpleNamespace(ok=True, message="ok", wishlist_id="wid", initial_run_summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]})
 
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", _create)
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters_and_initial_summary", _create)
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda *_: (_ for _ in ()).throw(AssertionError("must not call")))
     ctx = types.SimpleNamespace(user_data={})
     asyncio.run(handlers_core.menu_create_wishlist_on_text(_Update(message=_Message("civic si entre 2014 e 2015")), ctx))
     q1 = _CallbackQuery("CWL:CREATE")
@@ -308,7 +325,7 @@ def test_cwl_create_is_idempotent_for_repeated_callback(monkeypatch):
 
 def test_cwl_create_plan_limit_shows_only_business_message(monkeypatch):
     _patch_user(monkeypatch)
-    monkeypatch.setattr(handlers_core, "add_wishlist", lambda *_, **__: (False, "Você atingiu o limite do plano Free..."))
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda *_, **__: _create_result(ok=False, message="Você atingiu o limite do plano Free..."))
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
     q = _CallbackQuery("CWL:CREATE")
     state = asyncio.run(handlers_core.cb_menu_create_wishlist(_Update(q=q), ctx))
@@ -324,9 +341,9 @@ def test_cwl_create_plan_limit_does_not_lock_idempotency_key(monkeypatch):
 
     def _add(*_args, **_kwargs):
         calls["count"] += 1
-        return False, "Você atingiu o limite do plano Free..."
+        return types.SimpleNamespace(ok=False, message="Você atingiu o limite do plano Free...", wishlist_id=None, initial_run_summary=None)
 
-    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", _add)
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
 
     q1 = _CallbackQuery("CWL:CREATE")
@@ -349,9 +366,9 @@ def test_cwl_create_partial_enqueue_message_still_confirms_and_is_idempotent(mon
 
     def _add(*_args, **_kwargs):
         calls["count"] += 1
-        return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
+        return _create_result(message="✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo.", summary={"triggered": 0, "ok": 0, "skipped": 0, "failed": 2, "sources": ["s1", "s2"]})
 
-    monkeypatch.setattr(handlers_core, "add_wishlist", _add)
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", _add)
     ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "a4 avant 2019"})
 
     q1 = _CallbackQuery("CWL:CREATE")
@@ -376,9 +393,9 @@ def test_cwlf_done_is_idempotent_for_repeated_callback(monkeypatch):
 
     def _create(_db, _uid, query, filters, **kwargs):
         calls["count"] += 1
-        return True, "ok", "wid"
+        return types.SimpleNamespace(ok=True, message="ok", wishlist_id="wid", initial_run_summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]})
 
-    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters", _create)
+    monkeypatch.setattr(handlers_core, "create_wishlist_with_filters_and_initial_summary", _create)
     ctx = types.SimpleNamespace(user_data={
         "menu_create_wishlist_query": "civic si",
         "menu_create_wishlist_draft_filters": [{"group": "state", "label": "Estado: SP", "filters": [{"field": "state", "operator": "eq", "value": "SP"}]}],
