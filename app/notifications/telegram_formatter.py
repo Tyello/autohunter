@@ -170,6 +170,50 @@ def _delta_badge_text(delta_pct: float | None) -> str | None:
         return f"+{pct_i}% vs mediana"
     return "0% vs mediana"
 
+def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
+    market_context = breakdown.get("market_context") if isinstance(breakdown, dict) else None
+    market_context = market_context if isinstance(market_context, dict) else {}
+
+    delta_pct = breakdown.get("delta_vs_median_pct")
+    if delta_pct is None:
+        delta_pct = market_context.get("delta_pct")
+    dtxt = _delta_badge_text(delta_pct)
+    if dtxt:
+        return f"💰 {dtxt}"
+
+    delta_vs_fipe_pct = breakdown.get("delta_vs_fipe_pct")
+    if delta_vs_fipe_pct is not None:
+        try:
+            fipe_delta = float(delta_vs_fipe_pct)
+        except Exception:
+            fipe_delta = None
+        if fipe_delta is not None:
+            if fipe_delta < -10:
+                return f"💰 {abs(fipe_delta):.0f}% abaixo da FIPE"
+            if fipe_delta > 10:
+                return f"📈 {fipe_delta:.0f}% acima da FIPE"
+            return "💰 Próximo da FIPE"
+
+    price = getattr(ad, "price", None)
+    try:
+        price_value = float(price)
+    except Exception:
+        return None
+    if price_value <= 0:
+        return None
+
+    sample_size = market_context.get("sample_size")
+    try:
+        sample_size_i = int(sample_size) if sample_size is not None else None
+    except Exception:
+        sample_size_i = None
+
+    if not sample_size_i:
+        return "💰 Preço informado — sem base de mercado"
+    if sample_size_i < 8:
+        return "💰 Preço informado — base de mercado pequena"
+    return "💰 Preço informado — comparação indisponível"
+
 
 def _get_breakdown(ad: Any, score_result: Any | None) -> dict | None:
     if isinstance(score_result, dict):
@@ -401,14 +445,9 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
         badges.append(f"⚙️ {gb}")
 
     breakdown = _get_breakdown(ad, score_result) or {}
-    delta_pct = breakdown.get("delta_vs_median_pct")
-    if delta_pct is None:
-        mc = breakdown.get("market_context") if isinstance(breakdown, dict) else None
-        if isinstance(mc, dict):
-            delta_pct = mc.get("delta_pct")
-    dtxt = _delta_badge_text(delta_pct)
-    if dtxt:
-        badges.append(f"💰 {dtxt}")
+    price_badge = _price_context_badge(ad, breakdown)
+    if price_badge:
+        badges.append(price_badge)
 
     seller = build_seller_type_badge(ad)
     if seller:

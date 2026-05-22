@@ -74,11 +74,15 @@
   - Implementado no PR #288.
   - Alertas de queda de preço agora mostram contexto histórico quando disponível, como preço inicial, queda total e tempo de rastreamento.
 
+- [x] 2.2 — Contexto de mercado quando `market_stats` está vazio
+  - Implementado no PR #289.
+  - Alertas com preço agora mostram contexto conservador quando não há base de mercado suficiente, sem inventar comparação.
+
 
 ### Próximo pacote recomendado
 
-2.2 — Contexto de mercado ausente quando market_stats está vazio
-- motivo: depois de melhorar o alerta de tracking, o próximo ganho de inteligência está nos alertas normais: dar contexto de preço quando a mediana de mercado não existe, sem inventar comparação.
+Revisar roadmap UX e encerrar bloco atual.
+- motivo: com o item 2.2 concluído, os itens atuais estão resolvidos ou endereçados. O próximo passo é uma revisão final da documentação e definição de um novo bloco, em vez de empilhar ajustes incrementais.
 
 ---
 
@@ -248,7 +252,7 @@ def build_recency_badge(ad: Any) -> str | None:
 
 ---
 
-### 2.2 Contexto de mercado ausente quando `market_stats` está vazio
+### 2.2 Contexto de mercado ausente quando `market_stats` está vazio — ✅ Concluído no PR #289
 
 **O problema hoje:**
 `build_badges` tenta mostrar `💰 18% abaixo da média` via `delta_vs_median_pct` do `score_breakdown`. Mas se `market_stats_cohorts` não tem dados para aquele make/model/year, o badge não aparece. Não há fallback.
@@ -688,6 +692,7 @@ text = f"Limite atingido ({limit} alertas hoje). Renova às {renews_str}."
 | 5.2 | Texto de upgrade orientado à dor | ✅ Concluído PR #284 | Baixo | Médio — testa mensagem alternativa |
 | 6.4 | Horário de renovação do limite diário | ✅ Concluído PR #286 | Baixo | Baixo — reduz dúvida operacional |
 | 4.2 | Contexto histórico em queda de preço rastreado | ✅ Concluído PR #288 | Médio | Médio — aumenta valor percebido do rastreamento |
+| 2.2 | Contexto de mercado quando `market_stats` está vazio | ✅ Concluído PR #289 | Baixo | Médio — melhora transparência do preço |
 
 ---
 
