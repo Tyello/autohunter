@@ -116,3 +116,40 @@ def test_admin_sources_show_adds_operational_reading_for_webmotors_blocked_perim
 
     out = up.message.texts[-1]
     assert "leitura=source despriorizada por bloqueio PerimeterX/fingerprint" in out
+
+
+def test_admin_sources_show_adds_operational_reading_for_webmotors_blocked_without_provider(monkeypatch):
+    cfg = SimpleNamespace(
+        source="webmotors",
+        is_enabled=True,
+        sched_minutes=90,
+        cooldown_minutes=0,
+        rate_limit_seconds=0,
+        proxy_server=None,
+        browser_fallback_enabled=True,
+        force_browser=True,
+        extra={"operational_role": "deprioritized"},
+    )
+    st = SimpleNamespace(last_status="blocked", last_payload={})
+
+    class _Q:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def one_or_none(self):
+            return st
+
+    class _DB:
+        def query(self, _model):
+            return _Q()
+
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(_Ctx, "__enter__", lambda self: _DB())
+
+    up = _Update()
+    asyncio.run(mod.admin_sources_show(up, "webmotors"))
+
+    out = up.message.texts[-1]
+    assert "leitura=source despriorizada; último status blocked; execução manual disponível, sem falha crítica global." in out

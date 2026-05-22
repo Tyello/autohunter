@@ -122,8 +122,11 @@ async def admin_sources_show(update, source: str):
         blocked_provider = None
         if st is not None and isinstance(st.last_payload, dict):
             blocked_provider = str(st.last_payload.get("blocked_provider") or st.last_payload.get("provider") or "").strip().lower()
-        if role == "deprioritized" and str(getattr(st, "last_status", "") or "").lower() == "blocked" and blocked_provider == "perimeterx":
-            lines.append("leitura=source despriorizada por bloqueio PerimeterX/fingerprint; execução manual disponível, sem falha crítica global.")
+        if role == "deprioritized" and str(getattr(st, "last_status", "") or "").lower() == "blocked":
+            if blocked_provider == "perimeterx":
+                lines.append("leitura=source despriorizada por bloqueio PerimeterX/fingerprint; execução manual disponível, sem falha crítica global.")
+            else:
+                lines.append("leitura=source despriorizada; último status blocked; execução manual disponível, sem falha crítica global.")
         await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
 
 

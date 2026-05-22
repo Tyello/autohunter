@@ -67,6 +67,9 @@ Notas operacionais rápidas:
   - tentativa HTTP com `curl_cffi` (`impersonate=chrome`).
 - Resultado consolidado: `status=blocked` com HTTP 200 + challenge (`provider=perimeterx`, `title=Access to this page has been denied`, snippet “Pressione e segure para confirmar que você é um humano”).
 - Decisão operacional: manter Webmotors como `operational_role=deprioritized` e `default_enabled=false` por padrão de seed.
+- ⚠️ Importante: `default_enabled=false` no plugin afeta apenas seed de novas linhas em `source_configs`. Em ambientes já existentes, desative manualmente:
+  - `/admin sources disable webmotors`
+  - ou SQL: `UPDATE source_configs SET is_enabled = false WHERE source = 'webmotors';`
 - Efeito esperado: não tratar bloqueio da Webmotors como falha crítica global; manter visível como blocked/deprioritized no detalhamento admin.
 - Próximas tentativas (ex.: Patchright/sessão assistida) exigem POC isolada e decisão explícita antes de qualquer rollout.
 
