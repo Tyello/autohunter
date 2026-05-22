@@ -117,6 +117,9 @@ class _PlaywrightCore:
         IMPORTANT: Some anti-bot challenges rely on fetching images or other
         resources. For a small allowlist of "hostile" sources we do NOT block.
         """
+        if not block_resources:
+            return
+
         src = (source or "").strip().lower()
         allow_heavy = src in {"mobiauto", "icarros", "facebook_marketplace"}
         if allow_heavy:
@@ -353,15 +356,16 @@ class _PlaywrightCore:
             ctx.storage_state(path=storage_path)
 
             # Invalidate cached context for this (proxy,source) so next fetch reloads storage_state
-            key = (proxy_key, src, bool(block_resources))
             try:
-                old = self._contexts.pop(key, None)
-                self._ctx_last_used.pop(key, None)
-                if old is not None:
-                    try:
-                        old.close()
-                    except Exception:
-                        pass
+                keys_to_drop = [k for k in self._contexts.keys() if len(k) == 3 and k[0] == proxy_key and k[1] == src]
+                for k in keys_to_drop:
+                    old = self._contexts.pop(k, None)
+                    self._ctx_last_used.pop(k, None)
+                    if old is not None:
+                        try:
+                            old.close()
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

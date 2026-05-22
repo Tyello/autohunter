@@ -6,6 +6,7 @@ from app.services import browser_fetcher
 from app.scrapers.scraper_base import fetcher as unified_fetcher
 from app.sources.registry import list_sources
 from app.sources.types import ScrapeContext
+from app.services.playwright_pool import _PlaywrightCore
 
 
 class _FakeResult:
@@ -94,3 +95,88 @@ def test_builtins_defaults_for_non_blocking_sources():
     by_name = {p.name: p for p in list_sources()}
     for src in ("webmotors", "icarros", "mobiauto", "facebook_marketplace"):
         assert by_name[src].default_extra.get("browser_block_resources") is False
+
+
+def test_builtins_gogarage_kavak_do_not_set_non_blocking_default():
+    by_name = {p.name: p for p in list_sources()}
+    assert "browser_block_resources" not in by_name["gogarage"].default_extra
+    assert "browser_block_resources" not in by_name["kavak"].default_extra
+
+
+def test_block_heavy_resources_respects_false_flag():
+    core = _PlaywrightCore()
+
+    class _Page:
+        def __init__(self):
+            self.called = 0
+
+        def route(self, *_args, **_kwargs):
+            self.called += 1
+
+    page = _Page()
+    core._block_heavy_resources(page, source="olx", block_resources=False)
+    assert page.called == 0
+
+
+def test_warmup_invalidates_contexts_without_name_error(monkeypatch):
+    core = _PlaywrightCore()
+    closed = []
+
+    class _OldCtx:
+        def __init__(self, name):
+            self.name = name
+
+        def close(self):
+            closed.append(self.name)
+
+    class _WarmupCtx:
+        def new_page(self):
+            class _Page:
+                url = "https://example.com"
+
+                def goto(self, *_args, **_kwargs):
+                    return None
+
+                def wait_for_timeout(self, *_args, **_kwargs):
+                    return None
+
+                def content(self):
+                    return "<html></html>"
+
+                def title(self):
+                    return "ok"
+
+            return _Page()
+
+        def storage_state(self, path):
+            return path
+
+        def close(self):
+            return None
+
+    class _Browser:
+        def new_context(self, **_kwargs):
+            return _WarmupCtx()
+
+    core._contexts = {
+        ("proxyA", "webmotors", True): _OldCtx("t"),
+        ("proxyA", "webmotors", False): _OldCtx("f"),
+        ("proxyA", "olx", True): _OldCtx("other_source"),
+        ("proxyB", "webmotors", True): _OldCtx("other_proxy"),
+    }
+    core._ctx_last_used = {
+        ("proxyA", "webmotors", True): 1.0,
+        ("proxyA", "webmotors", False): 1.0,
+        ("proxyA", "olx", True): 1.0,
+        ("proxyB", "webmotors", True): 1.0,
+    }
+
+    monkeypatch.setattr(core, "_get_or_create_browser", lambda _proxy: _Browser())
+
+    out = core.warmup(source="webmotors", proxy_server="proxyA", url="https://www.webmotors.com.br/", timeout_ms=10)
+    assert out["ok"] is True
+    assert ("proxyA", "webmotors", True) not in core._contexts
+    assert ("proxyA", "webmotors", False) not in core._contexts
+    assert ("proxyA", "olx", True) in core._contexts
+    assert ("proxyB", "webmotors", True) in core._contexts
+    assert set(closed) == {"t", "f"}

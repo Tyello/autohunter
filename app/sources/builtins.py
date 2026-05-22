@@ -176,7 +176,6 @@ register_source(
             "operational_role": "fragile",
             "browser_timeout_ms": 45000,
             "browser_wait_until": "domcontentloaded",
-            "browser_block_resources": False,
         },
     )
 )
@@ -243,7 +242,6 @@ register_source(
         default_force_browser=True,
         default_extra={
             "operational_role": "experimental",
-            "browser_block_resources": False,
         },
     )
 )
