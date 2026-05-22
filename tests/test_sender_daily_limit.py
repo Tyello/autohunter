@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.models.car_listing import CarListing
@@ -8,7 +9,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.scheduler.jobs_send import send_queued_notifications
-from app.bot.sender import render_daily_limit_notice, send_daily_limit_notice_http
+from app.bot.sender import _daily_limit_renews_text, render_daily_limit_notice, send_daily_limit_notice_http
 
 
 def _seed_base(db):
@@ -165,6 +166,27 @@ def test_render_daily_limit_notice_with_premium_limit():
     assert "até 200 alertas" in text
 
 
+def test_daily_limit_renews_text_with_fixed_now():
+    now = datetime(2026, 5, 22, 15, 30, tzinfo=timezone.utc)
+    text = _daily_limit_renews_text(now=now)
+    assert "renova amanhã" in text
+    assert "00h" in text
+    assert "São Paulo" in text or "horário" in text
+
+
+def test_render_daily_limit_notice_with_custom_renews_text():
+    renews_text = "O limite renova amanhã às 00h (horário de São Paulo)."
+    text = render_daily_limit_notice(limit=5, renews_text=renews_text)
+    assert renews_text in text
+    assert "renova automaticamente amanhã" not in text
+
+
+def test_daily_limit_renews_text_with_invalid_timezone_falls_back(monkeypatch):
+    monkeypatch.setattr("app.bot.sender.settings.default_user_timezone", "Invalid/Timezone")
+    text = _daily_limit_renews_text()
+    assert "renova" in text
+
+
 def test_send_daily_limit_notice_http_includes_upgrade_button(monkeypatch):
     class _U:
         telegram_chat_id = 123
@@ -187,3 +209,6 @@ def test_send_daily_limit_notice_http_includes_upgrade_button(monkeypatch):
     assert ok is True
     assert "🚀 Ver Premium" in sent["data"]["reply_markup"]
     assert "MENU:UPGRADE" in sent["data"]["reply_markup"]
+    assert "Limite diário atingido" in sent["data"]["text"]
+    assert "renova" in sent["data"]["text"]
+    assert "00h" in sent["data"]["text"] or "horário" in sent["data"]["text"]
