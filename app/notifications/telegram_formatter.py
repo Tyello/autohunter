@@ -137,6 +137,25 @@ def _format_location_badge(location: str | None, *, city: str | None = None, sta
     return None
 
 
+
+
+def _score_label(score_i: int) -> str | None:
+    try:
+        score_value = int(score_i)
+    except Exception:
+        return None
+
+    if score_value >= 85:
+        return "Excelente oportunidade"
+    if score_value >= 70:
+        return "Forte oportunidade"
+    if score_value >= 50:
+        return "Boa compatibilidade"
+    if score_value >= 30:
+        return "Compatível"
+    if score_value > 0:
+        return "Baixa prioridade"
+    return None
 def _delta_badge_text(delta_pct: float | None) -> str | None:
     if delta_pct is None:
         return None
@@ -503,7 +522,13 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
         score_i = 0
 
     title = build_title(ad)
-    line1 = f"🔥 {score_i}/100 — {title}" if score_i > 0 else title
+    label = _score_label(score_i)
+    if score_i > 0 and label:
+        line1 = f"🔥 {score_i}/100 — {label} — {title}"
+    elif score_i > 0:
+        line1 = f"🔥 {score_i}/100 — {title}"
+    else:
+        line1 = title
 
     flags = extract_listing_flags(ad)
     badges = build_badges(ad, score_result, flags)

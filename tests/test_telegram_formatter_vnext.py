@@ -70,7 +70,7 @@ def test_complete_score_gt_zero_snapshot_and_order():
     payload = format_ad_message(ad)
     lines = payload.text.splitlines()
 
-    assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
+    assert lines[0] == "🔥 87/100 — Excelente oportunidade — Honda Civic 2019 SI"
     assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
     assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
     assert lines[3] == "Por que você recebeu:"
@@ -79,6 +79,81 @@ def test_complete_score_gt_zero_snapshot_and_order():
         "• Match forte com sua wishlist",
     ]
     assert payload.inline_keyboard == [[{"text": "Abrir anúncio", "url": "https://www.webmotors.com.br/comprar/1"}]]
+
+
+def test_score_92_shows_excellent_opportunity_label():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_v2=92, score_breakdown={"total": 92, "reasons": ["ok"]}))
+    assert "🔥 92/100 — Excelente oportunidade" in payload.text
+    assert "Honda Civic 2019 SI" in payload.text
+
+
+def test_score_77_shows_strong_opportunity_label():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_v2=77, score_breakdown={"total": 77, "reasons": ["ok"]}))
+    assert "🔥 77/100 — Forte oportunidade" in payload.text
+
+
+def test_score_58_shows_good_compatibility_label():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_v2=58, score_breakdown={"total": 58, "reasons": ["ok"]}))
+    assert "🔥 58/100 — Boa compatibilidade" in payload.text
+
+
+def test_score_35_shows_compatible_label():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_v2=35, score_breakdown={"total": 35, "reasons": ["ok"]}))
+    assert "🔥 35/100 — Compatível" in payload.text
+
+
+def test_score_12_shows_low_priority_label():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_v2=12, score_breakdown={"total": 12, "reasons": ["ok"]}))
+    assert "🔥 12/100 — Baixa prioridade" in payload.text
+
+
+def test_score_zero_or_missing_has_no_score_label():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    labels = [
+        "Excelente oportunidade",
+        "Forte oportunidade",
+        "Boa compatibilidade",
+        "Compatível",
+        "Baixa prioridade",
+    ]
+
+    zero_payload = format_ad_message(_base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []}))
+    missing_payload = format_ad_message(_base_ad(score_v2=None, score_breakdown={"total": None, "reasons": []}))
+
+    for payload in (zero_payload, missing_payload):
+        assert "/100" not in payload.text
+        assert "Honda Civic 2019 SI" in payload.text
+        for label in labels:
+            assert label not in payload.text
+
+
+def test_score_label_keeps_badges_and_context_block():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(
+        score_v2=77,
+        score_breakdown={"total": 77, "reasons": ["Match forte com sua wishlist"]},
+        mileage_km=75352,
+        location="São Paulo, SP",
+    )
+    ad.wishlist_query = "civic si"
+
+    payload = format_ad_message(ad)
+
+    assert "Forte oportunidade" in payload.text
+    assert "📍 São Paulo-SP" in payload.text or "🛞 75.352 km" in payload.text
+    assert "Por que você recebeu:" in payload.text
 
 
 def test_score_zero_with_query_shows_minimum_context():
