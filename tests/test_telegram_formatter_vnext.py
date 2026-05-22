@@ -73,7 +73,7 @@ def test_complete_score_gt_zero_snapshot_and_order():
     assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
     assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
     assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
-    assert lines[3] == "Por que você recebeu (resumo):"
+    assert lines[3] == "Por que você recebeu:"
     assert lines[4] == "• Motivo principal: Preço 8% abaixo da mediana"
     assert lines[5:] == [
         "• Match forte com sua wishlist",
@@ -81,15 +81,36 @@ def test_complete_score_gt_zero_snapshot_and_order():
     assert payload.inline_keyboard == [[{"text": "Abrir anúncio", "url": "https://www.webmotors.com.br/comprar/1"}]]
 
 
-def test_score_zero_hides_score_and_reasons():
+def test_score_zero_with_query_shows_minimum_context():
     from app.notifications.telegram_formatter import format_ad_message
 
-    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": ["não deve aparecer"]})
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    ad.wishlist_query = "civic si"
     payload = format_ad_message(ad)
 
     assert payload.text.splitlines()[0] == "Honda Civic 2019 SI"
     assert "🔥" not in payload.text
-    assert all(not ln.startswith("• ") for ln in payload.text.splitlines())
+    assert "Por que você recebeu:" in payload.text
+    assert "• Busca: civic si" in payload.text
+
+
+def test_score_zero_with_filters_shows_criteria_context():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    ad.wishlist_filters = [{"field": "year", "operator": "gte", "value": "2018"}]
+    payload = format_ad_message(ad)
+
+    assert "Por que você recebeu:" in payload.text
+    assert "• Critério: ano ≥ 2018" in payload.text
+
+
+def test_without_context_does_not_add_empty_context_block():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    payload = format_ad_message(ad)
+    assert "Por que você recebeu:" not in payload.text
 
 
 def test_missing_km_omits_badge():
@@ -277,7 +298,7 @@ def test_explainability_includes_compact_wishlist_filters():
 
     payload = format_ad_message(ad)
 
-    assert "Por que você recebeu (resumo):" in payload.text
+    assert "Por que você recebeu:" in payload.text
     assert "• Critério: cor = prata" in payload.text
     assert "• Critério: estado = SP" in payload.text
 
@@ -313,8 +334,30 @@ def test_formatter_caps_extreme_fields_and_prioritizes_core_content():
 
     assert len(lines) <= 8
     assert lines[0].startswith("🔥 91/100")
-    assert "Por que você recebeu (resumo):" in payload.text
+    assert "Por que você recebeu:" in payload.text
     assert payload.text.count("• Critério:") <= 2
+
+
+def test_non_actionable_reason_not_used_as_main_reason_when_query_exists():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(
+        score_v2=75,
+        score_breakdown={"total": 75, "reasons": ["anuncio completo"]},
+    )
+    ad.wishlist_query = "civic si"
+    payload = format_ad_message(ad)
+
+    assert "• Motivo principal:" not in payload.text
+    assert "• Busca: civic si" in payload.text
+
+
+def test_positive_score_with_reason_keeps_main_reason():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=75, score_breakdown={"total": 75, "reasons": ["preço abaixo da mediana"]})
+    payload = format_ad_message(ad)
+    assert "• Motivo principal: preço abaixo da mediana" in payload.text
 
 
 def test_tracked_price_drop_formatter_full_payload():

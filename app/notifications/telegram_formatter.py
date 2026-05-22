@@ -443,8 +443,35 @@ def _compact_filters(ad: Any) -> list[str]:
 def _main_reason(reasons: list[str]) -> str | None:
     if not reasons:
         return None
-    first = _clean(reasons[0])
-    return first or None
+    for reason in reasons:
+        candidate = _clean(reason)
+        if not candidate:
+            continue
+        if _norm_text(candidate) in _NON_ACTIONABLE_REASONS:
+            continue
+        return candidate
+    return None
+
+
+def _build_context_lines(ad: Any, main_reason: str | None, matched_filters: list[str]) -> list[str]:
+    lines: list[str] = []
+
+    if main_reason:
+        lines.append(f"• Motivo principal: {main_reason}")
+
+    for ftxt in matched_filters[:2]:
+        lines.append(f"• Critério: {ftxt}")
+
+    wishlist_query = _clip(
+        getattr(ad, "wishlist_query", None)
+        or getattr(ad, "query", None)
+        or "",
+        64,
+    )
+    if wishlist_query and not lines:
+        lines.append(f"• Busca: {wishlist_query}")
+
+    return lines[:3]
 
 def build_open_button(ad: Any) -> list[list[dict[str, str]]]:
     url = normalize_listing_url(
@@ -495,12 +522,10 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
         lines.append(line2)
     lines.append(line3)
 
-    if score_i > 0 and (main_reason or matched_filters):
-        lines.append("Por que você recebeu (resumo):")
-        if main_reason:
-            lines.append(f"• Motivo principal: {main_reason}")
-        for ftxt in matched_filters:
-            lines.append(f"• Critério: {ftxt}")
+    context_lines = _build_context_lines(ad, main_reason, matched_filters)
+    if context_lines:
+        lines.append("Por que você recebeu:")
+        lines.extend(context_lines)
 
     extra_reasons = []
     if not matched_filters:
