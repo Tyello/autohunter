@@ -12,6 +12,7 @@ class WarmupResult:
     ok: bool
     storage_path: str
     steps: int
+    data: dict | None = None
     error: str = ""
 
 def warmup_source(
@@ -22,6 +23,7 @@ def warmup_source(
     proxy_server: Optional[str] = None,
     steps: int = 2,
     timeout_ms: int = 120_000,
+    behavior: Optional[dict] = None,
 ) -> WarmupResult:
     """
     Warm a browser session (cookies/localStorage) and persist storage_state per source+proxy.
@@ -48,11 +50,12 @@ def warmup_source(
                 source=src,
                 proxy_server=proxy_use,
                 timeout_ms=timeout_ms,
+                behavior=behavior,
             )
             storage_path = ""
             if isinstance(res, dict):
                 storage_path = str(res.get("storage_path") or "")
-            return WarmupResult(ok=True, storage_path=storage_path, steps=steps)
+            return WarmupResult(ok=True, storage_path=storage_path, steps=steps, data=res if isinstance(res, dict) else None)
         raise AttributeError("backend.warmup not implemented")
     except Exception as e:
         if diag is not None:

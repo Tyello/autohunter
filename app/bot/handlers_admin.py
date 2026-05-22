@@ -102,6 +102,7 @@ from app.services.auction_source_config_service import (
 from app.services.auction_source_categories_service import get_auction_allowed_item_types, normalize_item_type
 from app.services.system_logs_service import log
 from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
+from app.services.browser_warmup_service import warmup_source
 
 
 @dataclass
@@ -492,6 +493,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "runall":
         await _admin_runall(update, args[1:])
         return
+    if action == "warmup":
+        await _admin_warmup(update, args[1:])
+        return
     if action == "premium":
         await _admin_premium(update, context, args[1:])
         return
@@ -516,7 +520,54 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
+
+
+def _render_warmup_result(source: str, payload: dict) -> str:
+    steps = payload.get("steps_completed") or []
+    lines = [
+        f"🧪 Warmup — {source}",
+        "",
+        f"ok={bool(payload.get('ok'))}",
+        f"storage_state_saved={bool(payload.get('storage_state_saved'))}",
+        f"still_challenge={bool(payload.get('still_challenge'))}",
+        f"provider={payload.get('challenge_provider') or '-'}",
+        f"reason={payload.get('challenge_reason') or '-'}",
+        f"title={payload.get('title') or '-'}",
+        f"final_url={payload.get('final_url') or '-'}",
+        f"duration_ms={int(payload.get('duration_ms') or 0)}",
+        "",
+        "steps:",
+    ]
+    for s in steps:
+        lines.append(f"- {s}")
+    lines.extend(["", "leitura:"])
+    if payload.get("still_challenge"):
+        lines.append("bloqueio anti-bot/fingerprint ainda presente; warmup salvou estado, mas não removeu challenge.")
+    else:
+        lines.append("warmup não detectou challenge neste momento; rode /admin runall webmotors para validar efeito real.")
+    return "\n".join(lines)
+
+
+async def _admin_warmup(update: Update, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    source = (args[0].lower() if args else "webmotors")
+    with SessionLocal() as db:
+        ensure_source_configs(db)
+        cfg = get_source_config(db, source)
+        extra = (cfg.extra if cfg and isinstance(cfg.extra, dict) else {}) or {}
+        behavior = {k: extra.get(k) for k in (
+            "webmotors_warmup_behavior_enabled",
+            "webmotors_warmup_scroll_enabled",
+            "webmotors_warmup_mouse_enabled",
+            "webmotors_warmup_consent_enabled",
+            "webmotors_warmup_extra_wait_ms",
+        )}
+        proxy = cfg.proxy_server if cfg else None
+    res = warmup_source(source=source, proxy_server=proxy, behavior=behavior)
+    payload = dict(res.data or {})
+    payload.setdefault("ok", bool(res.ok))
+    await update.message.reply_text(sanitize_for_telegram(_render_warmup_result(source, payload)))
 
 
 async def _admin_auctions(update: Update, raw_args: List[str]):

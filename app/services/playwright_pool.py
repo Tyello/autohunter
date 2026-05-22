@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import traceback
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -14,6 +15,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from app.core.runtime_paths import playwright_browsers_dir, playwright_storage_dir
 from app.core.settings import settings, ensure_playwright_browsers_env
 from app.scrapers.base import FetchBlocked
+from app.scrapers.webmotors_ops import detect_webmotors_challenge
 
 
 @dataclass
@@ -280,6 +282,7 @@ class _PlaywrightCore:
         url: Optional[str] = None,
         timeout_ms: int = 120000,
         wait_until: str = "domcontentloaded",
+        behavior: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Warm up cookies/storage_state for a given source/domain.
 
@@ -307,31 +310,19 @@ class _PlaywrightCore:
             viewport=viewport,
         )
 
-        def _is_challenge(html: str) -> bool:
-            h = (html or "").lower()
-            return (
-                "captcha" in h
-                or "verify you are" in h
-                or "cloudflare" in h
-                or "incapsula" in h
-                or "datadome" in h
-                or "perimeterx" in h
-                or "access denied" in h
-                or "just a moment" in h
-                or "px-captcha" in h
-            )
-
         try:
+            started = time.time()
             page = ctx.new_page()
+            steps_completed: list[str] = []
+            behavior_cfg = behavior or {}
             # do not block heavy resources for warmup; challenges often rely on them
             target_url = (url or "").strip()
             if not target_url and src == "webmotors":
                 target_url = "https://www.webmotors.com.br/"
             if target_url:
-                # Step 1: home
                 page.goto(target_url, wait_until=wait_until, timeout=timeout_ms)
                 page.wait_for_timeout(1500)
-                # Step 2: a lighter path to complete scripts/cookies
+                steps_completed.append("home")
                 if src == "webmotors" and "webmotors.com.br" in target_url:
                     page.goto(
                         "https://www.webmotors.com.br/carros",
@@ -339,6 +330,43 @@ class _PlaywrightCore:
                         timeout=timeout_ms,
                     )
                     page.wait_for_timeout(2000)
+                    steps_completed.append("cars_page")
+            if src == "webmotors" and bool(behavior_cfg.get("webmotors_warmup_behavior_enabled", False)):
+                if bool(behavior_cfg.get("webmotors_warmup_scroll_enabled", True)):
+                    try:
+                        page.evaluate("window.scrollTo({top: 300, behavior: 'smooth'})")
+                        page.wait_for_timeout(250)
+                        page.evaluate("window.scrollTo({top: 700, behavior: 'smooth'})")
+                        page.wait_for_timeout(250)
+                        page.evaluate("window.scrollTo({top: 450, behavior: 'smooth'})")
+                        steps_completed.append("scroll")
+                    except Exception:
+                        steps_completed.append("scroll_failed")
+                if bool(behavior_cfg.get("webmotors_warmup_mouse_enabled", True)):
+                    try:
+                        page.mouse.move(120, 140)
+                        page.wait_for_timeout(120)
+                        page.mouse.move(280, 220)
+                        page.wait_for_timeout(120)
+                        page.mouse.move(460, 320)
+                        steps_completed.append("mouse")
+                    except Exception:
+                        steps_completed.append("mouse_failed")
+                if bool(behavior_cfg.get("webmotors_warmup_consent_enabled", True)):
+                    try:
+                        from app.services.webmotors_consent import try_click_consent
+                        asyncio.run(try_click_consent(page))
+                        steps_completed.append("consent_attempted")
+                    except Exception:
+                        steps_completed.append("consent_failed")
+                try:
+                    extra_wait_ms = int(behavior_cfg.get("webmotors_warmup_extra_wait_ms", 1500) or 0)
+                except Exception:
+                    extra_wait_ms = 1500
+                extra_wait_ms = max(0, min(extra_wait_ms, 5000))
+                if extra_wait_ms:
+                    page.wait_for_timeout(extra_wait_ms)
+                    steps_completed.append("extra_wait")
 
             html = ""
             try:
@@ -354,6 +382,7 @@ class _PlaywrightCore:
             # Save state even if the page is not perfect; but report if it still looks like a challenge
             Path(storage_path).parent.mkdir(parents=True, exist_ok=True)
             ctx.storage_state(path=storage_path)
+            steps_completed.append("storage_state")
 
             # Invalidate cached context for this (proxy,source) so next fetch reloads storage_state
             try:
@@ -369,12 +398,21 @@ class _PlaywrightCore:
             except Exception:
                 pass
 
+            final_url = getattr(page, "url", "") or ""
+            challenge = detect_webmotors_challenge(html=html, title=title, final_url=final_url)
             return {
                 "ok": True,
+                "source": src,
                 "storage_path": storage_path,
-                "still_challenge": _is_challenge(html),
-                "final_url": getattr(page, "url", "") or "",
+                "still_challenge": bool(challenge.get("still_challenge")),
+                "challenge_provider": challenge.get("provider"),
+                "challenge_reason": challenge.get("reason"),
+                "challenge_signals": challenge.get("signals") or [],
+                "final_url": final_url,
                 "title": title,
+                "steps_completed": steps_completed,
+                "duration_ms": int((time.time() - started) * 1000),
+                "storage_state_saved": True,
             }
         finally:
             try:
@@ -880,6 +918,7 @@ class PlaywrightPool:
         proxy_server: Optional[str] = None,
         timeout_ms: int = 120000,
         wait_until: str = "domcontentloaded",
+        behavior: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Warm up cookies/storage_state for a given source (best-effort)."""
         self.start()
@@ -893,6 +932,7 @@ class PlaywrightPool:
             proxy_server=proxy_server,
             timeout_ms=timeout_ms,
             wait_until=wait_until,
+            behavior=behavior,
         )
 
 
