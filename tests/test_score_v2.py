@@ -109,3 +109,28 @@ def test_score_bounds_and_breakdown_stable():
     assert 0 <= res.total <= 100
     assert set(["match", "market_price", "price", "fipe_price", "mileage", "rarity", "quality"]).issubset(res.components.keys())
     assert len(res.reasons) <= 3
+
+
+def test_price_alias_does_not_double_count_total():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), now=_now())
+    assert res.components["price"] == res.components["market_price"]
+    canonical_total = (
+        res.components["match"]
+        + res.components["market_price"]
+        + res.components["fipe_price"]
+        + res.components["mileage"]
+        + res.components["rarity"]
+        + res.components["quality"]
+    )
+    assert res.total == canonical_total
+
+
+def test_neutral_base_score_no_inflation():
+    from app.scoring.score_v2 import score_ad
+
+    ad = _base_ad(price=Decimal("100000"), km=None, img=True, location="São Paulo-SP")
+    res = score_ad(ad, _Wishlist(query="civic"), None, now=_now())
+    # canonical neutral base (sem caps): match 35 + market 12 + fipe 5 + mileage 8 + rarity 2 + quality 6
+    assert res.total == 68

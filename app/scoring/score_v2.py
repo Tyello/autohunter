@@ -197,7 +197,14 @@ def score_ad(
     quality = max(0, min(10, quality))
 
     components = {"match": int(match_score), "market_price": int(market_price_score), "price": int(market_price_score), "fipe_price": int(fipe_score), "mileage": int(mileage_score), "rarity": int(rarity_score), "quality": int(quality)}
-    raw_total = int(sum(components.values()))
+    raw_total = int(
+        components["match"]
+        + components["market_price"]
+        + components["fipe_price"]
+        + components["mileage"]
+        + components["rarity"]
+        + components["quality"]
+    )
 
     caps: list[tuple[int, str]] = []
     has_images = _ad_has_images(ad)

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
@@ -63,6 +64,12 @@ def queue_notifications_for_matches(
         if keys:
             rows = db.query(FipePrice).filter(FipePrice.reference_month == ref_month).filter(FipePrice.vehicle_key.in_(list(dict.fromkeys(keys)))).all()
             fipe_rows = {str(r.vehicle_key): r.fipe_price for r in (rows or [])}
+    except SQLAlchemyError:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        fipe_rows = {}
     except Exception:
         fipe_rows = {}
 

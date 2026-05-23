@@ -139,6 +139,7 @@ def test_claim_eager_loads_user_and_listing(db):
 
 from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import SQLAlchemyError
 
 
 def test_claim_with_for_update_sql_postgres_has_no_outer_join():
@@ -180,3 +181,24 @@ def test_claim_query_keeps_main_select_without_outer_join_and_eager_loads(db):
     lock_selects = [s for s in statements if "FOR UPDATE" in s.upper()]
     if lock_selects:
         assert all("LEFT OUTER JOIN" not in s.upper() for s in lock_selects)
+
+
+def test_queue_survives_fipe_lookup_sql_error_with_rollback(db, monkeypatch):
+    user, wl, listing = _seed(db)
+    original_query = db.query
+
+    def _query_with_fipe_failure(*entities, **kwargs):
+        if entities and entities[0] is not None and getattr(entities[0], "__tablename__", None) == "fipe_prices":
+            raise SQLAlchemyError("relation fipe_prices does not exist")
+        return original_query(*entities, **kwargs)
+
+    monkeypatch.setattr(db, "query", _query_with_fipe_failure)
+
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    db.commit()
+
+    row = db.query(Notification).filter(Notification.user_id == user.id).one()
+    assert queued == 1
+    assert row.status == "queued"
+    assert row.score_breakdown is not None
+    assert row.score_breakdown.get("components", {}).get("fipe_price") == 5
