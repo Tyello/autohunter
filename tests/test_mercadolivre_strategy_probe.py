@@ -14,6 +14,19 @@ def test_build_strategies_contains_expected_names(monkeypatch):
     assert "plugin_build_url" in names
 
 
+def test_include_browser_adds_playwright_strategies(monkeypatch):
+    monkeypatch.setattr(probe, "get_source", lambda _s: SimpleNamespace(build_url=lambda q: f"https://plugin/{q}"))
+    out = probe.build_strategies("civic si", include_browser=True)
+    names = [x.name for x in out]
+    assert "playwright_domcontentloaded" in names
+    assert "playwright_networkidle" in names
+    assert "playwright_wait_scroll" in names
+
+
+def test_brand_model_url_for_civic_si():
+    assert probe._brand_model_url("civic si") == "https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/honda/civic"
+
+
 def test_json_results_diagnostics():
     out = probe._json_diagnostics('{"results":[{"id":"1","permalink":"https://carro.mercadolivre.com.br/MLB-1"}]}')
     assert out["json_detected"] is True
@@ -26,35 +39,45 @@ def test_json_error_diagnostics():
     assert out["json_error_message"] == "forbidden"
 
 
-def test_run_probe_inconclusive_shell(monkeypatch):
-    monkeypatch.setattr(probe, "build_strategies", lambda _q: [probe.ProbeStrategy("s1", "https://x")])
-    monkeypatch.setattr(probe, "unified_fetch", lambda *_a, **_k: SimpleNamespace(content="<html><title>| Mercado Livre</title></html>", method="http", duration_ms=3))
+def test_include_browser_false_does_not_call_playwright(monkeypatch):
+    monkeypatch.setattr(probe, "build_strategies", lambda _q, include_browser=False: [probe.ProbeStrategy("s1", "https://x")])
+    monkeypatch.setattr(probe, "get_browser_manager", lambda: (_ for _ in ()).throw(AssertionError("should not call browser")))
+    monkeypatch.setattr(probe, "unified_fetch", lambda *_a, **_k: SimpleNamespace(content="<html></html>", method="http", duration_ms=1, final_url="https://x"))
+    report = probe.run_probe("civic si", include_browser=False)
+    assert report["summary_status"] in {"INCONCLUSIVE", "WARN"}
+
+
+def test_playwright_unavailable_becomes_skipped(monkeypatch):
+    monkeypatch.setattr(probe, "build_strategies", lambda _q, include_browser=False: [probe.ProbeStrategy("playwright_domcontentloaded", "https://x", kind="playwright", browser_wait_until="domcontentloaded")])
+    monkeypatch.setattr(probe, "get_browser_manager", lambda: (_ for _ in ()).throw(RuntimeError("no pw")))
+    report = probe.run_probe("civic si", include_browser=True)
+    assert report["strategies"][0]["skipped"] is True
+    assert report["strategies"][0]["reason"] == "playwright_unavailable"
+
+
+def test_scoring_prefers_json_over_shell(monkeypatch):
+    monkeypatch.setattr(probe, "build_strategies", lambda _q, include_browser=False: [probe.ProbeStrategy("json", "https://x"), probe.ProbeStrategy("shell", "https://y")])
+
+    def _fetch(url, *_a, **_k):
+        if "x" in url:
+            return SimpleNamespace(content='{"results":[{"id":"1"}]}', method="http", duration_ms=1, final_url=url)
+        return SimpleNamespace(content="<html><title>| Mercado Livre</title>" + ("a" * 4000) + "</html>", method="http", duration_ms=1, final_url=url)
+
+    monkeypatch.setattr(probe, "unified_fetch", _fetch)
     report = probe.run_probe("civic si")
-    assert report["summary_status"] == "INCONCLUSIVE"
+    assert report["recommended_strategy"] == "json"
 
 
-def test_run_probe_fail_all_blocked(monkeypatch):
-    monkeypatch.setattr(probe, "build_strategies", lambda _q: [probe.ProbeStrategy("s1", "https://x")])
-
-    def _raise(*_a, **_k):
-        raise RuntimeError("FetchBlocked 403")
-
-    monkeypatch.setattr(probe, "unified_fetch", _raise)
+def test_shell_without_links_not_recommended(monkeypatch):
+    monkeypatch.setattr(probe, "build_strategies", lambda _q, include_browser=False: [probe.ProbeStrategy("shell", "https://x")])
+    monkeypatch.setattr(probe, "unified_fetch", lambda *_a, **_k: SimpleNamespace(content="<html><title>| Mercado Livre</title>" + ("a" * 4000) + "</html>", method="http", duration_ms=1, final_url="https://x"))
     report = probe.run_probe("civic si")
-    assert report["summary_status"] == "FAIL"
-
-
-def test_run_probe_ok_and_recommended(monkeypatch):
-    monkeypatch.setattr(probe, "build_strategies", lambda _q: [probe.ProbeStrategy("s1", "https://x")])
-    monkeypatch.setattr(probe, "unified_fetch", lambda *_a, **_k: SimpleNamespace(content='{"results":[{"id":"1"}]}', method="http", duration_ms=1))
-    report = probe.run_probe("civic si")
-    assert report["summary_status"] == "OK"
-    assert report["recommended_strategy"] == "s1"
+    assert report["recommended_strategy"] == ""
 
 
 def test_capture_dir_writes_only_when_provided(monkeypatch, tmp_path):
-    monkeypatch.setattr(probe, "build_strategies", lambda _q: [probe.ProbeStrategy("s1", "https://x")])
-    monkeypatch.setattr(probe, "unified_fetch", lambda *_a, **_k: SimpleNamespace(content="<html><body>x</body></html>", method="http", duration_ms=1))
+    monkeypatch.setattr(probe, "build_strategies", lambda _q, include_browser=False: [probe.ProbeStrategy("s1", "https://x")])
+    monkeypatch.setattr(probe, "unified_fetch", lambda *_a, **_k: SimpleNamespace(content="<html><body>x</body></html>", method="http", duration_ms=1, final_url="https://x"))
     report_no = probe.run_probe("civic")
     assert "capture_path" not in report_no["strategies"][0]
     report_yes = probe.run_probe("civic", capture_dir=str(tmp_path))

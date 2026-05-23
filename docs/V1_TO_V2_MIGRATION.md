@@ -391,3 +391,6 @@ Notas de operação:
   - `python scripts/source_dual_run_report.py mercadolivre --query "civic si" --strategy-probe --format json`
 - Captura de payload é opcional e explícita (`--capture-dir`), nunca ativa por padrão.
 - Conclusão de migração: antes de avançar com paridade/flipe V1→V2 para Mercado Livre, é necessário recuperar uma estratégia de fetch que entregue dados úteis no ambiente alvo.
+
+- Playwright é plano B diagnóstico explícito (somente manual), via `--include-browser`, sem alterar scraping de produção.
+- Comando: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`

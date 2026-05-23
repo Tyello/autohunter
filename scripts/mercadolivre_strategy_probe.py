@@ -18,12 +18,13 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--query", required=True)
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
     parser.add_argument("--capture-dir", help="Optional dir to save HTML/JSON responses. Never enabled by default.")
+    parser.add_argument("--include-browser", action="store_true", help="Include explicit Playwright diagnostic strategies (manual/read-only)")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    report = run_probe(query=args.query, capture_dir=args.capture_dir)
+    report = run_probe(query=args.query, capture_dir=args.capture_dir, include_browser=args.include_browser)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

@@ -35,6 +35,7 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--capture-html", help="optional path to persist probe HTML content")
     parser.add_argument("--strategy-probe", action="store_true", help="run manual mercadolivre strategy probe")
     parser.add_argument("--capture-dir", help="optional dir to persist strategy probe responses")
+    parser.add_argument("--include-browser", action="store_true", help="include explicit Playwright diagnostic strategies")
     args = parser.parse_args(argv)
 
     src = (args.source or "").strip().lower()
@@ -73,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.strategy_probe:
-        report = run_ml_strategy_probe(query=args.query or "", capture_dir=args.capture_dir)
+        report = run_ml_strategy_probe(query=args.query or "", capture_dir=args.capture_dir, include_browser=args.include_browser)
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
 

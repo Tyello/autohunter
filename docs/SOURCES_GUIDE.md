@@ -446,3 +446,6 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 - Use probe manual/read-only para triagem de estratégia:
   - `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`
 - Não há mudança automática de URL/default/impl nesse diagnóstico; objetivo é apenas observabilidade de fetch por estratégia.
+
+- Playwright pode ser incluído como plano B diagnóstico explícito com `--include-browser` (manual/read-only), sem mudança de comportamento de produção.
+- Exemplo: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`
