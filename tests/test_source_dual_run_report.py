@@ -7,7 +7,9 @@ import pytest
 
 from app.services.source_dual_run_report import (
     build_dual_run_report,
+    build_mercadolivre_probe_hints,
     compare_items,
+    diagnose_mercadolivre_html,
     normalize_item_for_compare,
     render_dual_run_report_markdown,
 )
@@ -197,3 +199,52 @@ def test_markdown_includes_diagnostics_hints():
     report = build_dual_run_report("mercadolivre", "https://x", [], [], v2_warnings=["challenge"])
     md = render_dual_run_report_markdown(report)
     assert "diagnostics_hints" in md
+
+
+def test_diagnose_mercadolivre_html_with_cards():
+    html = """
+    <html><head><title>Carros | Mercado Livre</title><link rel="canonical" href="https://lista.mercadolivre.com.br/veiculos"/></head>
+    <body><li class="ui-search-layout__item"><a href="https://lista.mercadolivre.com.br/veiculos/carro/MLB-123">x</a></li></body></html>
+    """
+    out = diagnose_mercadolivre_html(html)
+    assert out["selector_counts"]["li.ui-search-layout__item"] == 1
+    assert "has_mlb_links" in out["signals"]
+    assert "has_vehicle_links" in out["signals"]
+
+
+def test_diagnose_mercadolivre_html_zero_results_signal():
+    out = diagnose_mercadolivre_html("<html><body>Não encontramos resultados para sua busca</body></html>")
+    assert "zero_results" in out["signals"] or "no_results" in out["signals"]
+
+
+def test_diagnose_mercadolivre_html_access_denied_signal():
+    out = diagnose_mercadolivre_html("<html><body>Access to this page has been denied</body></html>")
+    assert "access_denied" in out["signals"] or "bot_challenge" in out["signals"]
+
+
+def test_probe_hints_links_without_cards():
+    html = "<html><body><a href='https://carro.mercadolivre.com.br/MLB-123'>Civic</a></body></html>"
+    diag = diagnose_mercadolivre_html(html)
+    hints = build_mercadolivre_probe_hints(0, diag)
+    assert "ml_links_present_but_card_selectors_missing" in hints
+
+
+def test_script_probe_fetch_and_capture(monkeypatch, capsys, tmp_path):
+    class FakeV2:
+        def scrape(self, url, ctx):
+            return SimpleNamespace(listings=[], warnings=[], blocked=False, metrics=SimpleNamespace(raw_items_found=0))
+
+    plugin = SimpleNamespace(default_extra={}, build_url=lambda q: "https://lista.mercadolivre.com.br/veiculos/civic", scrape=lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(script, "get_source", lambda _s: plugin)
+    monkeypatch.setattr(script, "get_scraper", lambda _s: FakeV2())
+    monkeypatch.setattr(
+        script,
+        "unified_fetch",
+        lambda *_args, **_kwargs: SimpleNamespace(content="<html><title>ML</title></html>", method="hybrid"),
+    )
+    capture = tmp_path / "captures" / "ml.html"
+    rc = script.main(["mercadolivre", "--query", "civic", "--format", "json", "--probe-fetch", "--capture-html", str(capture)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert '"fetch_probe"' in out
+    assert capture.exists()

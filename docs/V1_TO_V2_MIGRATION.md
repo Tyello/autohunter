@@ -372,4 +372,12 @@ Próximos comandos de validação recomendados:
 ```bash
 python scripts/source_dual_run_report.py mercadolivre --query "honda civic" --format json
 python scripts/source_dual_run_report.py mercadolivre --query "golf gti" --format json
+python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json --probe-fetch
+python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json --probe-fetch --capture-html /tmp/ml-civic-si.html
 ```
+
+Notas de operação:
+- `--probe-fetch` é **manual/read-only**: faz um fetch diagnóstico da mesma URL e adiciona `diagnostics.fetch_probe` ao report.
+- `--capture-html` **nunca é default**: só grava HTML quando informado explicitamente.
+- O HTML capturado pode conter dados de página pública e deve ficar fora do repositório.
+- Use os sinais/seletores do probe para decidir se o próximo ajuste deve ocorrer em selector/extract ou em `parse_listing`.
