@@ -348,3 +348,25 @@ Todos os arquivos obrigatórios listados acima existem no snapshot atual.
 - `INCONCLUSIVE` **não** autoriza flip para `impl=v2`.
 - Em caso de `INCONCLUSIVE`, o próximo passo é validar com outra query/URL representativa e investigar fetch/parser antes de concluir paridade.
 - O relatório também expõe `summary_reason` para deixar explícito o motivo do status calculado.
+
+## Dual-run diagnostics (Mercado Livre)
+
+- `summary_status=INCONCLUSIVE` com `summary_reason=both_paths_returned_zero_items` **não** é sinal de paridade; é sinal de investigação pendente.
+- Resultado `0/0` (V1=0 e V2=0) **não autoriza** flip para `impl=v2`.
+- O relatório agora inclui `diagnostics.hints` para orientar triagem operacional, por exemplo:
+  - `both_paths_zero_items`
+  - `try_broader_query_or_explicit_url`
+  - `check_ml_fetch_or_parser`
+  - `inspect_v2_metrics_raw_items_found`
+  - `not_safe_to_flip_to_v2`
+  - `dual_run_inconclusive_not_parity`
+  - `v2_extracted_raw_but_parsed_zero` / `likely_v2_parse_listing_gap`
+  - `v2_extracted_zero_raw_items` / `likely_fetch_or_extract_gap`
+- O payload também inclui `diagnostics.v2_metrics` (quando disponível) para diferenciar gap de fetch/extract versus parse.
+
+Próximos comandos de validação recomendados:
+
+```bash
+python scripts/source_dual_run_report.py mercadolivre --query "honda civic" --format json
+python scripts/source_dual_run_report.py mercadolivre --query "golf gti" --format json
+```

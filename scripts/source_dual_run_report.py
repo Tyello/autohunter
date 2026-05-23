@@ -24,6 +24,7 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--url", help="full search URL")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument("--limit", type=int, default=30)
+    parser.add_argument("--debug", action="store_true", help="include full diagnostics payload in markdown output")
     args = parser.parse_args(argv)
 
     src = (args.source or "").strip().lower()
@@ -87,15 +88,20 @@ def main(argv: list[str] | None = None) -> int:
             search_url,
             v1_items=v1_items,
             v2_items=v2_items,
+            query=args.query or "",
             v1_error=v1_error,
             v2_error=v2_error,
+            v2_blocked=bool(getattr(v2_result, "blocked", False)),
+            v2_warnings=list(getattr(v2_result, "warnings", []) or [])[:5],
+            v2_metrics=getattr(v2_result, "metrics", None),
         )
-        report["v2_blocked"] = bool(getattr(v2_result, "blocked", False))
-        report["v2_warnings"] = list(getattr(v2_result, "warnings", []) or [])[:5]
         if args.format == "json":
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
-            print(render_dual_run_report_markdown(report))
+            md = render_dual_run_report_markdown(report)
+            if args.debug:
+                md += "\n\n## diagnostics\n```json\n" + json.dumps(report.get("diagnostics", {}), ensure_ascii=False, indent=2) + "\n```"
+            print(md)
         return 0
     except Exception as exc:
         print(f"erro ao executar dual-run report: {exc}", file=sys.stderr)

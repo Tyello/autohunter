@@ -134,6 +134,90 @@ def compare_items(v1_items: list[dict], v2_items: list[dict]) -> dict:
     }
 
 
+
+
+def _extract_v2_metrics(v2_metrics: Any) -> dict[str, Any]:
+    if not v2_metrics:
+        return {}
+    keys = (
+        "fetch_method",
+        "fetch_blocked",
+        "fetch_error",
+        "raw_items_found",
+        "items_parsed",
+        "items_valid",
+        "items_invalid",
+        "parse_errors",
+        "total_duration_ms",
+        "circuit_breaker_state",
+    )
+    out: dict[str, Any] = {}
+    for key in keys:
+        value = getattr(v2_metrics, key, None)
+        if value is not None:
+            out[key] = value
+    return out
+
+
+def _build_diagnostics(
+    *,
+    query: str,
+    search_url: str,
+    v1_items: list[dict],
+    v2_items: list[dict],
+    v1_error: str,
+    v2_error: str,
+    v2_blocked: bool,
+    v2_warnings: list[str],
+    v2_metrics: Any = None,
+) -> dict[str, Any]:
+    parts = urlsplit(_to_clean_str(search_url))
+    v2_metrics_dict = _extract_v2_metrics(v2_metrics)
+
+    hints: list[str] = []
+    v1_count = len(v1_items or [])
+    v2_count = len(v2_items or [])
+    raw_items_found = v2_metrics_dict.get("raw_items_found")
+
+    if v1_count == 0 and v2_count == 0:
+        hints.extend([
+            "both_paths_zero_items",
+            "try_broader_query_or_explicit_url",
+            "check_ml_fetch_or_parser",
+            "inspect_v2_metrics_raw_items_found",
+            "not_safe_to_flip_to_v2",
+        ])
+        if not _to_clean_str(v1_error) and not _to_clean_str(v2_error):
+            hints.append("dual_run_inconclusive_not_parity")
+
+    if v2_count == 0 and isinstance(raw_items_found, int):
+        if raw_items_found > 0:
+            hints.extend(["v2_extracted_raw_but_parsed_zero", "likely_v2_parse_listing_gap"])
+        elif raw_items_found == 0:
+            hints.extend(["v2_extracted_zero_raw_items", "likely_fetch_or_extract_gap"])
+
+    if v2_blocked:
+        hints.append("v2_blocked")
+
+    # remove duplicados preservando ordem
+    hints = list(dict.fromkeys(hints))
+
+    return {
+        "query": _to_clean_str(query),
+        "search_url": _to_clean_str(search_url),
+        "url_host": parts.netloc or "",
+        "url_path": parts.path or "",
+        "v1_executed": True,
+        "v2_executed": True,
+        "v1_empty": v1_count == 0,
+        "v2_empty": v2_count == 0,
+        "v1_error": _to_clean_str(v1_error),
+        "v2_error": _to_clean_str(v2_error),
+        "v2_blocked": bool(v2_blocked),
+        "v2_warnings": list(v2_warnings or []),
+        "v2_metrics": v2_metrics_dict,
+        "hints": hints,
+    }
 def _summary_status_and_reason(v1_count: int, v2_count: int, *, v1_error: str = "", v2_error: str = "") -> tuple[str, str]:
     if v1_error or v2_error:
         return "FAIL", "path_execution_error"
@@ -154,8 +238,12 @@ def build_dual_run_report(
     v1_items: list[dict],
     v2_items: list[dict],
     *,
+    query: str = "",
     v1_error: str = "",
     v2_error: str = "",
+    v2_blocked: bool = False,
+    v2_warnings: list[str] | None = None,
+    v2_metrics: Any = None,
 ) -> dict:
     compare = compare_items(v1_items, v2_items)
     report = {
@@ -175,6 +263,19 @@ def build_dual_run_report(
         report["v1_error"] = _to_clean_str(v1_error)
     if v2_error:
         report["v2_error"] = _to_clean_str(v2_error)
+    report["v2_blocked"] = bool(v2_blocked)
+    report["v2_warnings"] = list(v2_warnings or [])[:5]
+    report["diagnostics"] = _build_diagnostics(
+        query=query,
+        search_url=search_url,
+        v1_items=v1_items,
+        v2_items=v2_items,
+        v1_error=v1_error,
+        v2_error=v2_error,
+        v2_blocked=v2_blocked,
+        v2_warnings=list(v2_warnings or []),
+        v2_metrics=v2_metrics,
+    )
     return report
 
 
@@ -194,6 +295,8 @@ def render_dual_run_report_markdown(report: dict) -> str:
         f"- field_diffs_count: {rpt.get('field_diffs_count', 0)}",
         f"- v2_blocked: {rpt.get('v2_blocked', False)}",
         f"- v2_warnings: {rpt.get('v2_warnings', [])}",
+        f"- diagnostics_hints: {(rpt.get('diagnostics') or {}).get('hints', [])}",
+        f"- v2_metrics: {(rpt.get('diagnostics') or {}).get('v2_metrics', {})}",
         *( [f"- v1_error: {rpt.get('v1_error')}" ] if rpt.get("v1_error") else [] ),
         *( [f"- v2_error: {rpt.get('v2_error')}" ] if rpt.get("v2_error") else [] ),
         "",
