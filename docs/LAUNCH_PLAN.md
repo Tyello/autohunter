@@ -1,239 +1,398 @@
 # Garagem Alvo — Plano de Lançamento
-> Do estado atual ao mar aberto. Três frentes em paralelo: produto, técnica e aquisição.
+
+> Do produto funcional ao lançamento público controlado. O foco agora não é provar que o bot funciona; é provar ativação, confiança, pagamento, operação e aquisição.
 
 ---
 
-## Contexto de partida
+## Status atual
 
-O produto funciona. O pipeline está completo. A cobertura de testes é boa. O que falta não é código novo — é fechar os buracos que impedem um usuário desconhecido de criar conta, receber valor em menos de 5 minutos e confiar o suficiente para pagar.
+Atualizado em: 2026-05-22.
 
-**Premissa do plano:** lançamento público em 4 semanas. Beta fechado na semana 2. Abertura gradual a partir da semana 4.
+O produto já possui:
+
+- bot Telegram com `/start` e `/menu` guiados;
+- criação e gestão de buscas/wishlists;
+- filtros implícitos e guiados;
+- busca manual/pontual;
+- tracking de anúncios;
+- alertas com contexto mínimo, score, recência e preço quando disponível;
+- plano Free/Premium;
+- upgrade com link Mercado Pago configurável;
+- ativação Premium manual/admin;
+- scheduler, filas persistentes, workers e sender;
+- source health/admin;
+- digest semanal básico;
+- leilões em piloto controlado.
+
+A lacuna de lançamento não é mais “falta produto”. É:
+
+1. ativar Premium sem operação manual frágil;
+2. medir funil de produto;
+3. validar carga/estabilidade no Raspberry;
+4. operar beta com feedback real;
+5. comunicar valor mesmo quando não há alerta;
+6. adquirir os primeiros usuários sem prometer cobertura que ainda não existe.
 
 ---
 
-## Frente 1 — Produto: fechar os bloqueadores de conversão
+## Premissa revisada
 
-### 1.1 Onboarding que entrega resultado imediato
+Premissa: lançamento público gradual após um beta fechado curto.
 
-**Problema hoje:** usuário cria busca e espera o scheduler rodar. Pode esperar 15–60 minutos sem nenhum feedback. Taxa de abandono nesse intervalo deve ser alta.
+Sequência recomendada:
+
+```text
+pré-beta técnico -> beta fechado 30–50 pessoas -> founders -> abertura gradual
+```
+
+Não abrir público amplo antes de resolver pagamento/ativação ou, no mínimo, fallback operacional de aprovação em 1 clique.
+
+---
+
+## Frente 1 — Produto e conversão
+
+### 1.1 Onboarding e primeira busca
+
+**Estado atual:** parcialmente resolvido.
+
+O usuário já consegue criar busca pelo menu/fluxo guiado. A criação agenda primeira varredura imediatamente em fila, sem esperar o scheduler natural.
+
+**O que ainda pode melhorar:**
+
+- Transformar “varredura agendada” em feedback ainda mais tangível.
+- Avaliar se vale renderizar até 3 resultados no fluxo sem bloquear o bot.
+- Se não for viável de forma segura, manter agendamento em fila e melhorar copy para explicar que o monitoramento já começou.
+
+**Tarefa recomendada:**
+
+- `LAUNCH-ONBOARDING-01`: revisar copy pós-criação e, se tecnicamente viável sem travar o callback, adicionar preview assíncrono dos primeiros resultados.
+
+**Critério de aceite:**
+
+- usuário entende imediatamente que a busca foi criada e que o bot está trabalhando;
+- falha de preview não impede salvar wishlist;
+- não há scraping síncrono pesado dentro do callback.
+
+---
+
+### 1.2 Digest semanal v2
+
+**Estado atual:** digest semanal básico existe e está registrado no scheduler.
+
+**Lacuna:** o digest ainda não comunica suficientemente valor quando não houve alerta.
 
 **O que fazer:**
 
-Ao criar uma wishlist, disparar uma busca pontual imediata (já existe `trigger_initial_run_for_wishlist` no código) e enviar os primeiros resultados como mensagem de confirmação no mesmo fluxo:
+- Mostrar que o sistema trabalhou na semana.
+- Exibir contexto por busca.
+- Diferenciar:
+  - nenhum anúncio encontrado;
+  - anúncios encontrados, mas bloqueados por filtros;
+  - anúncios encontrados, mas score baixo;
+  - source sem dados recentes.
+- Usar marca pública Garagem Alvo.
 
-```
-✅ Busca criada: "civic si manual"
-📡 Monitorando Mercado Livre, OLX, Chaves na Mão
+Exemplo desejado:
 
-Encontrei 3 anúncios relevantes agora:
-→ [lista dos 3 mais recentes]
-
-Você será avisado quando aparecer algo novo.
-```
-
-Se não houver resultado imediato, enviar mensagem honesta:
-```
-Nenhum anúncio encontrado agora para "ek9 b16".
-Esse é um carro raro — pode demorar dias ou semanas.
-Estou monitorando e você será o primeiro a saber.
-```
-
-Isso resolve o problema de "o bot está funcionando?" que todo usuário tem no primeiro dia.
-
----
-
-### 1.2 Digest semanal ativado por padrão
-
-O código já existe (`weekly_wishlist_digest_job`), mas está `default off`. Ativar para todos os usuários free e premium.
-
-O digest precisa comunicar mesmo quando não houve alerta:
-
-```
+```text
 📋 Resumo da semana — Garagem Alvo
 
 Suas buscas: civic si manual, golf gti mk7
-Monitorei 1.240 anúncios esta semana.
-Nenhum bateu com seus critérios.
+Monitorei anúncios compatíveis com suas buscas durante a semana.
 
-O mercado de Civic Si teve 2 anúncios novos
-em SP esta semana (ambos com preço acima do
-seu limite).
+Civic Si manual:
+- 2 anúncios novos em SP
+- nenhum entrou no seu limite de preço
+
+Golf GTI MK7:
+- sem anúncio novo compatível esta semana
+
+Continuo monitorando e aviso quando aparecer algo bom.
 ```
 
-Esse contexto de "o sistema está vivo e monitorando" é o que retém usuário que ainda não recebeu alerta.
+---
+
+### 1.3 Alertas com contexto
+
+**Estado atual:** amplamente resolvido.
+
+O alerta já entrega score, label humanizado, recência, preço, fonte, motivo/critério e contexto conservador de preço quando há base.
+
+**Lacunas possíveis:**
+
+- recorrência do modelo/termo em 30 dias;
+- contexto de raridade por wishlist;
+- explicação melhor quando a base de mercado é pequena.
+
+**Tarefa recomendada:**
+
+- `LAUNCH-ALERTS-01`: adicionar contexto de recorrência quando houver dado confiável em `wishlist_listing_activity` ou fonte equivalente.
 
 ---
 
-### 1.3 Contexto de mercado no alerta
+### 1.4 Pagamento funcionando sem intervenção manual frágil
 
-O alerta hoje entrega: título, preço, link. Precisa entregar também o porquê ele é relevante.
+**Estado atual:** bloqueador crítico.
 
-**Adicionar ao corpo do alerta:**
-- `📉 18% abaixo da média recente` (quando aplicável, via `market_stats_cohorts`)
-- `🔍 2ª vez que aparece esse modelo em 30 dias` (via `wishlist_listing_activity`)
-- `⚡ Anunciado há 47 minutos` (timestamp relativo)
+O fluxo atual usa link Mercado Pago configurável, mas a ativação Premium ainda é manual/admin após validação.
 
-O campo `score_breakdown` já existe na notificação. É só expor parte dele ao usuário de forma legível.
+**Opção A — caminho principal:** Mercado Pago com webhook.
+
+- Criar referência de pagamento vinculada ao usuário/chat_id.
+- Receber webhook.
+- Validar evento.
+- Ativar Premium via serviço interno.
+- Notificar usuário.
+- Notificar admin.
+- Registrar auditoria.
+
+**Opção B — fallback aceitável para beta:** aprovação em 1 clique.
+
+- Usuário envia comprovante.
+- Bot notifica admin com botões:
+  - aprovar mensal;
+  - aprovar anual;
+  - recusar.
+- Aprovação chama o mesmo serviço de ativação Premium.
+
+**Regra de lançamento:** não abrir público amplo sem uma das duas opções.
 
 ---
 
-### 1.4 Pagamento funcionando sem intervenção manual
+### 1.5 `/start` e `/menu`
 
-**Bloqueador crítico.** O fluxo atual — comprovante pelo Telegram + ativação manual pelo admin — não escala para 30+ assinantes e passa insegurança.
+**Estado atual:** resolvido o suficiente para beta.
 
-**O que implementar (ordem de esforço crescente):**
+`/start` e `/menu` já criam entrada clara para primeira busca, buscas existentes, busca pontual, tracking e plano.
 
-**Opção A (2–3 dias de trabalho):** Mercado Pago com webhook. Cria a assinatura, recebe confirmação automática, ativa o Premium via `/admin premium activate` chamado programaticamente. O Mercado Pago tem SDK Python e webhook simples.
+**Ajuste opcional:** refinar copy da primeira tela para a promessa central:
 
-**Opção B (fallback se A atrasar):** Manter fluxo manual mas adicionar bot de confirmação — quando usuário enviar comprovante, o bot identifica o valor e notifica admin com botão de aprovação de 1 clique no Telegram. Reduz o trabalho manual de 5 minutos para 10 segundos.
-
-Não lançar sem uma das duas opções.
-
----
-
-### 1.5 `/start` com CTA claro e sem pitch prematuro
-
-Hoje o `/start` faz o trabalho certo (não vende no primeiro contato). Mas precisa de uma linha que crie expectativa específica:
-
-```
+```text
 Garagem Alvo monitora anúncios de carros especiais
 e te avisa quando aparece o certo, antes de todo mundo.
-
-👉 /menu para criar sua primeira busca
 ```
 
-Sem listar features. Sem planos. Só o valor central.
+---
+
+## Frente 2 — Técnica e operação
+
+### 2.1 P0 de performance
+
+**Estado atual:** boa parte resolvida.
+
+Já há evidência de:
+
+- eager/selectin-load no claim de notificações;
+- cache de budget por usuário no sender;
+- pool SQLAlchemy explícito;
+- `ensure_source_configs` no boot do scheduler;
+- cache de summaries de wishlist.
+
+**Ainda validar:**
+
+- existência/aplicação real do índice `ix_notifications_user_sent_today`.
+
+**Tarefa recomendada:**
+
+- `LAUNCH-PERF-01`: confirmar migration do índice `ix_notifications_user_sent_today`; se ausente, criar migration e teste/guardrail.
 
 ---
 
-## Frente 2 — Técnica: o que precisa fechar antes do lançamento
+### 2.2 WebMotors
 
-### 2.1 P0 de performance (ver IMPROVEMENT_PLAN.md)
+**Estado atual:** decisão operacional tomada.
 
-Em ordem:
-1. Eager-load no sender loop — sem isso, 100 usuários = degradação perceptível
-2. Index `ix_notifications_user_sent_today`
-3. Pool SQLAlchemy explícito
-4. `ensure_source_configs` movido para boot
+WebMotors está tecnicamente implementada, mas bloqueada por PerimeterX/fingerprint e despriorizada. Não deve bloquear lançamento se outras sources estiverem entregando valor.
 
-**Prazo:** antes de abrir para beta.
+**Ação de lançamento:** comunicar cobertura real.
 
----
+Em vez de prometer “4 sites incluindo WebMotors”, usar copy honesta:
 
-### 2.2 Webmotors operacional (ver SOURCES_GUIDE.md)
-
-Webmotors tem volume alto e é a fonte onde entusiasta mais busca carro específico. Sem ela, há gap perceptível na cobertura. O plano de resolução está detalhado no documento de sources.
-
-**Prazo:** semana 1–2. Se não resolver em 2 semanas, comunicar claramente nos canais de divulgação que Webmotors está em integração.
+```text
+Monitoramos fontes automotivas em expansão. WebMotors está em integração por bloqueio anti-bot e pode não fazer parte do beta inicial.
+```
 
 ---
 
 ### 2.3 Métricas mínimas de produto
 
-Você tem `telemetry_events` mas não tem as perguntas respondidas:
+**Estado atual:** pendente.
+
+Criar `/admin metrics` para responder:
 
 | Pergunta | Onde buscar |
 |---|---|
+| Quantos usuários existem? | `users` |
 | Quantos usuários criaram busca esta semana? | `wishlists.created_at` |
+| Quantos usuários têm busca ativa? | `wishlists.is_active` |
 | Qual % recebeu pelo menos 1 alerta? | `notifications WHERE status='sent'` |
-| Qual % voltou ao bot em 7 dias? | `telemetry_events` ou `users.updated_at` |
+| Qual % voltou ao bot em 7 dias? | `telemetry_events` ou `users.updated_at` se confiável |
 | Qual a conversão Free → Premium? | `subscriptions` |
-| Qual source gera mais alertas aprovados? | `notifications JOIN car_listings` |
+| Qual source gera mais alertas enviados? | `notifications JOIN car_listings` |
+| Qual o backlog do sender? | `notifications status queued/processing` |
 
-Não precisa de dashboard bonito. Um comando `/admin metrics` no bot que retorna esses números uma vez por dia já é suficiente para operar.
+Não precisa dashboard web. Precisa caber no Telegram.
 
 ---
 
-### 2.4 Teste de carga mínimo antes do lançamento
+### 2.4 Teste de carga mínimo antes do beta
+
+**Estado atual:** pendente.
 
 Simular 50 usuários com wishlist ativa por 24h:
-- Monitorar RAM do RPi a cada 5 minutos
-- Verificar se scrape_jobs drena sem travamento
-- Verificar se sender mantém cadência sem atraso crescente
-- Verificar se Playwright não acumula processos zumbis
+
+- monitorar RAM do RPi a cada 5 minutos;
+- verificar se `scrape_jobs` drena sem travamento;
+- verificar se sender mantém cadência sem atraso crescente;
+- verificar se Playwright não acumula processos zumbis;
+- registrar relatório simples.
+
+Critério prático:
+
+- sender sem atraso crescente;
+- fila não cresce indefinidamente;
+- RAM não entra em pressão contínua;
+- nenhum processo browser acumulado;
+- falhas por source ficam isoladas.
 
 ---
 
-## Frente 3 — Aquisição: os primeiros 200 usuários sem gastar
+## Frente 3 — Aquisição e validação
 
-### 3.1 Fase beta fechada (semana 2–3) — 30–50 pessoas
+### 3.1 Beta fechado — 30–50 pessoas
 
-**Canal:** grupos de Telegram e WhatsApp de modelos específicos. Não grupos genéricos de "carro usado" — grupos de fã de Civic, Golf GTI, WRX, Opala.
+**Canal:** grupos de Telegram e WhatsApp de modelos específicos. Não grupos genéricos de carro usado.
 
-**Mensagem de entrada:**
-```
-Criei um bot que monitora anúncios de [modelo]
-em 4 sites ao mesmo tempo e avisa na hora.
-Tenho 30 vagas para beta fechado, gratuito.
+Exemplos:
+
+- Civic;
+- Golf GTI;
+- WRX;
+- Opala;
+- Jetta GLI;
+- Audi/BMW de entusiasta.
+
+Mensagem base:
+
+```text
+Criei um bot que monitora anúncios de carros especiais
+e avisa no Telegram quando aparece algo compatível.
+
+Estou abrindo 30 vagas para beta fechado gratuito.
 Quem quiser testar: @GaragemAlvoBot
 ```
 
-**Meta:** 1 alerta relevante para cada usuário beta nos primeiros 2 dias. Isso requer que as buscas dos beta users sejam acompanhadas manualmente na primeira semana.
+**Meta:** cada beta user precisa receber valor ou feedback claro nos primeiros 2 dias.
+
+Se não houver alerta, o admin precisa saber:
+
+- busca muito rara;
+- filtros muito restritivos;
+- source sem cobertura suficiente;
+- preço fora da realidade;
+- nenhum anúncio novo.
 
 ---
 
-### 3.2 Loop de conteúdo orgânico (a partir da semana 3)
+### 3.2 Acompanhamento manual dos beta users
 
-O "achado do dia" é o conteúdo natural do produto:
+Criar rotina operacional simples:
 
-1. Bot encontra anúncio abaixo do mercado ou raro
-2. Você captura o print do alerta
-3. Posta no Instagram/TikTok com o contexto: "Esse Civic Si apareceu às 7h32. Às 10h já tinha vendido."
+- usuário entrou;
+- criou busca;
+- recebeu primeiro resultado/alerta;
+- abriu anúncio;
+- rastreou algum anúncio;
+- bateu limite;
+- pediu upgrade;
+- deu feedback.
 
-Não precisa de produção elaborada. Print + contexto + resultado. Esse formato ressoa com entusiasta porque é exatamente a dor que ele sente.
-
-**Frequência mínima:** 3 posts por semana nas primeiras 4 semanas.
-
----
-
-### 3.3 Parceria com 1 canal de conteúdo automotivo
-
-Não precisa ser grande. Um canal de YouTube ou perfil de Instagram com 5.000–20.000 seguidores no nicho (JDM, clássicos, hot hatches) é mais eficaz que um com 500.000 que fala de tudo.
-
-**Proposta:** acesso vitalício Premium + link na bio ou menção em 1 vídeo. Sem dinheiro envolvido no início.
-
-**O que preparar:** um vídeo de 2 minutos mostrando o bot funcionando de verdade — criando busca, recebendo alerta, abrindo o anúncio.
+Pode começar com planilha/admin manual, mas idealmente vira `/admin metrics` + consultas curtas.
 
 ---
 
-### 3.4 Founders: fechar antes do lançamento público
+### 3.3 Loop de conteúdo orgânico
 
-O lote de Founders (R$ 149/ano) é a melhor ferramenta de validação financeira. Vender 20 Founders antes do lançamento público significa:
+O “achado do dia” é o conteúdo natural do produto:
 
-- R$ 2.980 de receita antecipada
-- 20 usuários comprometidos com feedback real
-- Prova de que pessoas pagam pelo produto
+1. Bot encontra anúncio abaixo do mercado ou raro.
+2. Você captura o print do alerta.
+3. Posta no Instagram/X/TikTok com contexto:
 
-**Como fazer:** anunciar nos grupos de beta com urgência real ("20 vagas, preço trava por 24 meses"). Não criar urgência falsa — se vender 20, fechar de verdade.
-
----
-
-## Cronograma
-
+```text
+Esse Civic Si apareceu cedo.
+Quem monitora manualmente provavelmente viu tarde.
+O Garagem Alvo avisou assim que entrou na busca.
 ```
-Semana 1
-├── Correções P0 de performance (IMPROVEMENT_PLAN.md)
-├── Início da resolução do Webmotors
-├── Implementar onboarding com resultado imediato (1.1)
-└── Iniciar pagamento automático (1.4)
 
-Semana 2
-├── Pagamento funcional (obrigatório para beta)
-├── Digest semanal ativado por padrão
-├── Beta fechado: 30–50 pessoas em grupos de nicho
-└── Acompanhamento manual das buscas dos beta users
+Frequência mínima inicial: 3 posts por semana.
 
-Semana 3
-├── Coletar e implementar feedback crítico do beta
-├── Contexto de mercado no alerta (1.3)
-├── Comando /admin metrics
-├── Primeiros posts de conteúdo orgânico
-└── Abordagem do parceiro de conteúdo
+---
 
-Semana 4
-├── Fechar lote Founders
-├── Lançamento público gradual (100 usuários/semana)
-└── Monitoramento de RAM/performance sob carga real
+### 3.4 Parceria com 1 canal de conteúdo automotivo
+
+Não precisa ser grande. Um canal/perfil de 5.000–20.000 seguidores em nicho automotivo pode ser melhor que perfil genérico enorme.
+
+Proposta inicial:
+
+- acesso Premium gratuito por período definido;
+- demonstração real do bot;
+- menção/link em bio/post/vídeo.
+
+---
+
+### 3.5 Founders
+
+Lote Founders valida disposição de pagamento.
+
+Antes de vender Founders:
+
+- pagamento/ativação não pode depender de comando manual demorado;
+- benefício precisa estar claro;
+- limite real de vagas deve ser respeitado.
+
+Exemplo de meta:
+
+- 20 Founders;
+- preço anual promocional;
+- benefício travado por período definido;
+- feedback prioritário.
+
+---
+
+## Cronograma revisado
+
+```text
+Semana 0 — Pré-beta técnico
+├── Pagamento webhook ou aprovação admin 1 clique
+├── /admin metrics v1
+├── Confirmar índice ix_notifications_user_sent_today
+├── Teste de carga 50 usuários/24h
+└── Ajustar copy pública de cobertura real das sources
+
+Semana 1 — Beta fechado
+├── 30–50 beta users em grupos de nicho
+├── Acompanhamento manual dos usuários sem primeiro alerta
+├── Correções críticas de UX/operação
+└── Coleta estruturada de feedback
+
+Semana 2 — Valor recorrente
+├── Digest semanal v2
+├── Ajustes de alertas/contexto de recorrência
+├── Primeiros posts de achados
+└── Abordagem de 1 parceiro de nicho
+
+Semana 3 — Founders
+├── Fechar oferta Founders
+├── Ativar fluxo de pagamento/ativação seguro
+├── Monitorar conversão Free → Premium
+└── Ajustar limites/copy conforme feedback
+
+Semana 4 — Abertura gradual
+├── Entrada controlada de novos usuários
+├── Monitoramento de RAM/fila/sender
+├── Growth orgânico leve
+└── Revisão do roadmap pós-beta
 ```
 
 ---
@@ -242,13 +401,39 @@ Semana 4
 
 Após 30 dias do lançamento público:
 
-- [ ] 100 usuários com pelo menos 1 busca ativa
-- [ ] 15% de conversão Free → pago (Founders + mensal)
-- [ ] Taxa de retenção de 7 dias > 60% (usuário volta ao bot)
-- [ ] Sender sem atraso > 5 minutos em horário de pico
-- [ ] Nenhum incidente de dados perdidos ou notificação duplicada em massa
-- [ ] Pelo menos 3 relatos espontâneos de "achei o carro pelo bot"
+- [ ] 100 usuários com pelo menos 1 busca ativa.
+- [ ] 15% de conversão Free → pago (Founders + mensal/anual).
+- [ ] Retenção de 7 dias > 60%.
+- [ ] Sender sem atraso > 5 minutos em horário de pico.
+- [ ] Nenhum incidente de dados perdidos ou notificação duplicada em massa.
+- [ ] Pelo menos 3 relatos espontâneos de “achei o carro pelo bot”.
+- [ ] Pelo menos 20 usuários usaram tracking ou abriram anúncio a partir de alerta.
+- [ ] Nenhuma promessa pública baseada em source despriorizada/bloqueada.
 
 ---
 
-*Documento criado em 2026-05-21. Revisar métricas e cronograma ao fechar o beta.*
+## Tarefas finais de lançamento
+
+### P0
+
+- `LAUNCH-PAY-01`: Mercado Pago webhook ou aprovação admin 1 clique.
+- `LAUNCH-METRICS-01`: `/admin metrics` v1.
+- `LAUNCH-PERF-01`: confirmar/criar índice `ix_notifications_user_sent_today`.
+- `LAUNCH-LOAD-01`: teste de carga 50 usuários/24h.
+
+### P1
+
+- `LAUNCH-DIGEST-01`: digest semanal v2.
+- `LAUNCH-COPY-01`: copy pública honesta sobre cobertura de sources.
+- `LAUNCH-BETA-01`: checklist beta fechado.
+- `LAUNCH-FOUNDERS-01`: pacote Founders.
+
+### P2
+
+- `LAUNCH-ALERTS-01`: contexto de recorrência/raridade no alerta.
+- `LAUNCH-GROWTH-01`: rotina de achados para Instagram/X/TikTok.
+- `LAUNCH-PARTNER-01`: abordagem de 1 parceiro de nicho.
+
+---
+
+*Este plano deve ser revisado ao final do beta fechado. O roadmap estrutural fica em `docs/ROADMAP.md`; os fluxos atuais ficam em `docs/USER_FLOWS.md`.*

@@ -1,5 +1,7 @@
 # Garagem Alvo / AutoHunter — Project Guideline
 
+Atualizado em: 2026-05-22.
+
 Este documento é a visão viva do runtime atual. Conteúdo histórico deve ser tratado como contexto, não como fonte de verdade quando divergir do código.
 
 ## 1) Identidade e posicionamento
@@ -31,11 +33,24 @@ wishlist include_auctions -> auction_lots -> source_configs + categorias -> matc
 
 Leilões estão em piloto controlado: há opt-in por busca, controles admin, scheduler em dry-run e runtime settings por AppKV. Envio real automático ainda não é a recomendação operacional.
 
+### Fluxos de usuário
+
+Fluxos detalhados: `docs/USER_FLOWS.md`.
+
+Resumo:
+
+- `/start` e `/menu` são portas de entrada.
+- `➕ Criar busca` é o caminho guiado principal.
+- `🎯 Minhas buscas` permite gerir filtros, pausa/reativação e remoção.
+- `🔎 Buscar agora` e `/buscar` fazem busca pontual sem salvar.
+- `⭐ Rastrear` vincula anúncios a uma wishlist.
+- `/plan` e `/upgrade` mostram limites e oferta Premium.
+
 ## 3) Superfícies do sistema
 
 - `app/bot/`: UX Telegram de usuário e admin.
 - `app/scheduler/`: scheduler, workers, sender, monitor, digest, jobs auxiliares.
-- `app/services/`: regras de negócio, source execution, matching, notificações, settings runtime.
+- `app/services/`: regras de negócio, source execution, matching, notificações, settings runtime, planos e tracking.
 - `app/sources/`: framework de plugins de sources tradicionais.
 - `app/sources/auctions/`: registry/parsers de sources de leilão.
 - `app/models/`: entidades persistidas.
@@ -87,6 +102,18 @@ As sources tradicionais são registradas por plugin em `app/sources/builtins.py`
 Exemplos já presentes no runtime incluem Mercado Livre, OLX, Chaves na Mão, WebMotors, GoGarage, iCarros, Mobiauto, Kavak, Facebook Marketplace e TurboClass.
 
 O que está ativo em produção depende do banco, não apenas do código.
+
+### Estado especial de WebMotors
+
+WebMotors está tecnicamente implementada, diagnosticável e disponível para execução manual/admin, mas operacionalmente despriorizada por bloqueio anti-bot/fingerprint PerimeterX. Não deve ser tratada como source crítica de saúde global sem nova decisão explícita.
+
+### Estado especial de TurboClass
+
+TurboClass está presente como source HTTP/feed experimental e habilitada por default, com validação operacional contínua.
+
+### V1/V2
+
+A migração V1→V2 é trilha técnica paralela. Não fazer flip geral sem inventário, dual-run e paridade por source. Referência: `docs/V1_TO_V2_MIGRATION.md`.
 
 ## 6) Leilões — estado atual
 
@@ -153,11 +180,11 @@ E deve orientar verificação de edital, taxas/comissão, documentação e visto
 
 ## 8) Tracking de anúncios por wishlist
 
-- Cada wishlist pode rastrear até 3 anúncios.
+- Cada wishlist tem até 3 slots de tracking.
+- O limite total de rastreados varia por plano.
 - Tracking mantém snapshot de preço/status por slot.
-- Alerta de queda é opt-in por slot.
+- Alerta de queda é permitido conforme plano/settings.
 - Defaults: queda mínima de R$ 500 ou 1%, cooldown 24h.
-- Job de alertas de queda permanece default off via settings.
 - Premium tem acesso ampliado a tracking/alertas conforme regras comerciais atuais.
 
 ## 9) Modelo comercial mínimo
@@ -167,11 +194,16 @@ Planos oficiais de UX:
 - **Free**
 - **Premium**
 
-Regras gerais:
+Regras gerais atuais:
 
-- Free: limite reduzido de buscas/tracking/notificações.
-- Premium: limites ampliados e alertas automáticos adicionais quando disponíveis.
-- Mercado Pago hoje funciona com validação humana/admin manual, não billing totalmente automatizado.
+- Free: até 2 buscas salvas, 1 anúncio rastreado no total, 5 alertas/dia por busca, sem alertas automáticos de tracking.
+- Premium: até 15 buscas salvas, 5 anúncios rastreados no total, até 3 slots por wishlist, alertas automáticos de tracking e 200 alertas/dia por busca.
+
+Estado de pagamento:
+
+- `/upgrade` pode exibir links Mercado Pago configuráveis.
+- Ativação Premium ainda depende de validação/admin manual.
+- Billing automático via webhook é lacuna de lançamento.
 
 ## 10) Operação e confiabilidade
 
@@ -196,6 +228,10 @@ Sinais críticos:
 - sender sem progresso;
 - notificações falhando em massa;
 - fonte user_eligible de leilão sem dados mínimos.
+
+Lacuna atual:
+
+- falta `/admin metrics` para funil de produto/comercial: usuários, buscas, alertas, retenção e conversão Free→Premium.
 
 ## 11) Storage e limpeza
 
@@ -224,12 +260,13 @@ Referência: [`docs/BACKUP_RESTORE.md`](BACKUP_RESTORE.md).
 
 ## 14) Evolução incremental recomendada
 
-Prioridades atuais após runtime de leilões:
+Prioridades atuais combinadas:
 
-1. Validar scheduler de leilões em dry-run automático.
-2. Criar digest operacional de dry-run de leilões.
-3. Melhorar leitura de qualidade por source/categoria.
-4. Só discutir envio real automático depois de ciclos de dry-run com samples bons e sem ruído.
+1. Fechar lacunas de lançamento: pagamento/ativação, `/admin metrics`, teste de carga e operação beta/founders.
+2. Continuar trilha técnica V1→V2 com inventário e dual-run controlado.
+3. Evoluir digest semanal para comunicar valor mesmo sem alerta.
+4. Avançar melhorias de inteligência: equivalência cross-source, histórico/retenção e contexto de mercado.
+5. Melhorar Admin UX sem ampliar arquitetura.
 
 ## 15) Regras de cautela
 
@@ -239,12 +276,19 @@ Prioridades atuais após runtime de leilões:
 - Não remover código legado sem evidência de uso.
 - Não misturar source técnica na UX de usuário final.
 - Não prometer valor final de leilão: lance é apenas lance.
+- Não tratar WebMotors como bloqueador imediato do lançamento se as demais sources entregarem valor.
+- Não implementar dashboard web completo antes de validar necessidade real.
 
 ## 16) Documentos relacionados
 
 - `README.md`
 - `AGENTS.md`
+- `docs/USER_FLOWS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/LLM_CONTEXT.md`
 - `docs/AUCTION_RUNTIME.md`
 - `docs/OPERATIONS_RUNBOOK.md`
+- `docs/ROADMAP.md`
+- `docs/LAUNCH_PLAN.md`
 - `docs/LEGACY_INVENTORY.md`
 - `docs/BACKUP_RESTORE.md`

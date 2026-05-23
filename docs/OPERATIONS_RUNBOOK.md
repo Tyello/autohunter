@@ -2,6 +2,8 @@
 
 > Este runbook opera o runtime interno AutoHunter, que sustenta a marca pública Garagem Alvo.
 
+Atualizado em: 2026-05-22.
+
 ## 1) Objetivo
 
 Runbook de operação diária e triagem inicial de incidentes.
@@ -25,6 +27,7 @@ Para o produto funcionar:
 7. Banco acessível e migrations em dia.
 8. `source_configs` consistentes.
 9. Para leilões: `auction_lots`, source elegível, categorias, runtime settings e dry-run/samples saudáveis.
+10. Para lançamento: métricas mínimas, pagamento/ativação e acompanhamento de beta.
 
 ## 3) Comandos admin essenciais
 
@@ -36,6 +39,7 @@ Saúde geral:
 /admin audit
 /admin sources
 /admin source <source> ...
+/admin runall <source>
 ```
 
 Leilões:
@@ -49,6 +53,22 @@ Leilões:
 /admin auctions quality
 /admin auctions notify-run --source vip --limit-wishlists 5
 ```
+
+Premium manual:
+
+```text
+/admin premium activate <chat_id> monthly
+/admin premium activate <chat_id> annual
+/admin premium status <chat_id>
+```
+
+Lacuna atual de lançamento:
+
+```text
+/admin metrics
+```
+
+Ainda precisa ser implementado para funil de produto/comercial.
 
 ## 4) Checklist de saúde geral
 
@@ -71,16 +91,20 @@ Leilões:
 
 - `source_states.next_allowed_at` não deve ficar perpetuamente no futuro para várias fontes.
 - `consecutive_blocks`/`consecutive_failures` altos indicam regressão ou anti-bot.
+- Sources `deprioritized`, como WebMotors no estado atual, não devem virar incidente crítico global se as sources primárias estiverem saudáveis.
 
 ### Notifications/sender
 
 - `notifications` deve avançar de `queued` para `sent`.
 - alta taxa de `failed/suppressed/discarded` requer investigação.
+- idade da notificação queued mais antiga é métrica importante para lançamento.
 
 ### Banco/configuração
 
 - `source_configs` deve existir para plugins/registries.
 - `is_enabled`, `sched_minutes`, browser flags e `user_eligible` coerentes.
+- `alembic heads` deve indicar head único.
+- Confirmar índice de performance de notificações por `sent_at` antes de beta maior.
 
 ## 5) Diagnóstico rápido — sequência prática
 
@@ -90,6 +114,7 @@ Leilões:
 4. Verificar fila e últimas runs.
 5. Validar source específica antes de mexer em parâmetros.
 6. Para leilões, rodar `/admin auctions readiness` antes de qualquer ajuste de scheduler.
+7. Para beta/lançamento, validar métricas de produto assim que `/admin metrics` existir.
 
 Queries úteis:
 
@@ -135,6 +160,27 @@ select status, count(*)
 from notifications
 group by status
 order by status;
+
+-- backlog do sender e idade da notificação mais antiga
+select
+  count(*) filter (where status = 'queued') as queued,
+  count(*) filter (where status = 'processing') as processing,
+  min(created_at) filter (where status = 'queued') as oldest_queued_at
+from notifications;
+
+-- alertas enviados por source nos últimos 7 dias
+select cl.source, count(*) as sent
+from notifications n
+join car_listings cl on cl.id = n.car_listing_id
+where n.status = 'sent'
+  and n.sent_at >= now() - interval '7 days'
+group by cl.source
+order by sent desc;
+
+-- usuários com busca ativa
+select count(distinct user_id) as users_with_active_wishlist
+from wishlists
+where is_active is true;
 ```
 
 ## 6) Operação de leilões — piloto atual
@@ -260,11 +306,55 @@ Bloqueios 403/429/challenge podem ser estruturais da origem.
 ### WebMotors
 
 - Bloqueio anti-bot recorrente, incluindo challenge com HTTP 200.
+- Está formalizada como `operational_role=deprioritized`.
 - Se outras sources prioritárias estiverem saudáveis, WebMotors bloqueada não deve ser incidente crítico diário.
-- Ação padrão: monitorar, manter backoff e despriorizar.
+- Ação padrão: monitorar, manter backoff e comunicar cobertura real.
 - Não aumentar agressividade e não tentar burlar challenge/captcha.
 
-## 8) Recovery básico
+### TurboClass
+
+- Source HTTP/feed experimental habilitada por default.
+- Monitorar volume, duplicidade, qualidade de normalização e ingest incremental.
+- Se gerar ruído, rebaixar operacionalmente antes de alterar arquitetura.
+
+## 8) Premium manual
+
+Fluxo atual:
+
+- usuário clica/recebe link Mercado Pago;
+- admin valida comprovante ou painel Mercado Pago;
+- admin ativa manualmente:
+
+```text
+/admin premium activate <chat_id> monthly
+/admin premium activate <chat_id> annual
+/admin premium status <chat_id>
+```
+
+Lacuna de lançamento:
+
+- webhook Mercado Pago ou aprovação de comprovante em 1 clique.
+- Não tratar Premium como billing automático enquanto isso não existir.
+
+## 9) Métricas de lançamento
+
+Enquanto `/admin metrics` não existir, usar consultas SQL.
+
+Métricas mínimas:
+
+- usuários totais;
+- usuários novos 7d;
+- usuários com busca ativa;
+- buscas criadas 7d;
+- usuários com pelo menos 1 alerta enviado;
+- alertas enviados 24h/7d;
+- top sources por alertas;
+- backlog do sender;
+- conversão Free→Premium.
+
+Essas métricas não substituem health técnico; elas medem produto/comercial.
+
+## 10) Recovery básico
 
 1. Confirmar que scheduler está de pé.
 2. Corrigir config inválida em uma source específica.
@@ -280,7 +370,7 @@ Bloqueios 403/429/challenge podem ser estruturais da origem.
 - Não remover caminho legado no meio de incidente.
 - Não ligar envio real automático de leilões.
 
-## 9) Storage / Disk pressure
+## 11) Storage / Disk pressure
 
 Diagnóstico rápido:
 
@@ -300,48 +390,51 @@ Ações:
 
 O cleanup diário remove artefatos antigos de audit/debug, mas não remove storage persistente sensível como Playwright storage/profile sem ação explícita.
 
-## 10) Backup / restore
+## 12) Backup / restore
 
 Referência: `docs/BACKUP_RESTORE.md`.
 
 Nunca rodar restore real sem dry-run, validação e janela operacional.
 
-## 11) Alembic
+## 13) Alembic
 
 - Manter head único.
 - Rodar `alembic heads` antes de PR com migration.
 - Validar migrations reais em PostgreSQL/Supabase quando houver alteração de schema.
 
-## 12) Premium manual
+## 14) Teste de carga pré-beta
 
-Fluxo atual:
+Antes de abrir para 30–50 beta users:
 
-- usuário clica/recebe link Mercado Pago;
-- admin valida comprovante ou painel Mercado Pago;
-- admin ativa manualmente:
+- simular 50 usuários com wishlist ativa;
+- monitorar RAM/CPU;
+- acompanhar `scrape_jobs` por status;
+- medir idade da notificação queued mais antiga;
+- observar processos Playwright;
+- registrar relatório.
 
-```text
-/admin premium activate <chat_id> monthly
-/admin premium activate <chat_id> annual
-/admin premium status <chat_id>
-```
+Critério: fila drena, sender não atrasa de forma crescente, RAM estabiliza e browser não acumula zumbis.
 
-## 13) Quando escalar investigação
+## 15) Quando escalar investigação
 
 Escalar quando houver:
 
 - stale global persistente;
-- muitas sources bloqueadas simultaneamente;
+- muitas sources primárias bloqueadas simultaneamente;
 - fila crescendo sem drenagem;
 - sender sem progresso;
 - regressão contínua de matching;
-- leilões gerando samples ruins repetidamente mesmo com gates.
+- leilões gerando samples ruins repetidamente mesmo com gates;
+- pagamento/ativação Premium falhando durante beta/founders.
 
-## 14) Referências
+## 16) Referências
 
 - `README.md`
 - `AGENTS.md`
+- `docs/USER_FLOWS.md`
 - `docs/PROJECT_GUIDELINE.md`
 - `docs/AUCTION_RUNTIME.md`
+- `docs/LAUNCH_PLAN.md`
+- `docs/ROADMAP.md`
 - `docs/LEGACY_INVENTORY.md`
 - `docs/BACKUP_RESTORE.md`

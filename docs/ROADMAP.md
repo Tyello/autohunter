@@ -9,6 +9,7 @@ AutoHunter / Garagem Alvo é um bot Telegram-first para monitoramento inteligent
 Não é marketplace genérico.
 Não é loja.
 Não é concessionária.
+Não é dashboard web-first.
 
 O foco é ajudar usuários a encontrar:
 
@@ -45,23 +46,35 @@ Superfícies principais:
 Concluído/estabilizado:
 
 - Score vNext.
-- Paridade v1/v2.
-- Source Health Gate.
 - Mensagem vNext.
-- Logotipo/imagem da marca.
+- Source Health Gate.
 - Contract enforcement/qualidade do NormalizedAd.
-- Primeira execução imediata ao criar wishlist.
 - Auditoria completa das sources.
 - Controle de anúncios inativos cross-source.
 - Diagnóstico admin de sources.
+- Admin Deploy via Telegram.
+- Logotipo/imagem da marca.
+- UX guiada com `/start` e `/menu`.
+- Criação guiada de wishlist/busca.
+- Filtros implícitos e guiados por preço, ano, km, cidade e estado.
+- Suporte core para filtros avançados como cor, source, vendedor, carroceria e portas.
+- Primeira varredura agendada imediatamente ao criar wishlist.
+- Busca manual/pontual com `/buscar` e fluxo conversacional.
+- Botão `⭐ Rastrear` em alertas/resultados quando aplicável.
+- Tracking de anúncios por wishlist com limite de slots.
+- Alertas de queda de preço/status para tracking quando plano/settings permitem.
+- `/plan` com uso de limites e `/upgrade` com copy comercial.
+- Digest semanal básico.
+- Backup/restore mínimo.
 - `browser_block_resources` configurável por source.
 - Warmup Webmotors mensurável.
 - `curl_cffi` experimental para Webmotors.
 - Classificação blocked/error corrigida para Webmotors.
 - Webmotors formalizada como `operational_role=deprioritized`.
 - Sources `deprioritized` fora da saúde crítica global.
-- Admin Deploy via Telegram concluído e removido do roadmap.
-- WebMotors erro de proxy removido como item; agora tratado como bloqueio anti-bot/fingerprint.
+- TurboClass habilitada por default como source HTTP/feed experimental.
+- Inventário automático V1/V2 de sources.
+- Dual-run report inicial para Mercado Livre.
 
 ## 3. Decisão operacional — Webmotors
 
@@ -109,77 +122,107 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 
 ## 4. Roadmap priorizado
 
-### P1 — Wishlist: filtros por cor, cidade e estado
+### P1 — Lançamento: pagamento e ativação Premium sem gargalo manual
 
-**Objetivo:** permitir que o usuário refine uma wishlist por cor, cidade e UF.
+**Objetivo:** remover o maior bloqueador comercial antes de beta/público.
 
-**Por que é prioridade:** entrega valor direto para o usuário final e reduz ruído.
+**Estado atual:** `/upgrade` e links Mercado Pago existem, mas ativação Premium ainda depende de validação/admin manual.
 
-**Escopo:**
+**Escopo recomendado:**
 
-- persistir campos opcionais na wishlist;
-- ajustar fluxo guiado Telegram;
-- ajustar edição/listagem de wishlist;
-- aplicar filtros no matching;
-- normalizar cor/cidade/UF vindas das sources;
-- exibir filtros ativos no resumo;
-- manter comportamento atual quando filtros estiverem vazios.
+- Opção principal: Mercado Pago webhook com ativação automática de Premium.
+- Fallback aceitável: comprovante no Telegram com botão admin de aprovação em 1 clique.
+- Reusar serviço interno de ativação Premium.
+- Registrar auditoria e notificar usuário/admin.
 
 **Critério de aceite:**
 
-- usuário cria wishlist com cor/cidade/UF;
-- usuário edita filtros;
-- matching respeita filtros preenchidos;
-- filtros vazios não quebram comportamento existente;
-- testes cobrem filtros preenchidos e ausentes.
+- usuário paga e Premium é ativado sem digitar comando manual;
+- admin consegue auditar evento;
+- `/plan` reflete Premium;
+- falhas são visíveis e recuperáveis.
 
-### P2 — Rastrear até 3 anúncios por wishlist
+### P2 — `/admin metrics` de produto/comercial
 
-**Objetivo:** permitir que o usuário monitore até 3 anúncios específicos por wishlist.
+**Objetivo:** operar beta e lançamento com números mínimos, sem dashboard web.
 
-**Escopo:**
+**Métricas mínimas:**
 
-- adicionar/listar/remover rastreados;
-- respeitar limite de 3;
-- melhorar mensagens para limite, duplicidade, slot vazio e anúncio indisponível;
-- preservar controle do que já foi notificado;
-- tratar anúncio órfão/inativo com mensagem clara.
-
-**Critério de aceite:**
-
-- até 3 anúncios rastreados por wishlist;
-- tentativa do quarto anúncio retorna mensagem clara;
-- usuário consegue remover e liberar slot;
-- listagem mostra status dos rastreados.
-
-### P3 — Backup e recuperação de users/wishlists
-
-**Objetivo:** criar rotina segura de backup/restore dos dados críticos.
-
-**Dados prioritários:**
-
-- users;
-- wishlists;
-- filtros;
-- tracked listings;
-- preferências/plano;
-- histórico mínimo de notificações, se fizer sentido.
-
-**Escopo:**
-
-- script de export;
-- script de restore controlado;
-- documentação operacional;
-- avaliar se `car_listings` entra no backup ou se basta histórico enxuto.
+- usuários totais e novos nos últimos 7 dias;
+- usuários com busca ativa;
+- buscas criadas nos últimos 7 dias;
+- percentual de usuários que recebeu pelo menos 1 alerta;
+- alertas enviados 24h/7d;
+- backlog do sender;
+- conversão Free → Premium;
+- top sources por alertas enviados;
+- sinais simples de retenção de 7 dias.
 
 **Critério de aceite:**
 
-- backup versionado por data/hora;
-- restore documentado;
-- dados críticos recuperáveis;
-- sem exposição de tokens/segredos.
+- `/admin metrics` responde no Telegram;
+- não expõe dados sensíveis desnecessários;
+- serve para decisão diária do beta.
 
-### P4 — Testes de regressão por source com fixtures reais
+### P3 — Teste de carga e prontidão de beta
+
+**Objetivo:** validar o runtime em Raspberry Pi 4 4GB antes de abrir para 30–50 beta users.
+
+**Escopo:**
+
+- simular 50 usuários com wishlist ativa;
+- monitorar RAM/CPU/fila/sender;
+- verificar se `scrape_jobs` drena;
+- verificar atraso máximo do sender;
+- verificar Playwright sem processos zumbis;
+- documentar resultado.
+
+**Critério de aceite:**
+
+- runbook/script de teste existe;
+- resultado documentado;
+- gargalos viram tarefas explícitas antes do beta.
+
+### P4 — Digest semanal v2
+
+**Objetivo:** comunicar valor mesmo quando não houve alerta.
+
+**Estado atual:** digest semanal básico existe.
+
+**Escopo:**
+
+- volume monitorado por semana;
+- contexto por wishlist;
+- anúncios encontrados mas bloqueados por filtro quando possível;
+- ausência honesta quando não houve resultado;
+- branding público como Garagem Alvo.
+
+**Critério de aceite:**
+
+- usuário entende que o sistema trabalhou;
+- digest não inventa dados;
+- digest melhora retenção de usuários sem alerta.
+
+### P5 — Operação beta/founders/growth
+
+**Objetivo:** transformar produto funcional em validação real de mercado.
+
+**Escopo:**
+
+- checklist de beta fechado;
+- acompanhamento manual dos usuários sem primeiro alerta;
+- pacote Founders;
+- textos de divulgação;
+- rotina de posts com achados;
+- parceria pequena em nicho automotivo.
+
+**Critério de aceite:**
+
+- 30–50 beta users acompanháveis;
+- 20 Founders possíveis sem operação caótica;
+- feedback e conversão medidos.
+
+### P6 — Testes de regressão por source com fixtures reais
 
 **Objetivo:** reduzir regressões de scraping/parsing por mudança de layout.
 
@@ -207,7 +250,26 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - parser quebra teste se layout esperado mudar;
 - fixtures não contêm dados sensíveis.
 
-### P5 — Unificação de anúncios equivalentes cross-source
+### P7 — V1→V2: dual-run e paridade por source
+
+**Objetivo:** migrar tecnicamente sem quebrar ingestão/matching.
+
+**Estado atual:** inventário automático existe e dual-run report inicial suporta Mercado Livre.
+
+**Escopo:**
+
+- expandir dual-run para OLX, iCarros, Chaves na Mão e Mobiauto;
+- medir divergência de campos críticos;
+- preservar heurísticas do caminho ativo;
+- só flipar source após evidência.
+
+**Critério de aceite:**
+
+- relatório mostra paridade aceitável;
+- divergências conhecidas viram tarefas;
+- nenhuma source crítica muda para v2 sem rollback.
+
+### P8 — Unificação de anúncios equivalentes cross-source
 
 **Objetivo:** avaliar anúncios equivalentes em plataformas diferentes e reduzir duplicidade.
 
@@ -224,7 +286,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - não altera notificações automaticamente na primeira fase;
 - evita colapsar anúncios distintos por engano.
 
-### P6 — Histórico de notificação e retenção
+### P9 — Histórico de notificação e retenção
 
 **Objetivo:** evitar renotificação indevida e controlar crescimento de histórico.
 
@@ -241,7 +303,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - histórico não cresce sem controle;
 - anúncios inativos têm estado claro.
 
-### P7 — Admin UX incremental
+### P10 — Admin UX incremental
 
 **Objetivo:** reduzir dependência de SQL/log no Raspberry.
 
@@ -260,7 +322,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - mensagens não ficam longas demais;
 - não expõe segredos.
 
-### P8 — Segurança admin
+### P11 — Segurança admin
 
 **Objetivo:** garantir que somente o chat admin autorizado tenha acesso a comandos administrativos.
 
@@ -275,29 +337,27 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - comandos admin rejeitados fora do chat permitido;
 - testes cobrem permissões.
 
-### P9 — Growth/branding
+## 4.1 Itens que deixaram de ser roadmap ativo
 
-**Objetivo:** preparar comunicação inicial do Garagem Alvo.
+Os itens abaixo já foram implementados, estabilizados ou absorvidos por frentes maiores:
 
-**Escopo:**
+- filtros guiados por cidade/estado;
+- suporte core a filtro de cor;
+- tracking de anúncios por wishlist;
+- UX de `/start` e `/menu`;
+- busca manual conversacional;
+- contexto mínimo em alerta;
+- contexto conservador de preço;
+- texto de upgrade orientado à dor;
+- horário de renovação do limite diário;
+- Admin Deploy via Telegram;
+- erro de proxy WebMotors como item isolado.
 
-- bio curta do bot;
-- mensagem de boas-vindas mais comercial;
-- exemplos de uso;
-- textos para canal/grupo;
-- posts futuros Instagram/X com carros encontrados.
-
-**Critério de aceite:**
-
-- usuário entende proposta em poucos segundos;
-- linguagem alinhada ao público entusiasta;
-- separação clara Free/Premium, se aplicável.
-
-## 4.1 Trilha técnica paralela — V1→V2 das sources
+## 4.2 Trilha técnica paralela — V1→V2 das sources
 
 - A trilha V1→V2 é **técnica de estabilização**, não um flip imediato de arquitetura.
-- Ela **não substitui** o P1 de produto, que continua sendo filtros de wishlist por cor/cidade/UF.
-- Próxima ação técnica: inventário automático de cobertura V1/V2 + dual-run controlado nas sources principais.
+- Ela **não substitui** as prioridades de lançamento.
+- Próxima ação técnica: expandir dual-run controlado para sources principais.
 - Webmotors está fora do caminho crítico da migração (source deprioritized, útil como fixture de blocked/challenge).
 - Referência: `docs/V1_TO_V2_MIGRATION.md`.
 
@@ -310,30 +370,35 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - Dashboard web completo.
 - ML/IA avançada.
 - API pública.
-- Monetização avançada.
+- Monetização avançada além do Premium/Founders inicial.
 - Multi-categoria fora de carros.
 
 Esses itens só entram após decisão explícita.
 
 ## 6. Ordem recomendada de execução
 
-1. Wishlist — filtros por cor, cidade e estado.
-2. Rastrear até 3 anúncios por wishlist.
-3. Backup/recuperação.
-4. Fixtures reais por source.
-5. Equivalência cross-source em modo diagnóstico.
-6. Histórico/retenção.
-7. Admin UX.
-8. Segurança admin.
-9. Growth/branding.
-10. Webmotors POC avançada somente com decisão explícita.
+1. Pagamento/ativação Premium sem gargalo manual.
+2. `/admin metrics`.
+3. Teste de carga/prontidão beta.
+4. Digest semanal v2.
+5. Operação beta/founders/growth.
+6. Fixtures reais por source.
+7. Dual-run/paridade V1→V2 por source.
+8. Equivalência cross-source em modo diagnóstico.
+9. Histórico/retenção.
+10. Admin UX.
+11. Segurança admin.
+12. Webmotors POC avançada somente com decisão explícita.
 
 ## 7. Referências
 
 - `README.md`
+- `AGENTS.md`
+- `docs/USER_FLOWS.md`
 - `docs/LLM_CONTEXT.md`
 - `docs/ARCHITECTURE.md`
 - `docs/PROJECT_GUIDELINE.md`
+- `docs/LAUNCH_PLAN.md`
 - `docs/AUCTION_RUNTIME.md`
 - `docs/OPERATIONS_RUNBOOK.md`
 - `docs/DOCUMENTATION_AUDIT.md`
