@@ -105,6 +105,22 @@ Ainda precisa ser implementado para funil de produto/comercial.
 - `is_enabled`, `sched_minutes`, browser flags e `user_eligible` coerentes.
 - `alembic heads` deve indicar head único.
 - Confirmar índice de performance de notificações por `sent_at` antes de beta maior.
+- Rodar validação read-only do schema PostgreSQL/Supabase:
+
+```bash
+DATABASE_URL=postgresql+psycopg://<user>:<pass>@<host>/<db> python scripts/validate_postgres_schema.py
+```
+
+Resultado da validação:
+- `OK`: check validado com sucesso.
+- `WARNING`: check não bloqueante (atenção operacional).
+- `FAIL`: incompatibilidade real de schema/runtime; exige ação antes de seguir.
+
+Ações recomendadas por falha:
+- `alembic_version` ausente: criar base versionada com migrations do projeto (ex.: `alembic stamp <revision>` para baseline correto + `alembic upgrade head` em janela controlada).
+- revision atual diferente do head: revisar cadeia de migrations aplicada no ambiente e executar upgrade planejado até o head único.
+- colunas críticas ausentes em `car_listings` (`doors`, `body_type`, `cross_source_fingerprint`): aplicar migrations pendentes antes de liberar workers/scheduler.
+- índice `ix_notifications_user_sent_today` ausente/incorreto: revisar migration `f6a1b2c3d4e5_notifications_sent_at_index.py` e corrigir o índice partial em PostgreSQL (`WHERE status = 'sent'`).
 
 ## 5) Diagnóstico rápido — sequência prática
 
