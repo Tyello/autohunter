@@ -1,16 +1,13 @@
 # /etc/cron.d/autohunter
-# Cron jobs para manutenÁ„o do AutoHunter
+# Cron jobs para manuten√ß√£o do AutoHunter
 
-# Limpeza de cache a cada 6 horas
-0 */6 * * * autohunter /home/autohunter/autohunter/venv/bin/python -c "from scripts.cache_manager import get_cache; get_cache().cleanup_expired()"
-
-# Vacuum database (toda segunda 3am)
-0 3 * * 1 autohunter /home/autohunter/autohunter/venv/bin/python scripts/database_optimizer.py vacuum
+# Limpeza operacional (logs/eventos/jobs/runs/notifica√ß√µes) a cada 6 horas
+0 */6 * * * autohunter /home/autohunter/autohunter/venv/bin/python /home/autohunter/autohunter/scripts/cleanup_operational_data.py --apply
 
 # Backup database (todos os dias 2am)
 0 2 * * * autohunter /home/autohunter/autohunter/scripts/backup_db.sh
 
-# Restart serviÁo (toda semana)
+# Restart servi√ßo (toda semana)
 0 4 * * 0 root systemctl restart autohunter.service
 
 # Cleanup de logs antigos (mensal)

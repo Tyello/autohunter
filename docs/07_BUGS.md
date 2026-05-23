@@ -74,14 +74,34 @@ WHERE status = 'sent';
 
 **Arquivo:** `config/raspberry-pi/crontab`
 
-**Problema:** esses scripts foram mantidos "por segurança operacional" mas podem estar referenciados no crontab do RPi real. Se forem removidos sem atualizar o crontab, o cron vai logar erros silenciosamente.
+**Status:** corrigido nesta branch.
 
-**Validar:**
+**Correção aplicada:** removidas referências a scripts legados e consolidada limpeza operacional em:
+
 ```bash
-cat config/raspberry-pi/crontab | grep -E "cache_manager|database_optimizer"
+/home/autohunter/autohunter/venv/bin/python /home/autohunter/autohunter/scripts/cleanup_operational_data.py --apply
 ```
 
-**Se referenciados:** atualizar crontab para usar `scripts/cleanup_operational_data.py` antes de remover.
+**Validação operacional contínua:**
+```bash
+grep -E "cache_manager|database_optimizer" config/raspberry-pi/crontab
+```
+
+---
+
+
+## BUG-08 — Chamada incompatível em `match_listings_for_active_wishlists` (P0 runtime)
+
+**Arquivo:** `app/services/matching_service.py`
+
+**Problema confirmado:** havia chamada incorreta `match_listing_to_wishlist(w, l).ok` dentro do loop de match ativo.
+
+- assinatura real exige `db` como primeiro parâmetro;
+- retorno é `bool`, sem atributo `.ok`.
+
+**Status:** corrigido nesta branch para `match_listing_to_wishlist(db, w, l)`.
+
+**Cobertura de regressão:** adicionada para garantir execução sem `TypeError`/`AttributeError` e inclusão de listing compatível no resultado.
 
 ---
 
@@ -180,7 +200,8 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 |---|---|---|---|
 | BUG-01 | Alta — escala | Trivial (1 linha) | Aberto |
 | BUG-02 | Alta — performance | Baixo (validar + migration) | Aberto |
-| BUG-03 | Média — operação | Baixo (verificar crontab) | Aberto |
+| BUG-03 | Média — operação | Baixo | Corrigido |
+| BUG-08 | Alta — runtime | Baixo | Corrigido |
 | BUG-04 | Alta — estabilidade | Médio (testar em staging) | Aberto |
 | BUG-05 | Média — produto | Médio (handlers + matching) | Aberto |
 | BUG-06 | Baixa — produto | Alto (implementar + observar) | Aberto |

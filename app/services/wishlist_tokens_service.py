@@ -28,6 +28,8 @@ class CandidateStats:
     candidates_total: int
     candidates_p50: int
     candidates_p95: int
+    unique_tokens: int = 0
+    wishlists_loaded: int = 0
 
 
 def extract_tokens(text: str) -> list[str]:
@@ -103,6 +105,43 @@ def candidate_wishlist_ids_for_listing_tokens(
     return [r[0] for r in rows]
 
 
+
+
+def candidate_wishlist_ids_for_listings(
+    db: Session,
+    *,
+    listing_id_to_text: dict,
+    min_overlap: int = 2,
+    max_candidates: int = 500,
+) -> tuple[dict, CandidateStats]:
+    cand_map: dict = {}
+    counts: list[int] = []
+    unique_tokens: set[str] = set()
+    all_wishlist_ids: set = set()
+
+    for listing_id, text in (listing_id_to_text or {}).items():
+        ltoks = extract_tokens(text or "")
+        unique_tokens.update(ltoks)
+        cids = candidate_wishlist_ids_for_listing_tokens(
+            db,
+            ltoks,
+            min_overlap=min_overlap,
+            max_candidates=max_candidates,
+        )
+        cand_map[listing_id] = cids
+        counts.append(len(cids))
+        all_wishlist_ids.update(cids)
+
+    base = compute_candidate_stats(counts)
+    stats = CandidateStats(
+        listings=base.listings,
+        candidates_total=base.candidates_total,
+        candidates_p50=base.candidates_p50,
+        candidates_p95=base.candidates_p95,
+        unique_tokens=len(unique_tokens),
+        wishlists_loaded=len(all_wishlist_ids),
+    )
+    return cand_map, stats
 def compute_candidate_stats(counts: Sequence[int]) -> CandidateStats:
     if not counts:
         return CandidateStats(listings=0, candidates_total=0, candidates_p50=0, candidates_p95=0)
