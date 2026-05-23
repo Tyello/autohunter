@@ -878,7 +878,7 @@ def match_listings_for_active_wishlists(
             w = wl_by_id.get(wid)
             if not w:
                 continue
-            if match_listing_to_wishlist(w, l).ok:
+            if match_listing_to_wishlist(db, w, l):
                 out[w.id].append(l)
 
     stats = {

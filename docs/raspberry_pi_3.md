@@ -252,3 +252,17 @@ Se o erro incluir `Permission denied` para:
 - `/home/autohunter/.config/git/ignore` → `home_not_accessible_from_service`
 
 trata-se de sintoma típico de sandbox de systemd no serviço do bot. Revise o override de `autohunter-bot.service` e confirme que o processo consegue ler `/home/autohunter`.
+
+## Cron operacional (RPi)
+
+Use o crontab versionado em `config/raspberry-pi/crontab`.
+Ele não deve referenciar scripts legados (`cache_manager`/`database_optimizer`) e deve usar `scripts/cleanup_operational_data.py --apply` para limpeza operacional recorrente.
+
+Aplicação no host:
+
+```bash
+sudo cp config/raspberry-pi/crontab /etc/cron.d/autohunter
+sudo chown root:root /etc/cron.d/autohunter
+sudo chmod 644 /etc/cron.d/autohunter
+sudo systemctl restart cron
+```
