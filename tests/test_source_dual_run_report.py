@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,18 @@ from app.services.source_dual_run_report import (
     render_dual_run_report_markdown,
 )
 from scripts import source_dual_run_report as script
+
+
+def test_script_bootstraps_project_root_before_app_imports():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "source_dual_run_report.py"
+    content = script_path.read_text(encoding="utf-8")
+
+    bootstrap_idx = content.index("ROOT = Path(__file__).resolve().parents[1]")
+    sys_path_insert_idx = content.index("sys.path.insert(0, str(ROOT))")
+    app_import_idx = content.index("from app.scrapers.sources import get_scraper")
+
+    assert bootstrap_idx < app_import_idx
+    assert sys_path_insert_idx < app_import_idx
 
 
 def test_normalize_item_for_compare_defensive():
