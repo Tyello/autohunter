@@ -86,6 +86,13 @@
 ### Status atual
 Caminho ativo é robusto e contém mecanismos anti-bloqueio/anti-ruído que não devem ser tratados como “gap total”.
 
+### Atualização recente (dual-run V2 HTML)
+- Em dual-run recente, V2 já alcançou HTML por `browser_fallback` com `raw_items_found > 0`, indicando evolução do fetch.
+- O gap principal estava na normalização: `parse_listing` retornava `None` para cards HTML sem título visível.
+- O V2 passou a reaproveitar `_parse_polycard_items` (caminho validado no V1) no branch HTML, convertendo os itens POLYCARD para o formato raw do V2 e aplicando dedupe por `id`.
+- Também foi adicionado fallback defensivo de título (img/link/slug de URL) para evitar descarte total quando o card não possui `h2`/`title`.
+- Próximo gate operacional: retomar paridade dual-run com V1 e V2 > 0 quando não houver captcha temporário no ML.
+
 ### Já implementado no caminho ativo
 - `curl_cffi` intermediário.
 - POLYCARD + merge com parser HTML.
