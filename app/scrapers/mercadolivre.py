@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.fetching import fetch_html_with_browser_fallback
+from app.services.browser_fetcher import fetch_html_browser
 from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
@@ -124,22 +125,16 @@ def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext],
     if not (settings.enable_playwright and ctx and getattr(ctx, "browser_fallback_enabled", False)):
         return html
 
-    proxy = getattr(ctx, "proxy_server", None)
-    return fetch_html_with_browser_fallback(
+    browser_res = fetch_html_browser(
         url,
         ctx=ctx,
-        timeout=timeout,
-        referer="https://lista.mercadolivre.com.br/",
-        proxy=proxy,
+        timeout_ms=timeout * 1000,
+        wait_until="networkidle",
         min_delay_ms=250,
         max_delay_ms=900,
-        wait_until="networkidle",
-        timeout_ms=timeout * 1000,
-        browser_min_delay_ms=250,
-        browser_max_delay_ms=900,
         block_resources=False,
-        allow_browser_fallback=True,
     )
+    return browser_res.html
 
 
 def _unescape_ml(s: str) -> str:
