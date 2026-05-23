@@ -1,6 +1,6 @@
 # Garagem Alvo / AutoHunter — Guia de contexto para LLMs
 
-Atualizado em: 2026-05-21.
+Atualizado em: 2026-05-22.
 
 Este documento existe para orientar qualquer LLM, agente ou pessoa técnica que precise entender o projeto sem depender de memória informal de conversas anteriores.
 
@@ -18,9 +18,10 @@ O projeto não é marketplace, loja, concessionária, dashboard web-first ou scr
 Ordem de confiança:
 
 1. Código atual e migrations.
-2. Docs vivos: `README.md`, `AGENTS.md`, `docs/PROJECT_GUIDELINE.md`, `docs/ARCHITECTURE.md`, `docs/AUCTION_RUNTIME.md`, `docs/OPERATIONS_RUNBOOK.md`.
-3. Runbooks e inventários específicos.
-4. Documentos históricos somente como contexto.
+2. Estado operacional em banco: `source_configs`, `source_states` e `AppKV`.
+3. Docs vivos: `README.md`, `AGENTS.md`, `docs/USER_FLOWS.md`, `docs/PROJECT_GUIDELINE.md`, `docs/ARCHITECTURE.md`, `docs/AUCTION_RUNTIME.md`, `docs/OPERATIONS_RUNBOOK.md`.
+4. Runbooks e inventários específicos.
+5. Documentos históricos somente como contexto.
 
 Quando houver divergência, o código atual vence. Para operação efetiva de sources, o banco vence defaults: `source_configs`, `source_states` e `AppKV` determinam o estado real.
 
@@ -38,6 +39,12 @@ Leilões:
 wishlist include_auctions -> auction_lots -> source_configs/user_eligible/categorias -> matching/gates -> dry-run/samples/preview -> envio controlado
 ```
 
+Jornada de usuário:
+
+```text
+/start ou /menu -> criar busca -> filtros/revisão -> monitoramento recorrente -> alerta -> abrir anúncio ou rastrear -> plano/upgrade se bater limite
+```
+
 A API/FastAPI é auxiliar. Não trate `/listings` ou `/admin/health` como jornada principal do produto.
 
 ## 4. Principais diretórios
@@ -47,7 +54,7 @@ A API/FastAPI é auxiliar. Não trate `/listings` ou `/admin/health` como jornad
 - `app/services/`: regras de negócio e coordenação operacional.
 - `app/sources/`: plugins e registry de sources tradicionais.
 - `app/sources/auctions/`: sources/parsers de leilão.
-- `app/scrapers/`: scrapers tradicionais e bridges legadas.
+- `app/scrapers/`: scrapers tradicionais, v2/unified e bridges legadas.
 - `app/models/`: modelos SQLAlchemy.
 - `alembic/`: migrations. Deve ter head único.
 - `docs/`: documentação viva e histórica.
@@ -58,13 +65,16 @@ A API/FastAPI é auxiliar. Não trate `/listings` ou `/admin/health` como jornad
 
 1. `README.md`
 2. `AGENTS.md`
-3. `docs/PROJECT_GUIDELINE.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/AUCTION_RUNTIME.md`
-6. `docs/OPERATIONS_RUNBOOK.md`
-7. `docs/LEGACY_INVENTORY.md`
-8. Código central:
+3. `docs/USER_FLOWS.md`
+4. `docs/PROJECT_GUIDELINE.md`
+5. `docs/ARCHITECTURE.md`
+6. `docs/AUCTION_RUNTIME.md`
+7. `docs/OPERATIONS_RUNBOOK.md`
+8. `docs/LEGACY_INVENTORY.md`
+9. Código central:
    - `app/bot/run.py`
+   - `app/bot/handlers_core.py`
+   - `app/bot/handlers.py`
    - `app/scheduler/run.py`
    - `app/services/source_execution_service.py`
    - `app/sources/builtins.py`
@@ -83,16 +93,21 @@ A API/FastAPI é auxiliar. Não trate `/listings` ou `/admin/health` como jornad
 - Não aumentar agressivamente browser/Playwright; o runtime deve respeitar Raspberry Pi 4 4GB.
 - Leilões estão em piloto controlado, com `VIP Leilões` como caminho user-facing principal e sources experimentais fora do usuário final.
 - Leilão precisa sempre deixar claro: lance não é preço final.
+- WebMotors está tecnicamente implementada, mas despriorizada operacionalmente por bloqueio anti-bot/fingerprint.
+- V1/V2 de scrapers é trilha técnica incremental, não flip global.
 
 ## 7. Estado funcional atual, em alto nível
 
 Já existem:
 
 - bot Telegram com comandos públicos e admin;
+- `/start` e `/menu` com UX guiada;
 - criação/listagem/gestão de buscas/wishlists;
-- filtros por busca;
-- tracking de até 3 anúncios por wishlist;
-- plano Free/Premium com ativação operacional/admin;
+- filtros implícitos e guiados por busca;
+- busca manual/pontual (`/buscar` e menu);
+- tracking de até 3 slots por wishlist, respeitando limites de plano;
+- alertas de queda de preço/status quando permitido por plano/settings;
+- plano Free/Premium com limites, `/plan`, `/upgrade` e ativação operacional/admin;
 - scheduler recorrente;
 - fila persistente `scrape_jobs`;
 - workers HTTP/browser;
@@ -101,8 +116,10 @@ Já existem:
 - sender Telegram;
 - source health/admin diagnostics;
 - fontes tradicionais via plugins;
+- v1/v2/dual-run de sources em trilha técnica;
 - frente de leilões com opt-in por busca, sources controladas, dry-run, samples, readiness, digest e piloto manual controlado;
-- backup/restore mínimo documentado.
+- backup/restore mínimo documentado;
+- digest semanal básico.
 
 ## 8. Pontos sensíveis
 
@@ -118,9 +135,16 @@ Já existem:
 - ingest/matching/notificação;
 - activity reconciliation.
 
+### Bot/UX
+
+- Fluxo guiado é preferencial.
+- Comandos legados continuam úteis para usuários técnicos e compatibilidade.
+- Não capturar callbacks de ConversationHandler com handlers globais.
+- Não colocar regra de negócio pesada nos handlers.
+
 ### v1/v2/dual-run
 
-Caminhos de adapter v1/v2/dual ainda existem por compatibilidade/migração. Não remover sem evidência.
+Caminhos de adapter v1/v2/dual ainda existem por compatibilidade/migração. Não remover sem evidência. `impl=dual` é configuração persistida em `source_configs.extra`, não flag de `/admin runall`.
 
 ### Leilões
 
@@ -146,7 +170,15 @@ Preserve todos os gates:
 
 Podem conter decisões antigas. Não use documentos históricos como fonte de verdade quando divergirem dos docs vivos/código.
 
-## 9. Como classificar recomendações
+## 9. Lacunas atuais importantes
+
+- Billing automático com Mercado Pago/webhook ou aprovação manual em 1 clique.
+- `/admin metrics` de produto/comercial.
+- Teste de carga mínimo para beta/lançamento.
+- Digest semanal mais explicativo quando não houve alerta.
+- Operação de beta/founders/growth ainda é frente de lançamento, não núcleo técnico.
+
+## 10. Como classificar recomendações
 
 Ao avaliar o projeto, classifique achados como:
 
@@ -156,7 +188,7 @@ Ao avaliar o projeto, classifique achados como:
 - **Melhoria de produto**: evolução de UX, plano, notificações, fontes ou jornada.
 - **Obsolescência provável**: código/doc aparentemente antigo, mas ainda dependente de validação antes de remoção.
 
-## 10. O que não fazer
+## 11. O que não fazer
 
 - Não tratar documentação histórica como verdade atual.
 - Não apagar docs/arquivos sem separar histórico vs legado usado.
@@ -167,10 +199,11 @@ Ao avaliar o projeto, classifique achados como:
 - Não inventar valores de leilão: `initial_bid` não é `current_bid`; lance não é preço final.
 - Não ignorar limites de Raspberry Pi.
 - Não propor arquitetura distribuída pesada sem evidência de gargalo real.
+- Não declarar WebMotors como saudável/produção sem evidência real contra PerimeterX.
 
-## 11. Checklist antes de qualquer PR
+## 12. Checklist antes de qualquer PR
 
-- Li `AGENTS.md` e `docs/ARCHITECTURE.md`?
+- Li `AGENTS.md`, `docs/USER_FLOWS.md` e `docs/ARCHITECTURE.md`?
 - Identifiquei se a mudança afeta bot, scheduler, source, DB, notificação ou leilão?
 - Preservei compatibilidade de comandos existentes?
 - A regra de negócio ficou fora do handler?
@@ -179,7 +212,7 @@ Ao avaliar o projeto, classifique achados como:
 - Rodei ao menos testes focados e `alembic heads` se houver schema/migration?
 - Atualizei docs vivos quando o modelo mental mudou?
 
-## 12. Prompt recomendado para novo chat/LLM
+## 13. Prompt recomendado para novo chat/LLM
 
 Use este contexto ao abrir um novo chat:
 
@@ -188,10 +221,13 @@ Você está avaliando o projeto AutoHunter, runtime interno da marca pública Ga
 O produto é Telegram-first para monitoramento recorrente de oportunidades automotivas.
 A API FastAPI é auxiliar, não a jornada principal.
 Use o código atual como fonte de verdade.
-Leia primeiro README.md, AGENTS.md, docs/PROJECT_GUIDELINE.md, docs/ARCHITECTURE.md, docs/AUCTION_RUNTIME.md, docs/OPERATIONS_RUNBOOK.md e docs/LEGACY_INVENTORY.md.
+Leia primeiro README.md, AGENTS.md, docs/USER_FLOWS.md, docs/PROJECT_GUIDELINE.md, docs/ARCHITECTURE.md, docs/AUCTION_RUNTIME.md, docs/OPERATIONS_RUNBOOK.md e docs/LEGACY_INVENTORY.md.
 
 Fluxo classificados:
 wishlist -> scheduler tick -> scrape_jobs -> workers http/browser -> scrape+normalização+ingestão -> dedupe -> matching -> notifications -> sender Telegram.
+
+Fluxo usuário:
+/start ou /menu -> criar busca -> revisar filtros/leilões -> monitoramento -> alerta -> abrir anúncio ou rastrear -> plano/upgrade conforme limite.
 
 Fluxo leilões:
 wishlist include_auctions -> auction_lots -> source_configs/user_eligible/categorias -> matching/gates -> dry-run/samples/preview -> envio controlado.
