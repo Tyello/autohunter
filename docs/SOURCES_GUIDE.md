@@ -9,7 +9,7 @@
 
 | Source | Modo | Papel | Estado atual |
 |---|---|---|---|
-| `mercadolivre` | HTTP + browser fallback | primary | ✅ Estável |
+| `mercadolivre` | HTTP + browser fallback | primary | ⚠️ Em diagnóstico de estratégia de fetch |
 | `olx` | HTTP + browser fallback | primary | ⚠️ Intermitente |
 | `chavesnamao` | Browser-first | primary | ✅ Estável |
 | `webmotors` | Browser-first | deprioritized | 🔴 Bloqueado |
@@ -451,3 +451,10 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 - Exemplo: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`
 
 - `playwright_wait_scroll` executa wait+scroll real (domcontentloaded + waits + scroll leve) somente no probe manual com `--include-browser`.
+
+
+### Mercado Livre — diagnóstico atual
+
+- Source `primary` em diagnóstico de estratégia de fetch (não despriorizada).
+- Probe manual recomendado (read-only): `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`.
+- Incluir Playwright apenas de forma explícita: `--include-browser`.
