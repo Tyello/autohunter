@@ -443,6 +443,8 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 - Estratégia comprovada no probe e aplicada no runtime V1:
   - `lista_vehicle_slug + unified_fetch` pode retornar HTML completo com cards.
   - quando a resposta vem como shell/SPA sem cards, o fallback efetivo é browser com `wait_until=networkidle`.
+  - captura de HTML via Playwright precisa ser resiliente a navegação transitória (`Page.content ... page is navigating`), com retries curtos antes de falhar.
+  - quando o browser cair em security/captcha (`Seguridad — Mercado Libre` ou `/captcha/wall`), o runtime deve sinalizar bloqueio explícito, evitando `count=0` silencioso.
   - API pública pode retornar `403` (bloqueio/fingerprint/challenge upstream), então não é caminho principal no Raspberry.
 - Use probe manual/read-only para triagem de estratégia:
   - `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`
