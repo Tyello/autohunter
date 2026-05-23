@@ -342,7 +342,7 @@ Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa esp
 
 Todos os arquivos obrigatórios listados acima existem no snapshot atual.
 
-## 6. Dual-run diagnostics (V1 vs V2)
+## 9. Dual-run diagnostics (V1 vs V2)
 
 - O relatório de dual-run agora pode retornar `summary_status=INCONCLUSIVE` com `summary_reason=both_paths_returned_zero_items` quando V1 e V2 retornam 0 itens.
 - `INCONCLUSIVE` **não** autoriza flip para `impl=v2`.
