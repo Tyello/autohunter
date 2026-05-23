@@ -413,4 +413,7 @@ Notas de operação:
 - V2 passou a usar por padrão a URL HTML de veículos (`https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/<slug>`), alinhada à estratégia operacional validada no V1.
 - Fetch V2 do Mercado Livre agora reutiliza fallback validado do V1 (`networkidle` via browser) quando HTTP vem bloqueado/sem conteúdo útil (shell sem cards).
 - Endpoint público JSON/API continua disponível apenas para compatibilidade/fallback explícito, e não como caminho principal.
+- Diagnóstico recente no dual-run mostrou falha transitória de browser fetch (`Page.content: ... page is navigating`) mesmo com URL/fetch strategy corretos.
+- Mitigação aplicada no pool Playwright: retries curtos e controlados na captura de `page.content()`, com espera leve (`domcontentloaded`) antes de falhar definitivamente.
+- Quando HTML final cair em página de segurança/captcha, o fluxo deve marcar blocked explícito (ex.: `ml_security_or_captcha_page`), não `0` silencioso.
 - Próximo gate de migração permanece: dual-run com `v1_count > 0` e `v2_count > 0` antes de qualquer decisão de flip.

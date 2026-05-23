@@ -258,6 +258,40 @@ class _PlaywrightCore:
 
             raise
 
+    def _is_retryable_content_error(self, err: BaseException) -> bool:
+        msg = str(err or "").lower()
+        signals = (
+            "unable to retrieve content because the page is navigating",
+            "page is navigating",
+            "execution context was destroyed",
+            "target closed",
+            "navigation failed because page was closed",
+        )
+        return any(s in msg for s in signals)
+
+    def _safe_page_content(self, page: Any, *, attempts: int = 5, wait_ms: int = 500) -> str:
+        last_exc: Optional[BaseException] = None
+        for i in range(max(1, int(attempts))):
+            try:
+                return page.content()
+            except Exception as e:
+                last_exc = e
+                if not self._is_retryable_content_error(e):
+                    raise
+                if i >= (attempts - 1):
+                    break
+                try:
+                    page.wait_for_timeout(wait_ms)
+                except Exception:
+                    pass
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=2000)
+                except Exception:
+                    pass
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Unable to capture page content.")
+
     def _get_or_create_browser(self, proxy_server: Optional[str]) -> Any:
         self.start()
         assert self._p is not None
@@ -403,7 +437,7 @@ class _PlaywrightCore:
 
             html = ""
             try:
-                html = page.content()
+                html = self._safe_page_content(page)
             except Exception:
                 html = ""
             title = ""
@@ -613,7 +647,7 @@ class _PlaywrightCore:
             final_url = page.url
             for i in range(0, 10):
                 page.wait_for_timeout(800 if i == 0 else 1200)
-                html = page.content()
+                html = self._safe_page_content(page)
                 final_url = page.url
                 h = (html or "").lower()
                 is_challenge = (

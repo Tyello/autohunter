@@ -134,7 +134,14 @@ def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext],
         max_delay_ms=900,
         block_resources=False,
     )
-    return browser_res.html
+    browser_html = browser_res.html
+    browser_final_url = (getattr(browser_res, "final_url", "") or "").lower()
+    browser_title_match = re.search(r"<title[^>]*>(.*?)</title>", browser_html or "", re.IGNORECASE | re.DOTALL)
+    browser_title = (browser_title_match.group(1).strip().lower() if browser_title_match else "")
+    if "seguridad — mercado libre" in browser_title or "/captcha/wall" in browser_final_url:
+        raise FetchBlocked(200, url, reason="ml_security_or_captcha_page")
+
+    return browser_html
 
 
 def _unescape_ml(s: str) -> str:
