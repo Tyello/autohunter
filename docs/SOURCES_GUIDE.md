@@ -436,3 +436,9 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 - Ative via `source_configs.extra.webmotors_warmup_behavior_enabled=true`.
 - Mesmo com warmup bem-sucedido, a validação real continua sendo `/admin runall webmotors`.
 - Não há promessa de desbloqueio.
+
+## Mercado Livre (status operacional)
+
+- Source primary em diagnóstico ativo de estratégia de fetch (URL matrix + fetch matrix).
+- Não marcar Mercado Livre como deprioritized enquanto houver investigação operacional em curso.
+- Probe manual/read-only disponível em `scripts/mercadolivre_strategy_probe.py`.

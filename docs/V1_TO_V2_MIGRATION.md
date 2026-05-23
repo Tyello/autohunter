@@ -381,3 +381,11 @@ Notas de operação:
 - `--capture-html` **nunca é default**: só grava HTML quando informado explicitamente.
 - O HTML capturado pode conter dados de página pública e deve ficar fora do repositório.
 - Use os sinais/seletores do probe para decidir se o próximo ajuste deve ocorrer em selector/extract ou em `parse_listing`.
+
+## 2026-05 Mercado Livre strategy probe
+
+- Observado: lista HTML de veículos retornou shell sem dados úteis (title `| Mercado Livre`, sem cards/links).
+- Observado: API pública `sites/MLB/search` retornou 403 em chamadas de diagnóstico.
+- Próximo passo operacional: executar `scripts/mercadolivre_strategy_probe.py` para matriz de URL+fetch.
+- Playwright é plano B diagnóstico explícito apenas com `--include-browser`.
+- Não concluir migração V1→V2 sem pelo menos uma estratégia com retorno consistente de dados.
