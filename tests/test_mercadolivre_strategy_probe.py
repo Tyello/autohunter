@@ -27,7 +27,7 @@ def test_civic_si_urls(monkeypatch):
     monkeypatch.setattr(probe, "get_source", lambda _s: SimpleNamespace(build_url=lambda _q: "https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic-si"))
     rows = {r["strategy"]: r["url"] for r in probe.build_mercadolivre_strategy_urls("civic si")}
     assert "/veiculos/carros-caminhonetes/civic-si" in rows["plugin_build_url"]
-    assert "api.mercadolibre.com/sites/MLB/search" in rows["v2_build_search_url"]
+    assert "/veiculos/carros-caminhonetes/civic-si" in rows["v2_build_search_url"]
     assert "/honda/civic" in rows["lista_vehicle_brand_model"]
 
 

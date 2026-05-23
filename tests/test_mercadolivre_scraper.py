@@ -7,6 +7,7 @@ import json
 from decimal import Decimal
 from app.scrapers.sources.mercadolivre import MercadoLivreScraper
 from app.sources.types import ScrapeContext
+from app.scrapers.base import FetchBlocked
 
 
 @pytest.fixture
@@ -26,9 +27,13 @@ def test_build_search_url(scraper):
     """Testa construção de URL."""
     url = scraper.build_search_url("civic si")
     
+    assert url == "https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic-si"
+    assert "api.mercadolibre.com" not in url
+
+
+def test_build_api_search_url_compat(scraper):
+    url = scraper.build_api_search_url("civic si")
     assert "api.mercadolibre.com" in url
-    assert "q=civic+si" in url or "q=civic%20si" in url
-    assert "category=MLB1743" in url  # carros
 
 
 def test_is_vehicle_listing(scraper):
@@ -322,6 +327,40 @@ def test_parse_listing_tracking_url_filtered(scraper):
     
     # Deve retornar None (filtrado)
     assert scraper.parse_listing(raw) is None
+
+
+def test_parse_listing_attributes_string_defensive(scraper):
+    raw = {
+        "id": "MLB777",
+        "title": "Honda Civic SI 2015",
+        "url": "https://carro.mercadolivre.com.br/MLB-777-honda-civic-si-_JM",
+        "price": "120.000",
+        "attributes": ["2015", "80.000 km"],
+        "thumbnail": "https://img.example/civic.jpg",
+    }
+    parsed = scraper.parse_listing(raw)
+    assert parsed is not None
+    assert parsed["year"] == 2015
+    assert parsed["mileage_km"] == 80000
+
+
+def test_fetch_content_uses_ml_helper(monkeypatch, scraper, ctx):
+    called = {"count": 0}
+
+    def _fake_fetch(url, _ctx):
+        called["count"] += 1
+        return "<html><li class='ui-search-layout__item'></li></html>"
+
+    monkeypatch.setattr("app.scrapers.sources.mercadolivre._fetch_ml_search_with_shell_fallback", _fake_fetch)
+    res = scraper._fetch_content(scraper.build_search_url("civic si"), ctx)
+    assert called["count"] == 1
+    assert "ui-search-layout__item" in res.content
+
+
+def test_fetch_content_shell_raises_blocked(monkeypatch, scraper, ctx):
+    monkeypatch.setattr("app.scrapers.sources.mercadolivre._fetch_ml_search_with_shell_fallback", lambda *_: "<html><title>Mercado Livre Brasil</title></html>")
+    with pytest.raises(FetchBlocked):
+        scraper._fetch_content(scraper.build_search_url("civic si"), ctx)
 
 
 if __name__ == "__main__":

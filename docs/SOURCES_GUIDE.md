@@ -458,4 +458,10 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 
 - Source `primary` em diagnóstico de estratégia de fetch (não despriorizada).
 - Probe manual recomendado (read-only): `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`.
+
+### Mercado Livre — estratégia V2 atualizada
+
+- O scraper V2 de Mercado Livre usa a mesma estratégia operacional validada no V1: URL HTML do vertical de veículos como padrão.
+- Quando o fetch HTTP retorna bloqueio/shell sem cards úteis, o V2 aplica fallback browser com `wait_until="networkidle"` para recuperar HTML completo.
+- A API pública do Mercado Livre permanece como compatibilidade/fallback e não deve ser tratada como caminho principal no runtime (especialmente no Raspberry).
 - Incluir Playwright apenas de forma explícita: `--include-browser`.

@@ -162,6 +162,10 @@ class BaseScraper(ABC):
         except (json.JSONDecodeError, ValueError):
             # Não é JSON - subclasse deve sobrescrever para HTML
             return []
+
+    def _fetch_content(self, search_url: str, ctx: ScrapeContext):
+        """Hook de fetch para customização por source."""
+        return unified_fetch(search_url, ctx, source=self.source)
     
     def scrape(self, search_url: str, ctx: ScrapeContext) -> ScraperResult:
         """Pipeline completo: fetch → extract → parse → validate.
@@ -198,7 +202,7 @@ class BaseScraper(ABC):
             metrics.fetch_started_at = time.time()
             
             try:
-                fetch_result = unified_fetch(search_url, ctx, source=self.source)
+                fetch_result = self._fetch_content(search_url, ctx)
                 raw_content = fetch_result.content
                 
                 metrics.fetch_duration_ms = int((time.time() - metrics.fetch_started_at) * 1000)
