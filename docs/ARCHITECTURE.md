@@ -1,6 +1,6 @@
 # Garagem Alvo / AutoHunter — Arquitetura atual
 
-Atualizado em: 2026-05-21.
+Atualizado em: 2026-05-22.
 
 Este documento descreve a arquitetura operacional atual do AutoHunter, runtime interno que sustenta a marca pública Garagem Alvo.
 
@@ -43,11 +43,12 @@ wishlist include_auctions=true
 - `app/bot/`: jornada principal do usuário final e comandos administrativos.
 - Telegram é a superfície oficial de uso.
 - A terminologia pública deve priorizar Garagem Alvo, busca, alerta, oportunidade e assinatura Premium.
+- Fluxos detalhados de usuário ficam em `docs/USER_FLOWS.md`.
 
 ### Runtime operacional
 
 - `app/scheduler/`: agenda ticks, workers, sender, monitor, digest, cleanup, premium expiration, autopilot e jobs de leilão.
-- `app/services/`: regras de negócio, execução de sources, configuração DB-driven, matching, notificações, settings runtime e observabilidade.
+- `app/services/`: regras de negócio, execução de sources, configuração DB-driven, matching, notificações, planos, tracking, settings runtime e observabilidade.
 - `app/sources/`: registry e plugins de sources tradicionais.
 - `app/sources/auctions/`: registry e parsers/fetchers de leilões.
 - `app/models/`: entidades persistidas via SQLAlchemy/Alembic.
@@ -71,6 +72,16 @@ Responsabilidades:
 - entregar notificações pendentes via sender embutido quando o scheduler não está rodando em alguns ambientes locais;
 - registrar handlers de busca, menu, wishlist, filtros, tracking, planos, upgrade, admin, debug, Facebook Agent e callbacks.
 
+Fluxos públicos principais:
+
+- `/start`: onboarding contextual e CTA para criar primeira busca ou abrir buscas existentes;
+- `/menu`: hub de ações guiadas;
+- criação de busca monitorada com filtros implícitos/guiados;
+- gestão de buscas: listar, pausar, reativar, remover e ajustar filtros;
+- `/buscar` ou `Buscar agora`: busca pontual sem salvar monitoramento;
+- `⭐ Rastrear`: tracking de anúncio por wishlist;
+- `/plan` e `/upgrade`: plano, limites e jornada comercial.
+
 Cuidados:
 
 - handlers devem ser finos;
@@ -85,6 +96,7 @@ Arquivo principal: `app/scheduler/run.py`.
 Responsabilidades:
 
 - criar `BackgroundScheduler` em UTC;
+- fazer bootstrap de `source_configs` no boot;
 - registrar ticks por source com cadência curta de avaliação;
 - delegar execução real para filas persistentes `scrape_jobs`;
 - rodar heartbeat;
@@ -162,7 +174,19 @@ Sources presentes no runtime incluem:
 
 O fato de existir plugin no código não significa que a source esteja ativa em produção. A operação efetiva é DB-driven via `source_configs`.
 
-### 3.6 Sources de leilão
+### 3.6 Migração V1/V2 de sources
+
+O runtime é misto:
+
+- scrapers legados ainda são caminho principal para várias sources;
+- scrapers v2/unified existem e podem ser usados por source;
+- a seleção operacional usa `source_configs.extra.impl` (`v1|v2|dual`);
+- `impl=dual` é configuração persistida, não flag de `/admin runall`;
+- inventário e dual-run controlado são a trilha correta antes de qualquer flip amplo.
+
+Referência: `docs/V1_TO_V2_MIGRATION.md`.
+
+### 3.7 Sources de leilão
 
 Registry técnico: `app/sources/auctions/registry.py`.
 
@@ -179,7 +203,7 @@ Sources atuais:
 
 Atenção: o registry técnico define fetchers/aliases. O serviço de config de leilão reconcilia `source_configs.source_type` e `source_configs.status` com defaults operacionais seguros. Quando houver divergência documental, trate `source_configs` e `auction_source_config_service.DEFAULTS` como referência operacional.
 
-### 3.7 Matching, dedupe e notificação
+### 3.8 Matching, dedupe e notificação
 
 Modelos/tabelas relevantes:
 
@@ -187,6 +211,7 @@ Modelos/tabelas relevantes:
 - `wishlist_filters`
 - `wishlist_tokens`
 - `wishlist_tracked_listings`
+- `wishlist_listing_activity`
 - `car_listings`
 - `auction_lots`
 - `notifications`
@@ -206,18 +231,34 @@ Leilões:
 - dedupe lógico por `auction:{wishlist_id}:{source}:{lot_external_id}`;
 - gates obrigatórios antes de qualquer alerta user-facing.
 
-### 3.8 Tracking por wishlist
+### 3.9 Tracking por wishlist
 
-Cada wishlist pode rastrear até 3 anúncios.
+Cada wishlist pode ter até 3 slots de tracking, respeitando limite total por plano.
 
 Responsabilidades:
 
 - guardar snapshot por slot;
-- permitir alerta de queda por slot;
+- exibir preço inicial, preço atual, variação, status e última vez visto;
+- permitir alerta de queda por slot quando permitido;
 - controlar queda mínima/cooldown;
 - diferenciar limites Free/Premium.
 
 O job de alertas de tracking é protegido por setting e não deve ser assumido como sempre ligado.
+
+### 3.10 Planos e monetização
+
+Planos atuais:
+
+- Free;
+- Premium.
+
+O código possui capacidades por plano, uso no `/plan`, upgrade com links configuráveis do Mercado Pago e ativação manual/admin.
+
+Estado comercial atual:
+
+- billing automático via webhook ainda não é fonte de verdade;
+- ativação Premium é operacional/admin;
+- para lançamento público, automatizar pagamento ou reduzir aprovação manual para 1 clique é bloqueador comercial.
 
 ## 4. Banco e configuração runtime
 
@@ -293,6 +334,7 @@ Superfícies operacionais principais:
 /admin audit
 /admin sources
 /admin source <source> ...
+/admin runall <source>
 /admin auctions readiness
 /admin auctions notify-status
 /admin auctions notify-samples
@@ -310,6 +352,8 @@ Sinais críticos:
 - alto volume de failed/suppressed/discarded;
 - source experimental marcada por engano como user-facing;
 - categorias não-car chegando ao piloto de leilões.
+
+Lacuna atual para lançamento: ainda falta um `/admin metrics` focado em produto/comercial, distinto de health técnico.
 
 ## 7. Limpeza e armazenamento local
 
@@ -348,7 +392,9 @@ Regra: FastAPI é auxiliar. Não redesenhar o produto como web-first sem decisã
 ```bash
 pytest -q
 alembic heads
-python -m app.bot.run   # quando for validar bot localmente com env real
+python scripts/source_v2_inventory.py --no-db
+python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json
+python -m app.bot.run        # quando for validar bot localmente com env real
 python -m app.scheduler.run  # quando aplicável ao entrypoint do ambiente
 ```
 
