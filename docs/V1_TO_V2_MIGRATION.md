@@ -292,6 +292,9 @@ Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa esp
 
 - **P3 — Paridade Mercado Livre no v2.**
   - Garantir: `curl_cffi` (ou decisão explícita de não portar), POLYCARD, merge POLYCARD+HTML, filtro anti-peças, tracking/sponsored URL, VIP price fallback, canonicalização e guardrail de vertical veículos.
+  - Progresso recente: corrigido bug no extractor HTML do V2 que montava `items`, mas retornava `[]` no final de `extract_raw_data`.
+  - Próximo dual-run deve validar aumento de `diagnostics.v2_metrics.raw_items_found`.
+  - Se `raw_items_found > 0` e `items_valid = 0`, a próxima etapa é ajustar `parse_listing`/normalização em PR separada.
 
 - **P4 — Paridade OLX no v2.**
   - Garantir: `__NEXT_DATA__`, fallback HTML, dedupe, policy de force-browser/fallback e decisão sobre `curl_cffi`.

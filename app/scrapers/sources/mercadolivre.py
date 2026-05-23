@@ -167,7 +167,7 @@ class MercadoLivreScraper(BaseScraper):
             except Exception:
                 continue
 
-        return []
+        return items
 
     def parse_listing(self, raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Normaliza dados de um anúncio."""
