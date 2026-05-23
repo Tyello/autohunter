@@ -38,7 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(f"# MercadoLivre Strategy Probe\n\nsummary_status={report['summary_status']}\nrecommended_strategy={report['recommended_strategy']}")
+        rec_key = report.get("recommended_strategy_key") or ""
+        if not rec_key and isinstance(report.get("recommended_strategy"), dict):
+            rs = report["recommended_strategy"]
+            rec_key = f"{rs.get('url_strategy', '')}+{rs.get('fetch_strategy', '')}".strip("+")
+        print(f"# MercadoLivre Strategy Probe\n\nsummary_status={report['summary_status']}\nrecommended_strategy={rec_key}")
     return 0
 
 

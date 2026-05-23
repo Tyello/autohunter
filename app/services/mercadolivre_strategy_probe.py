@@ -186,7 +186,16 @@ def run_probe(query: str, capture_dir: str | None = None, include_browser: bool 
             attempts.append(row)
 
     best = max(attempts, key=lambda r: r.get("useful_data_score", -9999), default=None)
-    recommended = best["url_strategy"] if best and best.get("useful_data_score", 0) > 0 else ""
+    recommended = None
+    recommended_key = ""
+    if best and best.get("useful_data_score", 0) > 0:
+        recommended = {
+            "url_strategy": best["url_strategy"],
+            "fetch_strategy": best["fetch_strategy"],
+            "url": best["url"],
+            "useful_data_score": best["useful_data_score"],
+        }
+        recommended_key = f"{best['url_strategy']}+{best['fetch_strategy']}"
     if best and best.get("useful_data_score", 0) >= 80:
         status = "OK"
     elif any((a.get("useful_data_score", 0) > 0 for a in attempts)):
@@ -196,5 +205,18 @@ def run_probe(query: str, capture_dir: str | None = None, include_browser: bool 
     else:
         status = "FAIL"
     for a in attempts:
-        a["recommended"] = bool(recommended and a["url_strategy"] == recommended)
-    return {"source": "mercadolivre", "query": query, "summary_status": status, "recommended_strategy": recommended, "attempts": attempts}
+        a["recommended"] = bool(
+            best
+            and recommended
+            and a["url_strategy"] == best["url_strategy"]
+            and a["fetch_strategy"] == best["fetch_strategy"]
+            and best.get("useful_data_score", 0) > 0
+        )
+    return {
+        "source": "mercadolivre",
+        "query": query,
+        "summary_status": status,
+        "recommended_strategy": recommended or "",
+        "recommended_strategy_key": recommended_key,
+        "attempts": attempts,
+    }
