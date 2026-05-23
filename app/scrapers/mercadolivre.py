@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.fetching import fetch_html_with_browser_fallback
+from app.services.browser_fetcher import fetch_html_browser
 from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
@@ -80,6 +81,60 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
         )
 
     raise FetchBlocked(403, url, reason="ml_403_all_strategies")
+
+
+def _is_ml_shell_without_results(html: str) -> bool:
+    """Detecta respostas-shell do ML sem cards úteis de veículo.
+
+    Heurística conservadora para ativar fallback browser somente quando necessário.
+    """
+    if not html or not html.strip():
+        return False
+
+    lower_html = html.lower()
+    content_length = len(html)
+
+    if any(marker in lower_html for marker in ("captcha", "acesso negado", "access denied", "403 forbidden")):
+        return False
+
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    title = (title_match.group(1).strip() if title_match else "")
+    is_ml_title = "mercado livre" in title.lower() or "| mercado livre" in title.lower()
+    if not is_ml_title:
+        return False
+
+    li_cards = len(re.findall(r"<li[^>]+class=[\"'][^\"']*ui-search-layout__item", html, re.IGNORECASE))
+    mlb_links = len(re.findall(r"href=[\"'][^\"']*MLB-", html, re.IGNORECASE))
+    vehicle_links = len(re.findall(r"carro\.mercadolivre\.com\.br", lower_html))
+
+    if li_cards > 0 or mlb_links > 0 or vehicle_links > 2:
+        return False
+
+    has_canonical = bool(re.search(r"<link[^>]+rel=[\"']canonical[\"']", html, re.IGNORECASE))
+    has_og_url = bool(re.search(r"<meta[^>]+property=[\"']og:url[\"']", html, re.IGNORECASE))
+
+    return content_length < 50_000 or not (has_canonical or has_og_url)
+
+
+def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext], timeout: int = 25) -> str:
+    """Busca HTML da listagem ML priorizando HTTP e fallback browser networkidle."""
+    html = _fetch_html_ml(url, ctx, timeout=timeout)
+    if not _is_ml_shell_without_results(html):
+        return html
+
+    if not (settings.enable_playwright and ctx and getattr(ctx, "browser_fallback_enabled", False)):
+        return html
+
+    browser_res = fetch_html_browser(
+        url,
+        ctx=ctx,
+        timeout_ms=timeout * 1000,
+        wait_until="networkidle",
+        min_delay_ms=250,
+        max_delay_ms=900,
+        block_resources=False,
+    )
+    return browser_res.html
 
 
 def _unescape_ml(s: str) -> str:
@@ -609,7 +664,7 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
     # Trava a busca no vertical de veículos.
     search_url = _ensure_vehicle_search_url(search_url)
 
-    html = _fetch_html_ml(search_url, ctx, timeout=25)
+    html = _fetch_ml_search_with_shell_fallback(search_url, ctx, timeout=25)
 
     # Se o ML saiu do vertical (redirect/canonical fora de carro.*), não ingere nada.
     if _left_vehicle_vertical(search_url, html):

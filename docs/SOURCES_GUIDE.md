@@ -439,10 +439,11 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 
 ## Mercado Livre (status operacional atual)
 
-- Continua como source `primary`, porém em diagnóstico de estratégia de fetch no ambiente Raspberry Pi.
-- Sinais atuais observados:
-  - API pública pode retornar `403` (bloqueio/fingerprint/challenge upstream).
-  - HTML/lista pode responder como shell/SPA sem cards extraíveis.
+- Continua como source `primary`, em recuperação operacional no ambiente Raspberry Pi, sem flip para V2 nesta etapa.
+- Estratégia comprovada no probe e aplicada no runtime V1:
+  - `lista_vehicle_slug + unified_fetch` pode retornar HTML completo com cards.
+  - quando a resposta vem como shell/SPA sem cards, o fallback efetivo é browser com `wait_until=networkidle`.
+  - API pública pode retornar `403` (bloqueio/fingerprint/challenge upstream), então não é caminho principal no Raspberry.
 - Use probe manual/read-only para triagem de estratégia:
   - `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`
 - Não há mudança automática de URL/default/impl nesse diagnóstico; objetivo é apenas observabilidade de fetch por estratégia.

@@ -405,3 +405,5 @@ Notas de operação:
 - Próximo passo técnico: executar `scripts/mercadolivre_strategy_probe.py` para matriz de URL+fetch em modo manual/read-only.
 - Playwright é plano B diagnóstico explícito somente com `--include-browser`.
 - Não concluir migração V1→V2 para Mercado Livre sem ao menos uma estratégia retornando dados úteis (score positivo e preferencialmente >=80).
+- Gate de continuidade: V1 precisa permanecer saudável (count > 0 em consultas de referência, ex.: "civic si") antes de qualquer avanço de paridade/flipe V1→V2.
+- Próxima etapa após estabilizar V1: reexecutar dual-run (`source_dual_run_report`) e comparar V1 vs V2 com evidência objetiva de divergências.
