@@ -11,7 +11,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 from sqlalchemy.engine.url import make_url
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -38,7 +38,13 @@ class CheckResult:
 
 
 def classify_database_url(database_url: str) -> Tuple[str, str]:
-    url = make_url(database_url)
+    try:
+        url = make_url(database_url)
+    except (ArgumentError, ValueError, TypeError):
+        return (
+            "FAIL",
+            "DATABASE_URL inválida ou malformada. Verifique o formato postgresql+psycopg://...",
+        )
     driver = (url.drivername or "").lower()
     if driver.startswith("sqlite"):
         return "FAIL", f"DATABASE_URL usa SQLite ({url.drivername}). Esta validação exige PostgreSQL/Supabase real."

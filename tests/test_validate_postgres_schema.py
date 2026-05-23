@@ -17,6 +17,12 @@ def test_accepts_postgres_urls() -> None:
     assert classify_database_url("postgresql+psycopg://user:pass@localhost/db")[0] == "OK"
 
 
+def test_rejects_malformed_database_url() -> None:
+    level, message = classify_database_url("not a valid database url")
+    assert level == "FAIL"
+    assert "inválida ou malformada" in message
+
+
 def test_detects_valid_partial_index_condition() -> None:
     index_sql = "CREATE INDEX ix_notifications_user_sent_today ON notifications (user_id, sent_at) WHERE status = 'sent'"
     assert has_sent_partial_condition(index_sql)
