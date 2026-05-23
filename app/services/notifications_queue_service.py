@@ -4,13 +4,16 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.scoring.score_v2 import score_ad
+from app.services.fipe_service import current_reference_month, listing_vehicle_keys
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
+from app.models.fipe_price import FipePrice
 
 
 def queue_notifications_for_matches(
@@ -52,6 +55,21 @@ def queue_notifications_for_matches(
         stats_map = {}
 
     queued = 0
+    ref_month = current_reference_month()
+    fipe_rows = {}
+    try:
+        keys = []
+        for l in matched_listings:
+            keys.extend(listing_vehicle_keys(l))
+        if keys:
+            with db.begin_nested():
+                rows = db.query(FipePrice).filter(FipePrice.reference_month == ref_month).filter(FipePrice.vehicle_key.in_(list(dict.fromkeys(keys)))).all()
+                fipe_rows = {str(r.vehicle_key): r.fipe_price for r in (rows or [])}
+    except SQLAlchemyError:
+        fipe_rows = {}
+    except Exception:
+        fipe_rows = {}
+
     for listing in matched_listings:
         if listing.id in existing_ids:
             continue
@@ -66,7 +84,13 @@ def queue_notifications_for_matches(
 
         # Compute score breakdown (wishlist-specific)
         try:
-            sres = score_ad(listing, wishlist, ms)
+            lkeys = listing_vehicle_keys(listing)
+            fipe = next((fipe_rows.get(k) for k in lkeys if k in fipe_rows), None)
+            rarity_ratio = None
+            rarity_sample = int(ms.sample_size or 0) if ms else None
+            if rarity_sample and rarity_sample > 0:
+                rarity_ratio = 1.0 / float(rarity_sample)
+            sres = score_ad(listing, wishlist, ms, fipe_price=fipe, rarity_ratio=rarity_ratio, rarity_sample_size=rarity_sample)
         except Exception:
             # Never block queueing due to scoring errors; fall back to minimal breakdown
             sres = None
