@@ -381,3 +381,18 @@ Notas de operação:
 - `--capture-html` **nunca é default**: só grava HTML quando informado explicitamente.
 - O HTML capturado pode conter dados de página pública e deve ficar fora do repositório.
 - Use os sinais/seletores do probe para decidir se o próximo ajuste deve ocorrer em selector/extract ou em `parse_listing`.
+
+## Mercado Livre — estratégia de fetch (diagnóstico manual)
+
+- Evidência operacional recente em Raspberry Pi: chamada direta da API pública (`https://api.mercadolibre.com/sites/MLB/search?...`) retornou bloqueio `403` via fetch (`FetchBlocked 403`).
+- Evidência operacional recente em Raspberry Pi: URL HTML/lista de veículos retornou shell/SPA sem cards úteis (ex.: `title="| Mercado Livre"`, `cards=0`, `a_mlb_links=0`).
+- Foi adicionado probe manual/read-only para estratégias de fetch, sem alterar default de scraping/parsing:
+  - `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`
+  - `python scripts/source_dual_run_report.py mercadolivre --query "civic si" --strategy-probe --format json`
+- Captura de payload é opcional e explícita (`--capture-dir`), nunca ativa por padrão.
+- Conclusão de migração: antes de avançar com paridade/flipe V1→V2 para Mercado Livre, é necessário recuperar uma estratégia de fetch que entregue dados úteis no ambiente alvo.
+
+- Playwright é plano B diagnóstico explícito (somente manual), via `--include-browser`, sem alterar scraping de produção.
+- Comando: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`
+
+- `playwright_wait_scroll` executa wait+scroll real (domcontentloaded + waits + scroll leve) somente no probe manual com `--include-browser`.

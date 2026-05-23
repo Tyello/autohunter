@@ -190,6 +190,43 @@ class BrowserManager:
             # Atualizar last_used
             self._touch_context(source, proxy)
     
+
+    def fetch_html_with_actions(
+        self,
+        url: str,
+        source: str,
+        proxy: Optional[str] = None,
+        timeout_ms: int = 30000,
+        wait_until: str = "domcontentloaded",
+        block_resources: bool = False,
+        extra_wait_ms: int = 3000,
+        scroll: bool = False,
+    ) -> BrowserFetchResult:
+        """Fetch diagnóstico com ações opcionais (wait/scroll), uso manual/read-only."""
+        self.start()
+        context = self._get_or_create_context(source, proxy)
+        page = context.new_page()
+        try:
+            if block_resources:
+                self._setup_resource_blocking(page, source)
+            page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            if extra_wait_ms > 0:
+                page.wait_for_timeout(extra_wait_ms)
+            if scroll:
+                page.evaluate("window.scrollTo({top: 600, behavior: 'smooth'})")
+                page.wait_for_timeout(1500)
+                page.evaluate("window.scrollTo({top: 1200, behavior: 'smooth'})")
+                page.wait_for_timeout(2000)
+            html = page.content()
+            final_url = page.url
+            return BrowserFetchResult(html=html, final_url=final_url)
+        finally:
+            try:
+                page.close()
+            except:
+                pass
+            self._touch_context(source, proxy)
+
     def _get_or_create_context(self, source: str, proxy: Optional[str]):
         """Obtém context do pool ou cria novo.
         
