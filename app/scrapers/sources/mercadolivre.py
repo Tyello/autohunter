@@ -13,11 +13,15 @@ from decimal import Decimal
 from typing import Dict, Any, List, Optional
 import re
 import json
+import time
 
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin, urlparse
 
 from app.scrapers.scraper_base import BaseScraper
+from app.scrapers.scraper_base.fetcher import FetchResult
+from app.scrapers.base import FetchBlocked
+from app.scrapers.mercadolivre import _fetch_ml_search_with_shell_fallback, _is_ml_shell_without_results
 
 
 class MercadoLivreScraper(BaseScraper):
@@ -46,11 +50,39 @@ class MercadoLivreScraper(BaseScraper):
         if not slug:
             slug = "carro"
 
-        # Mantém URL do endpoint da API pública (compat com testes/integrações antigas).
+        return f"{self.BASE_URL}{self.VEHICLES_PREFIX}{slug}"
+
+    def build_api_search_url(self, query: str) -> str:
+        """Mantém endpoint da API pública para compatibilidade/fallback explícito."""
         return (
             "https://api.mercadolibre.com/sites/MLB/search"
             f"?q={quote_plus(query or '')}&category=MLB1743"
         )
+
+    def _fetch_content(self, search_url: str, ctx):
+        """Fetch V2 alinhado ao V1: HTML + fallback browser networkidle."""
+        is_ml_html_listing = (
+            isinstance(search_url, str)
+            and "lista.mercadolivre.com.br/veiculos/carros-caminhonetes/" in search_url
+        )
+        if not is_ml_html_listing:
+            return super()._fetch_content(search_url, ctx)
+
+        try:
+            started = time.time()
+            html = _fetch_ml_search_with_shell_fallback(search_url, ctx)
+            if _is_ml_shell_without_results(html):
+                raise FetchBlocked(403, search_url, reason="ml_shell_without_results")
+            return FetchResult(
+                content=html,
+                final_url=search_url,
+                method="browser_fallback",
+                duration_ms=int((time.time() - started) * 1000),
+            )
+        except FetchBlocked:
+            raise
+        except Exception as exc:
+            raise FetchBlocked(403, search_url, reason=f"ml_v2_fetch_error:{exc}") from exc
 
     def extract_raw_data(self, raw_content: str, ctx) -> List[Dict]:
         """Extrai anúncios de JSON (API) ou HTML (fallback)."""
@@ -210,6 +242,8 @@ class MercadoLivreScraper(BaseScraper):
                 make = make or t_make
                 model = model or t_model
             mileage_km = self._parse_km(self._extract_attribute(attributes, "KILOMETERS") or "")
+            if mileage_km is None and isinstance(attributes, list):
+                mileage_km = self._extract_km_from_attrs([a for a in attributes if isinstance(a, str)])
             fuel_type = self._normalize_fuel(self._extract_attribute(attributes, "FUEL_TYPE") or "")
             transmission = self._normalize_transmission(self._extract_attribute(attributes, "TRANSMISSION") or "")
 
@@ -328,6 +362,8 @@ class MercadoLivreScraper(BaseScraper):
 
     def _extract_attribute(self, attributes: List[Dict[str, Any]], attr_id: str) -> Optional[str]:
         for attr in attributes or []:
+            if not isinstance(attr, dict):
+                continue
             if str(attr.get("id") or "").upper() == str(attr_id or "").upper():
                 value = attr.get("value_name")
                 if value is not None:

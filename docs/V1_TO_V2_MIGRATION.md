@@ -407,3 +407,10 @@ Notas de operação:
 - Não concluir migração V1→V2 para Mercado Livre sem ao menos uma estratégia retornando dados úteis (score positivo e preferencialmente >=80).
 - Gate de continuidade: V1 precisa permanecer saudável (count > 0 em consultas de referência, ex.: "civic si") antes de qualquer avanço de paridade/flipe V1→V2.
 - Próxima etapa após estabilizar V1: reexecutar dual-run (`source_dual_run_report`) e comparar V1 vs V2 com evidência objetiva de divergências.
+
+## Mercado Livre — ajuste V2 de fetch/build_url (2026-05-23)
+
+- V2 passou a usar por padrão a URL HTML de veículos (`https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/<slug>`), alinhada à estratégia operacional validada no V1.
+- Fetch V2 do Mercado Livre agora reutiliza fallback validado do V1 (`networkidle` via browser) quando HTTP vem bloqueado/sem conteúdo útil (shell sem cards).
+- Endpoint público JSON/API continua disponível apenas para compatibilidade/fallback explícito, e não como caminho principal.
+- Próximo gate de migração permanece: dual-run com `v1_count > 0` e `v2_count > 0` antes de qualquer decisão de flip.
