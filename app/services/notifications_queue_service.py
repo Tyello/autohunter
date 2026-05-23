@@ -62,13 +62,10 @@ def queue_notifications_for_matches(
         for l in matched_listings:
             keys.extend(listing_vehicle_keys(l))
         if keys:
-            rows = db.query(FipePrice).filter(FipePrice.reference_month == ref_month).filter(FipePrice.vehicle_key.in_(list(dict.fromkeys(keys)))).all()
-            fipe_rows = {str(r.vehicle_key): r.fipe_price for r in (rows or [])}
+            with db.begin_nested():
+                rows = db.query(FipePrice).filter(FipePrice.reference_month == ref_month).filter(FipePrice.vehicle_key.in_(list(dict.fromkeys(keys)))).all()
+                fipe_rows = {str(r.vehicle_key): r.fipe_price for r in (rows or [])}
     except SQLAlchemyError:
-        try:
-            db.rollback()
-        except Exception:
-            pass
         fipe_rows = {}
     except Exception:
         fipe_rows = {}
