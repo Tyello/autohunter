@@ -143,6 +143,83 @@ def test_extract_raw_data_valid_json(scraper, ctx):
     assert items[0]["id"] == "MLB123"
 
 
+def test_extract_raw_data_html_returns_items(scraper, ctx):
+    """Testa regressão: HTML com card válido deve retornar item."""
+    html = """
+    <html>
+    <body>
+      <li class="ui-search-layout__item">
+        <a class="ui-search-link" href="https://carro.mercadolivre.com.br/MLB-123456789-honda-civic-si-_JM">
+          <h2>Honda Civic Si 2.4 2015</h2>
+        </a>
+        <span class="price-tag-fraction">120.000</span>
+        <span class="ui-search-item__location">São Paulo, SP</span>
+        <span class="ui-search-item__attribute">2015</span>
+        <span class="ui-search-item__attribute">80.000 km</span>
+        <img src="https://example.com/civic.jpg" />
+      </li>
+    </body>
+    </html>
+    """
+
+    items = scraper.extract_raw_data(html, ctx)
+
+    assert len(items) == 1
+    assert items[0]["id"] == "MLB123456789"
+    assert "Honda Civic" in items[0]["title"]
+    assert items[0]["url"].startswith("https://carro.mercadolivre.com.br/MLB-123456789")
+    assert items[0]["price"] == "120.000"
+    assert items[0]["location"] == "São Paulo, SP"
+    assert items[0]["thumbnail"] == "https://example.com/civic.jpg"
+    assert "2015" in items[0]["attributes"]
+    assert "80.000 km" in items[0]["attributes"]
+
+
+def test_extract_raw_data_json_non_vehicle_filtered(scraper, ctx):
+    """Testa que JSON com URL não-veículo continua filtrado."""
+    api_response = {
+        "results": [
+            {
+                "id": "MLB999",
+                "title": "Honda Civic Si",
+                "permalink": "https://carro.mercadolivre.com.br/MLB-999-honda-civic-si-_JM",
+                "price": 120000,
+            },
+            {
+                "id": "MLB000",
+                "title": "Produto não veículo",
+                "permalink": "https://produto.mercadolivre.com.br/MLB-000-peca-_JM",
+                "price": 100,
+            },
+        ]
+    }
+
+    items = scraper.extract_raw_data(json.dumps(api_response), ctx)
+
+    assert len(items) == 1
+    assert items[0]["id"] == "MLB999"
+    assert items[0]["url"] == "https://carro.mercadolivre.com.br/MLB-999-honda-civic-si-_JM"
+
+
+def test_extract_raw_data_html_non_vehicle_filtered(scraper, ctx):
+    """Testa que HTML com URL não-veículo continua filtrado."""
+    html = """
+    <html>
+    <body>
+      <li class="ui-search-layout__item">
+        <a class="ui-search-link" href="https://produto.mercadolivre.com.br/MLB-123456789-peca-_JM">
+          <h2>Peça avulsa</h2>
+        </a>
+      </li>
+    </body>
+    </html>
+    """
+
+    items = scraper.extract_raw_data(html, ctx)
+
+    assert items == []
+
+
 def test_extract_raw_data_invalid_json(scraper, ctx):
     """Testa com JSON inválido (retorna vazio para fallback)."""
     raw_content = "<!DOCTYPE html><html>..."  # HTML
