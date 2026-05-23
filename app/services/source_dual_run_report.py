@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from bs4 import BeautifulSoup
 
 _COMPARE_FIELDS = ("title", "price", "year", "km", "city", "uf", "url", "external_id", "thumbnail")
 
@@ -159,6 +160,88 @@ def _extract_v2_metrics(v2_metrics: Any) -> dict[str, Any]:
     return out
 
 
+def diagnose_mercadolivre_html(raw_content: str) -> dict[str, Any]:
+    html = raw_content or ""
+    soup = BeautifulSoup(html, "lxml")
+    title = (soup.title.string or "").strip() if soup.title and soup.title.string else ""
+    canonical = (soup.select_one("link[rel='canonical']") or {}).get("href", "").strip() if soup.select_one("link[rel='canonical']") else ""
+    og_url = (soup.select_one("meta[property='og:url']") or {}).get("content", "").strip() if soup.select_one("meta[property='og:url']") else ""
+
+    mlb_links = []
+    vehicle_links = []
+    for anchor in soup.select("a[href]"):
+        href = (anchor.get("href") or "").strip()
+        if "/MLB-" in href:
+            mlb_links.append(href)
+        if "/veiculos/" in href:
+            vehicle_links.append(href)
+
+    signals: list[str] = []
+    body_text = soup.get_text(" ", strip=True).lower()
+    if "mercado livre" in title.lower() or "mercadolivre.com.br" in html.lower():
+        signals.append("mercado_livre_page")
+    if "access to this page has been denied" in body_text:
+        signals.append("access_denied")
+    if "captcha" in body_text:
+        signals.append("captcha")
+    if "bot challenge" in body_text or "are you human" in body_text:
+        signals.append("bot_challenge")
+    if "consent" in body_text or "cookies" in body_text and "aceitar" in body_text:
+        signals.append("consent")
+    if "não encontramos resultados" in body_text or "nao encontramos resultados" in body_text:
+        signals.append("zero_results")
+    if "sem resultados" in body_text or "no results" in body_text:
+        signals.append("no_results")
+    if soup.select_one("script[type='application/ld+json']"):
+        signals.append("has_json_ld")
+    if soup.select_one("script#__NEXT_DATA__"):
+        signals.append("has_next_data")
+    if "window.__PRELOADED_STATE__" in html:
+        signals.append("has_preloaded_state")
+    if mlb_links:
+        signals.append("has_mlb_links")
+    if vehicle_links:
+        signals.append("has_vehicle_links")
+
+    return {
+        "content_length": len(html),
+        "title": title,
+        "canonical_url": canonical,
+        "og_url": og_url,
+        "selector_counts": {
+            "li.ui-search-layout__item": len(soup.select("li.ui-search-layout__item")),
+            "div.ui-search-result": len(soup.select("div.ui-search-result")),
+            "div[class*='item__container']": len(soup.select("div[class*='item__container']")),
+            "article": len(soup.select("article")),
+            "li_has_mlb_link": len(soup.select("li a[href*='/MLB-']")),
+            "a_mlb_links": len(mlb_links),
+            "a_vehicle_links": len(vehicle_links),
+        },
+        "signals": list(dict.fromkeys(signals)),
+        "sample_links": list(dict.fromkeys((mlb_links + vehicle_links)))[:5],
+    }
+
+
+def build_mercadolivre_probe_hints(v2_raw_items_found: Any, html_diagnostics: dict[str, Any] | None) -> list[str]:
+    if v2_raw_items_found != 0 or not html_diagnostics:
+        return []
+    selectors = (html_diagnostics or {}).get("selector_counts", {}) or {}
+    signals = set((html_diagnostics or {}).get("signals", []) or [])
+    card_count = int(selectors.get("li.ui-search-layout__item", 0)) + int(selectors.get("div.ui-search-result", 0)) + int(selectors.get("div[class*='item__container']", 0))
+    hints: list[str] = []
+    if card_count == 0 and int(html_diagnostics.get("content_length", 0)) > 5000:
+        hints.append("ml_html_structure_changed_or_spa")
+    if int(selectors.get("a_mlb_links", 0)) > 0 and card_count == 0:
+        hints.append("ml_links_present_but_card_selectors_missing")
+    if "zero_results" in signals or "no_results" in signals:
+        hints.append("ml_zero_results_page")
+    if signals.intersection({"access_denied", "captcha", "bot_challenge"}):
+        hints.append("ml_probe_blocked_or_challenged")
+    if int(selectors.get("a_vehicle_links", 0)) > 0:
+        hints.append("ml_vehicle_links_present_extractor_gap")
+    return list(dict.fromkeys(hints))
+
+
 def _build_diagnostics(
     *,
     query: str,
@@ -170,6 +253,7 @@ def _build_diagnostics(
     v2_blocked: bool,
     v2_warnings: list[str],
     v2_metrics: Any = None,
+    fetch_probe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     parts = urlsplit(_to_clean_str(search_url))
     v2_metrics_dict = _extract_v2_metrics(v2_metrics)
@@ -195,6 +279,7 @@ def _build_diagnostics(
             hints.extend(["v2_extracted_raw_but_parsed_zero", "likely_v2_parse_listing_gap"])
         elif raw_items_found == 0:
             hints.extend(["v2_extracted_zero_raw_items", "likely_fetch_or_extract_gap"])
+            hints.extend(build_mercadolivre_probe_hints(raw_items_found, (fetch_probe or {}).get("html_diagnostics")))
 
     if v2_blocked:
         hints.append("v2_blocked")
@@ -217,6 +302,7 @@ def _build_diagnostics(
         "v2_warnings": list(v2_warnings or []),
         "v2_metrics": v2_metrics_dict,
         "hints": hints,
+        **({"fetch_probe": fetch_probe} if fetch_probe else {}),
     }
 def _summary_status_and_reason(v1_count: int, v2_count: int, *, v1_error: str = "", v2_error: str = "") -> tuple[str, str]:
     if v1_error or v2_error:
@@ -244,6 +330,7 @@ def build_dual_run_report(
     v2_blocked: bool = False,
     v2_warnings: list[str] | None = None,
     v2_metrics: Any = None,
+    fetch_probe: dict[str, Any] | None = None,
 ) -> dict:
     compare = compare_items(v1_items, v2_items)
     report = {
@@ -275,6 +362,7 @@ def build_dual_run_report(
         v2_blocked=v2_blocked,
         v2_warnings=list(v2_warnings or []),
         v2_metrics=v2_metrics,
+        fetch_probe=fetch_probe,
     )
     return report
 
@@ -297,6 +385,7 @@ def render_dual_run_report_markdown(report: dict) -> str:
         f"- v2_warnings: {rpt.get('v2_warnings', [])}",
         f"- diagnostics_hints: {(rpt.get('diagnostics') or {}).get('hints', [])}",
         f"- v2_metrics: {(rpt.get('diagnostics') or {}).get('v2_metrics', {})}",
+        f"- fetch_probe: {(rpt.get('diagnostics') or {}).get('fetch_probe', {})}",
         *( [f"- v1_error: {rpt.get('v1_error')}" ] if rpt.get("v1_error") else [] ),
         *( [f"- v2_error: {rpt.get('v2_error')}" ] if rpt.get("v2_error") else [] ),
         "",

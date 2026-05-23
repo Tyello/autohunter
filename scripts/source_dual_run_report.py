@@ -12,7 +12,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.scrapers.sources import get_scraper
-from app.services.source_dual_run_report import build_dual_run_report, render_dual_run_report_markdown
+from app.services.source_dual_run_report import (
+    build_dual_run_report,
+    diagnose_mercadolivre_html,
+    render_dual_run_report_markdown,
+)
+from app.scrapers.scraper_base.fetcher import unified_fetch
 from app.sources.registry import get_source
 from app.sources.types import ScrapeContext
 
@@ -25,6 +30,8 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument("--limit", type=int, default=30)
     parser.add_argument("--debug", action="store_true", help="include full diagnostics payload in markdown output")
+    parser.add_argument("--probe-fetch", action="store_true", help="run manual fetch probe for HTML diagnostics")
+    parser.add_argument("--capture-html", help="optional path to persist probe HTML content")
     args = parser.parse_args(argv)
 
     src = (args.source or "").strip().lower()
@@ -83,6 +90,25 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             v2_error = f"{type(exc).__name__}: {exc}"
 
+        fetch_probe = None
+        if args.probe_fetch:
+            try:
+                probe = unified_fetch(search_url, ctx, source=source)
+                html = probe.content or ""
+                fetch_probe = {
+                    "executed": True,
+                    "fetch_method": getattr(probe, "method", ""),
+                    "content_length": len(html),
+                    "html_diagnostics": diagnose_mercadolivre_html(html),
+                }
+                if args.capture_html:
+                    capture_path = Path(args.capture_html)
+                    capture_path.parent.mkdir(parents=True, exist_ok=True)
+                    capture_path.write_text(html, encoding="utf-8")
+                    fetch_probe["capture_path"] = str(capture_path)
+            except Exception as exc:
+                fetch_probe = {"executed": True, "error": f"{type(exc).__name__}: {exc}"}
+
         report = build_dual_run_report(
             source,
             search_url,
@@ -94,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             v2_blocked=bool(getattr(v2_result, "blocked", False)),
             v2_warnings=list(getattr(v2_result, "warnings", []) or [])[:5],
             v2_metrics=getattr(v2_result, "metrics", None),
+            fetch_probe=fetch_probe,
         )
         if args.format == "json":
             print(json.dumps(report, ensure_ascii=False, indent=2))
