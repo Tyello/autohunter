@@ -3,6 +3,7 @@ from scripts.validate_postgres_schema import (
     classify_database_url,
     evaluate_required_columns,
     has_sent_partial_condition,
+    run_validation,
     summarize_results,
 )
 
@@ -44,3 +45,19 @@ def test_exit_code_follows_fail_presence() -> None:
     _, fail_exit = summarize_results([CheckResult("OK", "ok"), CheckResult("FAIL", "fail")])
     assert ok_exit == 0
     assert fail_exit == 1
+
+
+def test_run_validation_prints_fail_for_sqlite_url(capsys) -> None:
+    _, exit_code = run_validation("sqlite:///tmp/test.db")
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "FAIL" in output
+    assert "SQLite" in output
+
+
+def test_run_validation_prints_fail_for_malformed_url(capsys) -> None:
+    _, exit_code = run_validation("not a valid database url")
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "FAIL" in output
+    assert "inválida ou malformada" in output

@@ -101,7 +101,9 @@ def run_validation(database_url: Optional[str] = None) -> Tuple[List[CheckResult
     level, message = classify_database_url(url)
     results.append(CheckResult(level, message))
     if level == "FAIL":
-        return results, 1
+        counts, exit_code = summarize_results(results)
+        _print_results(results, counts)
+        return results, exit_code
 
     try:
         engine: Engine = create_engine(url, pool_pre_ping=True)
