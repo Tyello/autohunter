@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.fetching import fetch_html_with_browser_fallback
-from app.services.browser_fetcher import fetch_html_browser
+from app.services.browser_fetcher import fetch_html_browser, reset_browser_state_for_source
 from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
@@ -83,6 +83,24 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
     raise FetchBlocked(403, url, reason="ml_403_all_strategies")
 
 
+def _is_ml_security_or_captcha_page(html: str, final_url: str = "") -> bool:
+    lower_html = (html or "").lower()
+    lower_url = (final_url or "").lower()
+    return any(marker in lower_url for marker in ("/captcha/wall",)) or any(
+        marker in lower_html
+        for marker in (
+            "seguridad — mercado libre",
+            "seguridad - mercado libre",
+            "/captcha/wall",
+            "account-verification",
+            "captcha",
+            "hcaptcha",
+            "g-recaptcha",
+            "are you human",
+        )
+    )
+
+
 def _is_ml_shell_without_results(html: str) -> bool:
     """Detecta respostas-shell do ML sem cards úteis de veículo.
 
@@ -125,23 +143,32 @@ def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext],
     if not (settings.enable_playwright and ctx and getattr(ctx, "browser_fallback_enabled", False)):
         return html
 
-    browser_res = fetch_html_browser(
-        url,
-        ctx=ctx,
-        timeout_ms=timeout * 1000,
-        wait_until="networkidle",
-        min_delay_ms=250,
-        max_delay_ms=900,
-        block_resources=False,
-    )
-    browser_html = browser_res.html
-    browser_final_url = (getattr(browser_res, "final_url", "") or "").lower()
-    browser_title_match = re.search(r"<title[^>]*>(.*?)</title>", browser_html or "", re.IGNORECASE | re.DOTALL)
-    browser_title = (browser_title_match.group(1).strip().lower() if browser_title_match else "")
-    if "seguridad — mercado libre" in browser_title or "/captcha/wall" in browser_final_url:
+    def _browser_fetch_once() -> tuple[str, str]:
+        browser_res = fetch_html_browser(
+            url,
+            ctx=ctx,
+            timeout_ms=timeout * 1000,
+            wait_until="networkidle",
+            min_delay_ms=250,
+            max_delay_ms=900,
+            block_resources=False,
+        )
+        return (browser_res.html or "", getattr(browser_res, "final_url", "") or "")
+
+    browser_html, browser_final_url = _browser_fetch_once()
+    if _is_ml_security_or_captcha_page(browser_html, browser_final_url):
         raise FetchBlocked(200, url, reason="ml_security_or_captcha_page")
 
-    return browser_html
+    if not _is_ml_shell_without_results(browser_html):
+        return browser_html
+
+    reset_browser_state_for_source("mercadolivre", ctx, block_resources=False, clear_storage=True)
+    retry_html, retry_final_url = _browser_fetch_once()
+    if _is_ml_security_or_captcha_page(retry_html, retry_final_url):
+        raise FetchBlocked(200, url, reason="ml_security_or_captcha_page")
+    if _is_ml_shell_without_results(retry_html):
+        raise FetchBlocked(200, url, reason="ml_shell_without_results")
+    return retry_html
 
 
 def _unescape_ml(s: str) -> str:

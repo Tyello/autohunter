@@ -22,6 +22,7 @@ def parse_args(argv: list[str] | None = None):
     p.add_argument("--limit-strategies", type=int)
     p.add_argument("--external-id")
     p.add_argument("--timeout-ms", type=int, default=30000)
+    p.add_argument("--ignore-security-wall", action="store_true")
     return p.parse_args(argv)
 
 
@@ -34,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         external_id=args.external_id,
         timeout_ms=args.timeout_ms,
         limit_strategies=args.limit_strategies,
+        ignore_security_wall=args.ignore_security_wall,
     )
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2))

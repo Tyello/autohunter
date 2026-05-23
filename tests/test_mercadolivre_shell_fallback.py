@@ -1,5 +1,6 @@
 from app.scrapers.mercadolivre import (
     _is_ml_shell_without_results,
+    _is_ml_security_or_captcha_page,
     scrape_mercadolivre,
 )
 from app.scrapers.base import FetchBlocked
@@ -185,3 +186,64 @@ def test_scrape_mercadolivre_browser_security_page_raises_blocked(monkeypatch):
         assert False, "expected FetchBlocked"
     except FetchBlocked as exc:
         assert exc.reason == "ml_security_or_captcha_page"
+
+
+def test_ml_security_detector_by_title_or_url():
+    html = "<html><head><title>Seguridad — Mercado Libre</title></head></html>"
+    assert _is_ml_security_or_captcha_page(html) is True
+    assert _is_ml_security_or_captcha_page("<html></html>", "https://lista.mercadolivre.com.br/captcha/wall") is True
+    assert _is_ml_security_or_captcha_page(ML_RESULTS_HTML, "https://lista.mercadolivre.com.br/veiculos") is False
+
+
+def test_scrape_ml_shell_retry_with_fresh_context(monkeypatch):
+    calls = {"browser": 0, "reset": 0}
+
+    def _fake_fetch(url, ctx=None, timeout=25):
+        return ML_SHELL_HTML
+
+    class _Res:
+        def __init__(self, html, final_url="https://lista.mercadolivre.com.br/veiculos"):
+            self.html = html
+            self.final_url = final_url
+
+    responses = [_Res(ML_SHELL_HTML), _Res(ML_RESULTS_HTML)]
+
+    def _fake_browser_fetch(url, **kwargs):
+        calls["browser"] += 1
+        return responses.pop(0)
+
+    def _fake_reset(*args, **kwargs):
+        calls["reset"] += 1
+
+    monkeypatch.setattr("app.scrapers.mercadolivre._fetch_html_ml", _fake_fetch)
+    monkeypatch.setattr("app.scrapers.mercadolivre.fetch_html_browser", _fake_browser_fetch)
+    monkeypatch.setattr("app.scrapers.mercadolivre.reset_browser_state_for_source", _fake_reset)
+    monkeypatch.setattr("app.scrapers.mercadolivre.settings.enable_playwright", True)
+
+    ctx = ScrapeContext(source="mercadolivre", browser_fallback_enabled=True)
+    items = scrape_mercadolivre("https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic-si", ctx)
+    assert len(items) == 1
+    assert calls["browser"] == 2
+    assert calls["reset"] == 1
+
+
+def test_scrape_ml_shell_retry_limited(monkeypatch):
+    def _fake_fetch(url, ctx=None, timeout=25):
+        return ML_SHELL_HTML
+
+    class _Res:
+        def __init__(self):
+            self.html = ML_SHELL_HTML
+            self.final_url = "https://lista.mercadolivre.com.br/veiculos"
+
+    monkeypatch.setattr("app.scrapers.mercadolivre._fetch_html_ml", _fake_fetch)
+    monkeypatch.setattr("app.scrapers.mercadolivre.fetch_html_browser", lambda *a, **k: _Res())
+    monkeypatch.setattr("app.scrapers.mercadolivre.reset_browser_state_for_source", lambda *a, **k: None)
+    monkeypatch.setattr("app.scrapers.mercadolivre.settings.enable_playwright", True)
+
+    ctx = ScrapeContext(source="mercadolivre", browser_fallback_enabled=True)
+    try:
+        scrape_mercadolivre("https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic-si", ctx)
+        assert False
+    except FetchBlocked as exc:
+        assert exc.reason == "ml_shell_without_results"
