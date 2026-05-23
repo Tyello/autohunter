@@ -140,3 +140,60 @@ def test_script_generates_report_when_v2_fails(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert '"v2_error": "RuntimeError: v2 broke"' in out
+
+
+def test_zero_zero_includes_inconclusive_hints():
+    report = build_dual_run_report("mercadolivre", "https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic-si", [], [])
+    assert report["summary_status"] == "INCONCLUSIVE"
+    assert report["summary_reason"] == "both_paths_returned_zero_items"
+    hints = report["diagnostics"]["hints"]
+    assert "both_paths_zero_items" in hints
+    assert "not_safe_to_flip_to_v2" in hints
+
+
+def test_v2_metrics_raw_items_found_gt_zero_adds_parse_gap_hint():
+    metrics = SimpleNamespace(raw_items_found=3)
+    report = build_dual_run_report("mercadolivre", "https://x", [{"id": 1}], [], v2_metrics=metrics)
+    hints = report["diagnostics"]["hints"]
+    assert "v2_extracted_raw_but_parsed_zero" in hints
+
+
+def test_v2_metrics_raw_items_found_zero_adds_fetch_extract_hint():
+    metrics = SimpleNamespace(raw_items_found=0)
+    report = build_dual_run_report("mercadolivre", "https://x", [{"id": 1}], [], v2_metrics=metrics)
+    hints = report["diagnostics"]["hints"]
+    assert "v2_extracted_zero_raw_items" in hints
+
+
+def test_v2_blocked_adds_hint():
+    report = build_dual_run_report("mercadolivre", "https://x", [], [], v2_blocked=True)
+    assert "v2_blocked" in report["diagnostics"]["hints"]
+
+
+def test_script_json_includes_diagnostics_metrics(monkeypatch, capsys):
+    class FakeV2:
+        def scrape(self, url, ctx):
+            metrics = SimpleNamespace(fetch_method="http", raw_items_found=2, items_valid=0)
+            return SimpleNamespace(listings=[], warnings=[], blocked=False, metrics=metrics)
+
+    plugin = SimpleNamespace(
+        default_extra={},
+        build_url=lambda q: f"https://example.com/?q={q}",
+        scrape=lambda *_args, **_kwargs: [],
+    )
+
+    monkeypatch.setattr(script, "get_source", lambda _s: plugin)
+    monkeypatch.setattr(script, "get_scraper", lambda _s: FakeV2())
+
+    rc = script.main(["mercadolivre", "--query", "civic", "--format", "json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert '"diagnostics"' in out
+    assert '"v2_metrics"' in out
+    assert '"fetch_method": "http"' in out
+
+
+def test_markdown_includes_diagnostics_hints():
+    report = build_dual_run_report("mercadolivre", "https://x", [], [], v2_warnings=["challenge"])
+    md = render_dual_run_report_markdown(report)
+    assert "diagnostics_hints" in md
