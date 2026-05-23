@@ -436,3 +436,13 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 - Ative via `source_configs.extra.webmotors_warmup_behavior_enabled=true`.
 - Mesmo com warmup bem-sucedido, a validação real continua sendo `/admin runall webmotors`.
 - Não há promessa de desbloqueio.
+
+## Mercado Livre (status operacional atual)
+
+- Continua como source `primary`, porém em diagnóstico de estratégia de fetch no ambiente Raspberry Pi.
+- Sinais atuais observados:
+  - API pública pode retornar `403` (bloqueio/fingerprint/challenge upstream).
+  - HTML/lista pode responder como shell/SPA sem cards extraíveis.
+- Use probe manual/read-only para triagem de estratégia:
+  - `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json`
+- Não há mudança automática de URL/default/impl nesse diagnóstico; objetivo é apenas observabilidade de fetch por estratégia.

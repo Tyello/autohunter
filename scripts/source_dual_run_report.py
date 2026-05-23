@@ -17,6 +17,7 @@ from app.services.source_dual_run_report import (
     diagnose_mercadolivre_html,
     render_dual_run_report_markdown,
 )
+from app.services.mercadolivre_strategy_probe import run_probe as run_ml_strategy_probe
 from app.scrapers.scraper_base.fetcher import unified_fetch
 from app.sources.registry import get_source
 from app.sources.types import ScrapeContext
@@ -32,6 +33,8 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--debug", action="store_true", help="include full diagnostics payload in markdown output")
     parser.add_argument("--probe-fetch", action="store_true", help="run manual fetch probe for HTML diagnostics")
     parser.add_argument("--capture-html", help="optional path to persist probe HTML content")
+    parser.add_argument("--strategy-probe", action="store_true", help="run manual mercadolivre strategy probe")
+    parser.add_argument("--capture-dir", help="optional dir to persist strategy probe responses")
     args = parser.parse_args(argv)
 
     src = (args.source or "").strip().lower()
@@ -68,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     if v2_scraper is None:
         print(f"source sem scraper v2 registrado: {source}", file=sys.stderr)
         return 2
+
+    if args.strategy_probe:
+        report = run_ml_strategy_probe(query=args.query or "", capture_dir=args.capture_dir)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
 
     search_url = args.url or plugin.build_url(args.query)
     ctx = _build_ctx(source, plugin)
