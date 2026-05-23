@@ -180,6 +180,70 @@ def test_extract_raw_data_html_returns_items(scraper, ctx):
     assert "80.000 km" in items[0]["attributes"]
 
 
+def test_extract_raw_data_html_polycard_preferred(monkeypatch, scraper, ctx):
+    monkeypatch.setattr(
+        "app.scrapers.sources.mercadolivre._parse_polycard_items",
+        lambda *_args, **_kwargs: [{
+            "external_id": "MLB4690465617",
+            "title": "Honda Civic 2008 New Si 2.0 16v",
+            "url": "https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM",
+            "thumbnail_url": "https://img.example/civic.jpg",
+            "price": 89900,
+            "currency": "BRL",
+            "location": "São Paulo, SP",
+        }],
+    )
+    html = "<html><body></body></html>"
+    items = scraper.extract_raw_data(html, ctx)
+    assert len(items) > 0
+    assert items[0]["id"] == "MLB4690465617"
+    assert items[0]["title"]
+    assert items[0]["price"] == 89900
+    assert "carro.mercadolivre.com.br" in items[0]["url"]
+
+
+def test_extract_raw_data_html_slug_title_fallback(scraper, ctx):
+    html = """
+    <html><body>
+      <li class="ui-search-layout__item">
+        <a class="ui-search-link" href="https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM"></a>
+        <span class="price-tag-fraction">89.900</span>
+      </li>
+    </body></html>
+    """
+    items = scraper.extract_raw_data(html, ctx)
+    assert len(items) == 1
+    assert items[0]["title"] == "Honda Civic Si 20 A Gasolina Manual 2008"
+    parsed = scraper.parse_listing(items[0])
+    assert parsed is not None
+    assert parsed["title"] == "Honda Civic Si 20 A Gasolina Manual 2008"
+
+
+def test_extract_raw_data_html_dedup_polycard_and_card(monkeypatch, scraper, ctx):
+    monkeypatch.setattr(
+        "app.scrapers.sources.mercadolivre._parse_polycard_items",
+        lambda *_args, **_kwargs: [{
+            "external_id": "MLB4690465617",
+            "title": "Honda Civic 2008 New Si 2.0 16v",
+            "url": "https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM",
+            "thumbnail_url": "https://img.example/civic.jpg",
+            "price": 89900,
+            "currency": "BRL",
+            "location": "São Paulo, SP",
+        }],
+    )
+    html = """
+    <html><body>
+      <li class="ui-search-layout__item">
+        <a class="ui-search-link" href="https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM"><h2>Outro título</h2></a>
+      </li>
+    </body></html>
+    """
+    items = scraper.extract_raw_data(html, ctx)
+    assert len(items) == 1
+    assert items[0]["id"] == "MLB4690465617"
+
+
 def test_extract_raw_data_json_non_vehicle_filtered(scraper, ctx):
     """Testa que JSON com URL não-veículo continua filtrado."""
     api_response = {
@@ -295,6 +359,27 @@ def test_parse_listing_minimal(scraper):
     assert parsed["title"] == "Carro usado"
     assert parsed["price"] is None
     assert parsed["year"] is None
+
+
+def test_parse_listing_polycard_converted(scraper):
+    raw = {
+        "id": "MLB4690465617",
+        "title": "Honda Civic 2008 New Si 2.0 16v",
+        "url": "https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM",
+        "permalink": "https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM",
+        "thumbnail": "https://img.example/civic.jpg",
+        "price": 89900,
+        "currency_id": "BRL",
+        "location": "São Paulo, SP",
+        "attributes": [],
+    }
+    parsed = scraper.parse_listing(raw)
+    assert parsed is not None
+    assert parsed["external_id"] == "MLB4690465617"
+    assert parsed["title"] == "Honda Civic 2008 New Si 2.0 16v"
+    assert parsed["price"] == Decimal("89900")
+    assert parsed["url"] == "https://carro.mercadolivre.com.br/MLB-4690465617-honda-civic-si-20-a-gasolina-manual-2008-_JM"
+    assert parsed["thumbnail_url"] == "https://img.example/civic.jpg"
 
 
 def test_parse_listing_invalid_no_id(scraper):

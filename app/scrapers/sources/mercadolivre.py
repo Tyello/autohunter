@@ -21,7 +21,11 @@ from urllib.parse import quote_plus, urljoin, urlparse
 from app.scrapers.scraper_base import BaseScraper
 from app.scrapers.scraper_base.fetcher import FetchResult
 from app.scrapers.base import FetchBlocked
-from app.scrapers.mercadolivre import _fetch_ml_search_with_shell_fallback, _is_ml_shell_without_results
+from app.scrapers.mercadolivre import (
+    _fetch_ml_search_with_shell_fallback,
+    _is_ml_shell_without_results,
+    _parse_polycard_items,
+)
 
 
 class MercadoLivreScraper(BaseScraper):
@@ -103,8 +107,19 @@ class MercadoLivreScraper(BaseScraper):
             return out
 
         soup = BeautifulSoup(raw_content, "lxml")
+        items: list[dict] = []
+        seen_ids: set[str] = set()
 
-        items = []
+        poly_items = _parse_polycard_items(raw_content or "", limit=50)
+        for poly in poly_items:
+            converted = self._convert_polycard_item(poly)
+            if not converted:
+                continue
+            item_id = str(converted.get("id") or "")
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            items.append(converted)
 
         # Mercado Livre usa diferentes estruturas
         # Seletores conhecidos (2024-2026):
@@ -157,6 +172,8 @@ class MercadoLivreScraper(BaseScraper):
                 title = ""
                 if title_el:
                     title = title_el.get_text(strip=True) or title_el.get("title", "")
+                if not title:
+                    title = self._extract_title_from_card_fallback(card, link_el, url)
 
                 # Preço
                 price_el = (
@@ -186,15 +203,20 @@ class MercadoLivreScraper(BaseScraper):
                 for el in attr_els:
                     attrs.append(el.get_text(strip=True))
 
-                items.append({
+                item = {
                     "id": item_id,
                     "url": url,
+                    "permalink": url,
                     "title": title,
                     "price": price_text,
                     "thumbnail": thumbnail,
                     "location": location,
                     "attributes": attrs,
-                })
+                }
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+                items.append(item)
 
             except Exception:
                 continue
@@ -218,6 +240,8 @@ class MercadoLivreScraper(BaseScraper):
 
             # Título
             title = raw_data.get("title", "").strip()
+            if not title:
+                title = self._title_from_listing_url(url)
             if not title:
                 return None
 
@@ -248,10 +272,11 @@ class MercadoLivreScraper(BaseScraper):
             transmission = self._normalize_transmission(self._extract_attribute(attributes, "TRANSMISSION") or "")
 
             location_obj = raw_data.get("location") or {}
-            city = ((location_obj.get("city") or {}).get("name") or "").strip()
-            state = ((location_obj.get("state") or {}).get("name") or "").strip()
-            if city and state:
-                location = f"{city}, {state}"
+            if isinstance(location_obj, dict):
+                city = ((location_obj.get("city") or {}).get("name") or "").strip()
+                state = ((location_obj.get("state") or {}).get("name") or "").strip()
+                if city and state:
+                    location = f"{city}, {state}"
 
             return {
                 "external_id": external_id,
@@ -277,6 +302,51 @@ class MercadoLivreScraper(BaseScraper):
 
         except Exception:
             return None
+
+    def _convert_polycard_item(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(item, dict):
+            return None
+        url = self._clean_url(item.get("url") or "")
+        external_id = str(item.get("external_id") or "")
+        if not external_id or not url or not self._is_vehicle_listing(url):
+            return None
+        title = str(item.get("title") or "").strip() or self._title_from_listing_url(url)
+        return {
+            "id": external_id,
+            "title": title,
+            "url": url,
+            "permalink": url,
+            "thumbnail": item.get("thumbnail_url") or "",
+            "price": item.get("price"),
+            "currency_id": item.get("currency") or "BRL",
+            "location": item.get("location") or "",
+            "attributes": [],
+        }
+
+    def _extract_title_from_card_fallback(self, card, link_el, url: str) -> str:
+        img_el = card.select_one("img")
+        if img_el:
+            for key in ("alt", "title"):
+                value = (img_el.get(key) or "").strip()
+                if value:
+                    return value
+        for key in ("title", "aria-label"):
+            value = (link_el.get(key) or "").strip()
+            if value:
+                return value
+        return self._title_from_listing_url(url)
+
+    def _title_from_listing_url(self, url: str) -> str:
+        if not url:
+            return ""
+        parsed = urlparse(url)
+        slug = (parsed.path or "").split("/")[-1]
+        slug = re.sub(r"^MLB-?\d+-?", "", slug, flags=re.I)
+        slug = re.sub(r"[-_]+JM$", "", slug, flags=re.I)
+        slug = slug.replace("-", " ").replace("_", " ").strip()
+        if not slug:
+            return ""
+        return re.sub(r"\s+", " ", slug).title()
 
     # ========== Helper Methods ==========
 
