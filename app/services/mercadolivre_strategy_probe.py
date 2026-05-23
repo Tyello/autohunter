@@ -130,10 +130,20 @@ def _fetch_with_playwright(strategy: ProbeStrategy, source: str) -> dict[str, An
         return {"skipped": True, "reason": "playwright_unavailable"}
     start = perf_counter()
     try:
-        result = browser_mgr.fetch_html(url=strategy.url, source=source, proxy=None, timeout_ms=30000, wait_until=strategy.browser_wait_until or "domcontentloaded", block_resources=False)
-        content = result.html or ""
         if strategy.browser_wait_scroll:
-            content = content
+            result = browser_mgr.fetch_html_with_actions(
+                url=strategy.url,
+                source=source,
+                proxy=None,
+                timeout_ms=30000,
+                wait_until="domcontentloaded",
+                block_resources=False,
+                extra_wait_ms=3000,
+                scroll=True,
+            )
+        else:
+            result = browser_mgr.fetch_html(url=strategy.url, source=source, proxy=None, timeout_ms=30000, wait_until=strategy.browser_wait_until or "domcontentloaded", block_resources=False)
+        content = result.html or ""
         return {
             "fetch_ok": True,
             "fetch_blocked": False,

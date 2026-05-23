@@ -394,3 +394,5 @@ Notas de operação:
 
 - Playwright é plano B diagnóstico explícito (somente manual), via `--include-browser`, sem alterar scraping de produção.
 - Comando: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`
+
+- `playwright_wait_scroll` executa wait+scroll real (domcontentloaded + waits + scroll leve) somente no probe manual com `--include-browser`.

@@ -82,3 +82,81 @@ def test_capture_dir_writes_only_when_provided(monkeypatch, tmp_path):
     assert "capture_path" not in report_no["strategies"][0]
     report_yes = probe.run_probe("civic", capture_dir=str(tmp_path))
     assert "capture_path" in report_yes["strategies"][0]
+
+
+def test_playwright_wait_scroll_runs_actions(monkeypatch):
+    class FakePage:
+        def __init__(self):
+            self.calls = []
+            self.url = "https://final"
+
+        def goto(self, *args, **kwargs):
+            self.calls.append(("goto", args, kwargs))
+
+        def wait_for_timeout(self, ms):
+            self.calls.append(("wait", ms))
+
+        def evaluate(self, script):
+            self.calls.append(("eval", script))
+
+        def content(self):
+            return "<html><body>ok</body></html>"
+
+        def close(self):
+            self.calls.append(("close",))
+
+    class FakeContext:
+        def __init__(self, page):
+            self.page = page
+
+        def new_page(self):
+            return self.page
+
+    class FakeBM:
+        def __init__(self, page):
+            self.page = page
+
+        def fetch_html_with_actions(self, **kwargs):
+            p = self.page
+            p.goto(kwargs["url"], wait_until=kwargs["wait_until"], timeout=kwargs["timeout_ms"])
+            p.wait_for_timeout(kwargs["extra_wait_ms"])
+            p.evaluate("window.scrollTo({top: 600, behavior: 'smooth'})")
+            p.wait_for_timeout(1500)
+            p.evaluate("window.scrollTo({top: 1200, behavior: 'smooth'})")
+            p.wait_for_timeout(2000)
+            html = p.content()
+            return SimpleNamespace(html=html, final_url=p.url)
+
+    page = FakePage()
+    bm = FakeBM(page)
+    monkeypatch.setattr(probe, "get_browser_manager", lambda: bm)
+    out = probe._fetch_with_playwright(probe.ProbeStrategy("playwright_wait_scroll", "https://x", kind="playwright", browser_wait_scroll=True), "mercadolivre")
+    assert out["fetch_ok"] is True
+    assert any(c[0] == "wait" and c[1] == 3000 for c in page.calls)
+    assert any(c[0] == "eval" for c in page.calls)
+
+
+def test_playwright_domcontentloaded_does_not_call_scroll(monkeypatch):
+    class FakeBM:
+        def fetch_html(self, **kwargs):
+            return SimpleNamespace(html="<html></html>", final_url=kwargs["url"])
+
+        def fetch_html_with_actions(self, **kwargs):
+            raise AssertionError("should not call actions")
+
+    monkeypatch.setattr(probe, "get_browser_manager", lambda: FakeBM())
+    out = probe._fetch_with_playwright(probe.ProbeStrategy("playwright_domcontentloaded", "https://x", kind="playwright", browser_wait_until="domcontentloaded"), "mercadolivre")
+    assert out["fetch_ok"] is True
+
+
+def test_strategy_error_does_not_break_report(monkeypatch):
+    monkeypatch.setattr(probe, "build_strategies", lambda _q, include_browser=False: [probe.ProbeStrategy("playwright_wait_scroll", "https://x", kind="playwright", browser_wait_scroll=True)])
+
+    class BrokenBM:
+        def fetch_html_with_actions(self, **kwargs):
+            raise TimeoutError("timeout")
+
+    monkeypatch.setattr(probe, "get_browser_manager", lambda: BrokenBM())
+    report = probe.run_probe("civic", include_browser=True)
+    assert report["strategies"][0]["fetch_ok"] is False
+    assert "TimeoutError" in report["strategies"][0]["error"]

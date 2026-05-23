@@ -449,3 +449,5 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 
 - Playwright pode ser incluído como plano B diagnóstico explícito com `--include-browser` (manual/read-only), sem mudança de comportamento de produção.
 - Exemplo: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`
+
+- `playwright_wait_scroll` executa wait+scroll real (domcontentloaded + waits + scroll leve) somente no probe manual com `--include-browser`.
