@@ -24,7 +24,8 @@
 - Contexto de raridade.
 
 ### P3 — refactors grandes
-- Refactor de `handlers_admin`.
+- Refactor de `handlers_admin` **iniciado** com extração incremental e segura de helpers puros (parsing/formatting/labels/data-string) para módulo auxiliar, mantendo entrypoints e comportamento.
+- Pendente: refactor completo de `handlers_admin` (decomposição maior por domínios de comando e integrações).
 - Mitigação do `settings` como god object.
 
 ## Comandos guiados no Telegram
@@ -45,4 +46,3 @@ Diretriz:
 - botões/guiado como caminho recomendado;
 - não mover regra de negócio para handlers;
 - handlers só orquestram serviços.
-
