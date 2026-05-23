@@ -61,9 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         v1_items = (plugin.scrape(search_url, ctx=ctx) or [])[: args.limit]
         v2_result = v2_scraper.scrape(search_url, ctx)
-        v2_items = (v2_result.items or [])[: args.limit]
+        v2_items = (getattr(v2_result, "listings", None) or [])[: args.limit]
 
         report = build_dual_run_report(source, search_url, v1_items=v1_items, v2_items=v2_items)
+        report["v2_blocked"] = bool(getattr(v2_result, "blocked", False))
+        report["v2_warnings"] = list(getattr(v2_result, "warnings", []) or [])[:5]
         if args.format == "json":
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:

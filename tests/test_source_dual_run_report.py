@@ -63,7 +63,7 @@ def test_script_parse_args_validation_and_success_path(monkeypatch, capsys):
 
     class FakeV2:
         def scrape(self, url, ctx):
-            return SimpleNamespace(items=[{"external_id": "1", "title": "A"}])
+            return SimpleNamespace(listings=[{"external_id": "1", "title": "A"}], warnings=[], blocked=False)
 
     plugin = SimpleNamespace(
         default_extra={"foo": "bar"},
@@ -78,3 +78,4 @@ def test_script_parse_args_validation_and_success_path(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert '"source": "mercadolivre"' in out
+    assert '"v2_blocked": false' in out
