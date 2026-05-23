@@ -14,21 +14,35 @@ from app.services.mercadolivre_strategy_probe import run_probe
 
 
 def parse_args(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser(description="Manual Mercado Livre fetch strategy probe (read-only).")
-    parser.add_argument("--query", required=True)
-    parser.add_argument("--format", choices=("json", "markdown"), default="json")
-    parser.add_argument("--capture-dir", help="Optional dir to save HTML/JSON responses. Never enabled by default.")
-    parser.add_argument("--include-browser", action="store_true", help="Include explicit Playwright diagnostic strategies (manual/read-only)")
-    return parser.parse_args(argv)
+    p = argparse.ArgumentParser(description="Mercado Livre strategy probe (manual/read-only)")
+    p.add_argument("--query", required=True)
+    p.add_argument("--format", choices=("json", "markdown"), default="json")
+    p.add_argument("--include-browser", action="store_true")
+    p.add_argument("--capture-dir")
+    p.add_argument("--limit-strategies", type=int)
+    p.add_argument("--external-id")
+    p.add_argument("--timeout-ms", type=int, default=30000)
+    return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    report = run_probe(query=args.query, capture_dir=args.capture_dir, include_browser=args.include_browser)
+    report = run_probe(
+        query=args.query,
+        capture_dir=args.capture_dir,
+        include_browser=args.include_browser,
+        external_id=args.external_id,
+        timeout_ms=args.timeout_ms,
+        limit_strategies=args.limit_strategies,
+    )
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(f"# MercadoLivre strategy probe\n\nsummary_status={report['summary_status']}\nrecommended_strategy={report['recommended_strategy']}")
+        rec_key = report.get("recommended_strategy_key") or ""
+        if not rec_key and isinstance(report.get("recommended_strategy"), dict):
+            rs = report["recommended_strategy"]
+            rec_key = f"{rs.get('url_strategy', '')}+{rs.get('fetch_strategy', '')}".strip("+")
+        print(f"# MercadoLivre Strategy Probe\n\nsummary_status={report['summary_status']}\nrecommended_strategy={rec_key}")
     return 0
 
 

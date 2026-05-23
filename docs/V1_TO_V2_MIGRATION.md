@@ -396,3 +396,12 @@ Notas de operação:
 - Comando: `python scripts/mercadolivre_strategy_probe.py --query "civic si" --format json --include-browser`
 
 - `playwright_wait_scroll` executa wait+scroll real (domcontentloaded + waits + scroll leve) somente no probe manual com `--include-browser`.
+
+
+## Mercado Livre — nota operacional (2026-05-23)
+
+- Evidência recente em Raspberry: URL HTML de lista (`https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic-si`) respondeu com shell (`title=| Mercado Livre`, sem cards/links úteis).
+- Evidência recente em Raspberry: API pública (`https://api.mercadolibre.com/sites/MLB/search?q=honda%20civic&category=MLB1743`) respondeu `403`.
+- Próximo passo técnico: executar `scripts/mercadolivre_strategy_probe.py` para matriz de URL+fetch em modo manual/read-only.
+- Playwright é plano B diagnóstico explícito somente com `--include-browser`.
+- Não concluir migração V1→V2 para Mercado Livre sem ao menos uma estratégia retornando dados úteis (score positivo e preferencialmente >=80).
