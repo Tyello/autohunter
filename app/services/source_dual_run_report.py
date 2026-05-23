@@ -134,22 +134,47 @@ def compare_items(v1_items: list[dict], v2_items: list[dict]) -> dict:
     }
 
 
-def _summary_status(v1_count: int, v2_count: int) -> str:
+def _summary_status_and_reason(v1_count: int, v2_count: int, *, v1_error: str = "", v2_error: str = "") -> tuple[str, str]:
+    if v1_error or v2_error:
+        return "FAIL", "path_execution_error"
+    if v1_count == 0 and v2_count == 0:
+        return "INCONCLUSIVE", "both_paths_returned_zero_items"
     if v1_count > 0 and v2_count == 0:
-        return "FAIL"
+        return "FAIL", "v2_returned_zero_items_while_v1_found_items"
+    if v1_count == 0 and v2_count > 0:
+        return "WARN", "v1_returned_zero_items_while_v2_found_items"
     if max(v1_count, v2_count, 1) and abs(v1_count - v2_count) / max(v1_count, v2_count, 1) > 0.30:
-        return "WARN"
-    return "OK"
+        return "WARN", "count_difference_above_threshold"
+    return "OK", "counts_within_threshold"
 
 
-def build_dual_run_report(source: str, search_url: str, v1_items: list[dict], v2_items: list[dict]) -> dict:
+def build_dual_run_report(
+    source: str,
+    search_url: str,
+    v1_items: list[dict],
+    v2_items: list[dict],
+    *,
+    v1_error: str = "",
+    v2_error: str = "",
+) -> dict:
     compare = compare_items(v1_items, v2_items)
     report = {
         "source": (source or "").strip().lower(),
         "search_url": _to_clean_str(search_url),
         **compare,
     }
-    report["summary_status"] = _summary_status(report["v1_count"], report["v2_count"])
+    status, reason = _summary_status_and_reason(
+        report["v1_count"],
+        report["v2_count"],
+        v1_error=_to_clean_str(v1_error),
+        v2_error=_to_clean_str(v2_error),
+    )
+    report["summary_status"] = status
+    report["summary_reason"] = reason
+    if v1_error:
+        report["v1_error"] = _to_clean_str(v1_error)
+    if v2_error:
+        report["v2_error"] = _to_clean_str(v2_error)
     return report
 
 
@@ -160,12 +185,17 @@ def render_dual_run_report_markdown(report: dict) -> str:
         "",
         f"- search_url: {rpt.get('search_url', '')}",
         f"- status: **{rpt.get('summary_status', 'UNKNOWN')}**",
+        f"- summary_reason: {rpt.get('summary_reason', '')}",
         f"- v1_count: {rpt.get('v1_count', 0)}",
         f"- v2_count: {rpt.get('v2_count', 0)}",
         f"- matched_count: {rpt.get('matched_count', 0)}",
         f"- only_v1_count: {rpt.get('only_v1_count', 0)}",
         f"- only_v2_count: {rpt.get('only_v2_count', 0)}",
         f"- field_diffs_count: {rpt.get('field_diffs_count', 0)}",
+        f"- v2_blocked: {rpt.get('v2_blocked', False)}",
+        f"- v2_warnings: {rpt.get('v2_warnings', [])}",
+        *( [f"- v1_error: {rpt.get('v1_error')}" ] if rpt.get("v1_error") else [] ),
+        *( [f"- v2_error: {rpt.get('v2_error')}" ] if rpt.get("v2_error") else [] ),
         "",
         "## only_v1_examples",
         "```json",

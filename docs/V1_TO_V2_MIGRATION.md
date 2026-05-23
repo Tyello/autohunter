@@ -341,3 +341,10 @@ Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa esp
 - `app/scrapers/facebook_marketplace.py`
 
 Todos os arquivos obrigatórios listados acima existem no snapshot atual.
+
+## 9. Dual-run diagnostics (V1 vs V2)
+
+- O relatório de dual-run agora pode retornar `summary_status=INCONCLUSIVE` com `summary_reason=both_paths_returned_zero_items` quando V1 e V2 retornam 0 itens.
+- `INCONCLUSIVE` **não** autoriza flip para `impl=v2`.
+- Em caso de `INCONCLUSIVE`, o próximo passo é validar com outra query/URL representativa e investigar fetch/parser antes de concluir paridade.
+- O relatório também expõe `summary_reason` para deixar explícito o motivo do status calculado.
