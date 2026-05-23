@@ -162,17 +162,21 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 
 ---
 
-## BUG-07 — `score_v2` automotivo incompleto
+## BUG-07 — `score_v2` automotivo incompleto (P2 incremental)
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P2 aberto
 
-**Problema:** `score_v2` existe no modelo `Notification` e é persistido, mas a lógica de score automotivo (FIPE, mercado, raridade) ainda não está completa. Alertas podem estar usando score básico que não reflete valor real da oportunidade.
+**Problema original:** `score_v2` existe no modelo `Notification` e é persistido, mas a lógica de score automotivo (FIPE, mercado, raridade) estava incompleta.
 
-**O que validar:** checar em `app/core/scoring.py` se os componentes de score incluem:
-- delta vs mediana de mercado (`market_stats_cohorts`)
-- delta vs FIPE (`fipe_prices`)
-- raridade (frequência de aparição)
-- qualidade do anúncio (thumbnail, km, ano, título)
+**Implementado na P2:**
+- componente `market_price` com delta vs mediana de mercado quando `market_stats_cohorts` possui amostra mínima (fallback neutro quando não possui);
+- componente `fipe_price` com lookup opcional em `fipe_prices` (sem integração externa) e fallback neutro quando ausente;
+- componente `rarity` leve/conservador com fallback neutro quando não há amostra mínima;
+- componente `quality` com sinais baratos (preço, km, localização, imagem, URL, make/model/year);
+- breakdown auditável com componentes nomeados e alias `price` mantido por compatibilidade.
+
+**Pendência real pós-P2:**
+- cobertura/população operacional da tabela `fipe_prices` ainda depende de etapa futura de dados; enquanto isso, o score permanece estável via fallback neutro.
 
 ---
 
@@ -187,4 +191,4 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 | BUG-04 | Alta — estabilidade | Médio (validar em staging/prod) | Validação automatizada criada; execução real pendente |
 | BUG-05 | Média — produto | Médio (handlers + matching) | Aberto |
 | BUG-06 | Baixa — produto | Alto (implementar + observar) | Aberto |
-| BUG-07 | Média — produto | Alto (validar scoring) | Aberto |
+| BUG-07 | Média — produto | Alto (validar scoring) | Parcialmente resolvido (P2) |
