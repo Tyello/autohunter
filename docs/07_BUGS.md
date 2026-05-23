@@ -7,34 +7,11 @@
 
 **Arquivo:** `app/db/session.py`
 
-**Problema:**
-```python
-# Estado atual — max_overflow não está sendo passado:
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    pool_recycle=settings.db_pool_recycle,
-    pool_timeout=settings.db_pool_timeout,
-)
-```
+**Status:** corrigido no código atual.
 
-`settings.db_max_overflow = 5` existe, mas não está sendo usado. O SQLAlchemy usa o default de `max_overflow=10`, que pode ser maior do que o `max_connections` do PostgreSQL no RPi.
+**Nota de validação:** `app/db/session.py` já aplica `max_overflow=settings.db_max_overflow` e `connect_args={"connect_timeout": int(settings.db_connect_timeout)}` para conexões não-SQLite.
 
-**Correção:**
-```python
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,   # ← adicionar
-    pool_recycle=settings.db_pool_recycle,
-    pool_timeout=settings.db_pool_timeout,
-    connect_args={"connect_timeout": 10},    # ← adicionar
-)
-```
-
-**Impacto:** sem correção, pool pode abrir mais conexões do que o banco suporta sob carga.
+**Impacto histórico:** sem a correção, o pool poderia abrir mais conexões do que o banco suporta sob carga.
 
 ---
 
@@ -42,7 +19,13 @@ engine = create_engine(
 
 **Arquivo:** `migrations/versions/f6a1b2c3d4e5_notifications_sent_at_index.py`
 
-**Problema:** existe migration com esse nome, mas não foi validado se é um partial index (`WHERE status='sent'`) ou um índice simples em `sent_at`. `count_sent_today` faz:
+**Status:** migration implementada; validação em banco real coberta pelo script operacional.
+
+**Nota de validação:** a migration `f6a1b2c3d4e5_notifications_sent_at_index.py` já cria em PostgreSQL o índice:
+
+`ix_notifications_user_sent_today ON notifications (user_id, sent_at) WHERE status = 'sent'`
+
+`count_sent_today` faz:
 
 ```sql
 SELECT COUNT(*) FROM notifications
@@ -61,12 +44,7 @@ WHERE tablename = 'notifications'
   AND indexname LIKE '%sent%';
 ```
 
-**Se não for partial index, criar migration:**
-```sql
-CREATE INDEX CONCURRENTLY ix_notifications_user_sent_today
-ON notifications (user_id, sent_at)
-WHERE status = 'sent';
-```
+**Ação operacional atual:** validar no banco real com `python scripts/validate_postgres_schema.py` (sem criar migration duplicada nesta etapa).
 
 ---
 
@@ -109,7 +87,11 @@ grep -E "cache_manager|database_optimizer" config/raspberry-pi/crontab
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P0 aberto
 
-**Problema:** as migrations foram testadas em SQLite local mas não validadas em cadeia completa em PostgreSQL/Supabase. Colunas como `doors`, `body_type` e `cross_source_fingerprint` foram adicionadas ao modelo mas não confirmadas no banco de staging.
+**Status:** validação automatizada criada; execução no ambiente real pendente.
+
+**Mudança desta PR:** novo script read-only `scripts/validate_postgres_schema.py` valida conexão PostgreSQL, estado Alembic, colunas críticas de `car_listings` e índice partial de `notifications`.
+
+**Importante:** o script **não** executa `alembic upgrade head` automaticamente e não aplica alterações destrutivas.
 
 **Como validar:**
 ```bash
@@ -198,11 +180,11 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 
 | Bug | Severidade | Esforço | Status |
 |---|---|---|---|
-| BUG-01 | Alta — escala | Trivial (1 linha) | Aberto |
-| BUG-02 | Alta — performance | Baixo (validar + migration) | Aberto |
+| BUG-01 | Alta — escala | Trivial (1 linha) | Corrigido |
+| BUG-02 | Alta — performance | Baixo (validar + migration) | Migration implementada; validar em banco real |
 | BUG-03 | Média — operação | Baixo | Corrigido |
 | BUG-08 | Alta — runtime | Baixo | Corrigido |
-| BUG-04 | Alta — estabilidade | Médio (testar em staging) | Aberto |
+| BUG-04 | Alta — estabilidade | Médio (validar em staging/prod) | Validação automatizada criada; execução real pendente |
 | BUG-05 | Média — produto | Médio (handlers + matching) | Aberto |
 | BUG-06 | Baixa — produto | Alto (implementar + observar) | Aberto |
 | BUG-07 | Média — produto | Alto (validar scoring) | Aberto |
