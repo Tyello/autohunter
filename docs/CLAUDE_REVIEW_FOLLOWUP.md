@@ -9,7 +9,10 @@
 ## Pendências
 
 ### P0 — validação/migration
-- Consolidar validação end-to-end de migrations em ambiente com cadeia completa e histórico homogêneo de revisions.
+- **Concluído:** validação end-to-end do schema PostgreSQL/Supabase executada com sucesso via `scripts/validate_postgres_schema.py`.
+- Evidências registradas: conexão PostgreSQL OK, Alembic com head único `aa21b3c4d5e6`, banco em `aa21b3c4d5e6`, colunas críticas em `car_listings` presentes e índice partial `ix_notifications_user_sent_today` confirmado.
+- Resultado da execução real: `OK=8, WARNING=0, FAIL=0`.
+- Status atual: **sem pendência operacional P0 aberta para schema/migrations**.
 
 ### P1 — filtros estruturados
 - Filtros estruturados para KM, seller, body_type e doors.

@@ -19,7 +19,7 @@
 
 **Arquivo:** `migrations/versions/f6a1b2c3d4e5_notifications_sent_at_index.py`
 
-**Status:** migration implementada; validação em banco real coberta pelo script operacional.
+**Status:** resolvido e validado em banco real (PostgreSQL/Supabase).
 
 **Nota de validação:** a migration `f6a1b2c3d4e5_notifications_sent_at_index.py` já cria em PostgreSQL o índice:
 
@@ -36,7 +36,7 @@ WHERE user_id = $1
 
 Sem `WHERE status='sent'` no índice, esse filtro faz varredura parcial.
 
-**Validar em produção:**
+**Validação executada (banco real):**
 ```sql
 SELECT indexname, indexdef
 FROM pg_indexes
@@ -44,7 +44,7 @@ WHERE tablename = 'notifications'
   AND indexname LIKE '%sent%';
 ```
 
-**Ação operacional atual:** validar no banco real com `python scripts/validate_postgres_schema.py` (sem criar migration duplicada nesta etapa).
+**Resultado confirmado:** `ix_notifications_user_sent_today` é índice partial com `WHERE status = 'sent'` no banco real, conforme validação do script `scripts/validate_postgres_schema.py` (OK).
 
 ---
 
@@ -87,21 +87,23 @@ grep -E "cache_manager|database_optimizer" config/raspberry-pi/crontab
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P0 aberto
 
-**Status:** validação automatizada criada; execução no ambiente real pendente.
+**Status:** resolvido e validado em PostgreSQL/Supabase real.
 
 **Mudança desta PR:** novo script read-only `scripts/validate_postgres_schema.py` valida conexão PostgreSQL, estado Alembic, colunas críticas de `car_listings` e índice partial de `notifications`.
 
 **Importante:** o script **não** executa `alembic upgrade head` automaticamente e não aplica alterações destrutivas.
 
-**Como validar:**
+**Validação executada (resultado):**
 ```bash
-DATABASE_URL=postgresql://... alembic heads   # deve ter único head
-DATABASE_URL=postgresql://... alembic upgrade head
-# Verificar colunas:
-psql $DATABASE_URL -c "\d car_listings" | grep -E "doors|body_type|cross_source"
+python scripts/validate_postgres_schema.py
 ```
 
-**Risco:** migração incompleta em produção pode causar erro em runtime quando o código tentar acessar esses campos.
+**Resultado confirmado em banco real:**
+- conexão PostgreSQL estabelecida e dialect confirmado;
+- Alembic com head único `aa21b3c4d5e6`;
+- revision atual do banco em `aa21b3c4d5e6` (alinhada ao head esperado);
+- `car_listings` contém `doors`, `body_type`, `cross_source_fingerprint`;
+- resumo da execução: `OK=8, WARNING=0, FAIL=0`.
 
 ---
 
@@ -185,10 +187,10 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 | Bug | Severidade | Esforço | Status |
 |---|---|---|---|
 | BUG-01 | Alta — escala | Trivial (1 linha) | Corrigido |
-| BUG-02 | Alta — performance | Baixo (validar + migration) | Migration implementada; validar em banco real |
+| BUG-02 | Alta — performance | Baixo | Resolvido e validado em banco real |
 | BUG-03 | Média — operação | Baixo | Corrigido |
 | BUG-08 | Alta — runtime | Baixo | Corrigido |
-| BUG-04 | Alta — estabilidade | Médio (validar em staging/prod) | Validação automatizada criada; execução real pendente |
+| BUG-04 | Alta — estabilidade | Médio | Resolvido e validado em PostgreSQL/Supabase real |
 | BUG-05 | Média — produto | Médio (handlers + matching) | Aberto |
 | BUG-06 | Baixa — produto | Alto (implementar + observar) | Aberto |
 | BUG-07 | Média — produto | Alto (validar scoring) | Parcialmente resolvido (P2) |
