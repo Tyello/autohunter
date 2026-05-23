@@ -281,8 +281,14 @@ Se for desejável trocar `impl` por comando Telegram, isso precisa de tarefa esp
   - Esta saída é a base para o **P2 dual-run controlado**.
 
 - **P2 — Criar/rodar dual-run controlado nas sources principais.**
-  - Sources: `mercadolivre`, `olx`, `icarros`, `chavesnamao`, `mobiauto`.
-  - Comparar: quantidade de itens, `title`, `price`, `year`, `km`, `city/uf`, `url`, `external_id`, `thumbnail`, campos normalizados e `reason` de divergência.
+  - Status: iniciado com script manual para Mercado Livre.
+  - Script inicial (manual, sem alterar runtime de produção):
+    - `python scripts/source_dual_run_report.py mercadolivre --query "civic si"`
+    - `python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json`
+  - Nesta primeira etapa, o dual-run report executável suporta apenas `mercadolivre`.
+  - O script é estritamente operacional/manual: não altera `source_configs`, não altera impl default, não grava DB, não chama scheduler, não chama matching/notificações e não envia Telegram.
+  - Objetivo: gerar evidência objetiva de paridade/divergência V1 vs V2 (counts, matched, only_v1, only_v2, field diffs) antes de qualquer flip para `impl=v2`.
+  - Próximas sources planejadas para expansão do mesmo fluxo: `olx`, `icarros`, `chavesnamao`, `mobiauto`.
 
 - **P3 — Paridade Mercado Livre no v2.**
   - Garantir: `curl_cffi` (ou decisão explícita de não portar), POLYCARD, merge POLYCARD+HTML, filtro anti-peças, tracking/sponsored URL, VIP price fallback, canonicalização e guardrail de vertical veículos.
