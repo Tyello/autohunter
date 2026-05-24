@@ -97,29 +97,23 @@ app/bot/
 
 ---
 
-## ARCH-05 — Index `ix_notifications_user_sent_today` não confirmado
+## ARCH-05 — Index parcial de notificações enviadas (concluído) ✅
 
-**Estado atual:** o arquivo `f6a1b2c3d4e5_notifications_sent_at_index.py` existe nas migrations mas não sabemos se é o índice composto correto com `WHERE status='sent'`. `count_sent_today` filtra por `user_id + status='sent' + sent_at range` — sem partial index isso é seq scan em tabela crescente.
-
-**Validar:**
+**Estado verificado:** concluído no código. A migration `migrations/versions/f6a1b2c3d4e5_notifications_sent_at_index.py` já cria o índice `ix_notifications_user_sent_today` em Postgres como índice parcial:
 
 ```sql
--- Checar se o índice existe e é o correto
-SELECT indexname, indexdef
-FROM pg_indexes
-WHERE tablename = 'notifications'
-  AND indexname LIKE '%sent%';
-```
-
-**Se não existir como partial index:**
-
-```sql
-CREATE INDEX CONCURRENTLY ix_notifications_user_sent_today
+CREATE INDEX ix_notifications_user_sent_today
 ON notifications (user_id, sent_at)
 WHERE status = 'sent';
 ```
 
-**Criar migration:** `xxxx_notifications_partial_sent_at_index.py`
+Para ambientes não-Postgres (ex.: SQLite local/testes), a mesma migration aplica fallback compatível (`user_id, status, sent_at`) para não quebrar execução local.
+
+**Queries protegidas por este índice (limite diário/backlog por usuário):**
+- `app/services/limits_service.py::count_sent_today`
+- `app/services/limits_service.py::count_notifications_sent_last_n_days`
+
+**Ação:** remover de pendências ativas e manter apenas validação operacional padrão em produção.
 
 ---
 
