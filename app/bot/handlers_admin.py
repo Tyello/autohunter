@@ -30,6 +30,7 @@ from app.bot.admin_dedupe_diagnostics import (
     render_cross_source_dedupe_collisions,
     parse_dedupe_collisions_limit,
 )
+from app.bot.admin_tracking_diagnostics import render_tracking_diagnostics, parse_tracking_window_hours
 from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, render_admin_auction_source_history, _fmt_money_br, render_auction_alert_preview, render_auction_alert, build_auction_alert_keyboard, _friendly_wishlist_filters
 from app.core.settings import settings
 from app.db.session import SessionLocal
@@ -118,6 +119,7 @@ from app.services.auction_source_categories_service import get_auction_allowed_i
 from app.services.system_logs_service import log
 from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 from app.services.browser_warmup_service import warmup_source
+from app.services.tracking_diagnostics_service import build_tracking_diagnostics
 from app.services.cross_source_dedupe_service import find_cross_source_fingerprint_collisions
 
 
@@ -392,7 +394,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking")
         return
 
     action = args[0].lower()
@@ -435,6 +437,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "dedupe":
         await _admin_dedupe(update, args[1:])
         return
+    if action == "tracking":
+        await _admin_tracking(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -453,9 +458,22 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking")
 
 
+
+async def _admin_tracking(update: Update, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if args and args[0].lower() not in {"status", "price_drop"}:
+        await update.message.reply_text("Use: /admin tracking | /admin tracking status [horas] | /admin tracking price_drop [horas]")
+        return
+
+    window_hours = parse_tracking_window_hours(args[1:] if args else [])
+    with SessionLocal() as db:
+        payload = build_tracking_diagnostics(db, window_hours=window_hours)
+    rendered = render_tracking_diagnostics(payload)
+    msg, _ = _truncate_admin_message(rendered, max_chars=3500)
+    await update.message.reply_text(msg)
 
 
 async def _admin_dedupe(update: Update, raw_args: List[str]):

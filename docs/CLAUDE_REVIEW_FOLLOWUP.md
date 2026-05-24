@@ -50,3 +50,5 @@ Diretriz:
 - botões/guiado como caminho recomendado;
 - não mover regra de negócio para handlers;
 - handlers só orquestram serviços.
+
+- Tracking/price_drop ganhou observabilidade admin via `/admin tracking` com diagnóstico operacional (contagens, status e pendências), sem alterar regra de negócio.
