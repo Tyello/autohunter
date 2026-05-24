@@ -599,3 +599,9 @@ Resumo:
 - `skipped_recent`: pulados por janela mínima ainda não vencida.
 - `skipped_empty`: pulados por digest vazio (`totals.sent == 0`).
 - `failed`: erro de envio; execução segue para próximos usuários.
+
+### Weekly Digest: bloco "🧬 Achados raros"
+- O digest pode incluir seção opcional **🧬 Achados raros** quando houver evidência heurística de baixo volume observado no histórico recente.
+- A heurística usa somente dados já persistidos em `score_breakdown` (ex.: ratio/amostra de raridade), sem recalcular score.
+- Exige amostra mínima para confiabilidade; sem amostra suficiente, o item não recebe destaque de raridade.
+- Interpretação recomendada: usar como **sinal operacional** para priorização, não como garantia de unicidade/valor futuro.

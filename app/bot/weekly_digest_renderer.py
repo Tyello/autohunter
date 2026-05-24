@@ -86,10 +86,27 @@ def render_weekly_digest(payload: dict) -> str:
             year = item.get("year")
             if year and str(year) not in title:
                 title = f"{title} {year}"
-            lines.append(f"{i}. {title} — score {_fmt_score(item.get('score_v2'))}")
+            rarity = item.get('rarity_context') or {}
+            badge = ''
+            if rarity.get('is_rare'):
+                if rarity.get('label') == 'raro':
+                    badge = ' | 🧬 raro'
+                elif rarity.get('label') == 'incomum':
+                    badge = ' | 🧬 incomum'
+            lines.append(f"{i}. {title} — score {_fmt_score(item.get('score_v2'))}{badge}")
             lines.append(f"   {_fmt_brl(item.get('price'))} | {_fmt_km(item.get('mileage_km'))} | {_fmt_location(item)}")
             lines.append(f"   Busca: {item.get('wishlist') or '-'}")
             lines.append(f"   Fonte: {(item.get('source') or '-').upper()}")
+
+    rare_items = (payload.get("rare_opportunities") or [])[:3]
+    if rare_items:
+        lines.extend(["", "🧬 Achados raros"])
+        for item in rare_items:
+            label = (item.get('rarity_context') or {}).get('label')
+            suffix = 'raro no histórico recente' if label == 'raro' else 'configuração incomum'
+            lines.append(f"- {_truncate(item.get('title') or '', 64)} — {suffix}")
+            lines.append(f"  Score {_fmt_score(item.get('score_v2'))} | {_fmt_brl(item.get('price'))} | {_fmt_location(item)}")
+            lines.append(f"  Busca: {item.get('wishlist') or '-'}")
 
     drop_items = (payload.get("price_drops") or [])[:3]
     if drop_items:

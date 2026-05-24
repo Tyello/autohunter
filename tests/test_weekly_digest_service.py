@@ -5,7 +5,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
-from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
+from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user, extract_rarity_context
 from app.services.weekly_digest_preferences_service import set_weekly_digest_enabled
 
 
@@ -30,8 +30,8 @@ def _mk_listing(db, ext="x", title="Car", price=10000, source="olx", year=2019, 
     return l
 
 
-def _mk_notif(db, user, wl, listing, *, days_ago=0, reason="match", score=80, sent_at=None):
-    n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="sent", reason=reason, score_v2=score, sent_at=sent_at or (datetime.now(timezone.utc)-timedelta(days=days_ago)))
+def _mk_notif(db, user, wl, listing, *, days_ago=0, reason="match", score=80, sent_at=None, score_breakdown=None):
+    n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="sent", reason=reason, score_v2=score, sent_at=sent_at or (datetime.now(timezone.utc)-timedelta(days=days_ago)), score_breakdown=score_breakdown)
     db.add(n)
     db.commit()
 
@@ -168,3 +168,42 @@ def test_digest_payload_fallback_when_optional_fields_missing(db):
     assert top["state"] is None
     assert top["location"] is None
     assert p["by_reason"][0]["reason"] == "unknown"
+
+
+def test_extract_rarity_context_ratio_strong(db):
+    u = _mk_user(db); wl = _mk_wl(db, u); l = _mk_listing(db, "r1", "Rare", year=2015)
+    n = Notification(user_id=u.id, wishlist_id=wl.id, car_listing_id=l.id, score_breakdown={"components": {"rarity": 4}, "market_context": {"rarity": {"ratio": 0.02, "sample_size": 12}}, "reasons": ["Configuração rara no mercado"]})
+    ctx = extract_rarity_context(n, l)
+    assert ctx["is_rare"] is True and ctx["label"] == "raro"
+
+
+def test_extract_rarity_context_ratio_moderate(db):
+    u = _mk_user(db); wl = _mk_wl(db, u); l = _mk_listing(db, "r2", "Uncommon")
+    n = Notification(user_id=u.id, wishlist_id=wl.id, car_listing_id=l.id, score_breakdown={"market_context": {"rarity": {"ratio": 0.06, "sample_size": 10}}})
+    ctx = extract_rarity_context(n, l)
+    assert ctx["is_rare"] is True and ctx["label"] == "incomum"
+
+
+def test_extract_rarity_context_insufficient_sample(db):
+    u = _mk_user(db); wl = _mk_wl(db, u); l = _mk_listing(db, "r3", "Tiny sample")
+    n = Notification(user_id=u.id, wishlist_id=wl.id, car_listing_id=l.id, score_breakdown={"market_context": {"rarity": {"ratio": 0.01, "sample_size": 3}}})
+    ctx = extract_rarity_context(n, l)
+    assert ctx["is_rare"] is False
+
+
+def test_extract_rarity_context_missing_data(db):
+    u = _mk_user(db); wl = _mk_wl(db, u); l = _mk_listing(db, "r4", "No context")
+    n = Notification(user_id=u.id, wishlist_id=wl.id, car_listing_id=l.id, score_breakdown=None)
+    ctx = extract_rarity_context(n, l)
+    assert ctx["is_rare"] is False and ctx["label"] == "sem contexto"
+
+
+def test_digest_payload_includes_rarity_and_rare_opportunities(db):
+    u = _mk_user(db); wl = _mk_wl(db, u, "Civic Si")
+    l = _mk_listing(db, "r5", "Honda Civic Si")
+    _mk_notif(db, u, wl, l, score=88, score_breakdown={"components": {"rarity": 4}, "market_context": {"rarity": {"ratio": 0.02, "sample_size": 20}}, "reasons": ["Configuração rara no mercado"]})
+    _mk_notif(db, u, wl, l, score=85, score_breakdown={"components": {"rarity": 3}, "market_context": {"rarity": {"ratio": 0.05, "sample_size": 20}}})
+    p = build_weekly_digest_for_user(db, user_id=u.id, days=7, limit=10)
+    assert "rarity_context" in p["top_opportunities"][0]
+    assert len(p["rare_opportunities"]) == 1
+    assert p["rare_opportunities"][0]["listing_id"] == p["top_opportunities"][0]["listing_id"]
