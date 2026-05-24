@@ -1,5 +1,9 @@
 # V1 → V2: Status real de migração
 
+## Mercado Livre — regra obrigatória para novas tarefas
+
+Novas tarefas V1→V2 para Mercado Livre devem obedecer a matriz em `docs/MERCADOLIVRE_STRATEGY_MATRIX.md`.
+
 ## 1. Resumo executivo
 
 - O runtime atual é **misto**: registry declarativo em `app/sources/builtins.py`, com scrapers legados `app/scrapers/*.py` ainda como caminho principal em várias sources.
