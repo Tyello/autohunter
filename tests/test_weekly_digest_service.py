@@ -6,6 +6,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
+from app.services.weekly_digest_preferences_service import set_weekly_digest_enabled
 
 
 def _mk_user(db, chat_id=9001):
@@ -112,3 +113,22 @@ def test_digest_candidates_counts_window_order_and_caps(db):
 
     rows_min = build_weekly_digest_candidates(db, days=0, limit=1)
     assert len(rows_min) == 1
+
+
+def test_digest_candidates_only_enabled_filter(db):
+    u1 = _mk_user(db, 2001)
+    u2 = _mk_user(db, 2002)
+    wl1 = _mk_wl(db, u1, "A")
+    wl2 = _mk_wl(db, u2, "B")
+    l1 = _mk_listing(db, "e1", "A")
+    l2 = _mk_listing(db, "e2", "B")
+    _mk_notif(db, u1, wl1, l1, days_ago=1, reason="match", score=70)
+    _mk_notif(db, u2, wl2, l2, days_ago=1, reason="match", score=80)
+    set_weekly_digest_enabled(db, u2.id, True)
+
+    all_rows = build_weekly_digest_candidates(db, days=7, limit=20, only_enabled=False)
+    enabled_rows = build_weekly_digest_candidates(db, days=7, limit=20, only_enabled=True)
+
+    assert len(all_rows) == 2
+    assert len(enabled_rows) == 1
+    assert enabled_rows[0]["telegram_chat_id"] == 2002
