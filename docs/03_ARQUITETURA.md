@@ -89,35 +89,11 @@ app/bot/
 
 ---
 
-## ARCH-04 — Pool SQLAlchemy: `max_overflow` ausente
+## ARCH-04 — Pool SQLAlchemy (concluído) ✅
 
-**Estado atual:** `settings.py` tem `db_pool_size=5` e `db_max_overflow=5`, mas o `session.py` ainda usa:
+**Estado verificado:** concluído no código. `app/db/session.py` já passa `max_overflow`, `pool_timeout` e `connect_timeout` (via `db_connect_timeout`) para conexões não-SQLite, com tratamento específico para SQLite sem parâmetros incompatíveis de pool.
 
-```python
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    pool_recycle=settings.db_pool_recycle,
-    pool_timeout=settings.db_pool_timeout,
-)
-```
-
-`max_overflow` não está sendo passado. Com 100 usuários simultâneos, o pool pode saturar silenciosamente.
-
-**Correção em `app/db/session.py`:**
-
-```python
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,   # ← ADICIONAR
-    pool_recycle=settings.db_pool_recycle,
-    pool_timeout=settings.db_pool_timeout,
-    connect_args={"connect_timeout": 10},     # ← ADICIONAR
-)
-```
+**Ação:** remover de pendências ativas. Manter apenas monitoramento normal em produção.
 
 ---
 
@@ -147,58 +123,82 @@ WHERE status = 'sent';
 
 ---
 
-## ARCH-06 — `scripts/cache_manager.py` e `scripts/database_optimizer.py` ainda existem
+## ARCH-06 — Limpeza de scripts órfãos (refactor seguro)
 
-**Estado atual:** referenciados em `config/raspberry-pi/crontab` mas sem integração real ao runtime. Risco de confusão operacional.
+**Estado atual:** `config/raspberry-pi/crontab` já foi migrado para `scripts/cleanup_operational_data.py` e não referencia mais `scripts/cache_manager.py` nem `scripts/database_optimizer.py`.
 
-**Ação:** verificar se o crontab ainda referencia esses arquivos. Se sim, substituir por `scripts/cleanup_operational_data.py` (que já existe e está integrado). Depois remover os dois scripts.
+**Pendência real:** os scripts legados ainda existem no repositório e podem gerar ambiguidade operacional/documental.
 
-```bash
-grep -r "cache_manager\|database_optimizer" /home/claude/autohunterv2/config/
-```
-
----
-
-## ARCH-07 — `notification_sender_batch_size=20` baixo para 100 usuários
-
-**Estado atual:** com 100 usuários × 5 alertas/dia = 500 notificações/dia. Batch de 20 = 25 ciclos para drenar. Se o scheduler roda a cada 60s e o sender roda a cada ciclo, o backlog não drena rápido o suficiente em horários de pico.
-
-**Ajustar `.env`:**
-
-```env
-NOTIFICATION_SENDER_BATCH_SIZE=50
-SCHEDULER_TICK_SECONDS=90
-```
-
-**Cuidado com rate limit do Telegram:** ~30 mensagens/segundo. Com batch 50 em sequência síncrona, adicionar sleep de 33ms entre envios ou usar asyncio gather com semáforo.
+**Ação:**
+1. Confirmar ausência de import/call no runtime.
+2. Remover scripts órfãos com changelog claro.
+3. Atualizar documentação de operação para apontar apenas para o fluxo de cleanup operacional vigente.
 
 ---
 
-## ARCH-08 — Playwright com `max_contexts=2` no RPi (risco de RAM)
+## ARCH-07 — Validar throughput real do sender e ajustar batch/rate limit com segurança
 
-**Estado atual:** `playwright_max_contexts=2` no settings. Cada contexto Chromium consome ~150–250MB. Com 2 contextos simultâneos = ~400MB só de browser, em um RPi com 4GB compartilhado com PostgreSQL, bot e scheduler.
+**Estado atual:** `.env.example` já sobe `SCHEDULER_TICK_SECONDS=90`, mas não explicita `NOTIFICATION_SENDER_BATCH_SIZE=50`. Além disso, `settings.py` segue com defaults conservadores voltados a DEV (`notification_sender_batch_size=20`).
 
-**Ajustar para produção com 100 usuários:**
+**Pendência real:** validar throughput real do sender em produção (picos), e então fixar parâmetros operacionais seguros sem violar rate limit do Telegram.
 
-```env
-PLAYWRIGHT_MAX_CONTEXTS=1
-PLAYWRIGHT_CONTEXT_TTL_SECONDS=600
-PLAYWRIGHT_QUEUE_MAX_JOBS=10
-```
+**Ação:**
+1. Medir backlog/latência por janela horária.
+2. Definir batch e ritmo de envio (sleep/semafóro) com margem para rate limit.
+3. Registrar baseline e limites operacionais no runbook.
 
-Com `max_contexts=1`, sources browser rodam em série, não em paralelo. É mais lento mas mais seguro para o RPi.
+---
+
+## ARCH-08 — Alinhar defaults seguros de `settings.py` com baseline Raspberry de produção
+
+**Estado atual:** `.env.example` já recomenda baseline seguro para Raspberry (`PLAYWRIGHT_MAX_CONTEXTS=1`, `PLAYWRIGHT_CONTEXT_TTL_SECONDS=600`, `PLAYWRIGHT_QUEUE_MAX_JOBS=10`), mas `app/core/settings.py` mantém defaults mais agressivos (`playwright_max_contexts=2`, `playwright_context_ttl_seconds=900`, `playwright_queue_max_jobs=25`).
+
+**Pendência real:** reduzir divergência entre fallback de código e baseline operacional para evitar risco em ambientes que não carreguem `.env` esperado.
+
+**Ação:** alinhar defaults internos a perfil seguro de produção Raspberry (ou documentar explicitamente o motivo técnico da divergência).
+
+---
+
+## Estado verificado em código
+
+Arquivos conferidos nesta revisão documental:
+
+- `app/db/session.py`
+- `app/core/settings.py`
+- `.env.example`
+- `config/raspberry-pi/crontab`
+- `scripts/cache_manager.py`
+- `scripts/database_optimizer.py`
+- `app/services/source_execution_service.py`
+- `app/bot/handlers_admin.py`
+- `app/bot/admin_handlers_sources.py`
 
 ---
 
 ## Prioridade
 
+### P0 — Operacional (estabilidade/risco imediato)
+
 | # | Item | Esforço | Risco de não fazer |
 |---|---|---|---|
-| ARCH-04 | `max_overflow` no pool SQLAlchemy | Trivial (1 linha) | Pool satura silenciosamente com 100 usuários |
-| ARCH-05 | Confirmar index `sent_at` partial | Baixo | Seq scan crescente no sender |
-| ARCH-08 | `max_contexts=1` no Playwright | Trivial | OOM no RPi sob carga |
-| ARCH-07 | Batch sender 50 + tick 90s | Trivial | Backlog não drena rápido |
-| ARCH-06 | Remover scripts órfãos | Baixo | Confusão operacional |
-| ARCH-01 | Split source_execution_service | Alto | Manutenção cara, bugs escondidos |
-| ARCH-03 | Split handlers_admin | Médio | Conflitos em adições futuras |
-| ARCH-02 | Settings por namespace | Alto | Baixo impacto imediato, alto de longo prazo |
+| ARCH-05 | Confirmar (ou criar) index parcial de notificações enviadas | Baixo | Seq scan crescente no sender e degradação progressiva |
+| ARCH-07 | Validar throughput real do sender e calibrar batch/rate limit | Médio | Backlog e latência de entrega em janelas de pico |
+| ARCH-08 | Alinhar defaults seguros de Playwright em `settings.py` | Trivial | Risco de consumo excessivo de RAM em fallback de configuração |
+
+### P1 — Refactor seguro (higiene técnica incremental)
+
+| # | Item | Esforço | Risco de não fazer |
+|---|---|---|---|
+| ARCH-06 | Limpeza de scripts órfãos (`cache_manager.py`, `database_optimizer.py`) | Baixo | Ambiguidade operacional e manutenção confusa |
+| ARCH-03 | Split de handlers admin por domínio | Médio | Arquivo monolítico, alto custo de evolução |
+
+### P2 — Arquitetura de longo prazo
+
+| # | Item | Esforço | Risco de não fazer |
+|---|---|---|---|
+| ARCH-01 | Split incremental de `source_execution_service.py` | Alto | Acoplamento alto, difícil teste/evolução |
+| ARCH-02 | Quebra de `settings` por namespaces de domínio | Alto | Dependências implícitas e menor clareza de configuração |
+
+### Itens concluídos (fora da fila de pendências)
+
+- **ARCH-04**: concluído no código (`session.py` já contempla `max_overflow`, `pool_timeout`, `db_connect_timeout` e exceção adequada para SQLite).
