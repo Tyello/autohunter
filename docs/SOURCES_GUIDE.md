@@ -5,6 +5,12 @@
 
 ---
 
+## Mercado Livre — memória operacional para IA
+
+Para decisões de Mercado Livre, consulte `docs/MERCADOLIVRE_STRATEGY_MATRIX.md` antes de gerar PRs.
+
+---
+
 ## Mapa de sources
 
 | Source | Modo | Papel | Estado atual |
