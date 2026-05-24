@@ -395,6 +395,9 @@ Exemplos úteis do fluxo legado de filtros estruturados:
 /wishlist filter add 1 portas eq 2
 /wishlist filter add 1 carroceria eq sedan
 /wishlist filter add 1 vendedor eq particular
+/wishlist filter add 1 cor equals vermelho
+/wishlist filter add 1 cidade equals São Paulo
+/wishlist filter add 1 uf equals SP
 /wishlist filter list 1
 /wishlist filter rm 1 2
 ```

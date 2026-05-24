@@ -205,7 +205,7 @@ def test_create_wishlist_with_invalid_filter_does_not_enqueue(db, monkeypatch):
         [{"field": "state", "operator": "eq", "value": "estado inexistente"}],
     )
     assert ok is False
-    assert "Valor inválido para state" in msg
+    assert "UF com 2 letras" in msg
     assert wishlist_id is None
     assert calls["n"] == 0
     assert db.query(Wishlist).filter(Wishlist.user_id == user.id).count() == 0

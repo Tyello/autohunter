@@ -32,6 +32,7 @@ from app.services.wishlist_sources_service import allowed_sources_for_wishlists
 from app.services.wishlist_tokens_service import rebuild_tokens_for_wishlist
 from app.core.settings import settings
 from app.core.geo import STATE_NAME_TO_UF, KNOWN_STATES_UF as KNOWN_STATES
+from app.core.text_norm import normalize
 from app.sources.normalize import normalize_seller_type_filter_value, normalize_body_type, normalize_doors
 from app.sources.registry import get_source
 from app.services.plan_capabilities import get_plan_capabilities, resolve_plan_capabilities, wishlist_limit_message
@@ -805,7 +806,10 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
         "mileage": "mileage_km", "mileage_km": "mileage_km", "seller": "seller_type", "vendedor": "seller_type",
         "tipo_vendedor": "seller_type", "tipo_de_vendedor": "seller_type", "anunciante": "seller_type", "loja": "seller_type",
         "particular": "seller_type", "concessionaria": "seller_type", "concessionária": "seller_type", "revenda": "seller_type",
-        "seller_type": "seller_type", "carroceria": "body_type", "tipo_carroceria": "body_type",
+        "seller_type": "seller_type", "cor": "color", "color": "color", "colour": "color",
+        "cidade": "city", "city": "city", "municipio": "city", "município": "city",
+        "estado": "state", "uf": "state", "state": "state",
+        "carroceria": "body_type", "tipo_carroceria": "body_type",
         "tipo_de_carroceria": "body_type", "categoria": "body_type", "tipo": "body_type", "body": "body_type",
         "body_type": "body_type", "estilo": "body_type", "porta": "doors", "portas": "doors", "qtd_portas": "doors",
         "quantidade_portas": "doors", "quantidade_de_portas": "doors", "doors": "doors",
@@ -814,7 +818,7 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
 
     op_aliases = {"<=": "lte", "=<": "lte", "até": "lte", "ate": "lte", "max": "lte", "máximo": "lte", "maximo": "lte",
                   ">=": "gte", "=>": "gte", "mínimo": "gte", "minimo": "gte", "min": "gte", "between": "between",
-                  "entre": "between", "igual": "eq", "=": "eq", "apenas": "eq", "somente": "eq", "excluir": "neq",
+                  "entre": "between", "igual": "eq", "equals": "eq", "=": "eq", "apenas": "eq", "somente": "eq", "excluir": "neq",
                   "diferente": "neq", "!=": "neq"}
     operator = op_aliases.get(operator, operator)
 
@@ -824,8 +828,10 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
         raise ValueError(f"Operador inválido para {field}. Use: lt|lte|gt|gte|eq|neq|between")
     if field == "source" and operator not in ("eq", "neq"):
         raise ValueError("Operador inválido para source. Use: eq|neq")
-    if field in ("color", "city", "state", "seller_type", "body_type") and operator not in ("eq", "neq"):
+    if field in ("color", "city", "seller_type", "body_type") and operator not in ("eq", "neq"):
         raise ValueError(f"Operador inválido para {field}. Use: eq|neq")
+    if field == "state" and operator != "eq":
+        raise ValueError("Operador inválido para state. Use: eq")
 
     if field == "source":
         v = value.strip().lower()
@@ -906,8 +912,10 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
             value = str(doors)
     if field in ("color", "city"):
         if len(value.strip()) < 2:
-            raise ValueError(f"Valor inválido para {field}.")
-        value = value.strip()
+            if field == "city":
+                raise ValueError("Para cidade, use o nome da cidade. Exemplo: São Paulo.")
+            raise ValueError("Para cor, use uma cor. Exemplo: vermelho.")
+        value = normalize(value).strip()
     if field == "state":
         raw_state = value.strip()
         uf = raw_state.upper()
@@ -915,7 +923,7 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
             normalized = raw_state.lower().replace("á", "a").replace("à", "a").replace("â", "a").replace("ã", "a").replace("é", "e").replace("ê", "e").replace("í", "i").replace("ó", "o").replace("ô", "o").replace("õ", "o").replace("ú", "u").replace("ç", "c")
             uf = STATE_NAME_TO_UF.get(normalized, "")
         if uf not in KNOWN_STATES:
-            raise ValueError("Valor inválido para state. Use UF (ex: SP) ou nome do estado.")
+            raise ValueError("Para estado, use uma UF com 2 letras. Exemplo: SP.")
         value = uf
     if field == "seller_type":
         normalized_seller = normalize_seller_type_filter_value(value)
