@@ -107,28 +107,24 @@ python scripts/validate_postgres_schema.py
 
 ---
 
-## BUG-05 — Filtros estruturados para `km`, `seller`, `body_type`, `doors` não implementados
+## BUG-05 — Filtros estruturados para `km`, `seller`, `body_type`, `doors` (resolvido via comando)
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P1 aberto
 
-**Problema:** os campos `doors`, `body_type` existem no modelo `CarListing` e nas migrations, mas os handlers de filtro guiado ainda não os suportam. O usuário não consegue filtrar por carroceria ou número de portas pela UX.
+**Status atual:** resolvido para fluxo por comando (`/wishlist filter ...`) com UX atualizada, parsing composto e testes cobrindo normalização + matching.
 
-**O que falta:**
-- `wishlist_filters` aceita `field="body_type"` e `field="doors"` no banco
-- O handler de criação de filtro não oferece essas opções no fluxo guiado
-- O matching não aplica esses filtros (ou aplica? — validar em `matching_service.py`)
+**O que já existia no backend (confirmado):**
+- normalização/aliases em `normalize_wishlist_filter_input` para `mileage_km`, `seller_type`, `body_type`, `doors`;
+- validação de operadores e valores para esses campos;
+- aplicação de filtros em matching (`_apply_filters`, `_apply_filters_fast`, `explain_match`).
 
-**Validar:**
-```python
-# Em matching_service.py — verificar se body_type e doors estão no map de filtros:
-FILTER_FIELD_MAP = {
-    "price": ...,
-    "year": ...,
-    "km": ...,       # ← confirmar se existe
-    "body_type": ..., # ← confirmar se existe
-    "doors": ...,     # ← confirmar se existe
-}
-```
+**O que foi fechado nesta PR (BUG-05):**
+- help do `/wishlist filter` atualizado com campos e exemplos de `km`, `vendedor`, `carroceria`, `portas`;
+- handler legado `/wishlist filter add` agora aceita valor composto (`value = " ".join(args[5:])`), incluindo `between 30000 90000`;
+- mensagens de uso/erro tornadas acionáveis com exemplos diretos;
+- listagem textual de filtros no comando legado com labels amigáveis (`km`, `vendedor`, `carroceria`, `portas`) sem alterar persistência.
+
+**Nota de produto:** fluxo guiado por botões para filtro estruturado completo pode evoluir depois; BUG-05 permanece **resolvido** no comando oficial já funcional.
 
 ---
 
@@ -191,6 +187,6 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 | BUG-03 | Média — operação | Baixo | Corrigido |
 | BUG-08 | Alta — runtime | Baixo | Corrigido |
 | BUG-04 | Alta — estabilidade | Médio | Resolvido e validado em PostgreSQL/Supabase real |
-| BUG-05 | Média — produto | Médio (handlers + matching) | Aberto |
+| BUG-05 | Média — produto | Médio (handlers + matching) | Resolvido (comando) |
 | BUG-06 | Baixa — produto | Alto (implementar + observar) | Aberto |
 | BUG-07 | Média — produto | Alto (validar scoring) | Parcialmente resolvido (P2) |
