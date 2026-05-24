@@ -51,3 +51,38 @@ def render_weekly_digest(payload: dict) -> str:
 
     lines.extend(["", "Próximo passo:", "Use /wishlist para ajustar suas buscas."])
     return "\n".join(lines)
+
+
+def render_weekly_digest_candidates(candidates: list[dict], *, days: int) -> str:
+    if not candidates:
+        return f"📬 Digest semanal — candidatos\n\nJanela: {days} dias\n\nNenhum usuário com alertas enviados nos últimos {days} dias."
+
+    lines = [
+        "📬 Digest semanal — candidatos",
+        "",
+        f"Janela: {days} dias",
+        f"Candidatos: {len(candidates)}",
+        "",
+    ]
+    for i, item in enumerate(candidates, 1):
+        username = (item.get("username") or "-").strip()
+        username = username if username.startswith("@") else f"@{username}"
+        lines.extend(
+            [
+                f"[{i}] {username} / chat_id={item.get('telegram_chat_id')}",
+                f"- alertas enviados: {int(item.get('total_sent') or 0)}",
+                f"- buscas com resultado: {int(item.get('total_wishlists_with_results') or 0)}",
+                f"- price drops: {int(item.get('total_price_drops') or 0)}",
+                f"- top score: {item.get('top_score_v2') if item.get('top_score_v2') is not None else '-'}",
+                f"- último alerta: {item.get('latest_sent_at') or '-'}",
+            ]
+        )
+        wishlists = item.get("sample_wishlist_names") or []
+        listings = item.get("sample_listing_titles") or []
+        if wishlists:
+            lines.append("- amostras de busca: " + ", ".join(_truncate(str(w), 24) for w in wishlists[:3]))
+        if listings:
+            lines.append("- amostras de anúncio: " + ", ".join(_truncate(str(t), 28) for t in listings[:3]))
+        lines.append("")
+    lines.extend(["Próximo passo:", "Use /admin digest user <chat_id> 7 para ver o preview individual."])
+    return "\n".join(lines)
