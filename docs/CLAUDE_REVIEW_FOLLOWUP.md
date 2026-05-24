@@ -18,7 +18,8 @@
 - Filtros estruturados para KM, seller, body_type e doors.
 
 ### P1 — tracking/price_drop
-- Tracking de preço e `price_drop` funcional.
+- **Concluído:** sync de tracking implementado com atualização incremental de preço/status usando os campos já existentes de `WishlistTrackedListing` (sem migration).
+- **Concluído:** detecção + enfileiramento de alerta `price_drop` implementados com anti-duplicidade por preço e cooldown configurável.
 - Cross-source dedupe funcional.
 
 ### P2 — score/digest/raridade
