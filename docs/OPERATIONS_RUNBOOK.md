@@ -557,6 +557,40 @@ Quando usar:
    - requer `weekly_digest_job_enabled=true`
    - comando: `/admin digest run live`
 
+### Conteúdo do digest semanal (preview e envio)
+
+A mensagem renderizada prioriza clareza e ação para o usuário final:
+- **Resumo** com alertas enviados, buscas com resultado, fontes mais frequentes e volume de `price drops`;
+- **🏁 Top oportunidades** (até 5), com score, preço formatado, km/localização quando houver, busca e fonte;
+- **📉 Quedas de preço** (até 3), deduplicadas por anúncio no payload;
+- **🔎 Buscas com mais alertas** (até 5);
+- **Próximo passo** com orientação para `/digest preview` e ajuste via `/wishlist`.
+
+Empty state (sem alertas) continua user-friendly e orienta revisão via `/wishlist` ou teste manual via `/buscar`.
+
+Exemplo resumido:
+
+```
+📬 Digest semanal — Garagem Alvo
+
+Período: últimos 7 dias
+
+Resumo:
+- alertas enviados: 18
+- buscas com resultado: 4
+- fontes: OLX, MERCADO_LIVRE
+- price drops: 2
+
+🏁 Top oportunidades
+1. Honda Civic Si 2015 — score 87
+   R$ 118.000 | 82.000 km | SP
+   Busca: Civic Si
+   Fonte: OLX
+
+📉 Quedas de preço
+- Golf GTI 2017 caiu para R$ 145.000
+```
+
 ### Interpretação do resumo
 
 - `checked`: prefs enabled avaliadas no batch.

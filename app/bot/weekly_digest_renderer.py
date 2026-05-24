@@ -18,13 +18,54 @@ def _fmt_brl(price) -> str:
         return "Preço indisponível"
 
 
+def _fmt_km(km) -> str:
+    if km is None:
+        return "km indisponível"
+    try:
+        value = int(round(float(km)))
+        return f"{value:,}".replace(",", ".") + " km"
+    except Exception:
+        return "km indisponível"
+
+
+def _fmt_location(item: dict) -> str:
+    city = (item.get("city") or "").strip()
+    state = (item.get("state") or "").strip()
+    location = (item.get("location") or "").strip()
+    if city and state:
+        return f"{city}/{state}"
+    if state:
+        return state
+    if city:
+        return city
+    if location:
+        return location
+    return "local indisponível"
+
+
+def _fmt_score(score) -> str:
+    if score is None:
+        return "-"
+    try:
+        return str(int(round(float(score))))
+    except Exception:
+        return "-"
+
+
 def render_weekly_digest(payload: dict) -> str:
     days = int(payload.get("days") or 7)
     totals = payload.get("totals") or {}
     sent = int(totals.get("sent") or 0)
     if sent == 0:
-        return f"📬 Digest semanal — Garagem Alvo\n\nPeríodo: últimos {days} dias\n\nSem alertas enviados nos últimos {days} dias."
+        return (
+            "📬 Digest semanal — Garagem Alvo\n\n"
+            f"Período: últimos {days} dias\n\n"
+            "Nenhum alerta enviado nesse período.\n"
+            "Suas buscas continuam ativas.\n"
+            "Use /wishlist para revisar filtros ou /buscar para testar uma busca pontual."
+        )
 
+    source_names = [str(item.get("source") or "-").upper() for item in (payload.get("by_source") or [])[:5] if item.get("source")]
     lines = [
         "📬 Digest semanal — Garagem Alvo",
         "",
@@ -33,23 +74,36 @@ def render_weekly_digest(payload: dict) -> str:
         "Resumo:",
         f"- alertas enviados: {sent}",
         f"- buscas com resultado: {int(totals.get('wishlists_with_results') or 0)}",
+        f"- fontes: {', '.join(source_names) if source_names else '-'}",
         f"- price drops: {int(totals.get('price_drops') or 0)}",
     ]
 
     top_items = (payload.get("top_opportunities") or [])[:5]
     if top_items:
-        lines.extend(["", "Top oportunidades:"])
+        lines.extend(["", "🏁 Top oportunidades"])
         for i, item in enumerate(top_items, 1):
-            lines.append(f"{i}. {_truncate(item.get('title') or '')} — score {item.get('score_v2') if item.get('score_v2') is not None else '-'}")
-            lines.append(f"   {_fmt_brl(item.get('price'))} | {(item.get('source') or '-').upper()} | Wishlist: {item.get('wishlist') or '-'}")
+            title = _truncate(item.get("title") or "", 64)
+            year = item.get("year")
+            if year and str(year) not in title:
+                title = f"{title} {year}"
+            lines.append(f"{i}. {title} — score {_fmt_score(item.get('score_v2'))}")
+            lines.append(f"   {_fmt_brl(item.get('price'))} | {_fmt_km(item.get('mileage_km'))} | {_fmt_location(item)}")
+            lines.append(f"   Busca: {item.get('wishlist') or '-'}")
+            lines.append(f"   Fonte: {(item.get('source') or '-').upper()}")
 
     drop_items = (payload.get("price_drops") or [])[:3]
     if drop_items:
-        lines.extend(["", "Price drops:"])
+        lines.extend(["", "📉 Quedas de preço"])
         for item in drop_items:
-            lines.append(f"- {_truncate(item.get('title') or '')} caiu para {_fmt_brl(item.get('price'))}")
+            lines.append(f"- {_truncate(item.get('title') or '', 64)} caiu para {_fmt_brl(item.get('price'))}")
 
-    lines.extend(["", "Próximo passo:", "Use /wishlist para ajustar suas buscas."])
+    top_wishlists = (payload.get("by_wishlist") or [])[:5]
+    if top_wishlists:
+        lines.extend(["", "🔎 Buscas com mais alertas"])
+        for item in top_wishlists:
+            lines.append(f"- {item.get('wishlist') or '-'}: {int(item.get('count') or 0)}")
+
+    lines.extend(["", "Próximo passo:", "Use /digest preview para rever quando quiser.", "Use /wishlist para ajustar suas buscas."])
     return "\n".join(lines)
 
 

@@ -121,6 +121,28 @@ def test_digest_preview_marks_preview_no_sent_update(monkeypatch):
     assert pref.last_digest_sent_at == sent_at
 
 
+
+
+def test_digest_preview_calls_renderer(monkeypatch):
+    update = _Update()
+    user = types.SimpleNamespace(id=uuid.uuid4())
+    pref = types.SimpleNamespace(weekly_digest_enabled=True, digest_days=7, digest_limit=10, last_digest_sent_at=None, last_digest_previewed_at=None)
+    calls = {"render": 0}
+
+    monkeypatch.setattr(handlers_core, "SessionLocal", lambda: _DBCtx())
+    monkeypatch.setattr(handlers_core, "get_or_create_user_by_chat", lambda *_a, **_k: user)
+    monkeypatch.setattr(handlers_core, "get_or_create_digest_preference", lambda *_a, **_k: pref)
+    monkeypatch.setattr(handlers_core, "build_weekly_digest_for_user", lambda *_a, **_k: {"days": 7, "totals": {"sent": 1}})
+
+    def _render(payload):
+        calls["render"] += 1
+        return f"digest {payload['days']}"
+
+    monkeypatch.setattr(handlers_core, "render_weekly_digest", _render)
+    monkeypatch.setattr(handlers_core, "mark_digest_previewed", lambda *_a, **_k: None)
+
+    asyncio.run(handlers_core.cmd_digest(update, _context(["preview"])))
+    assert calls["render"] == 1
 def test_digest_isolated_per_user(monkeypatch):
     users = {111: types.SimpleNamespace(id=uuid.uuid4()), 222: types.SimpleNamespace(id=uuid.uuid4())}
     prefs = {users[111].id: {"enabled": False}, users[222].id: {"enabled": False}}

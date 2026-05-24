@@ -44,6 +44,7 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
     by_wishlist: Counter[str] = Counter()
     by_reason: Counter[str] = Counter()
     by_status: Counter[str] = Counter()
+    by_source: Counter[str] = Counter()
 
     best_by_listing: dict[Any, dict[str, Any]] = {}
     price_drops: list[dict[str, Any]] = []
@@ -53,6 +54,7 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
         by_wishlist[wishlist_name] += 1
         by_reason[(notif.reason or "unknown").strip()] += 1
         by_status[(notif.status or "unknown").strip()] += 1
+        by_source[(listing.source or "unknown").strip()] += 1
 
         score = notif.score_v2 if notif.score_v2 is not None else -1
         existing = best_by_listing.get(listing.id)
@@ -65,6 +67,13 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
             "wishlist": wishlist_name,
             "score_v2": notif.score_v2,
             "sent_at": notif.sent_at,
+            "year": listing.year,
+            "mileage_km": listing.mileage_km,
+            "city": listing.city,
+            "state": listing.state,
+            "location": listing.location,
+            "score_breakdown": (notif.score_breakdown or {}) if isinstance(notif.score_breakdown, dict) else {},
+            "reason": (notif.reason or "").strip() or None,
         }
         if existing is None:
             best_by_listing[listing.id] = candidate
@@ -99,10 +108,12 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
             "price_drops": len(drop_items),
         },
         "by_wishlist": [{"wishlist": k, "count": v} for k, v in by_wishlist.most_common(limit)],
+        "by_source": [{"source": k, "count": v} for k, v in by_source.most_common(limit)],
         "by_reason": [{"reason": k, "count": v} for k, v in by_reason.most_common(limit)],
         "by_status": [{"status": k, "count": v} for k, v in by_status.most_common(limit)],
         "top_opportunities": top_opportunities,
         "price_drops": drop_items,
+        "recent_alerts": sorted(best_by_listing.values(), key=lambda x: x.get("sent_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:limit],
     }
 
 
