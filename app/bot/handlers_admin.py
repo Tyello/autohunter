@@ -121,8 +121,8 @@ from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 from app.services.browser_warmup_service import warmup_source
 from app.services.tracking_diagnostics_service import build_tracking_diagnostics
 from app.services.cross_source_dedupe_service import find_cross_source_fingerprint_collisions
-from app.services.weekly_digest_service import build_weekly_digest_for_user
-from app.bot.weekly_digest_renderer import render_weekly_digest
+from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
+from app.bot.weekly_digest_renderer import render_weekly_digest, render_weekly_digest_candidates
 
 
 @dataclass
@@ -471,8 +471,34 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _admin_digest(update: Update, raw_args: List[str]):
     args = [a.strip() for a in (raw_args or []) if a.strip()]
-    if len(args) < 2 or args[0].lower() != "user":
-        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30]")
+    if not args:
+        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30] | /admin digest candidates [1-30] [1-50]")
+        return
+    sub = args[0].lower()
+    if sub == "candidates":
+        days = 7
+        limit = 20
+        if len(args) >= 2:
+            try:
+                days = int(args[1])
+            except Exception:
+                await update.message.reply_text("Janela inválida, usando padrão de 7 dias.")
+                days = 7
+        if len(args) >= 3:
+            try:
+                limit = int(args[2])
+            except Exception:
+                await update.message.reply_text("Limite inválido, usando padrão de 20.")
+                limit = 20
+        days = max(1, min(30, days))
+        limit = max(1, min(50, limit))
+        with SessionLocal() as db:
+            candidates = build_weekly_digest_candidates(db, days=days, limit=limit)
+        await update.message.reply_text(render_weekly_digest_candidates(candidates, days=days))
+        return
+
+    if len(args) < 2 or sub != "user":
+        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30] | /admin digest candidates [1-30] [1-50]")
         return
 
     try:

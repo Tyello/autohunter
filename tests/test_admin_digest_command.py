@@ -73,3 +73,38 @@ def test_admin_digest_success_and_day_cap(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert captured["days"] == 30
     assert "Sem alertas enviados" in update.message.sent[-1]
+
+
+def test_admin_digest_candidates_defaults(monkeypatch):
+    update = _Update()
+    context = types.SimpleNamespace(args=["digest", "candidates"])
+    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=None))
+    captured = {}
+
+    def _fake_candidates(_db, *, days, limit):
+        captured["days"] = days
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(handlers_admin, "build_weekly_digest_candidates", _fake_candidates)
+    asyncio.run(handlers_admin.cmd_admin(update, context))
+    assert captured == {"days": 7, "limit": 20}
+    assert "Nenhum usuário com alertas enviados" in update.message.sent[-1]
+
+
+def test_admin_digest_candidates_day_and_limit_cap(monkeypatch):
+    update = _Update()
+    context = types.SimpleNamespace(args=["digest", "candidates", "999", "999"])
+    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
+    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=None))
+    captured = {}
+
+    def _fake_candidates(_db, *, days, limit):
+        captured["days"] = days
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(handlers_admin, "build_weekly_digest_candidates", _fake_candidates)
+    asyncio.run(handlers_admin.cmd_admin(update, context))
+    assert captured == {"days": 30, "limit": 50}

@@ -4,11 +4,12 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
+from app.models.user import User
 from app.models.wishlist import Wishlist
 
 
@@ -102,3 +103,81 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
         "top_opportunities": top_opportunities,
         "price_drops": drop_items,
     }
+
+
+def build_weekly_digest_candidates(db: Session, *, days: int = 7, limit: int = 20) -> list[dict[str, Any]]:
+    days = _clamp_days(days)
+    limit = max(1, min(50, int(limit or 20)))
+    since = _utc_now() - timedelta(days=days)
+
+    rows = (
+        db.query(
+            Notification.user_id.label("user_id"),
+            User.telegram_chat_id.label("telegram_chat_id"),
+            User.username.label("username"),
+            func.count(Notification.id).label("total_sent"),
+            func.count(func.distinct(Notification.wishlist_id)).label("total_wishlists_with_results"),
+            func.sum(case((func.lower(func.coalesce(Notification.reason, "")) == "tracked_price_drop", 1), else_=0)).label(
+                "total_price_drops"
+            ),
+            func.max(Notification.sent_at).label("latest_sent_at"),
+            func.max(Notification.score_v2).label("top_score_v2"),
+        )
+        .join(User, User.id == Notification.user_id)
+        .filter(Notification.status == "sent")
+        .filter(Notification.sent_at.isnot(None))
+        .filter(Notification.sent_at >= since)
+        .group_by(Notification.user_id, User.telegram_chat_id, User.username)
+        .order_by(
+            func.count(Notification.id).desc(),
+            func.sum(case((func.lower(func.coalesce(Notification.reason, "")) == "tracked_price_drop", 1), else_=0)).desc(),
+            func.max(Notification.sent_at).desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    if not rows:
+        return []
+
+    user_ids = [row.user_id for row in rows]
+    sample_rows = (
+        db.query(Notification.user_id, Wishlist.query, CarListing.title, Notification.sent_at)
+        .join(CarListing, CarListing.id == Notification.car_listing_id)
+        .outerjoin(Wishlist, Wishlist.id == Notification.wishlist_id)
+        .filter(Notification.user_id.in_(user_ids))
+        .filter(Notification.status == "sent")
+        .filter(Notification.sent_at.isnot(None))
+        .filter(Notification.sent_at >= since)
+        .order_by(Notification.sent_at.desc())
+        .limit(limit * 40)
+        .all()
+    )
+
+    sample_wishlist_names: dict[Any, list[str]] = defaultdict(list)
+    sample_listing_titles: dict[Any, list[str]] = defaultdict(list)
+    for user_id, wishlist_query, listing_title, _sent_at in sample_rows:
+        wishlist_name = (wishlist_query or "Sem wishlist").strip()
+        title = (listing_title or "Sem título").strip()
+        if wishlist_name and wishlist_name not in sample_wishlist_names[user_id] and len(sample_wishlist_names[user_id]) < 3:
+            sample_wishlist_names[user_id].append(wishlist_name)
+        if title and title not in sample_listing_titles[user_id] and len(sample_listing_titles[user_id]) < 3:
+            sample_listing_titles[user_id].append(title)
+
+    candidates = []
+    for row in rows:
+        candidates.append(
+            {
+                "user_id": str(row.user_id),
+                "telegram_chat_id": row.telegram_chat_id,
+                "username": row.username,
+                "total_sent": int(row.total_sent or 0),
+                "total_wishlists_with_results": int(row.total_wishlists_with_results or 0),
+                "total_price_drops": int(row.total_price_drops or 0),
+                "latest_sent_at": row.latest_sent_at,
+                "top_score_v2": row.top_score_v2,
+                "sample_wishlist_names": sample_wishlist_names.get(row.user_id, []),
+                "sample_listing_titles": sample_listing_titles.get(row.user_id, []),
+            }
+        )
+    return candidates

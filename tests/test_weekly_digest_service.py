@@ -5,7 +5,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
-from app.services.weekly_digest_service import build_weekly_digest_for_user
+from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
 
 
 def _mk_user(db, chat_id=9001):
@@ -81,3 +81,34 @@ def test_price_drop_dedup_keeps_most_recent_item(db):
     p = build_weekly_digest_for_user(db, user_id=u.id, days=7)
     assert len(p["price_drops"]) == 1
     assert p["price_drops"][0]["score_v2"] == 90
+
+
+def test_digest_candidates_empty(db):
+    assert build_weekly_digest_candidates(db, days=7, limit=20) == []
+
+
+def test_digest_candidates_counts_window_order_and_caps(db):
+    u1 = _mk_user(db, 1001)
+    u2 = _mk_user(db, 1002)
+    wl1 = _mk_wl(db, u1, "Civic EXL Touring versão muito grande para truncar")
+    wl2 = _mk_wl(db, u2, "Corolla")
+    l1 = _mk_listing(db, "c1", "Honda Civic EXL 2019 Automático Muito Muito Grande")
+    l2 = _mk_listing(db, "c2", "Corolla XEI")
+    _mk_notif(db, u1, wl1, l1, days_ago=1, reason="match", score=91)
+    _mk_notif(db, u1, wl1, l1, days_ago=2, reason="tracked_price_drop", score=85)
+    _mk_notif(db, u1, wl1, l1, days_ago=31, reason="tracked_price_drop", score=50)
+    _mk_notif(db, u2, wl2, l2, days_ago=1, reason="match", score=80)
+
+    rows = build_weekly_digest_candidates(db, days=999, limit=999)
+    assert len(rows) == 2
+    assert rows[0]["telegram_chat_id"] == 1001
+    assert rows[0]["total_sent"] == 2
+    assert rows[0]["total_wishlists_with_results"] == 1
+    assert rows[0]["total_price_drops"] == 1
+    assert rows[0]["top_score_v2"] == 91
+    assert rows[0]["latest_sent_at"] is not None
+    assert rows[0]["sample_wishlist_names"]
+    assert rows[0]["sample_listing_titles"]
+
+    rows_min = build_weekly_digest_candidates(db, days=0, limit=1)
+    assert len(rows_min) == 1
