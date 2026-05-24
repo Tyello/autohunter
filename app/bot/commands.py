@@ -16,6 +16,7 @@ def _parse_admin_chat_ids() -> set[int]:
 PUBLIC_COMMANDS = [
     BotCommand("start", "Iniciar / registrar"),
     BotCommand("menu", "Menu guiado de ações"),
+    BotCommand("digest", "Configurar digest semanal"),
     BotCommand("help", "Ver ajuda"),
     BotCommand("cancelar", "Cancelar fluxo guiado"),
 ]
@@ -34,6 +35,7 @@ ADMIN_COMMANDS = [
 
 ADVANCED_USER_COMMANDS = [
     BotCommand("status", "Status e limites"),
+    BotCommand("digest", "Digest semanal: status e preview"),
     BotCommand("version", "Versão do bot"),
     BotCommand("buscar", "Busca manual (não salva)"),
     BotCommand("wishlist", "Listar buscas (legado)"),
