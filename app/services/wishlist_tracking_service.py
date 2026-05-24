@@ -16,6 +16,7 @@ from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.core.settings import settings
 from app.services.notifications_queue_service import queue_tracked_price_drop_alert
+from app.services.price_tracking_service import sync_tracked_listing_price
 from app.services.wishlists_service import invalidate_wishlist_summaries_cache
 from app.services.wishlists_service import get_user_plan_snapshot
 from app.services.plan_capabilities import (
@@ -111,14 +112,6 @@ def _fmt_dt(dt: datetime | None) -> str:
     return dt.astimezone(timezone.utc).strftime("%d/%m/%Y %H:%M")
 
 
-def _listing_status(listing: CarListing | None) -> str:
-    if listing is None:
-        return "orphan"
-    if getattr(listing, "is_sold", False):
-        return "inactive"
-    return "active"
-
-
 def refresh_tracked_listing_snapshot(
     db: Session, tracked: WishlistTrackedListing, listing: CarListing | None = None
 ) -> dict[str, Any]:
@@ -126,36 +119,8 @@ def refresh_tracked_listing_snapshot(
     if listing_row is None and tracked.car_listing_id:
         listing_row = db.query(CarListing).filter(CarListing.id == tracked.car_listing_id).first()
 
-    if listing_row is None:
-        tracked.listing_status = "orphan"
-        return {"status": "orphan", "direction": None}
-
-    current_price = listing_row.price
-    previous_price = tracked.last_observed_price
-
-    direction = "unchanged"
-    if current_price is not None and previous_price is not None:
-        if current_price < previous_price:
-            direction = "dropped"
-        elif current_price > previous_price:
-            direction = "increased"
-
-    if current_price is not None and previous_price is not None and current_price != previous_price:
-        delta = current_price - previous_price
-        tracked.last_price_change_amount = delta
-        if previous_price != 0:
-            tracked.last_price_change_pct = delta / previous_price
-        tracked.last_price_change_direction = direction
-        tracked.last_price_change_at = datetime.now(timezone.utc)
-
-    if current_price is not None:
-        tracked.last_observed_price = current_price
-    if tracked.initial_price is None and current_price is not None:
-        tracked.initial_price = current_price
-
-    tracked.last_seen_at = listing_row.updated_at or tracked.last_seen_at
-    tracked.listing_status = _listing_status(listing_row)
-    return {"status": tracked.listing_status, "direction": direction}
+    result = sync_tracked_listing_price(db, tracked, listing_row)
+    return {"status": result.status, "direction": result.direction, "should_alert_price_drop": result.should_alert_price_drop}
 
 
 def evaluate_price_drop_alert(db: Session, tracked: WishlistTrackedListing, change_summary: dict[str, Any]) -> bool:
@@ -247,7 +212,7 @@ def add_tracked_listing_result(
             wishlist_index=wishlist_index,
         )
 
-    listing_status = _listing_status(listing)
+    listing_status = "inactive" if getattr(listing, "is_sold", False) else "active"
     if listing_status != "active":
         return _build_tracked_result(
             ok=False,
