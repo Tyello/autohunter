@@ -504,3 +504,16 @@ Quando usar:
 - validação de qualidade de alertas para um usuário específico;
 - suporte operacional durante piloto/beta;
 - conferência de volume de `price_drop` e principais oportunidades por score.
+
+
+## Digest semanal — preferências (P2)
+
+- Preferências por usuário em `user_digest_preferences` (opt-in explícito, default `enabled=false`).
+- Comandos admin:
+  - `/admin digest prefs <telegram_chat_id>`
+  - `/admin digest enable <telegram_chat_id>`
+  - `/admin digest disable <telegram_chat_id>`
+  - `/admin digest config <telegram_chat_id> days <1-30>`
+  - `/admin digest config <telegram_chat_id> limit <1-20>`
+- `preview` (`/admin digest user ...`) atualiza `last_digest_previewed_at`; **não** atualiza `last_digest_sent_at`.
+- `enabled=true` ainda **não** implica envio automático: scheduler/envio recorrente continuam pendentes.

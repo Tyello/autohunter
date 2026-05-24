@@ -59,3 +59,11 @@ Diretriz:
 - **Listagem de candidatos admin:** `/admin digest candidates [dias] [limite]` para preview operacional em lote (somente usuários com `notifications.status='sent'` na janela).
 - **Status da pendência:** parcialmente concluída com execução segura/read-only e sem broadcast.
 - **Ainda pendente (fora deste PR):** scheduler automático, envio recorrente para usuário final, preferências opt-in/opt-out.
+
+
+## P2 — Weekly Digest Preferences
+
+- Implementado: opt-in/opt-out admin para digest semanal com tabela dedicada `user_digest_preferences`.
+- Implementado: configuração básica (`digest_days`, `digest_limit`) e status consultável por admin.
+- Implementado: filtro opcional `only_enabled` em candidates para base de scheduler futuro.
+- Pendente (fora deste PR): scheduler automático, envio recorrente real, comando de autoatendimento para usuário final.

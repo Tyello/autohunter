@@ -24,6 +24,7 @@ from .wishlist_listing_activity import WishlistListingActivity
 from .wishlist_tracked_listing import WishlistTrackedListing
 from .auction_event import AuctionEvent
 from .auction_lot import AuctionLot
+from .user_digest_preference import UserDigestPreference
 
 __all__ = [
     "User",
@@ -52,4 +53,5 @@ __all__ = [
     "WishlistTrackedListing",
     "AuctionEvent",
     "AuctionLot",
+    "UserDigestPreference",
 ]

@@ -11,6 +11,7 @@ from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.user import User
 from app.models.wishlist import Wishlist
+from app.models.user_digest_preference import UserDigestPreference
 
 
 def _utc_now() -> datetime:
@@ -105,12 +106,12 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
     }
 
 
-def build_weekly_digest_candidates(db: Session, *, days: int = 7, limit: int = 20) -> list[dict[str, Any]]:
+def build_weekly_digest_candidates(db: Session, *, days: int = 7, limit: int = 20, only_enabled: bool = False) -> list[dict[str, Any]]:
     days = _clamp_days(days)
     limit = max(1, min(50, int(limit or 20)))
     since = _utc_now() - timedelta(days=days)
 
-    rows = (
+    rows_query = (
         db.query(
             Notification.user_id.label("user_id"),
             User.telegram_chat_id.label("telegram_chat_id"),
@@ -124,6 +125,7 @@ def build_weekly_digest_candidates(db: Session, *, days: int = 7, limit: int = 2
             func.max(Notification.score_v2).label("top_score_v2"),
         )
         .join(User, User.id == Notification.user_id)
+        .outerjoin(UserDigestPreference, UserDigestPreference.user_id == Notification.user_id)
         .filter(Notification.status == "sent")
         .filter(Notification.sent_at.isnot(None))
         .filter(Notification.sent_at >= since)
@@ -133,9 +135,10 @@ def build_weekly_digest_candidates(db: Session, *, days: int = 7, limit: int = 2
             func.sum(case((func.lower(func.coalesce(Notification.reason, "")) == "tracked_price_drop", 1), else_=0)).desc(),
             func.max(Notification.sent_at).desc(),
         )
-        .limit(limit)
-        .all()
     )
+    if only_enabled:
+        rows_query = rows_query.filter(UserDigestPreference.weekly_digest_enabled.is_(True))
+    rows = rows_query.limit(limit).all()
 
     if not rows:
         return []
