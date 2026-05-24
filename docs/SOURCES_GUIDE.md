@@ -467,3 +467,7 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 - Quando o fetch HTTP retorna bloqueio/shell sem cards úteis, o V2 aplica fallback browser com `wait_until="networkidle"` para recuperar HTML completo.
 - A API pública do Mercado Livre permanece como compatibilidade/fallback e não deve ser tratada como caminho principal no runtime (especialmente no Raspberry).
 - Incluir Playwright apenas de forma explícita: `--include-browser`.
+
+
+- Anti-hammering: ao detectar `Seguridad — Mercado Libre` ou `\/captcha\/wall`, interrompa novas tentativas browser em sequência para a mesma query e aguarde janela de cooldown antes de repetir o probe completo.
+- Shell sem cards (`ml_shell_without_results`) deve usar no máximo 1 retry com contexto Playwright fresco e limpeza de storage da source.

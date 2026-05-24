@@ -122,6 +122,28 @@ def _resolve_block_resources(ctx: "ScrapeContext", block_resources: Optional[boo
     return True
 
 
+
+
+def reset_browser_state_for_source(
+    source: str,
+    ctx: "ScrapeContext",
+    *,
+    block_resources: Optional[bool] = None,
+    clear_storage: bool = False,
+) -> None:
+    backend = _get_backend()
+    source_name = (source or getattr(ctx, "source", "") or "").strip().lower()
+    proxy_server = getattr(ctx, "proxy_server", None)
+    should_block = _resolve_block_resources(ctx, block_resources)
+
+    if hasattr(backend, "invalidate_contexts"):
+        backend.invalidate_contexts(
+            source=source_name,
+            proxy_server=proxy_server,
+            block_resources=should_block,
+            clear_storage=clear_storage,
+        )
+
 def fetch_html_browser(
         url: str,
         *,

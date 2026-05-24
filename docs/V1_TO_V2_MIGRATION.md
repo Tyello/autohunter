@@ -424,3 +424,7 @@ Notas de operação:
 - Mitigação aplicada no pool Playwright: retries curtos e controlados na captura de `page.content()`, com espera leve (`domcontentloaded`) antes de falhar definitivamente.
 - Quando HTML final cair em página de segurança/captcha, o fluxo deve marcar blocked explícito (ex.: `ml_security_or_captcha_page`), não `0` silencioso.
 - Próximo gate de migração permanece: dual-run com `v1_count > 0` e `v2_count > 0` antes de qualquer decisão de flip.
+
+
+- Gate atual de flip continua bloqueado quando Mercado Livre estiver em `ml_security_or_captcha_page` ou `ml_shell_without_results`; não decidir flip V2 durante janela de bloqueio/captcha.
+- V1 e V2 já têm caminho técnico viável, porém a decisão operacional depende de estabilidade fora de security wall temporária.

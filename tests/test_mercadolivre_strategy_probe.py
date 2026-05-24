@@ -86,3 +86,27 @@ def test_cli_behaviors_capture_and_no_browser(monkeypatch, tmp_path):
     assert "capture_path" not in r1["attempts"][0]
     r2 = probe.run_probe("civic", include_browser=False, capture_dir=str(tmp_path))
     assert "capture_path" in r2["attempts"][0]
+
+
+def test_security_wall_skips_next_browser(monkeypatch):
+    monkeypatch.setattr(probe, "build_mercadolivre_strategy_urls", lambda *_a, **_k: [{"strategy": "s1", "url": "https://x", "kind": "html", "source": "manual"}])
+    monkeypatch.setattr(
+        probe,
+        "_build_fetch_strategies",
+        lambda _ib: [
+            probe.ProbeFetchStrategy("playwright_domcontentloaded", "playwright", wait_until="domcontentloaded"),
+            probe.ProbeFetchStrategy("playwright_networkidle", "playwright", wait_until="networkidle"),
+        ],
+    )
+
+    calls = {"n": 0}
+
+    def _fake_fetch(*_a, **_k):
+        calls["n"] += 1
+        return {"content": "<html><body>captcha</body></html>", "final_url": "https://lista.mercadolivre.com.br/captcha/wall", "http_status": None, "content_type": "text/html"}
+
+    monkeypatch.setattr(probe, "_fetch_playwright", _fake_fetch)
+    report = probe.run_probe("civic", include_browser=True)
+    assert report["security_wall_detected"] is True
+    assert calls["n"] == 1
+    assert report["attempts"][1]["error"] == "skipped: security_wall_detected"

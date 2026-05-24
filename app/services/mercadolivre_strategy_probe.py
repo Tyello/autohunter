@@ -133,7 +133,7 @@ def _fetch_playwright(url: str, strategy: ProbeFetchStrategy, timeout_ms: int) -
     return {"content": result.html or "", "final_url": getattr(result, "final_url", url), "http_status": None, "content_type": "text/html"}
 
 
-def run_probe(query: str, capture_dir: str | None = None, include_browser: bool = False, external_id: str | None = None, timeout_ms: int = 30000, limit_strategies: int | None = None) -> dict[str, Any]:
+def run_probe(query: str, capture_dir: str | None = None, include_browser: bool = False, external_id: str | None = None, timeout_ms: int = 30000, limit_strategies: int | None = None, ignore_security_wall: bool = False) -> dict[str, Any]:
     urls = build_mercadolivre_strategy_urls(query, external_id=external_id)
     if limit_strategies is not None:
         urls = urls[: max(limit_strategies, 0)]
@@ -144,9 +144,14 @@ def run_probe(query: str, capture_dir: str | None = None, include_browser: bool 
         capture_base.mkdir(parents=True, exist_ok=True)
 
     attempts: list[dict[str, Any]] = []
+    security_wall_detected = False
     for u in urls:
         for f in fetchers:
             row = {"url_strategy": u["strategy"], "fetch_strategy": f.name, "url": u["url"], "fetch_ok": False, "fetch_blocked": False, "http_status": None, "error": "", "fetch_method": "", "duration_ms": 0, "final_url": "", "content_type": "", "content_length": 0, "json_detected": False, "json_results_count": None, "json_error_message": "", "html_diagnostics": {"title": "", "canonical_url": "", "og_url": "", "selector_counts": {}, "signals": [], "sample_links": []}, "useful_data_score": 0, "recommended": False}
+            if f.kind == "playwright" and security_wall_detected and not ignore_security_wall:
+                row["error"] = "skipped: security_wall_detected"
+                attempts.append(row)
+                continue
             if f.skipped:
                 row["error"] = f.reason
                 attempts.append(row)
@@ -177,6 +182,9 @@ def run_probe(query: str, capture_dir: str | None = None, include_browser: bool 
                 diag = diagnose_mercadolivre_html(content)
                 row["html_diagnostics"] = {k: diag.get(k, row["html_diagnostics"][k]) for k in row["html_diagnostics"].keys()}
             row["useful_data_score"] = _compute_useful_data_score(row)
+            signals = set((row.get("html_diagnostics") or {}).get("signals") or [])
+            if f.kind == "playwright" and ("/captcha/wall" in (row.get("final_url") or "").lower() or "captcha" in signals or "bot_challenge" in signals or "access_denied" in signals):
+                security_wall_detected = True
             if capture_base and content:
                 ext = "json" if row["json_detected"] else "html"
                 safe = re.sub(r"[^a-z0-9_-]", "_", f"{u['strategy']}_{f.name}".lower())
@@ -219,4 +227,5 @@ def run_probe(query: str, capture_dir: str | None = None, include_browser: bool 
         "recommended_strategy": recommended or "",
         "recommended_strategy_key": recommended_key,
         "attempts": attempts,
+        "security_wall_detected": security_wall_detected,
     }
