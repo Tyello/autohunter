@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     # Scheduler tuning (DEV)
     sched_sender_seconds: int = 60
     notification_sender_batch_size: int = 20
+    notification_sender_sleep_seconds: float = 0.04
     # Transaction flush size for sender status updates.
     # 1 = safest (commit per notification). >1 enables micro-batching.
     notification_sender_commit_batch_size: int = 1
@@ -269,6 +270,8 @@ class Settings(BaseSettings):
     operational_retention_system_logs_days: int = 7
     operational_retention_telemetry_events_days: int = 7
     operational_retention_scrape_jobs_days: int = 7
+    operational_retention_scrape_jobs_done_hours: int = 48
+    operational_retention_scrape_jobs_failed_days: int = 7
     operational_retention_source_runs_days: int = 30
     operational_retention_notifications_days: int = 90
     operational_retention_wishlist_activity_days: int = 90
@@ -282,6 +285,8 @@ class Settings(BaseSettings):
     # Disk pressure alerts
     disk_alert_root_used_pct: float = 85.0
     disk_alert_cache_limit_gb: float = 5.0
+    ram_alert_threshold: float = 85.0
+    resource_alert_throttle_seconds: int = 1800
 
     def model_post_init(self, __context) -> None:
         self._per_source_scraper_flags: dict[str, bool] = {}

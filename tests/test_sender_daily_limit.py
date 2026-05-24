@@ -212,3 +212,22 @@ def test_send_daily_limit_notice_http_includes_upgrade_button(monkeypatch):
     assert "Limite diário atingido" in sent["data"]["text"]
     assert "renova" in sent["data"]["text"]
     assert "00h" in sent["data"]["text"] or "horário" in sent["data"]["text"]
+
+
+def test_sender_applies_pacing_between_real_sends(db, monkeypatch):
+    _user, _wl, _listing, _n1 = _seed_base(db)
+    n2 = Notification(user_id=_user.id, wishlist_id=_wl.id, car_listing_id=_listing.id, status="queued")
+    db.add(n2)
+    db.commit()
+
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 0)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
+    monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: False)
+    monkeypatch.setattr("app.scheduler.jobs_send.settings.notification_sender_sleep_seconds", 0.04)
+
+    sleep_calls = []
+    monkeypatch.setattr("app.scheduler.jobs_send.time.sleep", lambda secs: sleep_calls.append(secs))
+
+    sent = send_queued_notifications(db, component="test", sender_fn=lambda *_args, **_kwargs: None)
+    assert sent == 2
+    assert sleep_calls == [0.04]

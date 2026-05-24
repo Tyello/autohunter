@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import time
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
@@ -86,6 +87,9 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
             pending_mutations += 1
             _flush()
             sent += 1
+            sleep_seconds = float(getattr(settings, "notification_sender_sleep_seconds", 0.04) or 0.0)
+            if sleep_seconds > 0 and sent > 1:
+                time.sleep(sleep_seconds)
         except Exception as e:
             outcome = mark_notification_delivery_error(n, error_message=str(e))
             pending_mutations += 1
