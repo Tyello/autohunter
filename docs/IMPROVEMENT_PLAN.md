@@ -14,8 +14,9 @@
   - `app/services/mercado_livre/`
   - `app/notifications/email.py`, `app/notifications/whatsapp.py`, `app/notifications/webhook.py`, `app/notifications/manager.py`
   - `app/scheduler/jobs.py::queue_notifications_for_new_listings` e `tests/test_scheduler_notifications_queue.py`
-- **Mantidos por segurança operacional (validar depois):**
-  - `scripts/cache_manager.py` e `scripts/database_optimizer.py` (ainda referenciados em `config/raspberry-pi/crontab`).
+- **Atualização ARCH-06 (2026-05-24):**
+  - `scripts/cache_manager.py` e `scripts/database_optimizer.py` removidos após validação de ausência de uso no runtime;
+  - `config/raspberry-pi/crontab` permanece oficialmente em `scripts/cleanup_operational_data.py --apply`.
 
 ## Status de execução (P2-A) — 2026-05-21
 
@@ -198,8 +199,6 @@ Já batched por `IN (wishlist_ids)` — padrão correto. Não é N+1 mas são 4�
 | `scripts/test_ml_scraper.py` | Usa `MercadoLivreIngestService` não integrado ao pipeline |
 | `scripts/test_olx.py` | Debug manual |
 | `scripts/health_check.py` | Imports quebrados (ver Bug 1.1) |
-| `scripts/cache_manager.py` | Nunca importado em `app/`; cache real está em `source_configs_service` |
-| `scripts/database_optimizer.py` | Só chamado no `health_check.py` quebrado |
 | `monitoring/resource_monitor.py` | Não integrado a nenhum serviço do app |
 
 **Ação:** Mover para `scripts/archive/` ou remover. Manter apenas scripts operacionais: `backup_core_data.py`, `restore_core_data.py`, `validate_core_backup.py`, `compare_core_backup_to_db.py`, `cleanup_operational_data.py`, `disk_audit.py`.

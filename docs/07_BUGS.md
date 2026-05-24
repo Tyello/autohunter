@@ -48,11 +48,11 @@ WHERE tablename = 'notifications'
 
 ---
 
-## BUG-03 — `scripts/cache_manager.py` e `scripts/database_optimizer.py` referenciados em crontab
+## BUG-03 — Scripts legados de cache/otimização removidos (ARCH-06)
 
 **Arquivo:** `config/raspberry-pi/crontab`
 
-**Status:** corrigido nesta branch.
+**Status:** corrigido e concluído.
 
 **Correção aplicada:** removidas referências a scripts legados e consolidada limpeza operacional em:
 

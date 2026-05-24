@@ -117,16 +117,14 @@ Para ambientes não-Postgres (ex.: SQLite local/testes), a mesma migration aplic
 
 ---
 
-## ARCH-06 — Limpeza de scripts órfãos (refactor seguro)
+## ARCH-06 — Limpeza de scripts órfãos (concluído) ✅
 
-**Estado atual:** `config/raspberry-pi/crontab` já foi migrado para `scripts/cleanup_operational_data.py` e não referencia mais `scripts/cache_manager.py` nem `scripts/database_optimizer.py`.
+**Estado verificado:** `config/raspberry-pi/crontab` usa o fluxo oficial `scripts/cleanup_operational_data.py --apply` e não referencia scripts legados.
 
-**Pendência real:** os scripts legados ainda existem no repositório e podem gerar ambiguidade operacional/documental.
-
-**Ação:**
-1. Confirmar ausência de import/call no runtime.
-2. Remover scripts órfãos com changelog claro.
-3. Atualizar documentação de operação para apontar apenas para o fluxo de cleanup operacional vigente.
+**Concluído nesta etapa:**
+1. Confirmada ausência de uso real no runtime/testes/operação para `scripts/cache_manager.py` e `scripts/database_optimizer.py`.
+2. Scripts legados removidos do repositório para eliminar ambiguidade operacional.
+3. Documentação alinhada para manter `scripts/cleanup_operational_data.py` como caminho oficial de limpeza operacional.
 
 ---
 
@@ -183,7 +181,6 @@ Arquivos conferidos nesta revisão documental:
 
 | # | Item | Esforço | Risco de não fazer |
 |---|---|---|---|
-| ARCH-06 | Limpeza de scripts órfãos (`cache_manager.py`, `database_optimizer.py`) | Baixo | Ambiguidade operacional e manutenção confusa |
 | ARCH-03 | Split de handlers admin por domínio | Médio | Arquivo monolítico, alto custo de evolução |
 
 ### P2 — Arquitetura de longo prazo
@@ -196,3 +193,4 @@ Arquivos conferidos nesta revisão documental:
 ### Itens concluídos (fora da fila de pendências)
 
 - **ARCH-04**: concluído no código (`session.py` já contempla `max_overflow`, `pool_timeout`, `db_connect_timeout` e exceção adequada para SQLite).
+- **ARCH-06**: concluído com remoção de `scripts/cache_manager.py` e `scripts/database_optimizer.py`; operação oficial permanece em `scripts/cleanup_operational_data.py` via `config/raspberry-pi/crontab`.
