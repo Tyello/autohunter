@@ -228,3 +228,31 @@ Before generating a Codex task about Mercado Livre:
   - final decision
 - Do not remove failed strategies. Mark them as BAD_PRIMARY or AVOID_REPEAT.
 - Keep this file optimized for agents, not prose.
+
+## Recent Validation Log
+
+### Date: 2026-05-24
+
+Command:
+
+```bash
+python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json
+```
+
+Observed:
+
+- V1 blocked with `ml_shell_without_results` (`v1_count=0`, `v1_error=FetchBlocked`).
+- V2 returned 14 valid items (`v2_count=14`, `v2_blocked=false`).
+- V2 `fetch_method=browser_fallback`.
+- V2 `raw_items_found=14`.
+- V2 `items_parsed=14`.
+- V2 `items_valid=14`.
+- V2 `parse_errors=0`.
+
+Decision:
+
+- V2 parser/fetch path is no longer the current blocker in this validation event.
+- Do **not** open another V2 parser/fetch PR based only on this result.
+- Do **not** flip to V2 yet.
+- Wait cooldown and rerun a **single dual-run** validation.
+- Flip gate remains: `v1_count > 0` and `v2_count > 0` in the same clean window.
