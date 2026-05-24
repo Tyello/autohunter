@@ -32,6 +32,27 @@ def test_normalize_wishlist_filter_input_state_alias_without_db():
     assert normalized.value == "SP"
 
 
+def test_normalize_wishlist_filter_aliases_for_color_city_state():
+    assert normalize_wishlist_filter_input("cor", "equals", "vermelho").field == "color"
+    assert normalize_wishlist_filter_input("cidade", "eq", "São Paulo").field == "city"
+    assert normalize_wishlist_filter_input("uf", "eq", "sp").value == "SP"
+    assert normalize_wishlist_filter_input("estado", "eq", "sp").value == "SP"
+
+
+def test_state_rejects_invalid_operator_and_invalid_uf():
+    try:
+        normalize_wishlist_filter_input("state", "gte", "SP")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "Operador inválido para state. Use: eq" in str(exc)
+
+    try:
+        normalize_wishlist_filter_input("uf", "eq", "SPO")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "UF com 2 letras" in str(exc)
+
+
 def test_parse_filter_expression_and_price_canonicalization():
     price = parse_wishlist_filter_expression("price", "até 150.000")
     assert price[0].operator == "lte"

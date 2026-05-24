@@ -91,6 +91,9 @@ def test_wishlist_filter_help_contains_new_examples(monkeypatch):
     assert "/wishlist filter add 1 portas eq 2" in msg
     assert "/wishlist filter add 1 carroceria eq sedan" in msg
     assert "/wishlist filter add 1 vendedor eq particular" in msg
+    assert "/wishlist filter add 1 cor equals vermelho" in msg
+    assert "/wishlist filter add 1 cidade equals São Paulo" in msg
+    assert "/wishlist filter add 1 uf equals SP" in msg
 
 
 def test_wishlist_filter_list_renders_friendly_field_names(monkeypatch):
@@ -103,6 +106,9 @@ def test_wishlist_filter_list_renders_friendly_field_names(monkeypatch):
             types.SimpleNamespace(field="seller_type", operator="eq", value="private"),
             types.SimpleNamespace(field="body_type", operator="eq", value="sedan"),
             types.SimpleNamespace(field="doors", operator="eq", value="2"),
+            types.SimpleNamespace(field="color", operator="eq", value="prata"),
+            types.SimpleNamespace(field="city", operator="eq", value="sao paulo"),
+            types.SimpleNamespace(field="state", operator="eq", value="SP"),
         ],
     )
 
@@ -115,3 +121,6 @@ def test_wishlist_filter_list_renders_friendly_field_names(monkeypatch):
     assert "2. vendedor eq private" in msg
     assert "3. carroceria eq sedan" in msg
     assert "4. portas eq 2" in msg
+    assert "5. Cor eq prata" in msg
+    assert "6. Cidade eq sao paulo" in msg
+    assert "7. Estado/UF eq SP" in msg

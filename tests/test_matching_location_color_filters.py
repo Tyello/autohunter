@@ -99,3 +99,17 @@ def test_missing_field_with_active_filter_is_predictably_rejected(db):
 
     assert match_listing_to_wishlist(db, w, listing) is False
     assert explain_match(w, listing) == "filter_color_missing"
+
+
+def test_invalid_persisted_operators_are_rejected_in_matching(db):
+    u = _mk_user(db)
+    listing = _mk_listing(city="São Paulo", state="SP", color="vermelho")
+
+    w_city = _mk_wishlist(db, u, "civic", filters=[("city", "gte", "sao paulo")])
+    assert match_listing_to_wishlist(db, w_city, listing) is False
+
+    w_color = _mk_wishlist(db, u, "civic", filters=[("color", "gt", "vermelho")])
+    assert match_listing_to_wishlist(db, w_color, listing) is False
+
+    w_state = _mk_wishlist(db, u, "civic", filters=[("state", "neq", "SP")])
+    assert match_listing_to_wishlist(db, w_state, listing) is False

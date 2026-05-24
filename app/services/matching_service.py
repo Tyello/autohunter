@@ -495,6 +495,10 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
             continue
 
         if field in {"color", "city", "state", "seller_type", "body_type"}:
+            if field == "state" and op != "eq":
+                return False
+            if field != "state" and op not in {"eq", "neq"}:
+                return False
             if not _field_match(listing, field, op, val):
                 return False
             continue
@@ -595,6 +599,10 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
             continue
 
         if field in {"color", "city", "state", "seller_type", "body_type"}:
+            if field == "state" and op != "eq":
+                return False
+            if field != "state" and op not in {"eq", "neq"}:
+                return False
             if not _field_match(listing, field, op, val):
                 return False
             continue
@@ -784,7 +792,9 @@ def explain_match(wishlist: Wishlist, listing: CarListing) -> str:
             continue
 
         if field in {"color", "city", "state", "seller_type", "body_type"}:
-            if op not in {"eq", "neq"}:
+            if field == "state" and op != "eq":
+                return "filter_state_bad_operator"
+            if field != "state" and op not in {"eq", "neq"}:
                 return f"filter_{field}_bad_operator"
             if not _field_match(listing, field, op, val):
                 if field == "color" and not _norm_color(getattr(listing, "color", None)):

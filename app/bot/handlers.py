@@ -58,13 +58,24 @@ def _wishlist_filter_help_text() -> str:
         "/wishlist filter add 1 portas eq 2\n"
         "/wishlist filter add 1 carroceria eq sedan\n"
         "/wishlist filter add 1 vendedor eq particular\n"
+        "/wishlist filter add 1 cor equals vermelho\n"
+        "/wishlist filter add 1 cidade equals São Paulo\n"
+        "/wishlist filter add 1 uf equals SP\n"
         "/wishlist filter list 1\n"
         "/wishlist filter rm 1 2"
     )
 
 
 def _wishlist_filter_field_label(field: str) -> str:
-    return {"mileage_km": "km", "seller_type": "vendedor", "body_type": "carroceria", "doors": "portas"}.get((field or "").strip().lower(), field)
+    return {
+        "mileage_km": "km",
+        "seller_type": "vendedor",
+        "body_type": "carroceria",
+        "doors": "portas",
+        "color": "Cor",
+        "city": "Cidade",
+        "state": "Estado/UF",
+    }.get((field or "").strip().lower(), field)
 
 
 async def _notify_upgrade_intent_admin_safe(admin_msg: str, *, chat_id: int, plan_period: str) -> None:
