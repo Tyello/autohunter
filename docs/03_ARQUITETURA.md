@@ -141,15 +141,19 @@ Para ambientes não-Postgres (ex.: SQLite local/testes), a mesma migration aplic
 
 ---
 
-## ARCH-08 — Alinhar defaults seguros de `settings.py` com baseline Raspberry de produção
+## ARCH-08 — Alinhar defaults seguros de `settings.py` com baseline Raspberry de produção (concluído) ✅
 
-**Estado atual:** `.env.example` já recomenda baseline seguro para Raspberry (`PLAYWRIGHT_MAX_CONTEXTS=1`, `PLAYWRIGHT_CONTEXT_TTL_SECONDS=600`, `PLAYWRIGHT_QUEUE_MAX_JOBS=10`), mas `app/core/settings.py` mantém defaults mais agressivos (`playwright_max_contexts=2`, `playwright_context_ttl_seconds=900`, `playwright_queue_max_jobs=25`).
+**Estado verificado:** concluído no código. Os defaults internos de Playwright em `app/core/settings.py` agora estão alinhados ao baseline seguro já documentado em `.env.example` para Raspberry Pi 4GB.
 
-**Pendência real:** reduzir divergência entre fallback de código e baseline operacional para evitar risco em ambientes que não carreguem `.env` esperado.
+**Valores finais alinhados (fallback/default):**
+- `playwright_max_contexts=1`
+- `playwright_context_ttl_seconds=600`
+- `playwright_queue_max_jobs=10`
 
-**Ação:** alinhar defaults internos a perfil seguro de produção Raspberry (ou documentar explicitamente o motivo técnico da divergência).
+**Observações de contrato preservado:**
+- Defaults continuam sobrescrevíveis por variáveis de ambiente.
+- `source_configs`/DB continuam determinando quando cada source usa browser; esta mudança apenas reduz risco no fallback quando `.env` estiver incompleto/ausente.
 
----
 
 ## Estado verificado em código
 
@@ -175,7 +179,6 @@ Arquivos conferidos nesta revisão documental:
 |---|---|---|---|
 | ARCH-05 | Confirmar (ou criar) index parcial de notificações enviadas | Baixo | Seq scan crescente no sender e degradação progressiva |
 | ARCH-07 | Validar throughput real do sender e calibrar batch/rate limit | Médio | Backlog e latência de entrega em janelas de pico |
-| ARCH-08 | Alinhar defaults seguros de Playwright em `settings.py` | Trivial | Risco de consumo excessivo de RAM em fallback de configuração |
 
 ### P1 — Refactor seguro (higiene técnica incremental)
 
@@ -194,3 +197,4 @@ Arquivos conferidos nesta revisão documental:
 
 - **ARCH-04**: concluído no código (`session.py` já contempla `max_overflow`, `pool_timeout`, `db_connect_timeout` e exceção adequada para SQLite).
 - **ARCH-06**: concluído com remoção de `scripts/cache_manager.py` e `scripts/database_optimizer.py`; operação oficial permanece em `scripts/cleanup_operational_data.py` via `config/raspberry-pi/crontab`.
+- **ARCH-08**: concluído com alinhamento dos defaults internos de Playwright ao baseline Raspberry (`playwright_max_contexts=1`, `playwright_context_ttl_seconds=600`, `playwright_queue_max_jobs=10`) mantendo override por env e decisão de uso por source via `source_configs`/DB.

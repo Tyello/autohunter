@@ -76,17 +76,17 @@ class Settings(BaseSettings):
     playwright_storage_dir: str = '/var/lib/autohunter/playwright'
 
     # Playwright queue & dedupe (scaling)
-    # - queue_max_jobs: hard cap to avoid RAM blowups on Raspberry Pi
+    # - queue_max_jobs: hard cap favoring stability/RAM on Raspberry baseline
     # - dedupe_inflight: if the same (url, source, proxy) is requested while in-flight, join instead of enqueue
     # - cache_ttl_seconds: short TTL to collapse bursts (manual search / multiple users) without serving stale results for long
     # - cache_max_entries: keep small; browser HTML can be heavy
-    playwright_queue_max_jobs: int = 25
+    playwright_queue_max_jobs: int = 10
     playwright_dedupe_inflight: bool = True
     playwright_cache_ttl_seconds: int = 30
     playwright_cache_max_entries: int = 16
 
     # Restrict Playwright usage to a subset of sources (comma-separated).
-    # Runtime is DB-driven (source_configs.force_browser / browser_fallback_enabled).
+    # Runtime is DB-driven (source_configs.force_browser / browser_fallback_enabled); this PR only adjusts fallback defaults.
     # This setting is an optional safety gate:
     # - empty: no restriction (DB decides when to use browser)
     # - '*': allow any source
@@ -95,10 +95,10 @@ class Settings(BaseSettings):
     playwright_sources: str = ""
 
     # Playwright memory guardrails
-    # - context TTL: close idle contexts to free RAM
-    # - max contexts: hard cap to avoid RAM blowups on small machines
-    playwright_context_ttl_seconds: int = 900  # 15 minutes
-    playwright_max_contexts: int = 2
+    # - context TTL: close idle contexts to free RAM (safe default for Raspberry)
+    # - max contexts: hard cap favoring stability on small machines; stronger hosts can raise via env
+    playwright_context_ttl_seconds: int = 600  # 10 minutes
+    playwright_max_contexts: int = 1
     browser_manager_context_ttl_seconds: int = 300
     browser_manager_max_contexts: int = 5
 
