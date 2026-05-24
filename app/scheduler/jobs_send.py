@@ -31,6 +31,15 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
     commit_batch_size = max(1, int(getattr(settings, "notification_sender_commit_batch_size", 1) or 1))
     pending_mutations = 0
     user_budget_cache: dict[str, dict[str, int]] = {}
+    successful_sends = 0
+
+    def _sender_sleep_seconds() -> float:
+        try:
+            raw = getattr(settings, "notification_sender_sleep_seconds", 0.04)
+            value = float(raw if raw is not None else 0.04)
+        except (TypeError, ValueError):
+            return 0.0
+        return max(0.0, value)
 
     def _get_user_budget(user_id):
         key = str(user_id)
@@ -81,15 +90,17 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
 
         listing = n.car_listing
         try:
+            if successful_sends > 0:
+                sleep_seconds = _sender_sleep_seconds()
+                if sleep_seconds > 0:
+                    time.sleep(sleep_seconds)
             sender_fn(n, listing, user)
             mark_notification_sent(n)
             budget["sent"] += 1
             pending_mutations += 1
             _flush()
             sent += 1
-            sleep_seconds = float(getattr(settings, "notification_sender_sleep_seconds", 0.04) or 0.0)
-            if sleep_seconds > 0 and sent > 1:
-                time.sleep(sleep_seconds)
+            successful_sends += 1
         except Exception as e:
             outcome = mark_notification_delivery_error(n, error_message=str(e))
             pending_mutations += 1

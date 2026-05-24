@@ -96,3 +96,111 @@ def test_scrape_job_rules_split_done_failed_and_preserve_queued():
     assert "status = 'done'" in done_count_sql
     assert "status = 'failed'" in failed_count_sql
     assert "status = 'queued'" in queued_old_sql
+
+
+def test_main_dry_run_is_read_only_and_prints_scrape_jobs_labels(monkeypatch, capsys):
+    mod = _load()
+
+    class _Result:
+        rowcount = 0
+
+        def __init__(self, scalar_value=0):
+            self.scalar_value = scalar_value
+
+        def scalar_one(self):
+            return self.scalar_value
+
+    class DB:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params):
+            query = str(sql)
+            self.calls.append(query)
+            if "status = 'queued'" in query:
+                return _Result(3)
+            return _Result(0)
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    class SessionCtx:
+        def __init__(self, db):
+            self.db = db
+
+        def __enter__(self):
+            return self.db
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    db = DB()
+    monkeypatch.setattr(mod, "SessionLocal", lambda: SessionCtx(db))
+    monkeypatch.setattr(mod.settings, "database_url", "postgresql://example")
+    monkeypatch.setattr("sys.argv", ["cleanup_operational_data.py"])
+
+    assert mod.main() == 0
+    output = capsys.readouterr().out
+    assert "[dry-run] scrape_jobs_queued_old_2h: 3" in output
+    assert "[dry-run] scrape_jobs_done:" in output
+    assert "[dry-run] scrape_jobs_failed:" in output
+    assert any("status = 'queued'" in q for q in db.calls)
+    assert all(("INSERT" not in q.upper() and "UPDATE" not in q.upper() and "DELETE" not in q.upper()) for q in db.calls)
+
+
+def test_main_apply_uses_separate_done_failed_delete_and_not_queued(monkeypatch, capsys):
+    mod = _load()
+
+    class _Result:
+        def __init__(self, rowcount=0, scalar_value=0):
+            self.rowcount = rowcount
+            self.scalar_value = scalar_value
+
+        def scalar_one(self):
+            return self.scalar_value
+
+    class DB:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params):
+            query = str(sql)
+            self.calls.append(query)
+            if "status = 'queued'" in query:
+                return _Result(scalar_value=2)
+            if "DELETE FROM scrape_jobs" in query and "status = 'done'" in query:
+                return _Result(rowcount=0)
+            if "DELETE FROM scrape_jobs" in query and "status = 'failed'" in query:
+                return _Result(rowcount=0)
+            return _Result(rowcount=0, scalar_value=0)
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    class SessionCtx:
+        def __init__(self, db):
+            self.db = db
+
+        def __enter__(self):
+            return self.db
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    db = DB()
+    monkeypatch.setattr(mod, "SessionLocal", lambda: SessionCtx(db))
+    monkeypatch.setattr(mod.settings, "database_url", "postgresql://example")
+    monkeypatch.setattr("sys.argv", ["cleanup_operational_data.py", "--apply"])
+
+    assert mod.main() == 0
+    output = capsys.readouterr().out
+    assert "[apply] scrape_jobs_queued_old_2h: 2" in output
+    assert any("DELETE FROM scrape_jobs" in q and "status = 'done'" in q for q in db.calls)
+    assert any("DELETE FROM scrape_jobs" in q and "status = 'failed'" in q for q in db.calls)
+    assert not any("DELETE FROM scrape_jobs" in q and "status = 'queued'" in q for q in db.calls)

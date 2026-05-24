@@ -177,6 +177,12 @@ Já implementado no scheduler (`filesystem_cleanup_daily`) usando:
 
 Escopo seguro: somente diretórios de runtime cache/debug (sem apagar DB/cookies/perfis persistentes).
 
+Referências no código:
+
+- agendamento: `app/scheduler/run.py` (job id `filesystem_cleanup_daily`, cron diário 03:00 UTC);
+- job: `app/scheduler/filesystem_cleanup_job.py::job_filesystem_cleanup_daily`;
+- execução: `app/services/filesystem_cleanup_service.py::run_filesystem_cleanup`.
+
 ---
 
 ## Fora de escopo deste documento

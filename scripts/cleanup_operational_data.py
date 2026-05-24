@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
@@ -48,7 +49,7 @@ def _log_warning(db, message: str, payload: dict) -> None:
             VALUES ('warn', 'cleanup_operational_data', :message, CAST(:payload AS JSONB), NOW())
             """
         ),
-        {"message": message, "payload": __import__('json').dumps(payload)},
+        {"message": message, "payload": json.dumps(payload)},
     )
     db.commit()
 
@@ -117,7 +118,7 @@ def main() -> int:
             "SELECT count(*) FROM scrape_jobs WHERE status = 'queued' AND created_at < :cut",
             {'cut': queued_old_cut},
         )
-        if queued_old > 0 and 'sqlite' not in settings.database_url:
+        if apply and queued_old > 0 and 'sqlite' not in settings.database_url:
             try:
                 _log_warning(db, 'queued scrape_jobs older than 2h detected', {'queued_old_count': queued_old})
             except Exception:
