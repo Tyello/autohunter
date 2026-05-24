@@ -22,6 +22,69 @@ def _clamp_days(days: int) -> int:
     return max(1, min(30, int(days or 7)))
 
 
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def extract_rarity_context(notification: Notification, listing: CarListing) -> dict[str, Any]:
+    breakdown = notification.score_breakdown if isinstance(notification.score_breakdown, dict) else {}
+    components = breakdown.get("components") if isinstance(breakdown.get("components"), dict) else {}
+    market_context = breakdown.get("market_context") if isinstance(breakdown.get("market_context"), dict) else {}
+    rarity_market = market_context.get("rarity") if isinstance(market_context.get("rarity"), dict) else {}
+
+    reasons = breakdown.get("reasons") if isinstance(breakdown.get("reasons"), list) else []
+    explicit_reason = next((str(r).strip() for r in reasons if isinstance(r, str) and "rara" in r.lower()), None)
+
+    rarity_score = _safe_int(components.get("rarity"))
+    rarity_ratio = _safe_float(rarity_market.get("ratio"))
+    rarity_sample_size = _safe_int(rarity_market.get("sample_size"))
+    min_sample = 8
+
+    is_rare = False
+    label = "sem contexto"
+
+    if rarity_ratio is not None and (rarity_sample_size or 0) >= min_sample:
+        if rarity_ratio <= 0.03:
+            is_rare = True
+            label = "raro"
+        elif rarity_ratio <= 0.06:
+            is_rare = True
+            label = "incomum"
+    elif rarity_score is not None and rarity_score >= 4 and explicit_reason:
+        is_rare = True
+        label = "incomum"
+
+    cohort = " ".join(
+        str(v).strip()
+        for v in [listing.make, listing.model, listing.version, listing.year, listing.transmission, listing.body_type, listing.doors, listing.fuel_type]
+        if v not in (None, "")
+    ) or None
+
+    return {
+        "is_rare": is_rare,
+        "rarity_score": rarity_score,
+        "rarity_ratio": rarity_ratio,
+        "rarity_sample_size": rarity_sample_size,
+        "label": label,
+        "reason": explicit_reason,
+        "cohort": cohort,
+    }
+
 def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: int = 10) -> dict[str, Any]:
     days = _clamp_days(days)
     limit = max(1, min(20, int(limit or 10)))
@@ -74,6 +137,7 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
             "location": listing.location,
             "score_breakdown": (notif.score_breakdown or {}) if isinstance(notif.score_breakdown, dict) else {},
             "reason": (notif.reason or "").strip() or None,
+            "rarity_context": extract_rarity_context(notif, listing),
         }
         if existing is None:
             best_by_listing[listing.id] = candidate
@@ -97,6 +161,16 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
             dedup_drop[item["listing_id"]] = item
     drop_items = list(dedup_drop.values())[:limit]
 
+    rare_candidates = [item for item in top_opportunities if (item.get("rarity_context") or {}).get("is_rare") is True]
+    rare_opportunities = sorted(
+        rare_candidates,
+        key=lambda x: (
+            0 if (x.get("rarity_context") or {}).get("label") == "raro" else 1,
+            -1 * ((x.get("score_v2") if x.get("score_v2") is not None else -1)),
+            -1 * int((x.get("sent_at") or datetime.min.replace(tzinfo=timezone.utc)).timestamp()),
+        ),
+    )[:limit]
+
     return {
         "user_id": str(user_id),
         "days": days,
@@ -113,6 +187,7 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
         "by_status": [{"status": k, "count": v} for k, v in by_status.most_common(limit)],
         "top_opportunities": top_opportunities,
         "price_drops": drop_items,
+        "rare_opportunities": rare_opportunities,
         "recent_alerts": sorted(best_by_listing.values(), key=lambda x: x.get("sent_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:limit],
     }
 

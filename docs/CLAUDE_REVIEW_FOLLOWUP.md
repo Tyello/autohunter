@@ -86,3 +86,6 @@ Atualização de status:
 - Implementado enriquecimento do payload do digest com `by_source`, `by_reason`, `recent_alerts`, metadados de oportunidade (ano/km/localização, reason e score_breakdown resumido quando presente).
 - Renderer atualizado com resumo mais legível, top oportunidades, quedas de preço e buscas com mais alertas, incluindo formatação BRL/km/localização e empty state útil ao usuário.
 - Mantido escopo: sem mudanças em scheduler, opt-in, preferências ou regras de envio.
+
+- Implementado contexto avançado de raridade no Weekly Digest (extração heurística conservadora a partir de `score_breakdown` persistido, sem alterar score/scheduler/envio/preferências).
+- Mantido pendente apenas operacionalização externa via cron/systemd no Raspberry, se ainda desejado.

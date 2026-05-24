@@ -14,13 +14,15 @@ def test_renderer_with_items_and_limits_and_truncate():
         "by_source": [{"source": "olx", "count": 5}, {"source": "mercado_livre", "count": 3}],
         "by_wishlist": [{"wishlist": "Civic Si", "count": 8}],
         "top_opportunities": [
-            {"title": "X" * 120, "score_v2": 88, "price": 123000, "source": "olx", "wishlist": "Civic", "mileage_km": 82000, "state": "SP", "year": 2015},
+            {"title": "X" * 120, "score_v2": 88, "price": 123000, "source": "olx", "wishlist": "Civic", "mileage_km": 82000, "state": "SP", "year": 2015, "rarity_context": {"is_rare": True, "label": "raro"}},
             *[{"title": f"Carro {i}", "score_v2": 80, "price": 100000, "source": "olx", "wishlist": "W", "mileage_km": None, "location": None} for i in range(10)],
         ],
+        "rare_opportunities": [{"title": f"Raro {i}", "score_v2": 80, "price": 118000, "state": "SP", "wishlist": "Civic Si", "rarity_context": {"is_rare": True, "label": "raro"}} for i in range(10)],
         "price_drops": [{"title": f"Drop {i}", "price": 145000} for i in range(10)],
     }
     text = render_weekly_digest(payload)
     assert "🏁 Top oportunidades" in text
+    assert "🧬 Achados raros" in text
     assert "📉 Quedas de preço" in text
     assert "🔎 Buscas com mais alertas" in text
     assert "R$ 123.000" in text
@@ -71,3 +73,9 @@ def test_candidates_renderer_items_and_truncate():
     assert "/admin digest user <chat_id> 7" in text
     assert "📬 Digest semanal — candidatos" in text
     assert "…" in text
+
+
+def test_renderer_hides_rare_block_when_no_reliable_rarity():
+    payload = {"days": 7, "totals": {"sent": 1, "wishlists_with_results": 1, "price_drops": 0}, "top_opportunities": [{"title": "A", "score_v2": 70, "price": 90000, "wishlist": "Civic"}]}
+    text = render_weekly_digest(payload)
+    assert "🧬 Achados raros" not in text
