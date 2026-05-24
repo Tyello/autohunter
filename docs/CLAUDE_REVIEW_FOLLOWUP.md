@@ -52,3 +52,9 @@ Diretriz:
 - handlers só orquestram serviços.
 
 - Tracking/price_drop ganhou observabilidade admin via `/admin tracking` com diagnóstico operacional (contagens, status e pendências), sem alterar regra de negócio.
+
+### Atualização P2 — Digest semanal
+- **Fundação implementada (manual/admin):** criado `build_weekly_digest_for_user` em `app/services/weekly_digest_service.py` e renderer `render_weekly_digest` em `app/bot/weekly_digest_renderer.py`.
+- **Comando admin manual:** `/admin digest user <telegram_chat_id> [dias]` (janela limitada entre 1 e 30, default 7).
+- **Status da pendência:** parcialmente concluída com execução segura/read-only e sem broadcast.
+- **Ainda pendente (fora deste PR):** scheduler automático, envio recorrente para usuário final, preferências opt-in/opt-out.

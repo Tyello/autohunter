@@ -121,6 +121,8 @@ from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 from app.services.browser_warmup_service import warmup_source
 from app.services.tracking_diagnostics_service import build_tracking_diagnostics
 from app.services.cross_source_dedupe_service import find_cross_source_fingerprint_collisions
+from app.services.weekly_digest_service import build_weekly_digest_for_user
+from app.bot.weekly_digest_renderer import render_weekly_digest
 
 
 @dataclass
@@ -394,7 +396,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest")
         return
 
     action = args[0].lower()
@@ -440,6 +442,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "tracking":
         await _admin_tracking(update, args[1:])
         return
+    if action == "digest":
+        await _admin_digest(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -458,10 +463,41 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest")
 
 
 
+
+
+async def _admin_digest(update: Update, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if len(args) < 2 or args[0].lower() != "user":
+        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30]")
+        return
+
+    try:
+        chat_id = int(args[1])
+    except Exception:
+        await update.message.reply_text("telegram_chat_id inválido.")
+        return
+
+    days = 7
+    if len(args) >= 3:
+        try:
+            days = int(args[2])
+        except Exception:
+            await update.message.reply_text("Janela inválida, usando padrão de 7 dias.")
+            days = 7
+    days = max(1, min(30, days))
+
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+        if not user:
+            await update.message.reply_text("Usuário não encontrado para este telegram_chat_id.")
+            return
+        payload = build_weekly_digest_for_user(db, user_id=user.id, days=days, limit=10)
+
+    await update.message.reply_text(render_weekly_digest(payload))
 async def _admin_tracking(update: Update, raw_args: List[str]):
     args = [a.strip() for a in (raw_args or []) if a.strip()]
     if args and args[0].lower() not in {"status", "price_drop"}:
