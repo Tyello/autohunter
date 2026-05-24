@@ -471,3 +471,11 @@ Notas:
 - Colisão de fingerprint **não implica** duplicata real automaticamente; use como sinal para análise.
 - Recomendação operacional: observar por alguns dias, amostrar títulos/preço/km entre sources e só depois avaliar ativação de dedupe real.
 - Limite padrão de fingerprints: 10. Limite máximo seguro no comando: 20.
+
+## Diagnóstico de tracking e price_drop
+
+- Comando: `/admin tracking` (ou `/admin tracking status [horas]`, janela entre 1 e 168; padrão 24h).
+- Mostra: volume de rastreados, status (`active/inactive/orphan/unknown`), lacunas de preço (`last_observed_price`/`last_seen_at` nulos), direção de preço (`dropped/increased/unchanged`), notificações `tracked_price_drop` por status na janela e último job/log relacionado.
+- Órfãos indicam vínculos de tracking cujo anúncio não está mais associado (`listing_status=orphan`) e exigem investigação operacional, não correção automática.
+- Alertas pendentes (`queued/processing`) ajudam a identificar backlog do sender sem alterar regra de envio.
+- Este comando é apenas observabilidade/admin: não dispara alertas, não ajusta cooldown, não altera dedupe e não corrige tracking automaticamente.
