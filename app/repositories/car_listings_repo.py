@@ -8,6 +8,7 @@ from sqlalchemy import func, case, literal_column
 from sqlalchemy.exc import ProgrammingError
 
 from app.models.car_listing import CarListing
+from app.services.cross_source_dedupe_service import compute_cross_source_fingerprint
 
 
 _RE_KM_IN_TITLE = re.compile(r"\b(\d{1,3}(?:\.\d{3})*|\d+)\s*km\b", re.I)
@@ -192,6 +193,9 @@ def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, wi
                 city=listing.get("city"),
                 state=listing.get("state"),
                 color=listing.get("color"),
+                doors=listing.get("doors"),
+                body_type=listing.get("body_type"),
+                cross_source_fingerprint=listing.get("cross_source_fingerprint"),
                 is_sold=bool(listing.get("is_sold")),
                 sold_at=listing.get("sold_at"),
                 created_at=now,
@@ -217,6 +221,10 @@ def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, wi
             row.city = row.city if row.city is not None else listing.get("city")
             row.state = row.state if row.state is not None else listing.get("state")
             row.color = row.color if row.color is not None else listing.get("color")
+            row.doors = row.doors if row.doors is not None else listing.get("doors")
+            row.body_type = row.body_type if row.body_type is not None else listing.get("body_type")
+            if listing.get("cross_source_fingerprint") is not None:
+                row.cross_source_fingerprint = listing.get("cross_source_fingerprint")
             row.raw_payload = row.raw_payload if row.raw_payload is not None else listing.get("raw_payload")
             row.extractor_version = row.extractor_version if row.extractor_version is not None else listing.get("extractor_version")
             row.is_sold = bool(row.is_sold) or bool(listing.get("is_sold"))
@@ -292,7 +300,11 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
             l["title"] = _decorate_title_with_year_km(l.get("title"), year, km)
         # keep only columns that actually exist in the table
         prepared_listing = {k: v for k, v in l.items() if k in allowed_cols}
-        prepared.append(_normalize_controlled_fields(prepared_listing))
+        prepared_listing = _normalize_controlled_fields(prepared_listing)
+        computed_fp = compute_cross_source_fingerprint(prepared_listing)
+        if computed_fp is not None:
+            prepared_listing["cross_source_fingerprint"] = computed_fp
+        prepared.append(prepared_listing)
 
     listings = prepared
     if not listings:
@@ -375,6 +387,9 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
             "city": func.coalesce(CarListing.city, stmt.excluded.city),
             "state": func.coalesce(CarListing.state, stmt.excluded.state),
             "color": func.coalesce(CarListing.color, stmt.excluded.color),
+            "doors": func.coalesce(CarListing.doors, stmt.excluded.doors),
+            "body_type": func.coalesce(CarListing.body_type, stmt.excluded.body_type),
+            "cross_source_fingerprint": func.coalesce(stmt.excluded.cross_source_fingerprint, CarListing.cross_source_fingerprint),
             "raw_payload": func.coalesce(CarListing.raw_payload, stmt.excluded.raw_payload),
             "extractor_version": func.coalesce(CarListing.extractor_version, stmt.excluded.extractor_version),
             # Sold state: once sold, never revert (OR semantics).

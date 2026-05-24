@@ -132,31 +132,16 @@ python scripts/validate_postgres_schema.py
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P1 aberto
 
-**Problema:** o campo `cross_source_fingerprint` foi adicionado ao modelo para identificar o mesmo carro em fontes diferentes. Mas o código que calcula e usa esse fingerprint não está implementado (ou está incompleto).
+**Status atual:** **Modo diagnóstico implementado**.
 
-**Consequência:** usuário recebe o mesmo carro anunciado em ML e OLX como dois alertas diferentes.
+**O que está ativo agora:**
+- fingerprint `cross_source_fingerprint` é calculado no ingest/upsert com sinais estruturados conservadores (`make`, `model`, `year`, buckets de `price` e `mileage_km`, com `version/transmission` opcionais quando presentes);
+- fingerprint é persistido em `car_listings` sem alterar a política atual de matching/notificação;
+- existe consulta de diagnóstico para observar colisões cross-source (mesmo fingerprint em mais de uma source).
 
-**O que implementar:**
-```python
-# Ao ingerir um listing, calcular fingerprint:
-def compute_cross_source_fingerprint(listing: dict) -> str | None:
-    """Fingerprint que identifica o mesmo carro em fontes diferentes.
-    Usa make, model, year, price (tolerância 5%), km (tolerância 10%).
-    """
-    make = normalize(listing.get("make", ""))
-    model = normalize(listing.get("model", ""))
-    year = listing.get("year")
-    price = round_to_bucket(listing.get("price"), bucket=500)
-    km = round_to_bucket(listing.get("mileage_km"), bucket=5000)
+**Importante:** nenhuma notificação é suprimida nesta fase. Não houve mudança em queue/matching/sender/daily limit.
 
-    if not all([make, model, year]):
-        return None
-
-    key = f"{make}:{model}:{year}:{price}:{km}"
-    return hashlib.md5(key.encode()).hexdigest()
-```
-
-**Modo diagnóstico primeiro:** calcular e persistir o fingerprint sem ainda usar para dedupe. Observar colisões por 7 dias antes de ativar a lógica de supressão.
+**Próximo passo (pendente):** ativar dedupe real somente após janela de observação de colisões em produção para calibrar falso positivo/falso negativo.
 
 ---
 
@@ -188,5 +173,5 @@ def compute_cross_source_fingerprint(listing: dict) -> str | None:
 | BUG-08 | Alta — runtime | Baixo | Corrigido |
 | BUG-04 | Alta — estabilidade | Médio | Resolvido e validado em PostgreSQL/Supabase real |
 | BUG-05 | Média — produto | Médio (handlers + matching) | Resolvido (comando) |
-| BUG-06 | Baixa — produto | Alto (implementar + observar) | Aberto |
+| BUG-06 | Baixa — produto | Alto (implementar + observar) | Modo diagnóstico implementado |
 | BUG-07 | Média — produto | Alto (validar scoring) | Parcialmente resolvido (P2) |
