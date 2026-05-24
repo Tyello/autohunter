@@ -258,6 +258,10 @@ class Settings(BaseSettings):
     autopilot_alert_throttle_seconds: int = 1800  # 30 min
     # digest diário para admins (UTC hour, ex: 12 = 09:00 America/Sao_Paulo)
     autopilot_daily_digest_enabled: bool = True
+    weekly_digest_job_enabled: bool = False
+    weekly_digest_dry_run: bool = True
+    weekly_digest_batch_size: int = 20
+    weekly_digest_max_send_per_run: int = 20
     autopilot_daily_digest_hour_utc: int = 12
     telegram_text_max: int = 4000
     safe_chunk: int = 3800

@@ -384,6 +384,20 @@ def start_scheduler() -> BackgroundScheduler:
         executor="sender",
     )
 
+    # Digest semanal opt-in (controlado por prefs por usuário)
+    from app.scheduler.weekly_digest_job import job_weekly_digest
+    sched.add_job(
+        job_weekly_digest,
+        "cron",
+        day_of_week="sat",
+        hour=11,
+        minute=0,
+        timezone=ZoneInfo(getattr(settings, "default_user_timezone", "America/Sao_Paulo")),
+        id="weekly_digest",
+        replace_existing=True,
+        executor="sender",
+    )
+
     # Admin monitor (erro/bloqueio -> alerta no Telegram)
     if getattr(settings, "admin_monitor_enabled", True):
         from app.scheduler.admin_monitor_job import job_admin_monitor

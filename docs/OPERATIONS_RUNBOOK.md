@@ -517,3 +517,33 @@ Quando usar:
   - `/admin digest config <telegram_chat_id> limit <1-20>`
 - `preview` (`/admin digest user ...`) atualiza `last_digest_previewed_at`; **não** atualiza `last_digest_sent_at`.
 - `enabled=true` ainda **não** implica envio automático: scheduler/envio recorrente continuam pendentes.
+
+## Weekly Digest scheduler (opt-in controlado)
+
+- O job `job_weekly_digest` envia digest **somente** para usuários com `weekly_digest_enabled=true`.
+- Guardrails padrão:
+  - `weekly_digest_job_enabled=false` (bloqueia envio live automático)
+  - `weekly_digest_dry_run=true`
+  - `weekly_digest_batch_size=20`
+  - `weekly_digest_max_send_per_run=20`
+
+### Operação admin
+
+1. Habilitar opt-in por usuário:
+   - `/admin digest enable <chat_id>`
+   - Ajustes opcionais: `/admin digest config <chat_id> days <1-30>` e `/admin digest config <chat_id> limit <1-20>`
+2. Dry-run manual:
+   - `/admin digest run`
+   - `/admin digest run dry`
+3. Live manual (com gate):
+   - requer `weekly_digest_job_enabled=true`
+   - comando: `/admin digest run live`
+
+### Interpretação do resumo
+
+- `checked`: prefs enabled avaliadas no batch.
+- `eligible`: usuários aptos após checar ativo/chat/janela mínima (`digest_days`).
+- `sent`: digests efetivamente enviados (ou que seriam enviados no dry-run).
+- `skipped_recent`: pulados por janela mínima ainda não vencida.
+- `skipped_empty`: pulados por digest vazio (`totals.sent == 0`).
+- `failed`: erro de envio; execução segue para próximos usuários.

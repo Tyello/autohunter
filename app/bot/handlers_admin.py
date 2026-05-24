@@ -123,6 +123,7 @@ from app.services.tracking_diagnostics_service import build_tracking_diagnostics
 from app.services.cross_source_dedupe_service import find_cross_source_fingerprint_collisions
 from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
 from app.bot.weekly_digest_renderer import render_weekly_digest, render_weekly_digest_candidates
+from app.scheduler.weekly_digest_job import run_weekly_digest_once
 from app.services.weekly_digest_preferences_service import (
     get_or_create_digest_preference,
     get_digest_preference,
@@ -479,9 +480,30 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _admin_digest(update: Update, raw_args: List[str]):
     args = [a.strip() for a in (raw_args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30] | /admin digest candidates [1-30] [1-50] | /admin digest prefs <chat_id> | /admin digest enable <chat_id> | /admin digest disable <chat_id> | /admin digest config <chat_id> days|limit <valor>")
+        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30] | /admin digest candidates [1-30] [1-50] | /admin digest prefs <chat_id> | /admin digest enable <chat_id> | /admin digest disable <chat_id> | /admin digest config <chat_id> days|limit <valor> | /admin digest run [dry|live]")
         return
     sub = args[0].lower()
+    if sub == "run":
+        mode = (args[1].lower() if len(args) >= 2 else "dry")
+        if mode not in {"dry", "live"}:
+            await update.message.reply_text("Use: /admin digest run [dry|live]")
+            return
+        if mode == "live" and not bool(getattr(settings, "weekly_digest_job_enabled", False)):
+            await update.message.reply_text("Live bloqueado: weekly_digest_job_enabled=false.")
+            return
+        stats = run_weekly_digest_once(dry_run=(mode != "live"))
+        await update.message.reply_text(
+            "Digest run summary\n"
+            f"mode={mode}\n"
+            f"checked={stats.get('checked', 0)}\n"
+            f"eligible={stats.get('eligible', 0)}\n"
+            f"sent={stats.get('sent', 0)}\n"
+            f"skipped_recent={stats.get('skipped_recent', 0)}\n"
+            f"skipped_empty={stats.get('skipped_empty', 0)}\n"
+            f"failed={stats.get('failed', 0)}"
+        )
+        return
+
     if sub == "candidates":
         days = 7
         limit = 20
@@ -551,7 +573,7 @@ async def _admin_digest(update: Update, raw_args: List[str]):
             )
         return
     if len(args) < 2 or sub != "user":
-        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30] | /admin digest candidates [1-30] [1-50] | /admin digest prefs <chat_id> | /admin digest enable <chat_id> | /admin digest disable <chat_id> | /admin digest config <chat_id> days|limit <valor>")
+        await update.message.reply_text("Use: /admin digest user <telegram_chat_id> [1-30] | /admin digest candidates [1-30] [1-50] | /admin digest prefs <chat_id> | /admin digest enable <chat_id> | /admin digest disable <chat_id> | /admin digest config <chat_id> days|limit <valor> | /admin digest run [dry|live]")
         return
 
     try:
