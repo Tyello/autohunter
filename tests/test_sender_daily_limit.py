@@ -225,9 +225,74 @@ def test_sender_applies_pacing_between_real_sends(db, monkeypatch):
     monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: False)
     monkeypatch.setattr("app.scheduler.jobs_send.settings.notification_sender_sleep_seconds", 0.04)
 
-    sleep_calls = []
-    monkeypatch.setattr("app.scheduler.jobs_send.time.sleep", lambda secs: sleep_calls.append(secs))
+    events = []
+    monkeypatch.setattr("app.scheduler.jobs_send.time.sleep", lambda secs: events.append(f"sleep:{secs}"))
 
-    sent = send_queued_notifications(db, component="test", sender_fn=lambda *_args, **_kwargs: None)
+    def _sender_fn(notification, *_args, **_kwargs):
+        events.append(f"send:{notification.id}")
+
+    sent = send_queued_notifications(db, component="test", sender_fn=_sender_fn)
     assert sent == 2
-    assert sleep_calls == [0.04]
+    assert events == [f"send:{_n1.id}", "sleep:0.04", f"send:{n2.id}"]
+
+
+def test_sender_does_not_sleep_with_single_success(db, monkeypatch):
+    _seed_base(db)
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 0)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
+    monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: False)
+    monkeypatch.setattr("app.scheduler.jobs_send.settings.notification_sender_sleep_seconds", 0.04)
+    sleeps = []
+    monkeypatch.setattr("app.scheduler.jobs_send.time.sleep", lambda secs: sleeps.append(secs))
+    assert send_queued_notifications(db, component="test", sender_fn=lambda *_args, **_kwargs: None) == 1
+    assert sleeps == []
+
+
+def test_sender_does_not_sleep_when_first_send_fails_before_any_success(db, monkeypatch):
+    user, wl, listing, n1 = _seed_base(db)
+    n2 = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="queued")
+    db.add(n2)
+    db.commit()
+
+    monkeypatch.setattr("app.scheduler.jobs_send.settings.notification_sender_sleep_seconds", 0.04)
+    sleeps = []
+    monkeypatch.setattr("app.scheduler.jobs_send.time.sleep", lambda secs: sleeps.append(secs))
+
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 0)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
+    monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: False)
+
+    calls = {"i": 0}
+
+    def _sender_fn(*_args, **_kwargs):
+        calls["i"] += 1
+        if calls["i"] == 1:
+            raise RuntimeError("boom")
+
+    send_queued_notifications(db, component="test", sender_fn=_sender_fn)
+    assert sleeps == []
+
+
+def test_sender_does_not_sleep_for_blocked_or_no_destination(db, monkeypatch):
+    user, wl, listing, _ = _seed_base(db)
+    blocked_n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="queued")
+    db.add(blocked_n)
+    db.commit()
+
+    class _NoDest:
+        id = "nodest-1"
+        user = None
+        user_id = uuid.uuid4()
+        car_listing = listing
+        car_listing_id = listing.id
+
+    monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 10)
+    monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)
+    monkeypatch.setattr("app.scheduler.jobs_send.should_send_daily_limit_notice", lambda *_: False)
+    monkeypatch.setattr("app.scheduler.jobs_send.claim_queued_notifications", lambda *_args, **_kwargs: [blocked_n, _NoDest()])
+    monkeypatch.setattr("app.scheduler.jobs_send.settings.notification_sender_sleep_seconds", 0.04)
+    sleeps = []
+    monkeypatch.setattr("app.scheduler.jobs_send.time.sleep", lambda secs: sleeps.append(secs))
+
+    assert send_queued_notifications(db, component="test", sender_fn=lambda *_args, **_kwargs: None) == 0
+    assert sleeps == []

@@ -94,7 +94,8 @@ def _human_gb(n: int) -> str:
 
 
 def _resource_cooldown_minutes(default_minutes: int = 30) -> int:
-    seconds = int(getattr(settings, "resource_alert_throttle_seconds", 1800) or 1800)
+    default_seconds = max(1, int(default_minutes)) * 60
+    seconds = int(getattr(settings, "resource_alert_throttle_seconds", default_seconds) or default_seconds)
     return max(1, seconds // 60)
 
 def collect_operational_alerts(
