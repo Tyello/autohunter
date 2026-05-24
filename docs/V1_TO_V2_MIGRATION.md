@@ -97,6 +97,27 @@ Caminho ativo é robusto e contém mecanismos anti-bloqueio/anti-ruído que não
 - Também foi adicionado fallback defensivo de título (img/link/slug de URL) para evitar descarte total quando o card não possui `h2`/`title`.
 - Próximo gate operacional: retomar paridade dual-run com V1 e V2 > 0 quando não houver captcha temporário no ML.
 
+### Atualização operacional (2026-05-24)
+- Validação parcial de V2 atingida em dual-run:
+  - `v2_count=14`
+  - `v2_metrics.fetch_method=browser_fallback`
+  - `v2_metrics.raw_items_found=14`
+  - `v2_metrics.items_parsed=14`
+  - `v2_metrics.items_valid=14`
+  - `parse_errors=0`
+- No mesmo teste, V1 ficou bloqueado com shell:
+  - `v1_count=0`
+  - `v1_error=FetchBlocked reason=ml_shell_without_results`
+- Interpretação obrigatória:
+  - bloqueador atual é janela instável do Mercado Livre / shell no V1 no mesmo teste;
+  - **não** é regressão ativa de parser/fetch do V2 nesse evento.
+- Próxima etapa recomendada:
+  - validação operacional (cooldown + **single dual-run**), e não novo strategy probe completo.
+- Gate de flip permanece inalterado:
+  - só considerar `impl=v2` após `v1_count > 0` e `v2_count > 0` na mesma janela limpa.
+- Diretriz para futuros agentes:
+  - não reabrir PR de parser/fetch V2 com base apenas nesse resultado de 2026-05-24.
+
 ### Já implementado no caminho ativo
 - `curl_cffi` intermediário.
 - POLYCARD + merge com parser HTML.
