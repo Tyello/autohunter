@@ -46,6 +46,27 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+
+def _wishlist_filter_help_text() -> str:
+    return (
+        "Use:\n"
+        "/wishlist filter add <n> <field> <op> <value>\n"
+        "Campos: price, year, km/mileage_km, source, color, city, state, vendedor/seller_type, carroceria/body_type, portas/doors\n"
+        "Exemplos:\n"
+        "/wishlist filter add 1 km lte 90000\n"
+        "/wishlist filter add 1 km between 30000 90000\n"
+        "/wishlist filter add 1 portas eq 2\n"
+        "/wishlist filter add 1 carroceria eq sedan\n"
+        "/wishlist filter add 1 vendedor eq particular\n"
+        "/wishlist filter list 1\n"
+        "/wishlist filter rm 1 2"
+    )
+
+
+def _wishlist_filter_field_label(field: str) -> str:
+    return {"mileage_km": "km", "seller_type": "vendedor", "body_type": "carroceria", "doors": "portas"}.get((field or "").strip().lower(), field)
+
+
 async def _notify_upgrade_intent_admin_safe(admin_msg: str, *, chat_id: int, plan_period: str) -> None:
     try:
         await asyncio.to_thread(send_admin_text, admin_msg)
@@ -446,14 +467,7 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # /wishlist filter ...
         if sub == "filter":
             if len(args) < 2:
-                await reply_text(
-                    update,
-                    "Use:\n"
-                    "/wishlist filter add <n> price lte 90000\n"
-                    "/wishlist filter add <n> source eq mercadolivre\n"
-                    "/wishlist filter list <n>\n"
-                    "/wishlist filter rm <n> <filter_num>"
-                )
+                await reply_text(update, _wishlist_filter_help_text())
                 return
 
             action = args[1].lower()
@@ -477,20 +491,20 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not fs:
                     await reply_text(update, "Sem filtros. Use /wishlist filter add ...")
                     return
-                lines = [f"{i+1}. {f.field} {f.operator} {f.value}" for i, f in enumerate(fs)]
+                lines = [f"{i+1}. {_wishlist_filter_field_label(f.field)} {f.operator} {f.value}" for i, f in enumerate(fs)]
                 await reply_text(update, "Filtros:\n" + "\n".join(lines))
                 return
 
             if action == "add":
                 if len(args) < 6 or parse_int(args[2]) is None:
-                    await reply_text(update, "Use: /wishlist filter add <n> <field> <op> <value>")
+                    await reply_text(update, _wishlist_filter_help_text())
                     return
                 wi = int(args[2])
                 wl = get_wishlist_by_index(wi)
                 if not wl:
                     await reply_text(update, "Wishlist inválida. Use /wishlist listar.")
                     return
-                field, op, value = args[3], args[4], args[5]
+                field, op, value = args[3], args[4], " ".join(args[5:])
                 ok, msg = add_filter(db, wl.id, field, op, value)
                 await reply_text(update, msg)
                 return

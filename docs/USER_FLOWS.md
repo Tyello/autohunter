@@ -387,6 +387,18 @@ Comandos avançados/legados continuam disponíveis para usuários técnicos e co
 
 Eles não devem ser removidos sem validação de uso e atualização de testes.
 
+Exemplos úteis do fluxo legado de filtros estruturados:
+
+```text
+/wishlist filter add 1 km lte 90000
+/wishlist filter add 1 km between 30000 90000
+/wishlist filter add 1 portas eq 2
+/wishlist filter add 1 carroceria eq sedan
+/wishlist filter add 1 vendedor eq particular
+/wishlist filter list 1
+/wishlist filter rm 1 2
+```
+
 ## 15. Lacunas de UX/produto ainda relevantes
 
 - Pagamento/ativação Premium sem intervenção manual.
