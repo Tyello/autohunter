@@ -82,7 +82,8 @@ def build_weekly_digest_for_user(db: Session, *, user_id, days: int = 7, limit: 
 
     dedup_drop = {}
     for item in sorted(price_drops, key=lambda x: x.get("sent_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
-        dedup_drop[item["listing_id"]] = item
+        if item["listing_id"] not in dedup_drop:
+            dedup_drop[item["listing_id"]] = item
     drop_items = list(dedup_drop.values())[:limit]
 
     return {

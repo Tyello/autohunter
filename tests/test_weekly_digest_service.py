@@ -29,8 +29,8 @@ def _mk_listing(db, ext="x", title="Car", price=10000):
     return l
 
 
-def _mk_notif(db, user, wl, listing, *, days_ago=0, reason="match", score=80):
-    n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="sent", reason=reason, score_v2=score, sent_at=datetime.now(timezone.utc)-timedelta(days=days_ago))
+def _mk_notif(db, user, wl, listing, *, days_ago=0, reason="match", score=80, sent_at=None):
+    n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="sent", reason=reason, score_v2=score, sent_at=sent_at or (datetime.now(timezone.utc)-timedelta(days=days_ago)))
     db.add(n)
     db.commit()
 
@@ -66,3 +66,18 @@ def test_digest_window_and_price_drop_dedup(db):
     assert p["totals"]["sent"] == 2
     assert len(p["top_opportunities"]) == 1
     assert len(p["price_drops"]) == 1
+
+
+def test_price_drop_dedup_keeps_most_recent_item(db):
+    u = _mk_user(db)
+    wl = _mk_wl(db, u)
+    l = _mk_listing(db, "99", "Mesmo carro")
+    older = datetime.now(timezone.utc) - timedelta(days=1, minutes=5)
+    newer = datetime.now(timezone.utc) - timedelta(days=1)
+
+    _mk_notif(db, u, wl, l, reason="tracked_price_drop", score=50, sent_at=older)
+    _mk_notif(db, u, wl, l, reason="tracked_price_drop", score=90, sent_at=newer)
+
+    p = build_weekly_digest_for_user(db, user_id=u.id, days=7)
+    assert len(p["price_drops"]) == 1
+    assert p["price_drops"][0]["score_v2"] == 90
