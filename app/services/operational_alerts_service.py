@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
+import psutil
 from typing import List, Optional
 
 from sqlalchemy import func
@@ -92,6 +93,10 @@ def _human_gb(n: int) -> str:
     return f"{(int(n) / (1024**3)):.2f}GB"
 
 
+def _resource_cooldown_minutes(default_minutes: int = 30) -> int:
+    seconds = int(getattr(settings, "resource_alert_throttle_seconds", 1800) or 1800)
+    return max(1, seconds // 60)
+
 def collect_operational_alerts(
     db: Session,
     now: Optional[datetime] = None,
@@ -147,11 +152,19 @@ def collect_operational_alerts(
         alerts.append(OperationalAlert("notifications_stuck", f"⚠️ Sender possivelmente parado: notifications antigas={notif_old}. Próximo passo: /admin health e /admin audit.", 30))
 
     try:
+        mem = psutil.virtual_memory()
+        ram_threshold = float(getattr(settings, "ram_alert_threshold", 85.0) or 85.0)
+        if float(mem.percent) >= ram_threshold:
+            alerts.append(OperationalAlert("ram_pressure", f"🚨 RAM em {mem.percent:.1f}% (threshold {ram_threshold:.1f}%).", _resource_cooldown_minutes()))
+    except Exception:
+        pass
+
+    try:
         disk = shutil.disk_usage("/")
         used_pct = (disk.used / disk.total) * 100 if disk.total else 0.0
         disk_threshold = float(getattr(settings, "disk_alert_root_used_pct", 85.0) or 85.0)
         if used_pct >= disk_threshold:
-            alerts.append(OperationalAlert("disk_root_pressure", f"🚨 Disco '/' em {used_pct:.1f}% (threshold {disk_threshold:.1f}%). Próximo passo: python scripts/disk_audit.py", 180))
+            alerts.append(OperationalAlert("disk_root_pressure", f"🚨 Disco '/' em {used_pct:.1f}% (threshold {disk_threshold:.1f}%). Próximo passo: python scripts/disk_audit.py", _resource_cooldown_minutes()))
     except Exception:
         pass
 
@@ -161,7 +174,7 @@ def collect_operational_alerts(
         cache_dir = Path(getattr(settings, "runtime_cache_dir", "/var/cache/autohunter")).expanduser().resolve()
         cache_size_bytes = _dir_size_bytes(cache_dir)
         if cache_size_bytes >= cache_limit_bytes > 0:
-            alerts.append(OperationalAlert("disk_cache_pressure", f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Próximo passo: executar cleanup filesystem e revisar artifacts/debug.", 180))
+            alerts.append(OperationalAlert("disk_cache_pressure", f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Próximo passo: executar cleanup filesystem e revisar artifacts/debug.", _resource_cooldown_minutes()))
     except Exception:
         pass
 

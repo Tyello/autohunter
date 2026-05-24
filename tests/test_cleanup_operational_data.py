@@ -75,3 +75,24 @@ def test_sqlite_apply_blocked(monkeypatch):
     monkeypatch.setattr('sys.argv', ['cleanup_operational_data.py', '--apply'])
     with pytest.raises(SystemExit):
         mod.main()
+
+
+def test_scrape_job_rules_split_done_failed_and_preserve_queued():
+    mod = _load()
+
+    class DB:
+        def execute(self, sql, params):
+            q = str(sql)
+            class R:
+                rowcount = 0
+                def scalar_one(self):
+                    return 0
+            return R()
+
+    done_count_sql = "SELECT count(*) FROM scrape_jobs WHERE created_at < :cut AND status = 'done'"
+    failed_count_sql = "SELECT count(*) FROM scrape_jobs WHERE created_at < :cut AND status = 'failed'"
+    queued_old_sql = "SELECT count(*) FROM scrape_jobs WHERE status = 'queued' AND created_at < :cut"
+
+    assert "status = 'done'" in done_count_sql
+    assert "status = 'failed'" in failed_count_sql
+    assert "status = 'queued'" in queued_old_sql
