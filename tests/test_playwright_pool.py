@@ -98,3 +98,63 @@ def test_invalidate_contexts_no_storage_no_fail(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.playwright_pool.playwright_storage_dir", lambda: tmp_path)
     out = core.invalidate_contexts(source="mercadolivre", clear_storage=True)
     assert out["removed_contexts"] == 0
+
+
+def test_playwright_pool_invalidate_contexts_delegates_to_worker_call(monkeypatch):
+    from app.services.playwright_pool import PlaywrightPool
+
+    pool = PlaywrightPool()
+    called = {}
+
+    def _fake_call(name, *, hard_timeout_s, **kwargs):
+        called["name"] = name
+        called["hard_timeout_s"] = hard_timeout_s
+        called["kwargs"] = kwargs
+        return {"removed_contexts": 1}
+
+    monkeypatch.setattr(pool, "_call", _fake_call)
+
+    out = pool.invalidate_contexts(
+        source="mercadolivre",
+        proxy_server="http://proxy:8080",
+        block_resources=False,
+        clear_storage=True,
+    )
+
+    assert out == {"removed_contexts": 1}
+    assert called["name"] == "invalidate_contexts"
+    assert called["hard_timeout_s"] == 10.0
+    assert called["kwargs"] == {
+        "source": "mercadolivre",
+        "proxy_server": "http://proxy:8080",
+        "block_resources": False,
+        "clear_storage": True,
+    }
+
+
+def test_reset_browser_state_for_source_calls_backend_invalidate(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import browser_fetcher
+
+    calls = {}
+
+    class _Backend:
+        def invalidate_contexts(self, **kwargs):
+            calls.update(kwargs)
+
+    monkeypatch.setattr(browser_fetcher, "_get_backend", lambda: _Backend())
+    ctx = SimpleNamespace(source="mercadolivre", proxy_server="http://proxy:8080", browser_block_resources=None)
+
+    browser_fetcher.reset_browser_state_for_source(
+        "mercadolivre",
+        ctx,
+        block_resources=False,
+        clear_storage=True,
+    )
+
+    assert calls == {
+        "source": "mercadolivre",
+        "proxy_server": "http://proxy:8080",
+        "block_resources": False,
+        "clear_storage": True,
+    }

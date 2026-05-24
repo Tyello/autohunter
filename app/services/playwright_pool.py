@@ -961,41 +961,22 @@ class PlaywrightPool:
         return job.result
 
 
-    def invalidate_contexts(self, *, source: str, proxy_server: Optional[str] = None, block_resources: Optional[bool] = None, clear_storage: bool = False) -> dict:
-        source_key = (source or "").strip().lower()
-        proxy_key = (proxy_server or "__no_proxy__").strip()
-        removed = 0
-        removed_keys = []
-        for key in list(self._contexts.keys()):
-            k_proxy = key[0]
-            k_source = key[1]
-            k_block = key[2] if len(key) > 2 else None
-            if source_key and k_source != source_key:
-                continue
-            if proxy_server is not None and k_proxy != proxy_key:
-                continue
-            if block_resources is not None and k_block is not None and bool(k_block) != bool(block_resources):
-                continue
-            ctx = self._contexts.pop(key, None)
-            self._ctx_last_used.pop(key, None)
-            if ctx is not None:
-                try:
-                    ctx.close()
-                except Exception:
-                    pass
-                removed += 1
-                removed_keys.append(key)
-        if clear_storage and source_key:
-            base = playwright_storage_dir()
-            if base.exists():
-                for st in base.glob(f"storage_{source_key}__*.json"):
-                    try:
-                        st.unlink()
-                    except FileNotFoundError:
-                        pass
-                    except Exception:
-                        pass
-        return {"removed_contexts": removed, "keys": removed_keys}
+    def invalidate_contexts(
+        self,
+        *,
+        source: str,
+        proxy_server: Optional[str] = None,
+        block_resources: Optional[bool] = None,
+        clear_storage: bool = False,
+    ) -> dict:
+        return self._call(
+            "invalidate_contexts",
+            hard_timeout_s=10.0,
+            source=source,
+            proxy_server=proxy_server,
+            block_resources=block_resources,
+            clear_storage=clear_storage,
+        )
 
     def fetch(
         self,
