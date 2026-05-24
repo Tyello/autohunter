@@ -497,6 +497,8 @@ def _apply_filters(listing: CarListing, filters: list[FilterRule]) -> bool:
         if field in {"color", "city", "state", "seller_type", "body_type"}:
             if field == "state" and op != "eq":
                 return False
+            if field != "state" and op not in {"eq", "neq"}:
+                return False
             if not _field_match(listing, field, op, val):
                 return False
             continue
@@ -598,6 +600,8 @@ def _apply_filters_fast(listing: CarListing, filters: list[FilterRule], year: in
 
         if field in {"color", "city", "state", "seller_type", "body_type"}:
             if field == "state" and op != "eq":
+                return False
+            if field != "state" and op not in {"eq", "neq"}:
                 return False
             if not _field_match(listing, field, op, val):
                 return False
