@@ -141,7 +141,9 @@ python scripts/validate_postgres_schema.py
 
 **Importante:** nenhuma notificação é suprimida nesta fase. Não houve mudança em queue/matching/sender/daily limit.
 
-**Próximo passo (pendente):** ativar dedupe real somente após janela de observação de colisões em produção para calibrar falso positivo/falso negativo.
+**Observabilidade admin:** comando `/admin dedupe collisions [N]` disponível para listar colisões persistidas de `cross_source_fingerprint` em modo de observação.
+
+**Próximo passo (pendente):** ativar dedupe real somente após janela de observação de colisões em produção para calibrar falso positivo/falso negativo. Nenhuma supressão de notificação está ativa nesta fase.
 
 ---
 

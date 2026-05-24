@@ -25,6 +25,11 @@ from app.bot.admin_helpers import (
     short as _short,
 )
 from app.bot.text_sanitize import sanitize_for_telegram
+from app.bot.admin_dedupe_diagnostics import (
+    DEFAULT_COLLISIONS_LIMIT,
+    render_cross_source_dedupe_collisions,
+    parse_dedupe_collisions_limit,
+)
 from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, render_admin_auction_source_history, _fmt_money_br, render_auction_alert_preview, render_auction_alert, build_auction_alert_keyboard, _friendly_wishlist_filters
 from app.core.settings import settings
 from app.db.session import SessionLocal
@@ -113,6 +118,7 @@ from app.services.auction_source_categories_service import get_auction_allowed_i
 from app.services.system_logs_service import log
 from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 from app.services.browser_warmup_service import warmup_source
+from app.services.cross_source_dedupe_service import find_cross_source_fingerprint_collisions
 
 
 @dataclass
@@ -386,7 +392,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe")
         return
 
     action = args[0].lower()
@@ -426,6 +432,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "auctions":
         await _admin_auctions(update, args[1:])
         return
+    if action == "dedupe":
+        await _admin_dedupe(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -444,8 +453,24 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe")
 
+
+
+
+async def _admin_dedupe(update: Update, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if args and args[0].lower() not in {"collisions"}:
+        await update.message.reply_text("Use: /admin dedupe | /admin dedupe collisions [N]")
+        return
+
+    limit = parse_dedupe_collisions_limit(args)
+    with SessionLocal() as db:
+        collisions = find_cross_source_fingerprint_collisions(db, limit=limit)
+
+    rendered = render_cross_source_dedupe_collisions(collisions)
+    msg, _ = _truncate_admin_message(rendered, max_chars=3500)
+    await update.message.reply_text(msg)
 
 def _render_warmup_result(source: str, payload: dict) -> str:
     steps = payload.get("steps_completed") or []

@@ -454,3 +454,20 @@ Escalar quando houver:
 - `docs/ROADMAP.md`
 - `docs/LEGACY_INVENTORY.md`
 - `docs/BACKUP_RESTORE.md`
+
+
+## Diagnóstico de cross-source dedupe (BUG-06)
+
+Comando operacional:
+
+```
+/admin dedupe
+/admin dedupe collisions
+/admin dedupe collisions 10
+```
+
+Notas:
+- Modo atual é **observação**: nenhuma notificação é suprimida por esse diagnóstico.
+- Colisão de fingerprint **não implica** duplicata real automaticamente; use como sinal para análise.
+- Recomendação operacional: observar por alguns dias, amostrar títulos/preço/km entre sources e só depois avaliar ativação de dedupe real.
+- Limite padrão de fingerprints: 10. Limite máximo seguro no comando: 20.
