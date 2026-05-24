@@ -75,8 +75,14 @@ Diretriz:
 - Garantia explícita: envio restrito a usuários com `weekly_digest_enabled=true` e elegibilidade ativa/chat/janela mínima por `digest_days`.
 
 Pendências mantidas para próximas PRs:
-- refinamento de conteúdo do digest;
-- integração com cron/systemd externo no Raspberry (se desejado operacionalmente).
+- integração com cron/systemd externo no Raspberry (se desejado operacionalmente);
+- contexto de raridade avançado no digest (se desejado e ainda não implementado).
 
 Atualização de status:
 - comando de autoatendimento do usuário final (`/digest`) implementado.
+
+
+### Atualização P2.1 — Refinamento de conteúdo do digest
+- Implementado enriquecimento do payload do digest com `by_source`, `by_reason`, `recent_alerts`, metadados de oportunidade (ano/km/localização, reason e score_breakdown resumido quando presente).
+- Renderer atualizado com resumo mais legível, top oportunidades, quedas de preço e buscas com mais alertas, incluindo formatação BRL/km/localização e empty state útil ao usuário.
+- Mantido escopo: sem mudanças em scheduler, opt-in, preferências ou regras de envio.

@@ -73,7 +73,7 @@ def test_admin_digest_success_and_day_cap(monkeypatch):
     monkeypatch.setattr(handlers_admin, "mark_digest_previewed", lambda *_a, **_k: None)
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert captured["days"] == 30
-    assert "Sem alertas enviados" in update.message.sent[-1]
+    assert "Nenhum alerta enviado" in update.message.sent[-1]
 
 
 def test_admin_digest_candidates_defaults(monkeypatch):

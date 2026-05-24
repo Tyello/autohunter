@@ -23,8 +23,8 @@ def _mk_wl(db, user, q="civic"):
     return wl
 
 
-def _mk_listing(db, ext="x", title="Car", price=10000):
-    l = CarListing(source="olx", external_id=ext, title=title, url=f"https://x/{ext}", price=price, location="SP")
+def _mk_listing(db, ext="x", title="Car", price=10000, source="olx", year=2019, mileage_km=55000, city="Sao Paulo", state="SP", location="SP"):
+    l = CarListing(source=source, external_id=ext, title=title, url=f"https://x/{ext}", price=price, year=year, mileage_km=mileage_km, city=city, state=state, location=location)
     db.add(l)
     db.commit()
     return l
@@ -132,3 +132,39 @@ def test_digest_candidates_only_enabled_filter(db):
     assert len(all_rows) == 2
     assert len(enabled_rows) == 1
     assert enabled_rows[0]["telegram_chat_id"] == 2002
+
+
+def test_digest_payload_enriched_fields_and_grouping(db):
+    u = _mk_user(db)
+    wl = _mk_wl(db, u, "Civic Si")
+    l = _mk_listing(db, "enriched", "Honda Civic Si", source="mercado_livre", year=2015, mileage_km=82000, city="Curitiba", state="PR", location="Curitiba/PR")
+    _mk_notif(db, u, wl, l, reason="tracked_price_drop", score=87)
+
+    p = build_weekly_digest_for_user(db, user_id=u.id, days=7)
+    top = p["top_opportunities"][0]
+
+    assert p["by_source"][0]["source"] == "mercado_livre"
+    assert p["by_reason"][0]["reason"] == "tracked_price_drop"
+    assert top["year"] == 2015
+    assert top["mileage_km"] == 82000
+    assert top["city"] == "Curitiba"
+    assert top["state"] == "PR"
+    assert top["location"] == "Curitiba/PR"
+    assert p["recent_alerts"]
+
+
+def test_digest_payload_fallback_when_optional_fields_missing(db):
+    u = _mk_user(db)
+    wl = _mk_wl(db, u)
+    l = _mk_listing(db, "miss", "Sem opcionais", year=None, mileage_km=None, city=None, state=None, location=None)
+    _mk_notif(db, u, wl, l, reason=None, score=None)
+
+    p = build_weekly_digest_for_user(db, user_id=u.id, days=7)
+    top = p["top_opportunities"][0]
+
+    assert top["year"] is None
+    assert top["mileage_km"] is None
+    assert top["city"] is None
+    assert top["state"] is None
+    assert top["location"] is None
+    assert p["by_reason"][0]["reason"] == "unknown"
