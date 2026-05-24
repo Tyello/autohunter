@@ -67,3 +67,14 @@ Diretriz:
 - Implementado: configuração básica (`digest_days`, `digest_limit`) e status consultável por admin.
 - Implementado: filtro opcional `only_enabled` em candidates para base de scheduler futuro.
 - Pendente (fora deste PR): scheduler automático, envio recorrente real, comando de autoatendimento para usuário final.
+
+### P2 — Weekly Digest scheduler controlado (opt-in)
+
+- Implementado `app/scheduler/weekly_digest_job.py` com execução segura (dry-run/live), batch/limite, logs e atualização de `last_digest_sent_at` só após envio bem-sucedido.
+- Implementado comando admin manual `/admin digest run [dry|live]` com gate forte para live (`weekly_digest_job_enabled=true`).
+- Garantia explícita: envio restrito a usuários com `weekly_digest_enabled=true` e elegibilidade ativa/chat/janela mínima por `digest_days`.
+
+Pendências mantidas para próximas PRs:
+- comando de autoatendimento do usuário final;
+- refinamento de conteúdo do digest;
+- integração com cron/systemd externo no Raspberry (se desejado operacionalmente).
