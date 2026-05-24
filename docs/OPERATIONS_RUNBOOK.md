@@ -479,3 +479,23 @@ Notas:
 - Órfãos indicam vínculos de tracking cujo anúncio não está mais associado (`listing_status=orphan`) e exigem investigação operacional, não correção automática.
 - Alertas pendentes (`queued/processing`) ajudam a identificar backlog do sender sem alterar regra de envio.
 - Este comando é apenas observabilidade/admin: não dispara alertas, não ajusta cooldown, não altera dedupe e não corrige tracking automaticamente.
+
+## Digest semanal manual (admin)
+
+Objetivo: validar o digest semanal de forma segura antes de qualquer automação.
+
+Comando:
+- `/admin digest user <telegram_chat_id>`
+- `/admin digest user <telegram_chat_id> 7`
+- `/admin digest user <telegram_chat_id> 30`
+
+Regras operacionais:
+- comando restrito a admin;
+- janela é limitada a `1..30` dias (default `7`);
+- execução read-only (consulta dados já persistidos);
+- não dispara scraping, não cria broadcast e não altera regra de envio normal.
+
+Quando usar:
+- validação de qualidade de alertas para um usuário específico;
+- suporte operacional durante piloto/beta;
+- conferência de volume de `price_drop` e principais oportunidades por score.
