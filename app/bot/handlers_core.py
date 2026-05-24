@@ -11,6 +11,9 @@ from app.db.session import SessionLocal
 from app.bot.renderers import render_all_tracked_listings, render_help_text, render_start_text, render_user_wishlists, render_wishlist_filters, render_upgrade_text, build_upgrade_choice_keyboard
 from app.core.settings import settings
 from app.services.users_service import get_or_create_user_by_chat
+from app.services.weekly_digest_preferences_service import get_or_create_digest_preference, set_weekly_digest_enabled, update_weekly_digest_preferences, mark_digest_previewed
+from app.services.weekly_digest_service import build_weekly_digest_for_user
+from app.bot.weekly_digest_renderer import render_weekly_digest
 from app.services.wishlists_service import list_wishlists, get_user_plan_snapshot, add_wishlist, add_filter, list_filters, remove_filter, get_wishlist_summaries, normalize_wishlist_filter_input, create_wishlist_with_filters, parse_wishlist_query_with_implicit_filters, parse_wishlist_filter_expression, remove_wishlist, set_wishlist_active_state, add_wishlist_with_initial_summary, create_wishlist_with_filters_and_initial_summary
 from app.services.wishlist_tracking_service import list_tracked_listings
 from app.services.limits_service import count_notifications_sent_last_n_days
@@ -706,6 +709,73 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Monitoramento: fontes via scheduler\n\n"
         "Use /wishlist para ver suas buscas monitoradas."
     )
+
+
+def _fmt_digest_dt(dt_obj) -> str:
+    if not dt_obj:
+        return "-"
+    return dt_obj.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _render_digest_status(pref) -> str:
+    status = "ativado" if bool(pref.weekly_digest_enabled) else "desativado"
+    return (
+        "📬 Digest semanal\n\n"
+        f"Status: {status}\n"
+        f"Frequência: a cada {int(pref.digest_days or 7)} dias\n"
+        f"Máximo de itens: {int(pref.digest_limit or 10)}\n"
+        f"Último envio: {_fmt_digest_dt(getattr(pref, 'last_digest_sent_at', None))}\n"
+        f"Último preview: {_fmt_digest_dt(getattr(pref, 'last_digest_previewed_at', None))}\n\n"
+        "Comandos:\n"
+        "/digest on\n"
+        "/digest off\n"
+        "/digest days 7\n"
+        "/digest limit 10\n"
+        "/digest preview"
+    )
+
+
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = list(getattr(context, "args", []) or [])
+    with SessionLocal() as db:
+        user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
+        pref = get_or_create_digest_preference(db, user.id)
+        action = (args[0].strip().lower() if args else "status")
+        if action in {"", "status"}:
+            await reply_text(update, _render_digest_status(pref))
+            return
+        if action == "on":
+            set_weekly_digest_enabled(db, user.id, True)
+            await reply_text(update, "✅ Digest semanal ativado.\nVocê receberá um resumo apenas quando houver alertas enviados no período.")
+            return
+        if action == "off":
+            set_weekly_digest_enabled(db, user.id, False)
+            await reply_text(update, "✅ Digest semanal desativado.")
+            return
+        if action in {"days", "limit"}:
+            if len(args) < 2:
+                await reply_text(update, "Uso: /digest days <1-30> ou /digest limit <1-20>.")
+                return
+            try:
+                value = int(args[1])
+                if action == "days":
+                    update_weekly_digest_preferences(db, user.id, days=value)
+                    await reply_text(update, f"✅ Frequência atualizada para {value} dias.")
+                else:
+                    update_weekly_digest_preferences(db, user.id, limit=value)
+                    await reply_text(update, f"✅ Limite atualizado para {value} itens.")
+            except ValueError:
+                await reply_text(update, "Valor inválido. Use /digest days <1-30> ou /digest limit <1-20>.")
+            return
+        if action == "preview":
+            payload = build_weekly_digest_for_user(db, user_id=user.id, days=int(pref.digest_days or 7), limit=int(pref.digest_limit or 10))
+            mark_digest_previewed(db, user.id)
+            await reply_text(update, render_weekly_digest(payload))
+            return
+        await reply_text(
+            update,
+            "Subcomando inválido.\n\nUse:\n/digest status\n/digest on\n/digest off\n/digest days <1-30>\n/digest limit <1-20>\n/digest preview",
+        )
 def _menu_keyboard(is_premium: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("➕ Criar busca", callback_data="MENU:CREATE_WISHLIST")],

@@ -75,6 +75,8 @@ Diretriz:
 - Garantia explícita: envio restrito a usuários com `weekly_digest_enabled=true` e elegibilidade ativa/chat/janela mínima por `digest_days`.
 
 Pendências mantidas para próximas PRs:
-- comando de autoatendimento do usuário final;
 - refinamento de conteúdo do digest;
 - integração com cron/systemd externo no Raspberry (se desejado operacionalmente).
+
+Atualização de status:
+- comando de autoatendimento do usuário final (`/digest`) implementado.

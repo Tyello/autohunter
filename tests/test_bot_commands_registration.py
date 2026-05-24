@@ -26,7 +26,7 @@ class _ChatNotFoundBot(_FakeBot):
 
 def test_public_commands_are_slim_and_exclude_admin():
     names = [c.command for c in commands.PUBLIC_COMMANDS]
-    assert names == ["start", "menu", "help", "cancelar"]
+    assert names == ["start", "menu", "digest", "help", "cancelar"]
     assert "debug" not in names
     assert "admin" not in names
     assert "setplan" not in names
@@ -40,7 +40,7 @@ def test_admin_commands_exist_and_are_separate():
 
 def test_admin_scoped_commands_include_public_plus_admin():
     names = [c.command for c in commands.ADMIN_SCOPED_COMMANDS]
-    for cmd in ("start", "menu", "help", "cancelar", "admin", "debug", "setplan", "setlimit"):
+    for cmd in ("start", "menu", "digest", "help", "cancelar", "admin", "debug", "setplan", "setlimit"):
         assert cmd in names
 
 

@@ -518,6 +518,24 @@ Quando usar:
 - `preview` (`/admin digest user ...`) atualiza `last_digest_previewed_at`; **não** atualiza `last_digest_sent_at`.
 - `enabled=true` ainda **não** implica envio automático: scheduler/envio recorrente continuam pendentes.
 
+### Autoatendimento do usuário final (Telegram)
+
+- Comando de usuário: `/digest`.
+- Subcomandos:
+  - `/digest` ou `/digest status`: mostra status atual (`enabled`, `digest_days`, `digest_limit`, último envio e último preview).
+  - `/digest on`: ativa `weekly_digest_enabled=true` para o próprio usuário.
+  - `/digest off`: desativa `weekly_digest_enabled`.
+  - `/digest days <1-30>`: altera janela do digest para o próprio usuário.
+  - `/digest limit <1-20>`: altera limite de itens para o próprio usuário.
+  - `/digest preview`: gera preview individual com `build_weekly_digest_for_user` + `render_weekly_digest`, atualiza `last_digest_previewed_at` e **não** altera `last_digest_sent_at`.
+- Segurança:
+  - o handler sempre resolve o usuário via `update.effective_chat.id`;
+  - não recebe `chat_id` por argumento;
+  - um usuário não consegue alterar preferências de outro.
+- Diferença preview x envio real:
+  - `preview` responde imediatamente no chat do usuário e não entra no fluxo de envio em lote;
+  - envio real depende exclusivamente do scheduler `job_weekly_digest` e das regras já existentes.
+
 ## Weekly Digest scheduler (opt-in controlado)
 
 - O job `job_weekly_digest` envia digest **somente** para usuários com `weekly_digest_enabled=true`.

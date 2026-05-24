@@ -9,7 +9,7 @@ from app.core.settings import settings
 
 from app.bot.commands import setup_bot_commands
 from app.bot.handlers_core import (
-    cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu,
+    cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu, cmd_digest,
     menu_create_wishlist_conversation, menu_filter_conversation, cb_session_guard,
 )
 from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit, cb_upgrade_plan_choice, quick_search_conversation
@@ -104,6 +104,7 @@ def main():
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("wishlist_help", cmd_wishlist_help))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("digest", cmd_digest))
     app.add_handler(CommandHandler("version", cmd_version))
 
     # search + wishlist (modo antigo continua)
