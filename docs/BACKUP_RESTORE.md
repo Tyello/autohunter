@@ -46,10 +46,36 @@ Fechar a lacuna operacional de backup diário real do banco com `pg_dump`, mante
 - `DATABASE_URL` (**obrigatória**)
 - `AUTOHUNTER_BACKUP_DIR` (default: `/var/backups/autohunter`)
 - `AUTOHUNTER_BACKUP_RETENTION_DAYS` (default: `14`; `<=0` desativa limpeza)
+- `AUTOHUNTER_ENV_FILE` (opcional, aponta para arquivo env carregado antes da validação)
+
+### Como o script encontra `DATABASE_URL` no cron
+Antes de validar `DATABASE_URL`, o script tenta carregar variáveis (se o arquivo existir) nesta ordem:
+1. `AUTOHUNTER_ENV_FILE`
+2. `/etc/default/autohunter`
+3. `/home/autohunter/autohunter/.env`
+4. `./.env`
+
+Precedência adotada:
+- variáveis já exportadas no ambiente atual **não são sobrescritas** por valores dos arquivos;
+- se nenhum arquivo existir, o script continua e falha apenas se `DATABASE_URL` ainda estiver ausente.
 
 ### `scripts/check_latest_backup.sh`
 - `AUTOHUNTER_BACKUP_DIR` (default: `/var/backups/autohunter`)
 - `AUTOHUNTER_BACKUP_MAX_AGE_HOURS` (default: `30`)
+
+## Recomendação para Raspberry Pi (cron)
+Opção recomendada:
+1. Criar `/etc/default/autohunter` com permissões restritas.
+2. Definir no arquivo pelo menos:
+   - `DATABASE_URL=postgresql://...`
+   - `AUTOHUNTER_BACKUP_DIR=/var/backups/autohunter`
+
+Alternativa:
+- usar `AUTOHUNTER_ENV_FILE` apontando para um arquivo seguro (fora do repo).
+
+Permissões recomendadas:
+- arquivo de env não deve ser público (ex.: `chmod 600 /etc/default/autohunter`);
+- diretório de backup deve ser restrito ao usuário operacional (o script já tenta `chmod 700`).
 
 ## Como rodar backup manual
 ```bash
@@ -63,6 +89,11 @@ Comportamento esperado:
 - usa arquivo temporário e só finaliza no sucesso;
 - imprime caminho final e tamanho;
 - retorna exit code `!= 0` em falha.
+
+## Como testar exatamente como o cron
+```bash
+sudo -u autohunter env -i AUTOHUNTER_ENV_FILE=/etc/default/autohunter /home/autohunter/autohunter/scripts/backup_db.sh
+```
 
 ## Retenção de backups
 - O script remove apenas `autohunter_*.sql.gz` do diretório configurado.
@@ -114,7 +145,7 @@ Linha ativa:
 
 Notas:
 - garantir `pg_dump` instalado no host;
-- garantir que ambiente do cron exponha `DATABASE_URL` (ex.: `/etc/default/autohunter` + source no wrapper, se necessário);
+- garantir arquivo seguro de env para o cron (`/etc/default/autohunter` ou `AUTOHUNTER_ENV_FILE`);
 - monitorar saída via logs do cron/journald;
 - testar restauração em banco separado periodicamente.
 

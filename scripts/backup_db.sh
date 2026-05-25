@@ -7,8 +7,38 @@ TIMESTAMP_UTC="$(date -u +"%Y%m%d_%H%M%S")"
 FINAL_FILE="${BACKUP_DIR}/autohunter_${TIMESTAMP_UTC}.sql.gz"
 TMP_FILE="${BACKUP_DIR}/.autohunter_${TIMESTAMP_UTC}.sql.gz.tmp"
 
+load_env_if_exists() {
+  local env_file="$1"
+  if [[ -z "$env_file" || ! -f "$env_file" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    line="${line#export }"
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      local key="${BASH_REMATCH[1]}"
+      local value="${BASH_REMATCH[2]}"
+      if [[ -z "${!key+x}" ]]; then
+        export "$key=$value"
+      fi
+    fi
+  done < "$env_file"
+}
+
+# Precedência para cron/manual:
+# 1) AUTOHUNTER_ENV_FILE (se apontar para arquivo existente)
+# 2) /etc/default/autohunter
+# 3) /home/autohunter/autohunter/.env
+# 4) ./.env
+# Variáveis já exportadas no ambiente têm precedência e não são sobrescritas.
+load_env_if_exists "${AUTOHUNTER_ENV_FILE:-}"
+load_env_if_exists "/etc/default/autohunter"
+load_env_if_exists "/home/autohunter/autohunter/.env"
+load_env_if_exists "./.env"
+
 if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "ERROR: DATABASE_URL is not set. Backup aborted." >&2
+  echo "ERROR: DATABASE_URL is not set after loading env files. Backup aborted." >&2
   exit 1
 fi
 

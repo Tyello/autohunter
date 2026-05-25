@@ -33,6 +33,21 @@ def test_backup_script_has_no_hardcoded_password_literal():
     assert "password=" not in content
 
 
+def test_backup_script_loads_env_sources_and_validates_after_loading():
+    content = BACKUP_SCRIPT.read_text(encoding="utf-8")
+    assert "AUTOHUNTER_ENV_FILE" in content
+    assert '/etc/default/autohunter' in content
+    assert '/home/autohunter/autohunter/.env' in content
+    assert 'load_env_if_exists "./.env"' in content
+    assert content.find('load_env_if_exists') < content.find('DATABASE_URL is not set after loading env files')
+
+
+def test_backup_script_does_not_echo_database_url():
+    content = BACKUP_SCRIPT.read_text(encoding="utf-8")
+    assert 'echo "$DATABASE_URL"' not in content
+    assert 'printenv DATABASE_URL' not in content
+
+
 def test_check_latest_backup_exit_1_when_no_backup(tmp_path):
     env = os.environ.copy()
     env["AUTOHUNTER_BACKUP_DIR"] = str(tmp_path)
