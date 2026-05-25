@@ -68,7 +68,7 @@ Cada módulo importa só o namespace que precisa: `from app.core.settings import
 
 ---
 
-## ARCH-03 — `handlers_admin.py` sem separação de domínio
+## ARCH-03 — `handlers_admin.py` sem separação de domínio (fase 1 em andamento)
 
 **Estado atual:** handlers de admin misturam: sources, saúde, deploy, usuários, métricas, leilões, Premium, debug — tudo em um arquivo. Qualquer adição cria conflito de contexto.
 
@@ -78,7 +78,7 @@ Cada módulo importa só o namespace que precisa: `from app.core.settings import
 app/bot/
   handlers_admin.py           → roteador principal (só dispatch)
   handlers_admin_sources.py   → /admin sources, runall, warmup
-  handlers_admin_health.py    → /admin health, audit, heartbeat
+  admin_handlers_health.py    → /admin health, /admin audit, /admin errors (extraído na fase 1)
   handlers_admin_users.py     → /admin users, premium, setplan
   handlers_admin_metrics.py   → /admin metrics (novo)
   handlers_admin_deploy.py    → já existe separado ✓
@@ -86,6 +86,8 @@ app/bot/
 ```
 
 **Critério:** cada arquivo tem no máximo 300 linhas e 1 domínio.
+
+**Status (2026-05-25):** Fase 1 concluída com extração de `/admin health`, `/admin audit` e `/admin errors` para `app/bot/admin_handlers_health.py`. O ARCH-03 permanece pendente para split de users/auctions/dedupe/tracking/digest e demais domínios ainda em `handlers_admin.py`.
 
 ---
 
