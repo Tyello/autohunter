@@ -1,48 +1,102 @@
 # Eficiência operacional — Raspberry Pi 4 (4GB)
 
-Documento operacional para manter o AutoHunter estável 24/7 no Raspberry Pi.
+Atualizado em: 2026-05-25.  
+Estado confrontado com a `main` após os merges recentes de eficiência, backup, backup health e tracking.
+
+Documento operacional para manter o AutoHunter/Garagem Alvo estável 24/7 em Raspberry Pi 4 com 4GB.
 
 ## Escopo
 
-- Este documento **não reabre** itens já corrigidos no código.
-- Foco: tuning de runtime, previsibilidade de envio Telegram, monitoramento e retenção de dados.
+Este documento cobre somente eficiência e operação do runtime:
+
+- sender e fila de notificações;
+- tuning de scheduler, PostgreSQL e Playwright;
+- monitoramento de RAM/disco/cache;
+- retenção e limpeza de dados operacionais;
+- backup observável no admin health.
+
+Este documento **não** é roadmap de produto, billing, growth ou UX de lançamento. Esses temas ficam em `docs/ROADMAP.md`, `docs/LAUNCH_PLAN.md` e `docs/USER_FLOWS.md`.
 
 ---
 
-## Resolvido (não reabrir)
+## Estado consolidado da `main`
+
+### Pronto / não reabrir
+
+- Eager-load no sender com `selectinload`.
+- Cache intra-batch de limite por usuário no sender.
+- SQLAlchemy pool com `max_overflow` configurável.
+- Pacing entre envios Telegram.
+- Profile RPi para scheduler, sender e Playwright.
+- Monitoramento admin de RAM/disco/cache com throttle.
+- Cleanup granular de `scrape_jobs`.
+- Filesystem cleanup diário seguro.
+- Backup PostgreSQL via `pg_dump`.
+- Verificação de frescor de backup via script e `/admin health`.
+
+### Ainda fora deste documento
+
+As próximas frentes relevantes para lançamento são:
+
+- `/admin metrics` v1;
+- pagamento/ativação Premium sem gargalo manual;
+- teste de carga 50 usuários/24h;
+- digest semanal v2;
+- confirmação do índice `ix_notifications_user_sent_today` se ainda não houver evidência no banco/migration.
+
+Essas frentes não devem ser misturadas aqui, exceto quando gerarem impacto direto de performance/operabilidade.
+
+---
+
+## Resolvido — não reabrir
 
 ### EFF-01 — Sender eager-load
 
 **Status:** resolvido.
 
-- `claim_queued_notifications` já carrega relacionamentos com `selectinload(Notification.user)` e `selectinload(Notification.car_listing)`.
-- A implementação atual usa **selectinload** (não joinedload).
-- **Não trocar para joinedload** sem benchmark/necessidade comprovada.
+`claim_queued_notifications` já carrega relacionamentos com:
+
+- `selectinload(Notification.user)`;
+- `selectinload(Notification.car_listing)`.
+
+A implementação atual usa **selectinload**, não `joinedload`.
+
+Regra: **não trocar para `joinedload` sem benchmark ou necessidade comprovada**.
 
 Referência: `app/services/notification_delivery_service.py`.
+
+---
 
 ### EFF-02 — Cache de limite por usuário no sender
 
 **Status:** resolvido.
 
-- `app/scheduler/jobs_send.py` já usa cache intra-batch (`user_budget_cache`) para reduzir consultas repetidas de limite/uso diário.
+`app/scheduler/jobs_send.py` já usa `user_budget_cache` para reduzir consultas repetidas de limite/uso diário por usuário durante o batch.
 
 Referência: `app/scheduler/jobs_send.py`.
+
+---
 
 ### EFF-03 — SQLAlchemy `max_overflow`
 
 **Status:** resolvido.
 
-- `app/db/session.py` já aplica `max_overflow=settings.db_max_overflow`.
-- `docs/07_BUGS.md` já marca BUG-01 como corrigido.
+`app/db/session.py` aplica `max_overflow=settings.db_max_overflow`.
 
-Referências: `app/db/session.py`, `docs/07_BUGS.md`.
+`docs/07_BUGS.md` também marca BUG-01 como corrigido.
+
+Referências:
+
+- `app/db/session.py`;
+- `docs/07_BUGS.md`.
 
 ---
 
-## Pendências reais (implementadas neste ciclo)
+## Implementado neste ciclo operacional
 
 ### EFF-04 — Profile PostgreSQL para Raspberry Pi
+
+**Status:** implementado/documentado.
 
 Arquivo de referência: `config/raspberry-pi/postgresql.conf`.
 
@@ -59,12 +113,17 @@ wal_buffers = 32MB
 synchronous_commit = off
 ```
 
-**Nota operacional importante:**
+Nota operacional:
 
-- `synchronous_commit = off` reduz fsync e melhora previsibilidade em SD card.
-- Use apenas se for aceitável perder poucos segundos de logs/eventos em crash abrupto.
+- `synchronous_commit = off` reduz fsync e melhora previsibilidade em SD card;
+- usar apenas se for aceitável perder poucos segundos de logs/eventos em crash abrupto;
+- produção em banco gerenciado/Supabase pode exigir decisão diferente.
+
+---
 
 ### EFF-05 — Tuning sender/scheduler + pacing Telegram
+
+**Status:** implementado.
 
 Profile recomendado para produção RPi 4:
 
@@ -74,12 +133,21 @@ NOTIFICATION_SENDER_BATCH_SIZE=50
 NOTIFICATION_SENDER_SLEEP_SECONDS=0.04
 ```
 
-Implementação:
+Comportamento atual:
 
-- Sender aplica sleep **somente entre envios bem-sucedidos** (não bloqueados/sem destino).
-- Objetivo: evitar burst sem pacing quando batch aumenta.
+- sender dorme antes do próximo envio real quando já houve pelo menos um envio bem-sucedido;
+- não dorme para notificações bloqueadas por limite diário;
+- não dorme para notificações sem destino;
+- não dorme antes do primeiro envio;
+- valor inválido/negativo é tratado de forma conservadora.
 
-### EFF-06 — Consolidar profile Playwright RPi
+Referência: `app/scheduler/jobs_send.py`.
+
+---
+
+### EFF-06 — Profile Playwright para RPi
+
+**Status:** implementado/documentado.
 
 Profile recomendado para produção RPi 4:
 
@@ -88,105 +156,300 @@ PLAYWRIGHT_MAX_CONTEXTS=1
 PLAYWRIGHT_QUEUE_MAX_JOBS=10
 ```
 
-Racional: menor paralelismo browser em troca de estabilidade de RAM e operação contínua.
+Racional:
 
-### EFF-07 — Monitoramento automático de RAM/disco
+- menor paralelismo de browser;
+- menor pressão de RAM;
+- operação contínua mais previsível;
+- adequado ao baseline Raspberry Pi 4 4GB.
 
-Monitor admin já existente foi estendido para recursos:
+---
 
-- alerta de RAM por `ram_alert_threshold`;
-- alerta de uso de `/` por `disk_alert_root_used_pct`;
-- alerta de tamanho de cache por `disk_alert_cache_limit_gb`.
+### EFF-07 — Monitoramento automático de RAM/disco/cache
+
+**Status:** implementado.
+
+O monitor admin cobre:
+
+- RAM usada acima de `RAM_ALERT_THRESHOLD`;
+- uso de `/` acima de `DISK_ALERT_ROOT_USED_PCT`;
+- cache acima de `DISK_ALERT_CACHE_LIMIT_GB`.
 
 Throttle:
 
-- `resource_alert_throttle_seconds` (default 1800s), aplicado por chave de alerta.
+```env
+RESOURCE_ALERT_THROTTLE_SECONDS=1800
+```
 
-Alerta é enviado apenas para chats de admin via `send_admin_text` (fluxo do `job_admin_monitor`).
+Regras:
+
+- alertas vão somente para chat/admin;
+- alertas usam cooldown por chave;
+- falha de leitura de recurso não deve derrubar o scheduler.
+
+Fluxo relacionado:
+
+- `job_admin_monitor`;
+- `send_admin_text`.
+
+---
 
 ### EFF-08 — Cleanup granular de `scrape_jobs`
 
-Retenção agora separada:
+**Status:** implementado.
 
-- `operational_retention_scrape_jobs_done_hours=48`
-- `operational_retention_scrape_jobs_failed_days=7`
+Retenção separada:
+
+```env
+OPERATIONAL_RETENTION_SCRAPE_JOBS_DONE_HOURS=48
+OPERATIONAL_RETENTION_SCRAPE_JOBS_FAILED_DAYS=7
+```
 
 Comportamento:
 
 - remove `done` após 48h;
 - remove `failed` após 7 dias;
-- **não remove `queued` por padrão**.
-
-Diagnóstico operacional:
-
+- **não remove `queued` por padrão**;
 - detecta `queued` com mais de 2h;
-- registra warning em `system_logs` durante o cleanup.
+- em dry-run, apenas imprime diagnóstico;
+- em `--apply`, registra warning em `system_logs` quando houver `queued` antigo.
+
+Segurança:
+
+- `python scripts/cleanup_operational_data.py` é dry-run e não deve alterar banco;
+- `--apply` recusa SQLite;
+- `queued` antigo é sinal de operação/scheduler, não lixo para apagar automaticamente.
+
+Referência: `scripts/cleanup_operational_data.py`.
 
 ---
 
-## Defaults DEV vs profile RPi produção
+### EFF-09 — Backup observável no admin health
 
-### Defaults seguros (desenvolvimento)
+**Status:** implementado.
 
-Manter defaults conservadores em `app/core/settings.py`.
+Backup real:
 
-### Profile recomendado Raspberry Pi 4 (produção)
+- script: `scripts/backup_db.sh`;
+- dump completo via `pg_dump`;
+- saída `.sql.gz`;
+- arquivo temporário antes do arquivo final;
+- retenção via `AUTOHUNTER_BACKUP_RETENTION_DAYS`.
 
-Aplicar via `.env`/systemd:
+Check de frescor:
+
+- script: `scripts/check_latest_backup.sh`;
+- serviço Python: `app/services/backup_health_service.py`;
+- admin: `/admin health`.
+
+Variáveis oficiais:
 
 ```env
+AUTOHUNTER_BACKUP_DIR=/var/backups/autohunter
+AUTOHUNTER_BACKUP_MAX_AGE_HOURS=30
+AUTOHUNTER_BACKUP_RETENTION_DAYS=14
+```
+
+Precedência importante:
+
+- `backup_health_service.py` prioriza `AUTOHUNTER_BACKUP_DIR` e `AUTOHUNTER_BACKUP_MAX_AGE_HOURS` para ficar alinhado aos scripts shell;
+- `settings.backup_dir` e `settings.backup_max_age_hours` são fallback, não fonte principal quando env oficial existe.
+
+Estados exibidos no `/admin health`:
+
+- `OK`: backup recente;
+- `WARNING`: backup existe, mas está antigo;
+- `FAIL`: diretório ausente ou nenhum backup encontrado.
+
+Restore continua manual e destrutivo. Não há restore automático via bot.
+
+Referência: `docs/BACKUP_RESTORE.md`.
+
+---
+
+### EFF-10 — Filesystem cleanup seguro
+
+**Status:** implementado.
+
+Agendamento:
+
+- `app/scheduler/run.py`;
+- job id `filesystem_cleanup_daily`;
+- cron diário às 03:00 UTC.
+
+Execução:
+
+- job: `app/scheduler/filesystem_cleanup_job.py::job_filesystem_cleanup_daily`;
+- service: `app/services/filesystem_cleanup_service.py::run_filesystem_cleanup`.
+
+Configurações:
+
+```env
+FILESYSTEM_CLEANUP_ENABLED=true
+FILESYSTEM_CLEANUP_ARTIFACTS_DAYS=7
+FILESYSTEM_CLEANUP_DEBUG_DAYS=3
+FILESYSTEM_CLEANUP_MAX_DELETE_PER_RUN=500
+```
+
+Escopo seguro:
+
+- runtime cache/debug;
+- artefatos operacionais temporários;
+- não apaga banco;
+- não apaga cookies/perfis persistentes;
+- não apaga diretórios fora do runtime esperado.
+
+---
+
+## Profile recomendado Raspberry Pi 4 — produção
+
+Aplicar via `.env`, `/etc/default/autohunter` ou systemd, conforme o padrão do host.
+
+```env
+# Scheduler / sender
 SCHEDULER_TICK_SECONDS=90
 NOTIFICATION_SENDER_BATCH_SIZE=50
 NOTIFICATION_SENDER_SLEEP_SECONDS=0.04
+
+# Playwright
 PLAYWRIGHT_MAX_CONTEXTS=1
 PLAYWRIGHT_QUEUE_MAX_JOBS=10
+
+# Resource monitor
 RAM_ALERT_THRESHOLD=85
 DISK_ALERT_ROOT_USED_PCT=85
 DISK_ALERT_CACHE_LIMIT_GB=5
 RESOURCE_ALERT_THROTTLE_SECONDS=1800
+
+# Operational cleanup
 OPERATIONAL_RETENTION_SCRAPE_JOBS_DONE_HOURS=48
 OPERATIONAL_RETENTION_SCRAPE_JOBS_FAILED_DAYS=7
+
+# Filesystem cleanup
+FILESYSTEM_CLEANUP_ENABLED=true
+FILESYSTEM_CLEANUP_ARTIFACTS_DAYS=7
+FILESYSTEM_CLEANUP_DEBUG_DAYS=3
+FILESYSTEM_CLEANUP_MAX_DELETE_PER_RUN=500
+
+# Backup
+AUTOHUNTER_BACKUP_DIR=/var/backups/autohunter
+AUTOHUNTER_BACKUP_MAX_AGE_HOURS=30
+AUTOHUNTER_BACKUP_RETENTION_DAYS=14
 ```
 
 ---
 
 ## Operação e validação rápida
 
-### Cleanup operacional (dry-run)
+### Cleanup operacional — dry-run
 
 ```bash
 python scripts/cleanup_operational_data.py
 ```
 
-### Cleanup operacional (apply em produção PostgreSQL)
+Esperado:
+
+- imprime contagens;
+- não executa `DELETE`;
+- não escreve `system_logs`;
+- exibe `scrape_jobs_queued_old_2h` quando houver fila antiga.
+
+### Cleanup operacional — apply em produção PostgreSQL
 
 ```bash
 python scripts/cleanup_operational_data.py --apply
 ```
 
-> O script recusa `--apply` em SQLite por segurança.
+Esperado:
 
-### Filesystem cleanup
+- remove dados operacionais conforme retenção;
+- recusa SQLite;
+- registra warning de `queued` antigo se houver.
 
-Já implementado no scheduler (`filesystem_cleanup_daily`) usando:
+### Backup manual
 
-- `filesystem_cleanup_enabled`
-- `filesystem_cleanup_artifacts_days`
-- `filesystem_cleanup_debug_days`
-- `filesystem_cleanup_max_delete_per_run`
+```bash
+DATABASE_URL='postgresql://user:<redacted>@host:5432/autohunter' \
+AUTOHUNTER_BACKUP_DIR='/var/backups/autohunter' \
+bash scripts/backup_db.sh
+```
 
-Escopo seguro: somente diretórios de runtime cache/debug (sem apagar DB/cookies/perfis persistentes).
+### Check de backup recente
 
-Referências no código:
+```bash
+AUTOHUNTER_BACKUP_DIR='/var/backups/autohunter' \
+AUTOHUNTER_BACKUP_MAX_AGE_HOURS=30 \
+bash scripts/check_latest_backup.sh
+```
 
-- agendamento: `app/scheduler/run.py` (job id `filesystem_cleanup_daily`, cron diário 03:00 UTC);
-- job: `app/scheduler/filesystem_cleanup_job.py::job_filesystem_cleanup_daily`;
-- execução: `app/services/filesystem_cleanup_service.py::run_filesystem_cleanup`.
+### Health admin
+
+```text
+/admin health
+```
+
+Esperado:
+
+- mostra bloco `Backup` com `OK`, `WARNING` ou `FAIL`;
+- mostra idade e diretório quando aplicável;
+- não executa backup;
+- não executa restore;
+- não imprime `DATABASE_URL`.
 
 ---
 
-## Fora de escopo deste documento
+## Validações recomendadas ao mexer nesta área
 
-- Mudanças de arquitetura v1/v2/dual-run.
-- Liberação de envio automático real de leilões fora dos gates atuais.
-- Billing automático (webhook Mercado Pago) ainda depende de implementação específica.
+```bash
+pytest -q
+python -m compileall app scripts
+bash -n scripts/backup_db.sh
+bash -n scripts/check_latest_backup.sh
+python scripts/cleanup_operational_data.py
+```
+
+Validações direcionadas úteis:
+
+```bash
+pytest -q tests/test_backup_health_service.py tests/test_admin_health_command.py
+pytest -q tests/test_db_backup_shell_scripts.py
+pytest -q tests/test_operational_cleanup.py tests/test_resource_monitor.py
+pytest -q tests/test_sender_daily_limit.py
+```
+
+Ajustar os nomes dos testes se forem reorganizados, mas manter cobertura para:
+
+- dry-run sem escrita;
+- backup health OK/WARNING/FAIL;
+- pacing entre envios;
+- resource alert com throttle;
+- cleanup granular de `scrape_jobs`.
+
+---
+
+## Itens que não devem voltar como tarefa de eficiência
+
+Não abrir nova PR apenas para reavaliar estes itens sem evidência nova:
+
+- trocar `selectinload` por `joinedload`;
+- recriar cache de budget do sender;
+- reimplementar `max_overflow`;
+- apagar `queued` antigo automaticamente;
+- rodar restore pelo Telegram;
+- aumentar paralelismo Playwright no Raspberry sem métrica de RAM;
+- tornar WebMotors requisito de saúde global.
+
+---
+
+## Pendências que pertencem ao lançamento, não à eficiência
+
+As próximas tarefas importantes estão em `docs/LAUNCH_PLAN.md` e `docs/ROADMAP.md`:
+
+- `LAUNCH-PAY-01`: Mercado Pago webhook ou aprovação admin em 1 clique;
+- `LAUNCH-METRICS-01`: `/admin metrics` v1;
+- `LAUNCH-PERF-01`: confirmar/criar índice `ix_notifications_user_sent_today`;
+- `LAUNCH-LOAD-01`: teste de carga 50 usuários/24h;
+- `LAUNCH-DIGEST-01`: digest semanal v2;
+- `LAUNCH-COPY-01`: copy pública honesta sobre cobertura real das sources.
+
+Essas tarefas podem usar métricas/health desta doc, mas não devem reabrir o pacote de eficiência operacional já fechado.
