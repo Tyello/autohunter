@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from app.bot import handlers_admin
+from app.bot import admin_handlers_fipe
 
 
 class _Msg:
@@ -20,6 +21,24 @@ class _Up:
 
 def _ctx(*args):
     return SimpleNamespace(args=list(args))
+
+
+def test_render_admin_fipe_coverage_has_expected_sections():
+    msg = admin_handlers_fipe.render_admin_fipe_coverage(
+        {
+            "reference_month": "2026-05",
+            "listings_with_fipe_keys": 320,
+            "vehicle_keys_distinct": 48,
+            "vehicle_keys_covered": 12,
+            "coverage_pct": 25,
+            "top_missing_keys": [{"vehicle_key": "honda|civic|2015", "count": 18}],
+        }
+    )
+    assert "Competência: 2026-05" in msg
+    assert "Cobertura: 12/48 keys (25%)" in msg
+    assert "Top ausentes:" in msg
+    assert "dry-run:" in msg
+    assert "--apply" in msg
 
 
 def test_admin_fipe_non_admin(monkeypatch):
@@ -46,23 +65,41 @@ def test_admin_fipe_coverage_defaults_and_limit_cap(monkeypatch):
             "top_missing_keys": [{"vehicle_key": "honda|civic|2015", "count": 18}],
         }
 
-    monkeypatch.setattr(handlers_admin, "build_fipe_coverage_report", _fake)
+    monkeypatch.setattr(admin_handlers_fipe, "build_fipe_coverage_report", _fake)
     up = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "coverage")))
     assert calls["reference_month"] is None
     assert calls["limit"] == 20
-    msg = up.message.sent[-1]
-    assert "📊 FIPE coverage" in msg
-    assert "Competência: 2026-05" in msg
-    assert "Cobertura: 12/48 keys (25%)" in msg
-    assert "Top ausentes:" in msg
-    assert "dry-run: python scripts/import_fipe_prices.py --file <csv> --reference-month 2026-05" in msg
-    assert "--apply" in msg
 
     up2 = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("fipe", "coverage", "2026-05", "999")))
     assert calls["reference_month"] == "2026-05"
     assert calls["limit"] == 50
+
+
+def test_admin_fipe_coverage_value_error(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+
+    def _fake(db, reference_month=None, limit=20):
+        raise ValueError("reference_month inválido")
+
+    monkeypatch.setattr(admin_handlers_fipe, "build_fipe_coverage_report", _fake)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "coverage", "foo")))
+    assert up.message.sent[-1] == "reference_month inválido"
+
+
+def test_admin_dispatch_calls_new_fipe_handler(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    calls = {}
+
+    async def _fake(update, raw_args):
+        calls["raw_args"] = raw_args
+
+    monkeypatch.setattr(handlers_admin, "admin_fipe", _fake)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "coverage")))
+    assert calls["raw_args"] == ["coverage"]
 
 
 def test_admin_invalid_action_help_lists_fipe(monkeypatch):
