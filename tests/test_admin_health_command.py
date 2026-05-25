@@ -230,3 +230,27 @@ def test_admin_health_includes_wishlist_cache_line(monkeypatch, db):
 
     assert "Wishlist summaries cache:" in text
     assert "off ttl=0s" in text
+
+
+def test_admin_health_includes_backup_status(monkeypatch, db):
+    from app.services.backup_health_service import BackupHealthResult
+
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(
+        handlers_admin._admin_health_module,
+        "get_backup_health",
+        lambda now=None: BackupHealthResult(
+            status="WARNING",
+            latest_file="autohunter_20260525_020000.sql.gz",
+            latest_age_hours=36,
+            backup_dir="/var/backups/autohunter",
+            max_age_hours=30,
+            message="antigo — último há 36h, limite 30h",
+        ),
+    )
+
+    text = _run_health(monkeypatch, _Update(), [])
+
+    assert "🗄 Backup:" in text
+    assert "WARNING" in text
+    assert "autohunter_20260525_020000.sql.gz" in text

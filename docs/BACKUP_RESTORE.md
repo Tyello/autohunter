@@ -152,3 +152,26 @@ Notas:
 ## Drill operacional em staging
 - Procedimento detalhado complementar: `docs/BACKUP_RESTORE_STAGING_DRILL.md`.
 - O drill permanece obrigatório antes de qualquer restore em produção.
+
+## Como verificar pelo Telegram/admin
+
+Use o comando:
+
+```text
+/admin health
+```
+
+O painel de health agora inclui uma linha de backup com semáforo operacional:
+
+- `OK` (`✅`): existe backup recente (idade `<= BACKUP_MAX_AGE_HOURS`).
+- `WARNING` (`⚠️`): existe backup, mas está antigo (idade `> BACKUP_MAX_AGE_HOURS`).
+- `FAIL` (`❌`): diretório ausente ou nenhum arquivo `autohunter_*.sql.gz` encontrado.
+
+Próximos passos quando não estiver `OK`:
+
+1. Rodar `bash scripts/check_latest_backup.sh` para diagnóstico rápido.
+2. Verificar se o cron diário de backup está ativo.
+3. Verificar `DATABASE_URL` do ambiente operacional usado pelo cron/script.
+4. Verificar permissões e existência de `/var/backups/autohunter` (ou `BACKUP_DIR` configurado).
+
+> Esta checagem é somente de observabilidade no admin/Telegram; não executa backup e não executa restore.

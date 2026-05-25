@@ -26,6 +26,7 @@ from app.services.source_operational_policy import (
     source_operational_hint,
 )
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
+from app.services.backup_health_service import get_backup_health
 from app.services.wishlists_service import get_wishlist_summaries_cache_stats
 from app.sources.registry import list_sources
 
@@ -293,6 +294,16 @@ async def admin_health(update: Update, raw_args: Optional[List[str]] = None):
         )
         if queued_old:
             lines.append(f"⚠️ sender possivelmente parado: queued_old={int(queued_old)} (>20m)")
+
+        backup_health = get_backup_health(now=now)
+        backup_icon = "✅" if backup_health.status == "OK" else ("⚠️" if backup_health.status == "WARNING" else "❌")
+        lines.append("")
+        lines.append(f"🗄 Backup: {backup_icon} {backup_health.status} — {backup_health.message}")
+        if backup_health.latest_file:
+            lines.append(f"- Último: {backup_health.latest_file}")
+        if backup_health.latest_age_hours is not None:
+            lines.append(f"- Idade: {backup_health.latest_age_hours}h")
+        lines.append(f"- Dir: {backup_health.backup_dir}")
 
         cache_stats = get_wishlist_summaries_cache_stats()
         lines.append("")

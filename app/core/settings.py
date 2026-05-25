@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     runtime_cache_dir: str = '/var/cache/autohunter'
     runtime_log_dir: str = '/var/log/autohunter'
 
+    backup_dir: str = '/var/backups/autohunter'
+    backup_max_age_hours: int = 30
+
     health_state_dir: str = '/var/lib/autohunter/health'
     source_audit_root: str = '/var/cache/autohunter/artifacts/source_audit_candidates'
     playwright_browsers_dir: str = '/var/cache/autohunter/pw-browsers'
