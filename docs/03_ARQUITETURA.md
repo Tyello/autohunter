@@ -128,16 +128,23 @@ Para ambientes não-Postgres (ex.: SQLite local/testes), a mesma migration aplic
 
 ---
 
-## ARCH-07 — Validar throughput real do sender e ajustar batch/rate limit com segurança
+## ARCH-07 — Calibrar throughput seguro do sender (concluído) ✅
 
-**Estado atual:** `.env.example` já sobe `SCHEDULER_TICK_SECONDS=90`, mas não explicita `NOTIFICATION_SENDER_BATCH_SIZE=50`. Além disso, `settings.py` segue com defaults conservadores voltados a DEV (`notification_sender_batch_size=20`).
+**Estado verificado:** concluído no código e nos testes. O sender real está em `app/scheduler/jobs_send.py::send_queued_notifications`, drenando notificações `queued` via `claim_queued_notifications` e processando `processing` stale com `reclaim_stale_processing_notifications` em `app/services/notification_delivery_service.py`.
 
-**Pendência real:** validar throughput real do sender em produção (picos), e então fixar parâmetros operacionais seguros sem violar rate limit do Telegram.
+**Validação de pacing/rate:**
+- `notification_sender_sleep_seconds` é aplicado **entre envios bem-sucedidos** (`time.sleep`) e não roda quando não houve envio real anterior.
+- O lote continua controlado por `notification_sender_batch_size` no claim (`claim_queued_notifications`).
+- O scheduler mantém ciclo de envio por `SCHED_SENDER_SECONDS=60` (sem mudança).
 
-**Ação:**
-1. Medir backlog/latência por janela horária.
-2. Definir batch e ritmo de envio (sleep/semafóro) com margem para rate limit.
-3. Registrar baseline e limites operacionais no runbook.
+**Valores finais recomendados para produção:**
+- `SCHED_SENDER_SECONDS=60`
+- `NOTIFICATION_SENDER_BATCH_SIZE=50` (operacional via `.env`)
+- `NOTIFICATION_SENDER_SLEEP_SECONDS=0.04` (~25 envios/s teórico máximo, com pacing explícito)
+- `notification_sender_batch_size` interno em `settings.py` permanece `20` como fallback conservador de DEV/bootstrapping.
+
+**Evidência de teste (sender):**
+- pacing aplicado entre envios reais e ausente quando há somente 1 envio, falha inicial, bloqueio de limite diário ou ausência de destino (`tests/test_sender_daily_limit.py`).
 
 ---
 
@@ -177,8 +184,6 @@ Arquivos conferidos nesta revisão documental:
 
 | # | Item | Esforço | Risco de não fazer |
 |---|---|---|---|
-| ARCH-05 | Confirmar (ou criar) index parcial de notificações enviadas | Baixo | Seq scan crescente no sender e degradação progressiva |
-| ARCH-07 | Validar throughput real do sender e calibrar batch/rate limit | Médio | Backlog e latência de entrega em janelas de pico |
 
 ### P1 — Refactor seguro (higiene técnica incremental)
 
@@ -198,3 +203,4 @@ Arquivos conferidos nesta revisão documental:
 - **ARCH-04**: concluído no código (`session.py` já contempla `max_overflow`, `pool_timeout`, `db_connect_timeout` e exceção adequada para SQLite).
 - **ARCH-06**: concluído com remoção de `scripts/cache_manager.py` e `scripts/database_optimizer.py`; operação oficial permanece em `scripts/cleanup_operational_data.py` via `config/raspberry-pi/crontab`.
 - **ARCH-08**: concluído com alinhamento dos defaults internos de Playwright ao baseline Raspberry (`playwright_max_contexts=1`, `playwright_context_ttl_seconds=600`, `playwright_queue_max_jobs=10`) mantendo override por env e decisão de uso por source via `source_configs`/DB.
+- **ARCH-07**: concluído com validação do sender real (`jobs_send` + `notification_delivery_service`), pacing via `NOTIFICATION_SENDER_SLEEP_SECONDS=0.04`, batch operacional recomendado `NOTIFICATION_SENDER_BATCH_SIZE=50` em `.env.example` e `SCHED_SENDER_SECONDS=60` preservado.
