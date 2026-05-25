@@ -25,13 +25,6 @@ from app.bot.admin_helpers import (
     short as _short,
 )
 from app.bot.text_sanitize import sanitize_for_telegram
-from app.bot.admin_dedupe_diagnostics import (
-    DEFAULT_COLLISIONS_LIMIT,
-    render_cross_source_dedupe_collisions,
-    parse_dedupe_collisions_limit,
-)
-from app.bot.admin_tracking_diagnostics import render_tracking_diagnostics, parse_tracking_window_hours
-from app.bot.admin_dedupe_shadow_report import parse_dedupe_shadow_args, render_cross_source_dedupe_shadow_report
 from app.bot.renderers import render_admin_auctions_summary, render_admin_auction_lot, render_admin_auction_quality_report, render_admin_auction_source_history, _fmt_money_br, render_auction_alert_preview, render_auction_alert, build_auction_alert_keyboard, _friendly_wishlist_filters
 from app.core.settings import settings
 from app.db.session import SessionLocal
@@ -73,6 +66,7 @@ from app.bot.admin_handlers_sources import (
 from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.bot import admin_handlers_health as _admin_health_module
 from app.bot.admin_handlers_health import admin_health, admin_audit, admin_errors
+from app.bot.admin_handlers_diagnostics import admin_dedupe, admin_tracking
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries, get_wishlist_summaries_cache_stats
 from app.services.auction_ingestion_service import inspect_auction_source, run_auction_ingestion
@@ -122,9 +116,6 @@ from app.services.auction_source_categories_service import get_auction_allowed_i
 from app.services.system_logs_service import log
 from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 from app.services.browser_warmup_service import warmup_source
-from app.services.tracking_diagnostics_service import build_tracking_diagnostics
-from app.services.cross_source_dedupe_service import find_cross_source_fingerprint_collisions
-from app.services.cross_source_dedupe_observability_service import build_cross_source_dedupe_shadow_report
 from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
 from app.bot.weekly_digest_renderer import render_weekly_digest, render_weekly_digest_candidates
 from app.scheduler.weekly_digest_job import run_weekly_digest_once
@@ -450,10 +441,10 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _admin_auctions(update, args[1:])
         return
     if action == "dedupe":
-        await _admin_dedupe(update, args[1:])
+        await admin_dedupe(update, args[1:])
         return
     if action == "tracking":
-        await _admin_tracking(update, args[1:])
+        await admin_tracking(update, args[1:])
         return
     if action == "digest":
         await _admin_digest(update, args[1:])
@@ -651,46 +642,6 @@ async def _admin_digest(update: Update, raw_args: List[str]):
         mark_digest_previewed(db, user.id, create_if_missing=True)
 
     await update.message.reply_text(render_weekly_digest(payload))
-async def _admin_tracking(update: Update, raw_args: List[str]):
-    args = [a.strip() for a in (raw_args or []) if a.strip()]
-    if args and args[0].lower() not in {"status", "price_drop"}:
-        await update.message.reply_text("Use: /admin tracking | /admin tracking status [horas] | /admin tracking price_drop [horas]")
-        return
-
-    window_hours = parse_tracking_window_hours(args[1:] if args else [])
-    with SessionLocal() as db:
-        payload = build_tracking_diagnostics(db, window_hours=window_hours)
-    rendered = render_tracking_diagnostics(payload)
-    msg, _ = _truncate_admin_message(rendered, max_chars=3500)
-    await update.message.reply_text(msg)
-
-
-async def _admin_dedupe(update: Update, raw_args: List[str]):
-    args = [a.strip() for a in (raw_args or []) if a.strip()]
-    if args and args[0].lower() not in {"collisions", "shadow"}:
-        await update.message.reply_text("Use: /admin dedupe | /admin dedupe collisions [N] | /admin dedupe shadow [horas] [limite]")
-        return
-
-    if args and args[0].lower() == "shadow":
-        hours, examples_limit = parse_dedupe_shadow_args(args)
-        with SessionLocal() as db:
-            report = build_cross_source_dedupe_shadow_report(db, hours=hours, limit=examples_limit)
-        rendered = render_cross_source_dedupe_shadow_report(report)
-    else:
-        limit = parse_dedupe_collisions_limit(args)
-        with SessionLocal() as db:
-            collisions = find_cross_source_fingerprint_collisions(db, limit=limit)
-
-        rendered = render_cross_source_dedupe_collisions(
-            collisions,
-            dedupe_flags={
-                "enabled": bool(getattr(settings, "cross_source_dedupe_enabled", False)),
-                "shadow_mode": bool(getattr(settings, "cross_source_dedupe_shadow_mode", True)),
-                "window_days": int(getattr(settings, "cross_source_dedupe_window_days", 30) or 30),
-            },
-        )
-    msg, _ = _truncate_admin_message(rendered, max_chars=3500)
-    await update.message.reply_text(msg)
 
 def _render_warmup_result(source: str, payload: dict) -> str:
     steps = payload.get("steps_completed") or []
