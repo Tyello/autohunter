@@ -117,6 +117,7 @@ def test_callback_owner_free_slot_free_plan(monkeypatch):
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert q.answers
     assert "Premium" in q.edits[-1]
+    assert "Vou avisar" not in q.edits[-1]
     assert "Premium" in bot.messages[-1]["text"]
 
 

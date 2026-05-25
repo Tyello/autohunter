@@ -234,6 +234,7 @@ Remoção:
 
 ```text
 /wishlist_track_remove <n> <slot>
+/wishlist_track_remove <n> <id_do_anuncio>
 ```
 
 Mensagens de UX:

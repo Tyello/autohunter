@@ -57,7 +57,17 @@ def test_track_remove_requires_slot(monkeypatch):
 
     asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_remove(update, context))
 
-    assert update.message.sent[-1] == "Use: /wishlist_track_remove <n> <slot>"
+    assert update.message.sent[-1] == "Use: /wishlist_track_remove <n> <slot ou id do anúncio>"
+
+
+def test_track_remove_accepts_listing_id(monkeypatch):
+    monkeypatch.setattr(handlers_wishlist_ui, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(handlers_wishlist_ui, "get_or_create_user_by_chat", lambda *_: types.SimpleNamespace(id="u1"))
+    monkeypatch.setattr(handlers_wishlist_ui, "remove_tracked_listing", lambda _db, **kwargs: (True, f"ok:{kwargs.get('car_listing_id')}"))
+    update = _Update()
+    context = types.SimpleNamespace(args=["1", "123e4567-e89b-12d3-a456-426614174000"])
+    asyncio.run(handlers_wishlist_ui.cmd_wishlist_track_remove(update, context))
+    assert update.message.sent[-1].startswith("ok:123e4567")
 
 
 def test_track_alert_on_free_blocked(monkeypatch):

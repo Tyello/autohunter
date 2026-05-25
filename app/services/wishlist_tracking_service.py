@@ -339,9 +339,8 @@ def add_tracked_listing_result(
     else:
         message = (
             f"✅ Anúncio rastreado no slot {slot}/3.\n"
-            "Vou avisar se houver queda relevante de preço.\n"
             f"Você pode acompanhar preço e status em:\n/wishlist_track_list {wishlist_index}\n\n"
-            "Notificações automáticas de mudança são um recurso Premium."
+            "Alertas automáticos de queda são Premium."
         )
     return _build_tracked_result(
         ok=True,

@@ -166,6 +166,8 @@ def test_tracking_add_result_automation_enabled_free_and_premium(db, monkeypatch
     rp = add_tracked_listing_result(db, user_id=user_premium.id, wishlist_index=1, listing_ref=lp.external_id)
     assert rf.automation_enabled is False
     assert rp.automation_enabled is True
+    assert "Vou avisar" not in rf.message
+    assert "Alertas automáticos de queda são Premium." in rf.message
 
 
 def test_free_limit_is_total_across_wishlists(db, monkeypatch):
