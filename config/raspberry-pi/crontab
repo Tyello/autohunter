@@ -4,7 +4,7 @@
 # Limpeza operacional (logs/eventos/jobs/runs/notificações) a cada 6 horas
 0 */6 * * * autohunter /home/autohunter/autohunter/venv/bin/python /home/autohunter/autohunter/scripts/cleanup_operational_data.py --apply
 
-# Backup database (todos os dias 2am)
+## Backup database daily at 2am (script: scripts/backup_db.sh; output via cron/journald)
 0 2 * * * autohunter /home/autohunter/autohunter/scripts/backup_db.sh
 
 # Restart serviço (toda semana)
