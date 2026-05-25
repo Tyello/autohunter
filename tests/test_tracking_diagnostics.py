@@ -85,11 +85,11 @@ def test_admin_tracking_auth_and_window(monkeypatch):
     class _S:
         def __enter__(self): return object()
         def __exit__(self, *a): return False
-    monkeypatch.setattr("app.bot.handlers_admin.SessionLocal", _S)
+    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.SessionLocal", _S)
     def _fake(db, window_hours=24):
         calls["w"] = window_hours
         return {"window_hours": window_hours, "tracked": {}, "price_drop_notifications": {}, "last_tracking_job": {}, "examples": {}}
-    monkeypatch.setattr("app.bot.handlers_admin.build_tracking_diagnostics", _fake)
+    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.build_tracking_diagnostics", _fake)
 
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("tracking", "status", "48")))
     assert calls["w"] == 48
