@@ -377,20 +377,31 @@ async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def cmd_wishlist_track_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Use: /wishlist_track_remove <n> <slot>"""
+    """Use: /wishlist_track_remove <n> <slot ou id do anúncio>"""
     if len(context.args or []) < 2:
-        await reply_text(update, "Use: /wishlist_track_remove <n> <slot>")
+        await reply_text(update, "Use: /wishlist_track_remove <n> <slot ou id do anúncio>")
         return
 
     n = parse_int(context.args[0])
-    slot = parse_int(context.args[1])
-    if n is None or slot is None:
-        await reply_text(update, "Use: /wishlist_track_remove <n> <slot>")
+    if n is None:
+        await reply_text(update, "Use: /wishlist_track_remove <n> <slot ou id do anúncio>")
         return
+    target = (context.args[1] or "").strip()
+    slot = parse_int(target)
 
     with SessionLocal() as db:
         user = get_or_create_user_by_chat(db, update.effective_chat.id, update.effective_user.username)
-        _ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=n, slot=slot)
+        if slot is not None:
+            _ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=n, slot=slot)
+        else:
+            import uuid
+
+            try:
+                uuid.UUID(target)
+            except Exception:
+                await reply_text(update, "Use: /wishlist_track_remove <n> <slot ou id do anúncio>")
+                return
+            _ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=n, car_listing_id=target)
 
     await reply_text(update, msg)
 
@@ -577,13 +588,13 @@ def _format_track_result_message(result: TrackedListingResult, wishlist_name: st
     wl_label = (wishlist_name or "wishlist").strip() or "wishlist"
     if result.status == "added":
         if bool(result.automation_enabled):
-            return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot} da wishlist {wl_label}.\n\nVou acompanhar preço e status automaticamente.\nVeja seus rastreados:\n/wishlist_track_list"
-        return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot} da wishlist {wl_label}.\n\nVocê pode acompanhar preço e status em:\n/wishlist_track_list\n\nNotificações automáticas são Premium."
+            return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot}/3.\n\nVou avisar se houver queda relevante de preço.\nVeja seus rastreados:\n/wishlist_track_list"
+        return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot}/3.\n\nVocê pode acompanhar preço e status em:\n/wishlist_track_list\n\nAlertas automáticos de queda são Premium."
 
     if result.status == "already_tracked":
-        return "Já rastreado", f"Esse anúncio já está rastreado no slot {slot} da wishlist {wl_label}.\n\nVeja em:\n/wishlist_track_list"
+        return "Já rastreado", "Esse anúncio já está sendo rastreado nesta wishlist."
     if result.status == "slots_full":
-        return "Slots cheios", f"Você já usa todos os slots da wishlist {wl_label}.\n\nVeja e remova algum slot em:\n/wishlist_track_list"
+        return "Slots cheios", "Você já rastreia 3 anúncios nesta wishlist. Remova um para adicionar outro."
     if result.status in {"listing_not_found", "unavailable"}:
         return "Anúncio indisponível", "Não consegui rastrear esse anúncio porque ele não está mais disponível."
     if result.status in {"wishlist_not_found", "invalid_slot"}:

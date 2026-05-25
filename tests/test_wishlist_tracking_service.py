@@ -52,14 +52,14 @@ def test_tracking_add_duplicate_limit_list_remove(db, monkeypatch):
 
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id)
     assert ok is False
-    assert "já está rastreado" in msg
+    assert "já está sendo rastreado" in msg
 
     assert add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l2.external_id)[0] is True
     assert add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l3.external_id)[0] is True
 
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=l4.external_id)
     assert ok is False
-    assert "limite por wishlist" in msg.lower()
+    assert "já rastreia 3 anúncios" in msg.lower()
 
     ok, msg = list_tracked_listings(db, user_id=user.id, wishlist_index=1)
     assert ok is True
@@ -166,6 +166,8 @@ def test_tracking_add_result_automation_enabled_free_and_premium(db, monkeypatch
     rp = add_tracked_listing_result(db, user_id=user_premium.id, wishlist_index=1, listing_ref=lp.external_id)
     assert rf.automation_enabled is False
     assert rp.automation_enabled is True
+    assert "Vou avisar" not in rf.message
+    assert "Alertas automáticos de queda são Premium." in rf.message
 
 
 def test_free_limit_is_total_across_wishlists(db, monkeypatch):
@@ -193,9 +195,46 @@ def test_premium_limit_total_5_and_slots_3_per_wishlist(db, monkeypatch):
         assert add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listings[i].external_id)[0] is True
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listings[3].external_id)
     assert ok is False
-    assert "limite por wishlist" in msg.lower()
+    assert "já rastreia 3 anúncios" in msg.lower()
     assert add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=listings[3].external_id)[0] is True
     assert add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=listings[4].external_id)[0] is True
     ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=2, listing_ref=listings[5].external_id)
     assert ok is False
     assert "5 anúncios no total" in msg
+
+
+def test_tracking_uses_lowest_free_slot(db, monkeypatch):
+    user = _mk_user(db, 8001)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    monkeypatch.setattr("app.services.wishlist_tracking_service.get_user_plan_snapshot", lambda *_args, **_kwargs: {"plan_code": "premium"})
+    add_wishlist(db, user.id, "civic")
+    l1, l2, l3 = _mk_listing(db, 81), _mk_listing(db, 82), _mk_listing(db, 83)
+    assert add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l1.external_id).slot == 1
+    assert add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l2.external_id).slot == 2
+    assert remove_tracked_listing(db, user_id=user.id, wishlist_index=1, slot=1)[0] is True
+    r = add_tracked_listing_result(db, user_id=user.id, wishlist_index=1, listing_ref=l3.external_id)
+    assert r.ok is True
+    assert r.slot == 1
+
+
+def test_remove_by_listing_identifier(db, monkeypatch):
+    user = _mk_user(db, 8002)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    add_wishlist(db, user.id, "uno")
+    listing = _mk_listing(db, 84)
+    ok, _ = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listing.external_id)
+    assert ok is True
+    wl = db.query(Wishlist).filter(Wishlist.user_id == user.id).one()
+    ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, car_listing_id=str(listing.id))
+    assert ok is True
+    assert "slot 1" in msg.lower()
+    assert db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id == wl.id).count() == 0
+
+
+def test_remove_empty_slot_message(db, monkeypatch):
+    user = _mk_user(db, 8003)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    add_wishlist(db, user.id, "gol")
+    ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, slot=1)
+    assert ok is False
+    assert msg == "Não há anúncio rastreado nesse slot."

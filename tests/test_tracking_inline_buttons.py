@@ -117,6 +117,7 @@ def test_callback_owner_free_slot_free_plan(monkeypatch):
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
     assert q.answers
     assert "Premium" in q.edits[-1]
+    assert "Vou avisar" not in q.edits[-1]
     assert "Premium" in bot.messages[-1]["text"]
 
 
@@ -125,7 +126,7 @@ def test_callback_owner_premium(monkeypatch):
     q = _CallbackQuery()
     bot = _Bot()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
-    assert "automaticamente" in q.edits[-1]
+    assert "queda relevante de preço" in q.edits[-1]
     assert "wishlist" in bot.messages[-1]["text"]
 
 
@@ -134,7 +135,7 @@ def test_callback_already_tracked(monkeypatch):
     q = _CallbackQuery()
     bot = _Bot()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
-    assert "já está rastreado" in q.edits[-1]
+    assert "já está sendo rastreado" in q.edits[-1]
     assert bot.messages
 
 
@@ -143,7 +144,7 @@ def test_callback_slots_full(monkeypatch):
     q = _CallbackQuery()
     bot = _Bot()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace(bot=bot)))
-    assert "todos os slots" in q.edits[-1]
+    assert "já rastreia 3 anúncios" in q.edits[-1]
     assert bot.messages
 
 
@@ -187,7 +188,7 @@ def test_callback_uses_structured_status_not_message(monkeypatch):
     )
     q = _CallbackQuery()
     asyncio.run(handlers_wishlist_ui.cb_track_add(_Update(q), types.SimpleNamespace()))
-    assert "todos os slots" in q.edits[-1]
+    assert "já rastreia 3 anúncios" in q.edits[-1]
 
 
 def test_callback_addwl_success(monkeypatch):

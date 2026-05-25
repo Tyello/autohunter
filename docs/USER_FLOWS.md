@@ -208,6 +208,8 @@ Comportamento:
 - cada wishlist pode ter até 3 slots;
 - o plano Free tem limite total menor de rastreados;
 - o Premium libera mais rastreados e alertas automáticos de queda/preço/status.
+- ao tentar rastrear anúncio já rastreado na mesma wishlist, não duplica e retorna mensagem amigável;
+- quando os 3 slots estiverem ocupados, orienta remover um rastreado antes de adicionar outro.
 
 Listagem:
 
@@ -226,6 +228,22 @@ A listagem mostra:
 - status;
 - última vez visto;
 - se alertas automáticos estão ativos ou dependem de Premium.
+- em caso de anúncio órfão/indisponível, mostra status claro e preserva histórico.
+
+Remoção:
+
+```text
+/wishlist_track_remove <n> <slot>
+/wishlist_track_remove <n> <id_do_anuncio>
+```
+
+Mensagens de UX:
+
+- sucesso: `Anúncio rastreado no slot X/3.`;
+- duplicado: `Esse anúncio já está sendo rastreado nesta wishlist.`;
+- limite: `Você já rastreia 3 anúncios nesta wishlist. Remova um para adicionar outro.`;
+- slot vazio: `Não há anúncio rastreado nesse slot.`;
+- indisponível: `Esse anúncio não está mais disponível na base, mas o histórico foi preservado.`
 
 ## 8. Plano e upgrade
 
