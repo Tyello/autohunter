@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.bot import handlers_admin
+from app.bot import admin_handlers_digest
 from app.models.user import User
 from app.scheduler import weekly_digest_job
 from app.services.weekly_digest_preferences_service import set_weekly_digest_enabled, get_digest_preference
@@ -89,7 +90,7 @@ def _ctx(*args):
 def test_admin_digest_run_modes(monkeypatch):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin.settings, "weekly_digest_job_enabled", False)
-    monkeypatch.setattr(handlers_admin, "run_weekly_digest_once", lambda dry_run=True: {"checked": 2, "eligible": 1, "sent": 1, "skipped_recent": 0, "skipped_empty": 0, "failed": 0})
+    monkeypatch.setattr(admin_handlers_digest, "run_weekly_digest_once", lambda dry_run=True: {"checked": 2, "eligible": 1, "sent": 1, "skipped_recent": 0, "skipped_empty": 0, "failed": 0})
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("digest", "run", "dry")))
     assert "mode=dry" in up.message.sent[-1]

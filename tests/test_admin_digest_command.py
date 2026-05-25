@@ -3,6 +3,7 @@ import types
 import uuid
 
 from app.bot import handlers_admin
+from app.bot import admin_handlers_digest
 
 
 class _Msg:
@@ -51,7 +52,7 @@ def test_admin_digest_user_not_found(monkeypatch):
     update = _Update()
     context = types.SimpleNamespace(args=["digest", "user", "123"])
     monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=None))
+    monkeypatch.setattr(admin_handlers_digest, "SessionLocal", lambda: _DBCtx(user=None))
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert "Usuário não encontrado" in update.message.sent[-1]
 
@@ -61,7 +62,7 @@ def test_admin_digest_success_and_day_cap(monkeypatch):
     context = types.SimpleNamespace(args=["digest", "user", "123", "999"])
     monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
     user = types.SimpleNamespace(id=uuid.uuid4(), telegram_chat_id=123)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=user))
+    monkeypatch.setattr(admin_handlers_digest, "SessionLocal", lambda: _DBCtx(user=user))
 
     captured = {}
 
@@ -69,8 +70,8 @@ def test_admin_digest_success_and_day_cap(monkeypatch):
         captured["days"] = days
         return {"days": days, "totals": {"sent": 0}}
 
-    monkeypatch.setattr(handlers_admin, "build_weekly_digest_for_user", _fake_build)
-    monkeypatch.setattr(handlers_admin, "mark_digest_previewed", lambda *_a, **_k: None)
+    monkeypatch.setattr(admin_handlers_digest, "build_weekly_digest_for_user", _fake_build)
+    monkeypatch.setattr(admin_handlers_digest, "mark_digest_previewed", lambda *_a, **_k: None)
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert captured["days"] == 30
     assert "Nenhum alerta enviado" in update.message.sent[-1]
@@ -80,7 +81,7 @@ def test_admin_digest_candidates_defaults(monkeypatch):
     update = _Update()
     context = types.SimpleNamespace(args=["digest", "candidates"])
     monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=None))
+    monkeypatch.setattr(admin_handlers_digest, "SessionLocal", lambda: _DBCtx(user=None))
     captured = {}
 
     def _fake_candidates(_db, *, days, limit):
@@ -88,7 +89,7 @@ def test_admin_digest_candidates_defaults(monkeypatch):
         captured["limit"] = limit
         return []
 
-    monkeypatch.setattr(handlers_admin, "build_weekly_digest_candidates", _fake_candidates)
+    monkeypatch.setattr(admin_handlers_digest, "build_weekly_digest_candidates", _fake_candidates)
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert captured == {"days": 7, "limit": 20}
     assert "Nenhum usuário com alertas enviados" in update.message.sent[-1]
@@ -98,7 +99,7 @@ def test_admin_digest_candidates_day_and_limit_cap(monkeypatch):
     update = _Update()
     context = types.SimpleNamespace(args=["digest", "candidates", "999", "999"])
     monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=None))
+    monkeypatch.setattr(admin_handlers_digest, "SessionLocal", lambda: _DBCtx(user=None))
     captured = {}
 
     def _fake_candidates(_db, *, days, limit):
@@ -106,7 +107,7 @@ def test_admin_digest_candidates_day_and_limit_cap(monkeypatch):
         captured["limit"] = limit
         return []
 
-    monkeypatch.setattr(handlers_admin, "build_weekly_digest_candidates", _fake_candidates)
+    monkeypatch.setattr(admin_handlers_digest, "build_weekly_digest_candidates", _fake_candidates)
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert captured == {"days": 30, "limit": 50}
 
@@ -115,7 +116,7 @@ def test_admin_digest_prefs_enable_disable_and_config(monkeypatch):
     update = _Update()
     monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
     user = types.SimpleNamespace(id=uuid.uuid4(), telegram_chat_id=123)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=user))
+    monkeypatch.setattr(admin_handlers_digest, "SessionLocal", lambda: _DBCtx(user=user))
 
     state = {"enabled": False, "days": 7, "limit": 10}
 
@@ -128,10 +129,10 @@ def test_admin_digest_prefs_enable_disable_and_config(monkeypatch):
             last_digest_previewed_at=None,
         )
 
-    monkeypatch.setattr(handlers_admin, "get_or_create_digest_preference", lambda *_a, **_k: _pref_obj())
-    monkeypatch.setattr(handlers_admin, "set_weekly_digest_enabled", lambda _db, _uid, enabled: state.update({"enabled": enabled}) or _pref_obj())
+    monkeypatch.setattr(admin_handlers_digest, "get_or_create_digest_preference", lambda *_a, **_k: _pref_obj())
+    monkeypatch.setattr(admin_handlers_digest, "set_weekly_digest_enabled", lambda _db, _uid, enabled: state.update({"enabled": enabled}) or _pref_obj())
     monkeypatch.setattr(
-        handlers_admin,
+        admin_handlers_digest,
         "update_weekly_digest_preferences",
         lambda _db, _uid, **kwargs: state.update({k: v for k, v in kwargs.items() if v is not None}) or _pref_obj(),
     )
@@ -153,13 +154,13 @@ def test_admin_digest_preview_marks_preview(monkeypatch):
     context = types.SimpleNamespace(args=["digest", "user", "123"])
     monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
     user = types.SimpleNamespace(id=uuid.uuid4(), telegram_chat_id=123)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _DBCtx(user=user))
-    monkeypatch.setattr(handlers_admin, "build_weekly_digest_for_user", lambda *_args, **_kwargs: {"days": 7, "totals": {"sent": 0}})
+    monkeypatch.setattr(admin_handlers_digest, "SessionLocal", lambda: _DBCtx(user=user))
+    monkeypatch.setattr(admin_handlers_digest, "build_weekly_digest_for_user", lambda *_args, **_kwargs: {"days": 7, "totals": {"sent": 0}})
     called = {"ok": False}
 
     def _mark(*_args, **_kwargs):
         called["ok"] = True
 
-    monkeypatch.setattr(handlers_admin, "mark_digest_previewed", _mark)
+    monkeypatch.setattr(admin_handlers_digest, "mark_digest_previewed", _mark)
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert called["ok"] is True

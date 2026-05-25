@@ -67,7 +67,7 @@ from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.bot import admin_handlers_health as _admin_health_module
 from app.bot.admin_handlers_health import admin_health, admin_audit, admin_errors
 from app.bot.admin_handlers_diagnostics import admin_dedupe, admin_tracking
-from app.bot import admin_handlers_digest as _admin_digest_module
+from app.bot.admin_handlers_digest import admin_digest
 from app.services.premium_subscription_service import activate_manual_premium
 from app.services.wishlists_service import get_user_plan_snapshot, get_wishlist_summaries, get_wishlist_summaries_cache_stats
 from app.services.auction_ingestion_service import inspect_auction_source, run_auction_ingestion
@@ -118,15 +118,6 @@ from app.services.system_logs_service import log
 from app.scrapers.webmotors_ops import extract_webmotors_diag_from_payload
 from app.services.browser_warmup_service import warmup_source
 from app.services.fipe_prices_import_service import build_fipe_coverage_report
-from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
-from app.bot.weekly_digest_renderer import render_weekly_digest, render_weekly_digest_candidates
-from app.scheduler.weekly_digest_job import run_weekly_digest_once
-from app.services.weekly_digest_preferences_service import (
-    get_or_create_digest_preference,
-    mark_digest_previewed,
-    set_weekly_digest_enabled,
-    update_weekly_digest_preferences,
-)
 
 
 @dataclass
@@ -447,19 +438,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tracking(update, args[1:])
         return
     if action == "digest":
-        _admin_digest_module.SessionLocal = SessionLocal
-        _admin_digest_module.settings = settings
-        _admin_digest_module.User = User
-        _admin_digest_module.build_weekly_digest_candidates = build_weekly_digest_candidates
-        _admin_digest_module.build_weekly_digest_for_user = build_weekly_digest_for_user
-        _admin_digest_module.render_weekly_digest = render_weekly_digest
-        _admin_digest_module.render_weekly_digest_candidates = render_weekly_digest_candidates
-        _admin_digest_module.run_weekly_digest_once = run_weekly_digest_once
-        _admin_digest_module.get_or_create_digest_preference = get_or_create_digest_preference
-        _admin_digest_module.mark_digest_previewed = mark_digest_previewed
-        _admin_digest_module.set_weekly_digest_enabled = set_weekly_digest_enabled
-        _admin_digest_module.update_weekly_digest_preferences = update_weekly_digest_preferences
-        await _admin_digest_module.admin_digest(update, args[1:])
+        await admin_digest(update, args[1:])
         return
     if action == "fipe":
         await _admin_fipe(update, args[1:])
