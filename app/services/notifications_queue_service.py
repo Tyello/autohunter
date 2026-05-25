@@ -81,13 +81,14 @@ def queue_notifications_for_matches(
         dedupe_eval = None
         if dedupe_enabled:
             try:
-                dedupe_eval = evaluate_cross_source_notification_dedupe(
-                    db,
-                    user_id=wishlist.user_id,
-                    wishlist_id=wishlist.id,
-                    listing=listing,
-                    window_days=dedupe_window_days,
-                )
+                with db.begin_nested():
+                    dedupe_eval = evaluate_cross_source_notification_dedupe(
+                        db,
+                        user_id=wishlist.user_id,
+                        wishlist_id=wishlist.id,
+                        listing=listing,
+                        window_days=dedupe_window_days,
+                    )
             except Exception as exc:
                 try:
                     log(

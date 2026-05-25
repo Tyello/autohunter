@@ -281,3 +281,20 @@ def test_queue_cross_source_dedupe_error_falls_back_to_queue(db, monkeypatch):
     monkeypatch.setattr("app.services.notifications_queue_service.evaluate_cross_source_notification_dedupe", _boom)
     queued = queue_notifications_for_matches(db, wl, [listing])
     assert queued == 1
+
+
+def test_queue_cross_source_dedupe_sqlalchemy_error_does_not_break_session(db, monkeypatch):
+    user, wl, listing = _seed(db)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_enabled", True)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_shadow_mode", False)
+
+    def _boom_sql(*_a, **_k):
+        raise SQLAlchemyError("db failure in dedupe eval")
+
+    monkeypatch.setattr("app.services.notifications_queue_service.evaluate_cross_source_notification_dedupe", _boom_sql)
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    db.commit()
+
+    row = db.query(Notification).filter(Notification.user_id == user.id, Notification.car_listing_id == listing.id).one_or_none()
+    assert queued == 1
+    assert row is not None
