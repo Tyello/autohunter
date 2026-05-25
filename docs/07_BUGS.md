@@ -132,7 +132,7 @@ python scripts/validate_postgres_schema.py
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P1 aberto
 
-**Status atual:** **Dedupe funcional preparado com feature flag (supressão default OFF)**.
+**Status atual:** **Dedupe funcional preparado com feature flag; live OFF por padrão; shadow observável**.
 
 **O que está ativo agora:**
 - fingerprint `cross_source_fingerprint` é calculado no ingest/upsert com sinais estruturados conservadores (`make`, `model`, `year`, buckets de `price` e `mileage_km`, com `version/transmission` opcionais quando presentes);
@@ -151,7 +151,7 @@ Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
 
 ---
 
-## BUG-07 — `score_v2` automotivo incompleto (P2 incremental)
+## BUG-07 — `score_v2` automotivo + FIPE operacional (P2 incremental)
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P2 aberto
 
@@ -164,9 +164,13 @@ Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
 - componente `quality` com sinais baratos (preço, km, localização, imagem, URL, make/model/year);
 - breakdown auditável com componentes nomeados e alias `price` mantido por compatibilidade.
 
-**Pendência real pós-P2:**
-- mecanismo operacional de import/upsert e coverage de `fipe_prices` implementado; carga real de dados FIPE ainda depende de operação.
-- score permanece estável via fallback neutro quando FIPE não está disponível.
+**Status atual:** **Score v2 implementado com fallback; import/coverage FIPE implementado; carga real de dados FIPE pendente de operação**.
+
+**Clarezas importantes:**
+- a fórmula/base do score não foi alterada pelo import FIPE; o import apenas viabiliza dados de referência para o componente FIPE já previsto;
+- importador operacional existe (`scripts/import_fipe_prices.py`);
+- cobertura admin existe (`/admin fipe coverage`);
+- sem carga FIPE real suficiente, o score continua estável por fallback neutro.
 
 ---
 
@@ -180,5 +184,5 @@ Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
 | BUG-08 | Alta — runtime | Baixo | Corrigido |
 | BUG-04 | Alta — estabilidade | Médio | Resolvido e validado em PostgreSQL/Supabase real |
 | BUG-05 | Média — produto | Médio (handlers + matching) | Resolvido (comando) |
-| BUG-06 | Baixa — produto | Alto (implementar + observar) | Modo diagnóstico implementado |
-| BUG-07 | Média — produto | Alto (validar scoring) | Parcialmente resolvido (P2) |
+| BUG-06 | Baixa — produto | Alto (implementar + observar) | Preparado com feature flag (live OFF por padrão, shadow observável) |
+| BUG-07 | Média — produto | Alto (validar scoring + carga FIPE real) | Score v2 com fallback + import/coverage FIPE implementados; carga real pendente |

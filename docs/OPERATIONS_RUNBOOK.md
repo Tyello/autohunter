@@ -556,7 +556,7 @@ Quando usar:
   - `/admin digest config <telegram_chat_id> days <1-30>`
   - `/admin digest config <telegram_chat_id> limit <1-20>`
 - `preview` (`/admin digest user ...`) atualiza `last_digest_previewed_at`; **não** atualiza `last_digest_sent_at`.
-- `enabled=true` ainda **não** implica envio automático: scheduler/envio recorrente continuam pendentes.
+- `enabled=true` em preferência de usuário apenas torna o usuário elegível; envio automático depende do job `job_weekly_digest` quando habilitado operacionalmente (`weekly_digest_job_enabled=true`).
 
 ### Autoatendimento do usuário final (Telegram)
 

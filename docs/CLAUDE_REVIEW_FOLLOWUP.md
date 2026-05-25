@@ -1,91 +1,51 @@
 # Claude Review Follow-up
 
-## Entregue nesta tranche
-- Correções de bugs aplicadas em `app/sources/normalize.py`, `app/services/wishlists_service.py` e `app/bot/handlers.py`.
-- DRY aplicado para normalização textual (`app/core/text_norm.py`) e mapeamento de UFs/estados (`app/core/geo.py`).
-- Normalização automotiva parcial com cobertura de transmissão e variantes de combustível GNV.
-- `CarListing`/`CarListingOut` e migration preparados para os campos `doors`, `body_type` e `cross_source_fingerprint`.
+## Estado consolidado pós-tranche
 
-## Pendências
+Este documento consolida o estado real após as entregas recentes.
 
-### P0 — validação/migration
-- **Concluído:** validação end-to-end do schema PostgreSQL/Supabase executada com sucesso via `scripts/validate_postgres_schema.py`.
-- Evidências registradas: conexão PostgreSQL OK, Alembic com head único `aa21b3c4d5e6`, banco em `aa21b3c4d5e6`, colunas críticas em `car_listings` presentes e índice partial `ix_notifications_user_sent_today` confirmado.
-- Resultado da execução real: `OK=8, WARNING=0, FAIL=0`.
-- Status atual: **sem pendência operacional P0 aberta para schema/migrations**.
+## Concluído
 
-### P1 — filtros estruturados
-- Filtros estruturados para KM, seller, body_type e doors.
+- **P0 schema/migrations** validado em PostgreSQL/Supabase com `scripts/validate_postgres_schema.py` (head único, índice partial de notifications e colunas críticas presentes).
+- **BUG-05 (filtros estruturados por comando)** resolvido no fluxo `/wishlist filter ...` com parsing composto, UX de ajuda e cobertura de testes para normalização/matching.
+- **Tracking/price_drop** concluído com sync funcional, alerta `price_drop` e anti-duplicidade/cooldown.
+- **Observabilidade admin de tracking** disponível via `/admin tracking`.
+- **Weekly Digest foundation** concluído:
+  - `build_weekly_digest_for_user` + renderer;
+  - `/admin digest user`;
+  - `/admin digest candidates`;
+  - preferências com opt-in/opt-out;
+  - scheduler controlado com `/admin digest run [dry|live]` e gate de live;
+  - comando de usuário `/digest`;
+  - refinamento de conteúdo;
+  - contexto de raridade no conteúdo.
+- **FIPE import/coverage** implementado:
+  - import/upsert via `scripts/import_fipe_prices.py`;
+  - diagnóstico via `/admin fipe coverage`.
+- **score_v2 incremental** já implementado com componentes market/FIPE/raridade e fallback neutro quando não há dados suficientes.
 
-### P1 — tracking/price_drop
-- **Concluído:** sync de tracking implementado com atualização incremental de preço/status usando os campos já existentes de `WishlistTrackedListing` (sem migration).
-- **Concluído:** detecção + enfileiramento de alerta `price_drop` implementados com anti-duplicidade por preço e cooldown configurável.
-- Cross-source dedupe funcional.
+## Preparado com feature flag / aguardando observação
 
-### P2 — score/digest/raridade
-- `score_v2` automotivo.
-- Digest semanal.
-- Contexto de raridade.
+- **Cross-source dedupe (BUG-06) live**:
+  - fingerprint calculado/persistido e diagnóstico de colisões implementados;
+  - shadow report implementado (`/admin dedupe shadow`);
+  - comportamento live controlado por flags:
+    - `cross_source_dedupe_enabled=false` (default);
+    - `cross_source_dedupe_shadow_mode=true` (default).
+- Status: funcional e observável, porém com supressão live mantida OFF por padrão até validação operacional.
 
-### P3 — refactors grandes
-- Refactor de `handlers_admin` **iniciado** com extração incremental e segura de helpers puros (parsing/formatting/labels/data-string) para módulo auxiliar, mantendo entrypoints e comportamento.
-- Pendente: refactor completo de `handlers_admin` (decomposição maior por domínios de comando e integrações).
-- Mitigação do `settings` como god object.
+## Pendências operacionais
 
-## Comandos guiados no Telegram
+- Rodar janela de observação em shadow para dedupe e revisar `/admin dedupe shadow`.
+- Revisar `/admin dedupe collisions` durante a janela para calibrar falso positivo/falso negativo.
+- Importar carga real FIPE no ambiente operacional.
+- Rodar `/admin fipe coverage` após carga para confirmar cobertura útil.
+- Integrar/ajustar cron/systemd externo no Raspberry (se ainda desejado operacionalmente).
 
-O AutoHunter tem muitos comandos e opções. Para reduzir fricção, vamos evoluir comandos principais para modo guiado com botões/menus e perguntas passo a passo, mantendo comandos rápidos para usuários avançados.
+## Pendências futuras de produto/refactor
 
-Escopo futuro:
-- criar wishlist guiada;
-- adicionar filtros guiados;
-- listar/editar filtros por botões;
-- rastrear anúncio por botão;
-- gerenciar slots rastreados por botões;
-- ativar/desativar notificações automáticas por botões;
-- menu principal com ações mais comuns.
-
-Diretriz:
-- manter comandos atuais por compatibilidade;
-- botões/guiado como caminho recomendado;
-- não mover regra de negócio para handlers;
-- handlers só orquestram serviços.
-
-- Tracking/price_drop ganhou observabilidade admin via `/admin tracking` com diagnóstico operacional (contagens, status e pendências), sem alterar regra de negócio.
-
-### Atualização P2 — Digest semanal
-- **Fundação implementada (manual/admin):** criado `build_weekly_digest_for_user` em `app/services/weekly_digest_service.py` e renderer `render_weekly_digest` em `app/bot/weekly_digest_renderer.py`.
-- **Comando admin manual:** `/admin digest user <telegram_chat_id> [dias]` (janela limitada entre 1 e 30, default 7).
-- **Listagem de candidatos admin:** `/admin digest candidates [dias] [limite]` para preview operacional em lote (somente usuários com `notifications.status='sent'` na janela).
-- **Status da pendência:** parcialmente concluída com execução segura/read-only e sem broadcast.
-- **Ainda pendente (fora deste PR):** scheduler automático, envio recorrente para usuário final, preferências opt-in/opt-out.
-
-
-## P2 — Weekly Digest Preferences
-
-- Implementado: opt-in/opt-out admin para digest semanal com tabela dedicada `user_digest_preferences`.
-- Implementado: configuração básica (`digest_days`, `digest_limit`) e status consultável por admin.
-- Implementado: filtro opcional `only_enabled` em candidates para base de scheduler futuro.
-- Pendente (fora deste PR): scheduler automático, envio recorrente real, comando de autoatendimento para usuário final.
-
-### P2 — Weekly Digest scheduler controlado (opt-in)
-
-- Implementado `app/scheduler/weekly_digest_job.py` com execução segura (dry-run/live), batch/limite, logs e atualização de `last_digest_sent_at` só após envio bem-sucedido.
-- Implementado comando admin manual `/admin digest run [dry|live]` com gate forte para live (`weekly_digest_job_enabled=true`).
-- Garantia explícita: envio restrito a usuários com `weekly_digest_enabled=true` e elegibilidade ativa/chat/janela mínima por `digest_days`.
-
-Pendências mantidas para próximas PRs:
-- integração com cron/systemd externo no Raspberry (se desejado operacionalmente);
-- contexto de raridade avançado no digest (se desejado e ainda não implementado).
-
-Atualização de status:
-- comando de autoatendimento do usuário final (`/digest`) implementado.
-
-
-### Atualização P2.1 — Refinamento de conteúdo do digest
-- Implementado enriquecimento do payload do digest com `by_source`, `by_reason`, `recent_alerts`, metadados de oportunidade (ano/km/localização, reason e score_breakdown resumido quando presente).
-- Renderer atualizado com resumo mais legível, top oportunidades, quedas de preço e buscas com mais alertas, incluindo formatação BRL/km/localização e empty state útil ao usuário.
-- Mantido escopo: sem mudanças em scheduler, opt-in, preferências ou regras de envio.
-
-- Implementado contexto avançado de raridade no Weekly Digest (extração heurística conservadora a partir de `score_breakdown` persistido, sem alterar score/scheduler/envio/preferências).
-- Mantido pendente apenas operacionalização externa via cron/systemd no Raspberry, se ainda desejado.
+- Refactor maior de `handlers_admin` (decomposição por domínios).
+- Mitigação adicional de `settings` como god object.
+- Evolução de comandos guiados/botões no Telegram.
+- Refinamentos futuros de FIPE/dados reais (qualidade/cobertura).
+- Eventual ativação live de dedupe cross-source após observação real consistente.

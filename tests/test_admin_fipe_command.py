@@ -57,3 +57,15 @@ def test_admin_fipe_coverage_defaults_and_limit_cap(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("fipe", "coverage", "2026-05", "999")))
     assert calls["reference_month"] == "2026-05"
     assert calls["limit"] == 50
+
+
+def test_admin_invalid_action_help_lists_fipe(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("comando_invalido")))
+    msg = up.message.sent[-1]
+    assert "Ação inválida" in msg
+    assert "/admin fipe" in msg
+    assert "/admin dedupe" in msg
+    assert "/admin tracking" in msg
+    assert "/admin digest" in msg
