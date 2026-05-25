@@ -645,3 +645,22 @@ Resumo:
 - A heurística usa somente dados já persistidos em `score_breakdown` (ex.: ratio/amostra de raridade), sem recalcular score.
 - Exige amostra mínima para confiabilidade; sem amostra suficiente, o item não recebe destaque de raridade.
 - Interpretação recomendada: usar como **sinal operacional** para priorização, não como garantia de unicidade/valor futuro.
+
+
+## FIPE operacional (import + coverage)
+
+Formato CSV aceito (`vehicle_key`, `fipe_price`, opcional `reference_month`, opcional `currency`).
+
+Dry-run (padrão):
+`python scripts/import_fipe_prices.py --file data/fipe_prices.csv --reference-month 2026-05`
+
+Apply:
+`python scripts/import_fipe_prices.py --file data/fipe_prices.csv --reference-month 2026-05 --apply`
+
+Cobertura no admin Telegram:
+`/admin fipe coverage`
+`/admin fipe coverage 2026-05 30`
+
+Interpretação: cobertura baixa indica necessidade de incluir chaves ausentes (top missing) no CSV antes de novo apply.
+
+Cuidados: valide `vehicle_key` normalizada, `fipe_price` > 0 e competência `YYYY-MM`; não importar fontes não confiáveis.

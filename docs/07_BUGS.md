@@ -165,7 +165,8 @@ Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
 - breakdown auditável com componentes nomeados e alias `price` mantido por compatibilidade.
 
 **Pendência real pós-P2:**
-- cobertura/população operacional da tabela `fipe_prices` ainda depende de etapa futura de dados; enquanto isso, o score permanece estável via fallback neutro.
+- mecanismo operacional de import/upsert e coverage de `fipe_prices` implementado; carga real de dados FIPE ainda depende de operação.
+- score permanece estável via fallback neutro quando FIPE não está disponível.
 
 ---
 
