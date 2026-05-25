@@ -1,46 +1,70 @@
 # Arquitetura — Melhorias Estruturais
-> Gaps identificados após análise do código v2. Foco em resiliência, separação de responsabilidades e operação segura no RPi 4 4GB.
+
+> Roadmap estrutural do AutoHunter após confronto com a `main`.
+> Foco: resiliência, separação de responsabilidades, operação segura no Raspberry Pi 4GB e evolução incremental sem reescrita arriscada.
+
+---
+
+## Estado atual do roadmap
+
+### Concluído
+
+- **ARCH-03 fase 1**: `/admin health`, `/admin audit` e `/admin errors` extraídos para `app/bot/admin_handlers_health.py`.
+- **ARCH-03 fase 2A**: `/admin dedupe` e `/admin tracking` extraídos para `app/bot/admin_handlers_diagnostics.py`.
+- **ARCH-03 fase 2B**: `/admin digest` extraído para `app/bot/admin_handlers_digest.py`.
+- **ARCH-03 fase 3A**: `/admin fipe` extraído para `app/bot/admin_handlers_fipe.py`.
+- **ARCH-04**: pool SQLAlchemy com `max_overflow`, `pool_timeout`, `db_connect_timeout` e tratamento específico para SQLite.
+- **ARCH-05**: índice parcial de notificações enviadas.
+- **ARCH-06**: remoção dos scripts órfãos `scripts/cache_manager.py` e `scripts/database_optimizer.py`.
+- **ARCH-07**: sender validado com batch operacional e pacing configurável.
+- **ARCH-08**: defaults seguros de Playwright alinhados ao baseline Raspberry.
+
+### Ainda pendente
+
+- **ARCH-03**: concluir o split dos domínios ainda dentro de `app/bot/handlers_admin.py`.
+- **ARCH-01**: quebrar incrementalmente `app/services/source_execution_service.py`.
+- **ARCH-02**: preparar `app/core/settings.py` para namespaces por domínio mantendo compatibilidade flat.
 
 ---
 
 ## ARCH-01 — `source_execution_service.py` ainda é god object
 
-**Estado atual:** um único serviço concentra elegibilidade, dispatch v1/v2/dual, scraping, ingestão, matching, telemetria, classificação de erro e reconciliação de atividade. Já foi extraído parcialmente (`build_scrape_dispatch`, `build_run_payload` em `source_execution_helpers.py`), mas o método central `run_source_for_all_wishlists` ainda tem ~500 linhas.
+**Estado atual:** `run_source_for_all_wishlists` ainda concentra elegibilidade, dispatch v1/v2/dual, scraping, ingestão, matching, telemetria, classificação de erro, backoff e reconciliação de atividade. Já existe extração parcial em `source_execution_helpers.py` (`build_scrape_dispatch`, `build_run_payload`), mas o método central segue grande e altamente acoplado.
 
 **O que fazer — extração incremental:**
 
-```
+```text
 Etapa 1: extrair _run_single_group(...)
   → recebe grupo de wishlists + URL
   → executa scrape + ingest + match para esse grupo
-  → retorna GroupResult
-  → sem efeito colateral de telemetria
+  → retorna GroupExecutionResult / RunTotals
+  → preserva contrato externo de run_source_for_all_wishlists
+  → não move telemetria final nem reconciliação ainda
 
 Etapa 2: extrair _post_run_telemetry(...)
-  → recebe GroupResult[]
-  → persiste source_runs, telemetry_events, system_logs
-  → separado do fluxo de execução
+  → recebe GroupExecutionResult[]
+  → persiste source_runs, telemetry_events e system_logs
+  → separa registro/observabilidade do fluxo de execução
 
 Etapa 3: extrair _reconcile_activity(...)
-  → recebe listing_ids vistos neste run
+  → recebe listing_ids vistos no run
   → marca inativos, atualiza last_seen_at
   → executado após todos os grupos
 ```
 
-**Critério:** `run_source_for_all_wishlists` delega para sub-funções, não implementa lógica inline.
+**Critério:** `run_source_for_all_wishlists` deve delegar para subfunções claras, sem reimplementar lógica inline de scraping, erro, telemetria e reconciliação no mesmo bloco.
 
-**Risco:** baixo se feito por etapa, com contrato externo preservado.
+**Risco:** baixo se feito em etapas pequenas, com contrato externo preservado e testes existentes mantidos.
 
 ---
 
 ## ARCH-02 — `settings` como god object
 
-**Estado atual:** `app/core/settings.py` tem ~240 campos cobrindo banco, Playwright, scheduler, Telegram, Mercado Pago, fontes, leilões, admin e feature flags. Qualquer import de settings em qualquer módulo cria dependência implícita no objeto inteiro.
+**Estado atual:** `app/core/settings.py` segue flat e concentra configuração de banco, Telegram, deploy admin, Playwright, scheduler, sender, tracking, dedupe, leilões, alertas, runtime paths, fontes e feature flags. Qualquer módulo que importa `settings` passa a depender implicitamente do objeto inteiro.
 
 **O que fazer — agrupamento por domínio:**
 
 ```python
-# Criar namespaces de settings por domínio:
 class DBSettings(BaseModel):
     database_url: str
     db_pool_size: int = 5
@@ -48,12 +72,14 @@ class DBSettings(BaseModel):
     db_pool_recycle: int = 1800
 
 class PlaywrightSettings(BaseModel):
-    playwright_max_contexts: int = 2
+    playwright_queue_max_jobs: int = 10
     playwright_context_ttl_seconds: int = 600
+    playwright_max_contexts: int = 1
 
 class SchedulerSettings(BaseModel):
-    scheduler_tick_seconds: int = 60
+    sched_sender_seconds: int = 60
     notification_sender_batch_size: int = 20
+    notification_sender_sleep_seconds: float = 0.04
 
 class Settings(BaseModel):
     db: DBSettings = DBSettings()
@@ -62,46 +88,81 @@ class Settings(BaseModel):
     # ...
 ```
 
-Cada módulo importa só o namespace que precisa: `from app.core.settings import settings; settings.db.pool_size`.
+**Migração:** incremental. Criar subobjetos mantendo o acesso flat atual por compatibilidade. Não renomear variáveis de ambiente na primeira etapa.
 
-**Migração:** incremental. Criar os sub-objetos mantendo acesso flat por compatibilidade via `@property`.
+**Critério:** módulos novos podem usar `settings.db`, `settings.playwright`, `settings.scheduler`, mas `settings.database_url`, `settings.playwright_max_contexts` e demais acessos legados continuam funcionando.
 
 ---
 
-## ARCH-03 — `handlers_admin.py` sem separação de domínio (fase 2B concluída, trabalho em andamento)
+## ARCH-03 — `handlers_admin.py` ainda não é apenas dispatcher
 
-**Estado atual:** handlers de admin misturam: sources, saúde, deploy, usuários, métricas, leilões, Premium, debug — tudo em um arquivo. Qualquer adição cria conflito de contexto.
+**Estado atual verificado na `main`:** `handlers_admin.py` já delega vários comandos para módulos dedicados, mas ainda mistura domínios grandes. O dispatcher já chama diretamente módulos extraídos para health, diagnostics, digest e FIPE, mas ainda mantém lógica de users/premium, auctions, runall/warmup, matchdebug/requeue/reindex, source/fb_sessions e parte de sources.
 
-**O que fazer — split por domínio:**
+### Já extraído
 
-```
-app/bot/
-  handlers_admin.py           → roteador principal (só dispatch)
-  handlers_admin_sources.py   → /admin sources, runall, warmup
-  admin_handlers_health.py    → /admin health, /admin audit, /admin errors (extraído na fase 1)
-  handlers_admin_users.py     → /admin users, premium, setplan
-  handlers_admin_metrics.py   → /admin metrics (novo)
-  handlers_admin_deploy.py    → já existe separado ✓
-  handlers_admin_auctions.py  → /admin auctions (já existe?)
+```text
+app/bot/admin_handlers_sources.py       → /admin sources parcial
+app/bot/admin_handlers_deploy.py        → /admin deploy
+app/bot/admin_handlers_health.py        → /admin health, /admin audit, /admin errors
+app/bot/admin_handlers_diagnostics.py   → /admin dedupe, /admin tracking
+app/bot/admin_handlers_digest.py        → /admin digest
+app/bot/admin_handlers_fipe.py          → /admin fipe
 ```
 
-**Critério:** cada arquivo tem no máximo 300 linhas e 1 domínio.
+### Ainda dentro de `handlers_admin.py`
 
-**Status (2026-05-25):** Fase 1 concluída com extração de `/admin health`, `/admin audit` e `/admin errors` para `app/bot/admin_handlers_health.py`. Fase 2A concluída com extração de `/admin dedupe` e `/admin tracking` para `app/bot/admin_handlers_diagnostics.py`. Fase 2B concluída com extração de `/admin digest` para `app/bot/admin_handlers_digest.py`. O ARCH-03 permanece pendente para split de `users/premium`, `auctions`, `fipe`, `runall/warmup/matchdebug/requeue/reindex` e demais domínios ainda em `handlers_admin.py`.
+```text
+/admin users
+/admin premium
+/admin auctions
+/admin runall
+/admin warmup
+/admin matchdebug
+/admin requeue
+/admin reindex_wishlists
+/admin source
+/admin fb_sessions
+helpers compartilhados e imports remanescentes de vários domínios
+```
+
+### Próximas fases recomendadas
+
+```text
+Fase 3B: extrair users/premium
+  → app/bot/admin_handlers_users.py
+  → /admin users, /admin premium e comandos diretamente ligados a plano/assinatura
+
+Fase 3C: extrair runall/warmup/source/fb_sessions
+  → app/bot/admin_handlers_execution.py ou módulos menores por domínio
+  → /admin runall, /admin warmup, /admin source, /admin fb_sessions
+
+Fase 3D: extrair matchdebug/requeue/reindex_wishlists
+  → app/bot/admin_handlers_matching_ops.py
+  → /admin matchdebug, /admin requeue, /admin reindex_wishlists
+
+Fase 3E: extrair auctions
+  → app/bot/admin_handlers_auctions.py
+  → /admin auctions e subcomandos relacionados
+
+Fase 3F: limpeza final do dispatcher
+  → handlers_admin.py deve conter apenas cmd_admin, delegações e glue mínimo
+```
+
+**Critério:** cada módulo deve ter responsabilidade única, evitar import circular e manter comportamento/textos existentes. `handlers_admin.py` deve caminhar para roteador puro.
 
 ---
 
 ## ARCH-04 — Pool SQLAlchemy (concluído) ✅
 
-**Estado verificado:** concluído no código. `app/db/session.py` já passa `max_overflow`, `pool_timeout` e `connect_timeout` (via `db_connect_timeout`) para conexões não-SQLite, com tratamento específico para SQLite sem parâmetros incompatíveis de pool.
+**Estado verificado:** concluído no código. `app/db/session.py` já passa `max_overflow`, `pool_timeout` e `connect_timeout` via `db_connect_timeout` para conexões não-SQLite, com tratamento específico para SQLite sem parâmetros incompatíveis de pool.
 
-**Ação:** remover de pendências ativas. Manter apenas monitoramento normal em produção.
+**Ação:** fora da fila de pendências. Manter apenas monitoramento normal em produção.
 
 ---
 
-## ARCH-05 — Index parcial de notificações enviadas (concluído) ✅
+## ARCH-05 — Índice parcial de notificações enviadas (concluído) ✅
 
-**Estado verificado:** concluído no código. A migration `migrations/versions/f6a1b2c3d4e5_notifications_sent_at_index.py` já cria o índice `ix_notifications_user_sent_today` em Postgres como índice parcial:
+**Estado verificado:** concluído no código. A migration `migrations/versions/f6a1b2c3d4e5_notifications_sent_at_index.py` cria o índice `ix_notifications_user_sent_today` em Postgres como índice parcial:
 
 ```sql
 CREATE INDEX ix_notifications_user_sent_today
@@ -109,100 +170,144 @@ ON notifications (user_id, sent_at)
 WHERE status = 'sent';
 ```
 
-Para ambientes não-Postgres (ex.: SQLite local/testes), a mesma migration aplica fallback compatível (`user_id, status, sent_at`) para não quebrar execução local.
+Para ambientes não-Postgres, a migration aplica fallback compatível (`user_id, status, sent_at`) para não quebrar execução local.
 
-**Queries protegidas por este índice (limite diário/backlog por usuário):**
+**Queries protegidas:**
+
 - `app/services/limits_service.py::count_sent_today`
 - `app/services/limits_service.py::count_notifications_sent_last_n_days`
 
-**Ação:** remover de pendências ativas e manter apenas validação operacional padrão em produção.
+**Ação:** fora da fila de pendências.
 
 ---
 
 ## ARCH-06 — Limpeza de scripts órfãos (concluído) ✅
 
-**Estado verificado:** `config/raspberry-pi/crontab` usa o fluxo oficial `scripts/cleanup_operational_data.py --apply` e não referencia scripts legados.
+**Estado verificado:** `config/raspberry-pi/crontab` usa `scripts/cleanup_operational_data.py --apply` como fluxo oficial de limpeza operacional.
 
-**Concluído nesta etapa:**
-1. Confirmada ausência de uso real no runtime/testes/operação para `scripts/cache_manager.py` e `scripts/database_optimizer.py`.
-2. Scripts legados removidos do repositório para eliminar ambiguidade operacional.
-3. Documentação alinhada para manter `scripts/cleanup_operational_data.py` como caminho oficial de limpeza operacional.
+**Concluído:**
+
+1. Removidos `scripts/cache_manager.py` e `scripts/database_optimizer.py`.
+2. Eliminada ambiguidade operacional.
+3. Mantido `scripts/cleanup_operational_data.py` como caminho oficial.
 
 ---
 
 ## ARCH-07 — Calibrar throughput seguro do sender (concluído) ✅
 
-**Estado verificado:** concluído no código e nos testes. O sender real está em `app/scheduler/jobs_send.py::send_queued_notifications`, drenando notificações `queued` via `claim_queued_notifications` e processando `processing` stale com `reclaim_stale_processing_notifications` em `app/services/notification_delivery_service.py`.
+**Estado verificado:** o sender real está em `app/scheduler/jobs_send.py::send_queued_notifications`, drenando notificações `queued` via `claim_queued_notifications` e reciclando `processing` stale com `reclaim_stale_processing_notifications` em `app/services/notification_delivery_service.py`.
 
 **Validação de pacing/rate:**
-- `notification_sender_sleep_seconds` é aplicado **entre envios bem-sucedidos** (`time.sleep`) e não roda quando não houve envio real anterior.
-- O lote continua controlado por `notification_sender_batch_size` no claim (`claim_queued_notifications`).
-- O scheduler mantém ciclo de envio por `SCHED_SENDER_SECONDS=60` (sem mudança).
 
-**Valores finais recomendados para produção:**
-- `SCHED_SENDER_SECONDS=60`
-- `NOTIFICATION_SENDER_BATCH_SIZE=50` (operacional via `.env`)
-- `NOTIFICATION_SENDER_SLEEP_SECONDS=0.04` (~25 envios/s teórico máximo, com pacing explícito)
-- `notification_sender_batch_size` interno em `settings.py` permanece `20` como fallback conservador de DEV/bootstrapping.
+- `notification_sender_sleep_seconds` é aplicado entre envios bem-sucedidos.
+- O sleep não roda quando não houve envio real anterior.
+- O lote é controlado por `notification_sender_batch_size`.
+- O scheduler mantém `SCHED_SENDER_SECONDS=60`.
 
-**Evidência de teste (sender):**
-- pacing aplicado entre envios reais e ausente quando há somente 1 envio, falha inicial, bloqueio de limite diário ou ausência de destino (`tests/test_sender_daily_limit.py`).
+**Valores recomendados para produção:**
+
+```env
+SCHED_SENDER_SECONDS=60
+NOTIFICATION_SENDER_BATCH_SIZE=50
+NOTIFICATION_SENDER_SLEEP_SECONDS=0.04
+```
+
+O default interno de `notification_sender_batch_size=20` permanece como fallback conservador.
 
 ---
 
-## ARCH-08 — Alinhar defaults seguros de `settings.py` com baseline Raspberry de produção (concluído) ✅
+## ARCH-08 — Defaults seguros de Playwright para Raspberry (concluído) ✅
 
-**Estado verificado:** concluído no código. Os defaults internos de Playwright em `app/core/settings.py` agora estão alinhados ao baseline seguro já documentado em `.env.example` para Raspberry Pi 4GB.
+**Estado verificado:** defaults internos de Playwright em `app/core/settings.py` alinhados ao baseline Raspberry Pi 4GB:
 
-**Valores finais alinhados (fallback/default):**
-- `playwright_max_contexts=1`
-- `playwright_context_ttl_seconds=600`
-- `playwright_queue_max_jobs=10`
+```text
+playwright_max_contexts=1
+playwright_context_ttl_seconds=600
+playwright_queue_max_jobs=10
+```
 
-**Observações de contrato preservado:**
-- Defaults continuam sobrescrevíveis por variáveis de ambiente.
-- `source_configs`/DB continuam determinando quando cada source usa browser; esta mudança apenas reduz risco no fallback quando `.env` estiver incompleto/ausente.
+**Contrato preservado:**
 
+- Valores seguem sobrescrevíveis por env.
+- `source_configs`/DB continuam decidindo quando cada source usa browser.
+- A mudança reduz risco quando `.env` está incompleto/ausente.
+
+---
 
 ## Estado verificado em código
 
 Arquivos conferidos nesta revisão documental:
 
-- `app/db/session.py`
-- `app/core/settings.py`
-- `.env.example`
-- `config/raspberry-pi/crontab`
-- `scripts/cache_manager.py`
-- `scripts/database_optimizer.py`
-- `app/services/source_execution_service.py`
-- `app/bot/handlers_admin.py`
-- `app/bot/admin_handlers_sources.py`
+```text
+app/db/session.py
+app/core/settings.py
+.env.example
+config/raspberry-pi/crontab
+app/services/source_execution_service.py
+app/services/source_execution_helpers.py
+app/bot/handlers_admin.py
+app/bot/admin_handlers_sources.py
+app/bot/admin_handlers_deploy.py
+app/bot/admin_handlers_health.py
+app/bot/admin_handlers_diagnostics.py
+app/bot/admin_handlers_digest.py
+app/bot/admin_handlers_fipe.py
+```
 
 ---
 
-## Prioridade
+## Prioridade atual
 
-### P0 — Operacional (estabilidade/risco imediato)
+### P0 — Operacional
 
-| # | Item | Esforço | Risco de não fazer |
-|---|---|---|---|
+Sem itens ativos neste documento. O bloco operacional identificado nesta revisão foi concluído em ARCH-04, ARCH-05, ARCH-06, ARCH-07 e ARCH-08.
 
-### P1 — Refactor seguro (higiene técnica incremental)
+### P1 — Refactor seguro
 
-| # | Item | Esforço | Risco de não fazer |
-|---|---|---|---|
-| ARCH-03 | Split de handlers admin por domínio | Médio | Arquivo monolítico, alto custo de evolução |
+| Ordem | Item | Escopo | Esforço | Risco de não fazer |
+|---|---|---|---|---|
+| 1 | ARCH-03 fase 3B | Extrair users/premium | Médio | Plano/assinatura continuam acoplados ao dispatcher |
+| 2 | ARCH-03 fase 3C | Extrair runall/warmup/source/fb_sessions | Médio | Operação de execução continua misturada com admin geral |
+| 3 | ARCH-03 fase 3D | Extrair matchdebug/requeue/reindex_wishlists | Médio | Diagnóstico e reprocessamento seguem dentro do arquivo principal |
+| 4 | ARCH-03 fase 3E | Extrair auctions | Alto | Bloco grande de leilões mantém alto acoplamento |
+| 5 | ARCH-03 fase 3F | Limpeza final do dispatcher | Baixo/Médio | `handlers_admin.py` continua importando domínios demais |
 
 ### P2 — Arquitetura de longo prazo
 
-| # | Item | Esforço | Risco de não fazer |
-|---|---|---|---|
-| ARCH-01 | Split incremental de `source_execution_service.py` | Alto | Acoplamento alto, difícil teste/evolução |
-| ARCH-02 | Quebra de `settings` por namespaces de domínio | Alto | Dependências implícitas e menor clareza de configuração |
+| Ordem | Item | Escopo | Esforço | Risco de não fazer |
+|---|---|---|---|---|
+| 1 | ARCH-01 fase 1 | Extrair `_run_single_group` de `source_execution_service.py` | Alto | Fluxo central de source continua difícil de testar/evoluir |
+| 2 | ARCH-01 fase 2 | Extrair `_post_run_telemetry` | Médio/Alto | Observabilidade segue acoplada à execução |
+| 3 | ARCH-01 fase 3 | Extrair `_reconcile_activity` | Médio | Regras de atividade/inatividade continuam misturadas ao runner |
+| 4 | ARCH-02 fase 1 | Criar namespaces de settings mantendo acesso flat | Alto | Configuração segue sem fronteiras por domínio |
 
-### Itens concluídos (fora da fila de pendências)
+---
 
-- **ARCH-04**: concluído no código (`session.py` já contempla `max_overflow`, `pool_timeout`, `db_connect_timeout` e exceção adequada para SQLite).
-- **ARCH-06**: concluído com remoção de `scripts/cache_manager.py` e `scripts/database_optimizer.py`; operação oficial permanece em `scripts/cleanup_operational_data.py` via `config/raspberry-pi/crontab`.
-- **ARCH-08**: concluído com alinhamento dos defaults internos de Playwright ao baseline Raspberry (`playwright_max_contexts=1`, `playwright_context_ttl_seconds=600`, `playwright_queue_max_jobs=10`) mantendo override por env e decisão de uso por source via `source_configs`/DB.
-- **ARCH-07**: concluído com validação do sender real (`jobs_send` + `notification_delivery_service`), pacing via `NOTIFICATION_SENDER_SLEEP_SECONDS=0.04`, batch operacional recomendado `NOTIFICATION_SENDER_BATCH_SIZE=50` em `.env.example` e `SCHED_SENDER_SECONDS=60` preservado.
+## Itens concluídos fora da fila de pendências
+
+- **ARCH-03 fase 1**: health/audit/errors extraídos.
+- **ARCH-03 fase 2A**: dedupe/tracking extraídos.
+- **ARCH-03 fase 2B**: digest extraído.
+- **ARCH-03 fase 3A**: FIPE extraído.
+- **ARCH-04**: pool SQLAlchemy endurecido.
+- **ARCH-05**: índice parcial de notificações confirmado.
+- **ARCH-06**: scripts órfãos removidos.
+- **ARCH-07**: sender throughput/pacing validado.
+- **ARCH-08**: Playwright alinhado ao baseline Raspberry.
+
+---
+
+## Próxima PR recomendada
+
+**ARCH-03 fase 3B — extrair users/premium**.
+
+Diretriz para a próxima PR:
+
+```text
+Criar app/bot/admin_handlers_users.py
+Mover apenas /admin users e /admin premium, mais helpers exclusivos
+Não mexer em auctions, runall, warmup, matchdebug, requeue ou source
+Manter textos e comportamento existentes
+Evitar import circular
+Atualizar esta doc ao final da PR
+```
