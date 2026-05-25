@@ -87,7 +87,7 @@ app/bot/
 
 **Critério:** cada arquivo tem no máximo 300 linhas e 1 domínio.
 
-**Status (2026-05-25):** Fase 1 concluída com extração de `/admin health`, `/admin audit` e `/admin errors` para `app/bot/admin_handlers_health.py`. Fase 2A concluída com extração de `/admin dedupe` e `/admin tracking` para `app/bot/admin_handlers_diagnostics.py`. Fase 2B concluída com extração de `/admin digest` para `app/bot/admin_handlers_digest.py`. O ARCH-03 permanece pendente para split de `users/premium`, `auctions`, `fipe`, `runall/warmup/matchdebug/requeue/reindex` e demais domínios ainda em `handlers_admin.py`.
+**Status (2026-05-25):** Fase 1 concluída com extração de `/admin health`, `/admin audit` e `/admin errors` para `app/bot/admin_handlers_health.py`. Fase 2A concluída com extração de `/admin dedupe` e `/admin tracking` para `app/bot/admin_handlers_diagnostics.py`. Fase 2B concluída com extração de `/admin digest` para `app/bot/admin_handlers_digest.py`. Fase 3A concluída com extração de `/admin fipe` para `app/bot/admin_handlers_fipe.py`. O ARCH-03 permanece pendente para split de `users/premium`, `auctions`, `runall/warmup/matchdebug/requeue/reindex` e demais domínios ainda em `handlers_admin.py`.
 
 ---
 

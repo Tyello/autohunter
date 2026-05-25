@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from app.bot import handlers_admin
+from app.bot import admin_handlers_fipe, handlers_admin
 
 
 class _Msg:
@@ -46,7 +46,7 @@ def test_admin_fipe_coverage_defaults_and_limit_cap(monkeypatch):
             "top_missing_keys": [{"vehicle_key": "honda|civic|2015", "count": 18}],
         }
 
-    monkeypatch.setattr(handlers_admin, "build_fipe_coverage_report", _fake)
+    monkeypatch.setattr(admin_handlers_fipe, "build_fipe_coverage_report", _fake)
     up = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "coverage")))
     assert calls["reference_month"] is None
