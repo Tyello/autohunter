@@ -23,24 +23,27 @@ class BackupHealthResult:
 
 
 def _resolve_backup_dir() -> str:
+    env_dir = (os.getenv("AUTOHUNTER_BACKUP_DIR") or "").strip()
+    if env_dir:
+        return env_dir
     configured = getattr(settings, "backup_dir", None)
     if configured and str(configured).strip():
         return str(configured).strip()
-    return (os.getenv("AUTOHUNTER_BACKUP_DIR") or "/var/backups/autohunter").strip()
+    return "/var/backups/autohunter"
 
 
 def _resolve_max_age_hours() -> int:
-    configured = getattr(settings, "backup_max_age_hours", None)
-    if configured is not None:
-        try:
-            return int(configured)
-        except (TypeError, ValueError):
-            pass
     raw = os.getenv("AUTOHUNTER_BACKUP_MAX_AGE_HOURS")
     if raw is not None:
         try:
             return int(raw)
         except ValueError:
+            pass
+    configured = getattr(settings, "backup_max_age_hours", None)
+    if configured is not None:
+        try:
+            return int(configured)
+        except (TypeError, ValueError):
             pass
     return 30
 
