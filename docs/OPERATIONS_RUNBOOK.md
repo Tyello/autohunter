@@ -480,6 +480,38 @@ Notas:
 - Limite padrão de fingerprints: 10. Limite máximo seguro no comando: 20.
 - Rollback: voltar `cross_source_dedupe_enabled=false`.
 
+
+### Shadow report operacional
+
+Comando:
+
+```
+/admin dedupe shadow
+/admin dedupe shadow 24
+/admin dedupe shadow 72
+/admin dedupe shadow 24 30
+```
+
+Como interpretar:
+- `would suppress`: quantidade de `cross-source dedupe shadow hit` (suprimiria no live, mas mantém fila);
+- `suppressed live`: quantidade de `cross-source dedupe suppressed` (somente se live estiver ativo);
+- `errors`: quantidade de `cross-source dedupe evaluation error`.
+
+Revisão de amostras:
+- priorize fingerprints mais recorrentes;
+- valide pares de source mais frequentes (`source A → source B`);
+- confira exemplos (`current`, `matched`, `fp`) para identificar falso positivo.
+
+Checklist antes de considerar live:
+1. rodar shadow por alguns dias;
+2. revisar top fingerprints;
+3. validar pares de sources;
+4. conferir falsos positivos;
+5. só então considerar `cross_source_dedupe_shadow_mode=false`.
+
+Rollback imediato:
+- `cross_source_dedupe_enabled=false`.
+
 ## Diagnóstico de tracking e price_drop
 
 - Comando: `/admin tracking` (ou `/admin tracking status [horas]`, janela entre 1 e 168; padrão 24h).
