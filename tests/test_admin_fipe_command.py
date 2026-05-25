@@ -51,7 +51,13 @@ def test_admin_fipe_coverage_defaults_and_limit_cap(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "coverage")))
     assert calls["reference_month"] is None
     assert calls["limit"] == 20
-    assert "📊 FIPE coverage" in up.message.sent[-1]
+    msg = up.message.sent[-1]
+    assert "📊 FIPE coverage" in msg
+    assert "Competência: 2026-05" in msg
+    assert "Cobertura: 12/48 keys (25%)" in msg
+    assert "Top ausentes:" in msg
+    assert "dry-run: python scripts/import_fipe_prices.py --file <csv> --reference-month 2026-05" in msg
+    assert "--apply" in msg
 
     up2 = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("fipe", "coverage", "2026-05", "999")))

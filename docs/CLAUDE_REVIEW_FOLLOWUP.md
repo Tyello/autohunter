@@ -39,7 +39,9 @@ Este documento consolida o estado real após as entregas recentes.
 - Rodar janela de observação em shadow para dedupe e revisar `/admin dedupe shadow`.
 - Revisar `/admin dedupe collisions` durante a janela para calibrar falso positivo/falso negativo.
 - Importar carga real FIPE no ambiente operacional.
+- Mecanismo de carga já existe (template CSV, guia operacional e importador local); próximo passo é executar a primeira carga real no ambiente operacional.
 - Rodar `/admin fipe coverage` após carga para confirmar cobertura útil.
+- Após a primeira carga e cobertura útil, a pendência FIPE pode ser considerada operacionalmente endereçada.
 - Integrar/ajustar cron/systemd externo no Raspberry (se ainda desejado operacionalmente).
 
 ## Pendências futuras de produto/refactor
