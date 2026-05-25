@@ -99,6 +99,7 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l2.id, status="sent", sent_at=now - timedelta(days=5)),
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l2.id, status="queued"),
         Notification(id=uuid.uuid4(), user_id=inactive.id, wishlist_id=wl_inactive.id, car_listing_id=l2.id, status="sent", sent_at=now - timedelta(days=1)),
+        Notification(id=uuid.uuid4(), user_id=inactive.id, wishlist_id=wl_inactive.id, car_listing_id=l2.id, status="queued"),
     ])
     db.commit()
 
@@ -108,8 +109,8 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
     assert "Total: 3 · Novos 7d: 3" in txt
     assert "Com busca ativa: 2 (67%)" in txt
     assert "Receberam alerta 7d: 2 (67%)" in txt
-    assert "Criadas 7d: 3 · Total ativas: 2" in txt
-    assert "Enviados hoje (UTC): 1 · Enviados 7d: 4" in txt
+    assert "Criadas 7d: 2 · Total ativas: 2" in txt
+    assert "Enviados hoje (UTC): 1 · Enviados 7d: 3" in txt
     assert "Backlog atual: 1" in txt
     assert "Free: 2 · Premium: 1 (33%)" in txt
     assert "mercadolivre: 2 alertas" in txt

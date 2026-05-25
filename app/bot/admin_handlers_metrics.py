@@ -95,7 +95,14 @@ async def admin_metrics(update, raw_args: list[str]):
             or 0
         )
 
-        wishlists_7d = db.query(func.count(Wishlist.id)).filter(Wishlist.created_at >= start_7d).scalar() or 0
+        wishlists_7d = (
+            db.query(func.count(Wishlist.id))
+            .join(User, User.id == Wishlist.user_id)
+            .filter(User.is_active.is_(True))
+            .filter(Wishlist.created_at >= start_7d)
+            .scalar()
+            or 0
+        )
         wishlists_active_total = (
             db.query(func.count(Wishlist.id))
             .join(User, User.id == Wishlist.user_id)
@@ -107,6 +114,8 @@ async def admin_metrics(update, raw_args: list[str]):
 
         alerts_sent_today = (
             db.query(func.count(Notification.id))
+            .join(User, User.id == Notification.user_id)
+            .filter(User.is_active.is_(True))
             .filter(Notification.status == "sent")
             .filter(Notification.sent_at.is_not(None))
             .filter(Notification.sent_at >= start_today)
@@ -115,13 +124,22 @@ async def admin_metrics(update, raw_args: list[str]):
         )
         alerts_sent_7d = (
             db.query(func.count(Notification.id))
+            .join(User, User.id == Notification.user_id)
+            .filter(User.is_active.is_(True))
             .filter(Notification.status == "sent")
             .filter(Notification.sent_at.is_not(None))
             .filter(Notification.sent_at >= start_7d)
             .scalar()
             or 0
         )
-        alerts_backlog = db.query(func.count(Notification.id)).filter(Notification.status == "queued").scalar() or 0
+        alerts_backlog = (
+            db.query(func.count(Notification.id))
+            .join(User, User.id == Notification.user_id)
+            .filter(User.is_active.is_(True))
+            .filter(Notification.status == "queued")
+            .scalar()
+            or 0
+        )
 
         premium_users = (
             db.query(func.count(func.distinct(User.id)))
