@@ -84,3 +84,38 @@ def test_check_latest_backup_exit_2_when_stale_backup(tmp_path):
     proc = subprocess.run(["bash", str(CHECK_SCRIPT)], env=env, capture_output=True, text=True, check=False)
     assert proc.returncode == 2
     assert "stale" in proc.stdout.lower()
+
+
+def test_backup_script_uses_env_file_for_backup_dir_and_retention(tmp_path):
+    env_file = tmp_path / "autohunter.env"
+    custom_backup_dir = tmp_path / "custom-backups"
+    env_file.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=postgresql://example",
+                f"AUTOHUNTER_BACKUP_DIR={custom_backup_dir}",
+                "AUTOHUNTER_BACKUP_RETENTION_DAYS=0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_pg_dump = fake_bin / "pg_dump"
+    fake_pg_dump.write_text("#!/usr/bin/env bash\necho 'SELECT 1;'\n", encoding="utf-8")
+    fake_pg_dump.chmod(0o755)
+
+    env = {
+        "AUTOHUNTER_ENV_FILE": str(env_file),
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+    }
+
+    proc = subprocess.run(["bash", str(BACKUP_SCRIPT)], env=env, capture_output=True, text=True, check=False)
+
+    assert proc.returncode == 0, proc.stderr
+    files = list(custom_backup_dir.glob("autohunter_*.sql.gz"))
+    assert len(files) == 1
+    assert "DATABASE_URL" not in proc.stdout
+    assert "postgresql://example" not in proc.stdout

@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BACKUP_DIR="${AUTOHUNTER_BACKUP_DIR:-/var/backups/autohunter}"
-RETENTION_DAYS="${AUTOHUNTER_BACKUP_RETENTION_DAYS:-14}"
-TIMESTAMP_UTC="$(date -u +"%Y%m%d_%H%M%S")"
-FINAL_FILE="${BACKUP_DIR}/autohunter_${TIMESTAMP_UTC}.sql.gz"
-TMP_FILE="${BACKUP_DIR}/.autohunter_${TIMESTAMP_UTC}.sql.gz.tmp"
-
 load_env_if_exists() {
   local env_file="$1"
   if [[ -z "$env_file" || ! -f "$env_file" ]]; then
@@ -36,6 +30,12 @@ load_env_if_exists "${AUTOHUNTER_ENV_FILE:-}"
 load_env_if_exists "/etc/default/autohunter"
 load_env_if_exists "/home/autohunter/autohunter/.env"
 load_env_if_exists "./.env"
+
+BACKUP_DIR="${AUTOHUNTER_BACKUP_DIR:-/var/backups/autohunter}"
+RETENTION_DAYS="${AUTOHUNTER_BACKUP_RETENTION_DAYS:-14}"
+TIMESTAMP_UTC="$(date -u +"%Y%m%d_%H%M%S")"
+FINAL_FILE="${BACKUP_DIR}/autohunter_${TIMESTAMP_UTC}.sql.gz"
+TMP_FILE="${BACKUP_DIR}/.autohunter_${TIMESTAMP_UTC}.sql.gz.tmp"
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "ERROR: DATABASE_URL is not set after loading env files. Backup aborted." >&2
