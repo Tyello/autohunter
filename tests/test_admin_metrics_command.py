@@ -67,7 +67,8 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
     new_user = User(id=uuid.uuid4(), telegram_chat_id=1002, username="new", is_active=True, created_at=now - timedelta(days=2))
     acc = Account(id=uuid.uuid4(), type="personal", name="acc")
     premium = User(id=uuid.uuid4(), telegram_chat_id=1003, username="premium", is_active=True, account_id=acc.id)
-    db.add_all([free, new_user, acc, premium])
+    inactive = User(id=uuid.uuid4(), telegram_chat_id=1004, username="inactive", is_active=False, created_at=now - timedelta(days=1))
+    db.add_all([free, new_user, acc, premium, inactive])
 
     p_free = Plan(id=uuid.uuid4(), code="free", name="Free", daily_alert_limit=1, max_wishlists=2, is_active=True)
     p_premium = Plan(id=uuid.uuid4(), code="premium", name="Premium", daily_alert_limit=10, max_wishlists=10, is_active=True)
@@ -85,7 +86,8 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
 
     wl1 = Wishlist(id=uuid.uuid4(), user_id=free.id, query="civic", is_active=True, created_at=now - timedelta(days=1))
     wl2 = Wishlist(id=uuid.uuid4(), user_id=premium.id, query="corolla", is_active=True)
-    db.add_all([wl1, wl2])
+    wl_inactive = Wishlist(id=uuid.uuid4(), user_id=inactive.id, query="gol", is_active=True, created_at=now - timedelta(days=1))
+    db.add_all([wl1, wl2, wl_inactive])
 
     l1 = CarListing(id=uuid.uuid4(), source="mercadolivre", external_id="m1", title="A", url="https://a")
     l2 = CarListing(id=uuid.uuid4(), source="olx", external_id="o1", title="B", url="https://b")
@@ -96,6 +98,7 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l1.id, status="sent", sent_at=now - timedelta(days=2)),
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l2.id, status="sent", sent_at=now - timedelta(days=5)),
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l2.id, status="queued"),
+        Notification(id=uuid.uuid4(), user_id=inactive.id, wishlist_id=wl_inactive.id, car_listing_id=l2.id, status="sent", sent_at=now - timedelta(days=1)),
     ])
     db.commit()
 
@@ -105,8 +108,8 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
     assert "Total: 3 · Novos 7d: 3" in txt
     assert "Com busca ativa: 2 (67%)" in txt
     assert "Receberam alerta 7d: 2 (67%)" in txt
-    assert "Criadas 7d: 2 · Total ativas: 2" in txt
-    assert "Enviados hoje: 1 · Enviados 7d: 3" in txt
+    assert "Criadas 7d: 3 · Total ativas: 2" in txt
+    assert "Enviados hoje (UTC): 1 · Enviados 7d: 4" in txt
     assert "Backlog atual: 1" in txt
     assert "Free: 2 · Premium: 1 (33%)" in txt
     assert "mercadolivre: 2 alertas" in txt

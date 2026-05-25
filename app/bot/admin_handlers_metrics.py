@@ -53,7 +53,7 @@ def _render_metrics(data: dict) -> str:
         f"Criadas 7d: {wish_7d} · Total ativas: {wish_active_total}",
         "",
         "Alertas",
-        f"Enviados hoje: {sent_today} · Enviados 7d: {sent_7d}",
+        f"Enviados hoje (UTC): {sent_today} · Enviados 7d: {sent_7d}",
         f"Backlog atual: {backlog}",
         "",
         "Conversão",
@@ -72,11 +72,13 @@ async def admin_metrics(update, raw_args: list[str]):
     start_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     with SessionLocal() as db:
-        users_total = db.query(func.count(User.id)).scalar() or 0
-        users_7d = db.query(func.count(User.id)).filter(User.created_at >= start_7d).scalar() or 0
+        users_total = db.query(func.count(User.id)).filter(User.is_active.is_(True)).scalar() or 0
+        users_7d = db.query(func.count(User.id)).filter(User.is_active.is_(True)).filter(User.created_at >= start_7d).scalar() or 0
 
         users_with_active = (
             db.query(func.count(func.distinct(Wishlist.user_id)))
+            .join(User, User.id == Wishlist.user_id)
+            .filter(User.is_active.is_(True))
             .filter(Wishlist.is_active.is_(True))
             .scalar()
             or 0
@@ -84,6 +86,8 @@ async def admin_metrics(update, raw_args: list[str]):
 
         users_with_alert_7d = (
             db.query(func.count(func.distinct(Notification.user_id)))
+            .join(User, User.id == Notification.user_id)
+            .filter(User.is_active.is_(True))
             .filter(Notification.status == "sent")
             .filter(Notification.sent_at.is_not(None))
             .filter(Notification.sent_at >= start_7d)
@@ -92,7 +96,14 @@ async def admin_metrics(update, raw_args: list[str]):
         )
 
         wishlists_7d = db.query(func.count(Wishlist.id)).filter(Wishlist.created_at >= start_7d).scalar() or 0
-        wishlists_active_total = db.query(func.count(Wishlist.id)).filter(Wishlist.is_active.is_(True)).scalar() or 0
+        wishlists_active_total = (
+            db.query(func.count(Wishlist.id))
+            .join(User, User.id == Wishlist.user_id)
+            .filter(User.is_active.is_(True))
+            .filter(Wishlist.is_active.is_(True))
+            .scalar()
+            or 0
+        )
 
         alerts_sent_today = (
             db.query(func.count(Notification.id))
@@ -116,16 +127,20 @@ async def admin_metrics(update, raw_args: list[str]):
             db.query(func.count(func.distinct(User.id)))
             .join(Subscription, Subscription.account_id == User.account_id)
             .join(Plan, Plan.id == Subscription.plan_id)
+            .filter(User.is_active.is_(True))
             .filter(Subscription.status == "active")
             .filter(Plan.code == PLAN_CODE_PREMIUM)
             .filter((Subscription.current_period_end.is_(None)) | (Subscription.current_period_end > now))
-            .all()[0][0]
+            .scalar()
+            or 0
         ) if users_total else 0
         free_users = max(0, int(users_total) - int(premium_users))
 
         sources_7d = (
             db.query(CarListing.source, func.count(Notification.id))
             .join(CarListing, CarListing.id == Notification.car_listing_id)
+            .join(User, User.id == Notification.user_id)
+            .filter(User.is_active.is_(True))
             .filter(Notification.status == "sent")
             .filter(Notification.sent_at.is_not(None))
             .filter(Notification.sent_at >= start_7d)
