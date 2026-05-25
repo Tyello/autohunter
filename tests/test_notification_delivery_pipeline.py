@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.user import User
@@ -236,3 +238,65 @@ def test_queue_fipe_failure_does_not_rollback_prior_uncommitted_changes(db, monk
     assert row is not None
     assert row.score_breakdown is not None
     assert row.score_breakdown.get("components", {}).get("fipe_price") == 5
+
+
+def test_queue_cross_source_dedupe_default_disabled_keeps_behavior(db, monkeypatch):
+    _user, wl, listing = _seed(db)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_enabled", False)
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    assert queued == 1
+
+
+def test_queue_cross_source_dedupe_shadow_mode_logs_but_queues(db, monkeypatch):
+    _user, wl, listing = _seed(db)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_enabled", True)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_shadow_mode", True)
+    monkeypatch.setattr(
+        "app.services.notifications_queue_service.evaluate_cross_source_notification_dedupe",
+        lambda *_a, **_k: {"should_suppress": True, "matched_listing_id": "m1", "matched_source": "olx", "current_source": "mercadolivre", "fingerprint": "fp"},
+    )
+    logs = []
+    monkeypatch.setattr("app.services.notifications_queue_service.log", lambda *_a, **k: logs.append(k.get("payload") or {}))
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    assert queued == 1
+    assert any(p.get("would_suppress") is True for p in logs)
+
+
+def test_queue_cross_source_dedupe_live_suppresses(db, monkeypatch):
+    _user, wl, listing = _seed(db)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_enabled", True)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_shadow_mode", False)
+    monkeypatch.setattr(
+        "app.services.notifications_queue_service.evaluate_cross_source_notification_dedupe",
+        lambda *_a, **_k: {"should_suppress": True, "matched_listing_id": "m1", "matched_source": "olx", "current_source": "mercadolivre", "fingerprint": "fp"},
+    )
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    assert queued == 0
+
+
+def test_queue_cross_source_dedupe_error_falls_back_to_queue(db, monkeypatch):
+    _user, wl, listing = _seed(db)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_enabled", True)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_shadow_mode", False)
+    def _boom(*_a, **_k):
+        raise RuntimeError("dedupe boom")
+    monkeypatch.setattr("app.services.notifications_queue_service.evaluate_cross_source_notification_dedupe", _boom)
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    assert queued == 1
+
+
+def test_queue_cross_source_dedupe_sqlalchemy_error_does_not_break_session(db, monkeypatch):
+    user, wl, listing = _seed(db)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_enabled", True)
+    monkeypatch.setattr("app.services.notifications_queue_service.settings.cross_source_dedupe_shadow_mode", False)
+
+    def _boom_sql(*_a, **_k):
+        raise SQLAlchemyError("db failure in dedupe eval")
+
+    monkeypatch.setattr("app.services.notifications_queue_service.evaluate_cross_source_notification_dedupe", _boom_sql)
+    queued = queue_notifications_for_matches(db, wl, [listing])
+    db.commit()
+
+    row = db.query(Notification).filter(Notification.user_id == user.id, Notification.car_listing_id == listing.id).one_or_none()
+    assert queued == 1
+    assert row is not None

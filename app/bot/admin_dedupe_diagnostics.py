@@ -39,7 +39,12 @@ def _fmt_mileage(mileage_km: Any) -> str:
     return f"{formatted} km"
 
 
-def render_cross_source_dedupe_collisions(collisions: list[dict]) -> str:
+def render_cross_source_dedupe_collisions(collisions: list[dict], *, dedupe_flags: dict[str, Any] | None = None) -> str:
+    flags = dedupe_flags or {}
+    suppression_enabled = bool(flags.get("enabled", False))
+    shadow_mode = bool(flags.get("shadow_mode", True))
+    window_days = int(flags.get("window_days", 30) or 30)
+    mode = "shadow" if shadow_mode else "live"
     header = [
         "🔎 Cross-source dedupe — diagnóstico",
         "",
@@ -53,12 +58,22 @@ def render_cross_source_dedupe_collisions(collisions: list[dict]) -> str:
                 "",
                 "Status:",
                 "- fingerprint: ativo",
-                "- supressão de notificações: desativada",
-                "- modo: observação",
+                f"- suppression enabled: {'true' if suppression_enabled else 'false'}",
+                f"- shadow mode: {'true' if shadow_mode else 'false'}",
+                f"- window: {window_days}d",
+                f"- mode: {mode}",
             ]
         )
 
-    lines = header + ["Modo: observação", "Supressão: desativada", ""]
+    lines = header + [
+        "Cross-source dedupe",
+        "- fingerprint: ativo",
+        f"- suppression enabled: {'true' if suppression_enabled else 'false'}",
+        f"- shadow mode: {'true' if shadow_mode else 'false'}",
+        f"- window: {window_days}d",
+        f"- mode: {mode}",
+        "",
+    ]
 
     for idx, collision in enumerate(collisions, start=1):
         fp = _short(collision.get("fingerprint") or "-", 24)

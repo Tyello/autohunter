@@ -14,6 +14,8 @@ from app.scoring.score_v2 import score_ad
 from app.services.fipe_service import current_reference_month, listing_vehicle_keys
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
 from app.models.fipe_price import FipePrice
+from app.services.cross_source_dedupe_service import evaluate_cross_source_notification_dedupe
+from app.services.system_logs_service import log
 
 
 def queue_notifications_for_matches(
@@ -55,6 +57,9 @@ def queue_notifications_for_matches(
         stats_map = {}
 
     queued = 0
+    dedupe_enabled = bool(getattr(settings, "cross_source_dedupe_enabled", False))
+    dedupe_shadow_mode = bool(getattr(settings, "cross_source_dedupe_shadow_mode", True))
+    dedupe_window_days = int(getattr(settings, "cross_source_dedupe_window_days", 30) or 30)
     ref_month = current_reference_month()
     fipe_rows = {}
     try:
@@ -73,6 +78,53 @@ def queue_notifications_for_matches(
     for listing in matched_listings:
         if listing.id in existing_ids:
             continue
+        dedupe_eval = None
+        if dedupe_enabled:
+            try:
+                with db.begin_nested():
+                    dedupe_eval = evaluate_cross_source_notification_dedupe(
+                        db,
+                        user_id=wishlist.user_id,
+                        wishlist_id=wishlist.id,
+                        listing=listing,
+                        window_days=dedupe_window_days,
+                    )
+            except Exception as exc:
+                try:
+                    log(
+                        db,
+                        "warning",
+                        "notifications_queue",
+                        "cross-source dedupe evaluation error",
+                        payload={
+                            "user_id": str(wishlist.user_id),
+                            "wishlist_id": str(wishlist.id),
+                            "current_listing_id": str(listing.id),
+                            "current_source": getattr(listing, "source", None),
+                            "mode": "shadow" if dedupe_shadow_mode else "live",
+                            "error": str(exc),
+                        },
+                    )
+                except Exception:
+                    pass
+                dedupe_eval = None
+
+        if dedupe_enabled and dedupe_eval and dedupe_eval.get("should_suppress"):
+            payload = {
+                "user_id": str(wishlist.user_id),
+                "wishlist_id": str(wishlist.id),
+                "current_listing_id": str(listing.id),
+                "matched_listing_id": dedupe_eval.get("matched_listing_id"),
+                "current_source": dedupe_eval.get("current_source"),
+                "matched_source": dedupe_eval.get("matched_source"),
+                "fingerprint": dedupe_eval.get("fingerprint"),
+                "mode": "shadow" if dedupe_shadow_mode else "live",
+            }
+            if dedupe_shadow_mode:
+                log(db, "info", "notifications_queue", "cross-source dedupe shadow hit", payload={**payload, "would_suppress": True})
+            else:
+                log(db, "info", "notifications_queue", "cross-source dedupe suppressed", payload={**payload, "suppressed": True})
+                continue
 
         ms = None
         try:

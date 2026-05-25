@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
 from app.models.car_listing import CarListing
+from app.models.notification import Notification
 
 PRICE_BUCKET = 1000
 MILEAGE_BUCKET = 5000
@@ -121,4 +123,62 @@ def find_cross_source_fingerprint_collisions(db: Session, limit: int = 20) -> li
                 "examples": examples,
             }
         )
+    return out
+
+
+def evaluate_cross_source_notification_dedupe(
+    db: Session,
+    *,
+    user_id,
+    wishlist_id,
+    listing,
+    window_days: int = 30,
+) -> dict[str, Any]:
+    out = {
+        "should_suppress": False,
+        "reason": None,
+        "fingerprint": getattr(listing, "cross_source_fingerprint", None),
+        "matched_notification_id": None,
+        "matched_listing_id": None,
+        "matched_source": None,
+        "current_source": getattr(listing, "source", None),
+    }
+    fp = out["fingerprint"]
+    if not fp:
+        out["reason"] = "missing_fingerprint"
+        return out
+
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(days=max(1, int(window_days or 30)))
+    rows = (
+        db.query(Notification, CarListing)
+        .join(CarListing, CarListing.id == Notification.car_listing_id)
+        .filter(Notification.user_id == user_id)
+        .filter(Notification.wishlist_id == wishlist_id)
+        .filter(Notification.status.in_(("queued", "processing", "sent")))
+        .filter(Notification.created_at >= window_start)
+        .filter(CarListing.cross_source_fingerprint == fp)
+        .all()
+    )
+    if not rows:
+        out["reason"] = "no_recent_match"
+        return out
+
+    current_source = str(getattr(listing, "source", "") or "").strip().lower()
+    cross_source_rows = [
+        (n, l) for (n, l) in rows if str(getattr(l, "source", "") or "").strip().lower() != current_source
+    ]
+    if not cross_source_rows:
+        out["reason"] = "same_source_only"
+        return out
+    if len(cross_source_rows) > 1:
+        out["reason"] = "ambiguous_multiple_matches"
+        return out
+
+    n, l = cross_source_rows[0]
+    out["should_suppress"] = True
+    out["reason"] = "cross_source_duplicate_recent_notification"
+    out["matched_notification_id"] = str(n.id)
+    out["matched_listing_id"] = str(l.id)
+    out["matched_source"] = l.source
     return out

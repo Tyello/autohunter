@@ -624,7 +624,14 @@ async def _admin_dedupe(update: Update, raw_args: List[str]):
     with SessionLocal() as db:
         collisions = find_cross_source_fingerprint_collisions(db, limit=limit)
 
-    rendered = render_cross_source_dedupe_collisions(collisions)
+    rendered = render_cross_source_dedupe_collisions(
+        collisions,
+        dedupe_flags={
+            "enabled": bool(getattr(settings, "cross_source_dedupe_enabled", False)),
+            "shadow_mode": bool(getattr(settings, "cross_source_dedupe_shadow_mode", True)),
+            "window_days": int(getattr(settings, "cross_source_dedupe_window_days", 30) or 30),
+        },
+    )
     msg, _ = _truncate_admin_message(rendered, max_chars=3500)
     await update.message.reply_text(msg)
 

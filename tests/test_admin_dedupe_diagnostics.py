@@ -29,8 +29,8 @@ def _ctx(*args):
 def test_render_cross_source_collisions_empty():
     out = render_cross_source_dedupe_collisions([])
     assert "Nenhuma colisão cross-source encontrada agora." in out
-    assert "- modo: observação" in out
-    assert "- supressão de notificações: desativada" in out
+    assert "- suppression enabled: false" in out
+    assert "- shadow mode: true" in out
 
 
 def test_render_cross_source_collisions_with_examples_and_truncation():
@@ -90,7 +90,11 @@ def test_admin_dedupe_calls_service_and_renders(monkeypatch):
 
     monkeypatch.setattr("app.bot.handlers_admin.SessionLocal", _DummySession)
     monkeypatch.setattr("app.bot.handlers_admin.find_cross_source_fingerprint_collisions", _fake_find)
+    monkeypatch.setattr("app.bot.handlers_admin.settings.cross_source_dedupe_enabled", False)
+    monkeypatch.setattr("app.bot.handlers_admin.settings.cross_source_dedupe_shadow_mode", True)
+    monkeypatch.setattr("app.bot.handlers_admin.settings.cross_source_dedupe_window_days", 30)
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("dedupe", "collisions", "999")))
     assert calls["limit"] == 20
     assert "[1] abc" in up.message.sent[-1]
+    assert "- suppression enabled: false" in up.message.sent[-1]
