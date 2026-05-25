@@ -143,7 +143,9 @@ python scripts/validate_postgres_schema.py
 Com `enabled=true` + `shadow_mode=true`, o runtime apenas registra o que **seria** suprimido; não altera fila.  
 Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
 
-**Observabilidade admin:** comando `/admin dedupe collisions [N]` exibe colisões e estado das flags (`suppression enabled`, `shadow mode`, `window`).
+**Observabilidade admin:**
+- `/admin dedupe collisions [N]` exibe colisões por fingerprint e estado das flags (`suppression enabled`, `shadow mode`, `window`).
+- `/admin dedupe shadow [horas] [limite]` exibe relatório de eventos shadow/live (`shadow hit`, `suppressed`, `evaluation error`) com top fingerprints, top pares de source e amostras para revisão operacional.
 
 **Próximo passo (operação controlada):** ativar dedupe live somente após janela de observação em shadow + revisão de `/admin dedupe collisions` e logs de shadow para calibrar falso positivo/falso negativo.
 
