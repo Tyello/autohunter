@@ -67,6 +67,7 @@ from app.bot.admin_handlers_deploy import admin_deploy as _admin_deploy_impl
 from app.bot import admin_handlers_health as _admin_health_module
 from app.bot.admin_handlers_health import admin_health, admin_audit, admin_errors
 from app.bot.admin_handlers_diagnostics import admin_dedupe, admin_tracking
+from app.bot.admin_handlers_metrics import admin_metrics
 from app.bot.admin_handlers_digest import admin_digest
 from app.bot.admin_handlers_fipe import admin_fipe
 from app.services.premium_subscription_service import activate_manual_premium
@@ -391,7 +392,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
         return
 
     action = args[0].lower()
@@ -443,6 +444,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "fipe":
         await admin_fipe(update, args[1:])
         return
+    if action == "metrics":
+        await admin_metrics(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -461,7 +465,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
 
 
 
