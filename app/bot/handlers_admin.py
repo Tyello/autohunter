@@ -490,7 +490,7 @@ async def _admin_fipe(update: Update, raw_args: List[str]):
             f"Listings com chave FIPE: {report['listings_with_fipe_keys']}",
             f"Vehicle keys distintas: {report['vehicle_keys_distinct']}",
             f"Cobertas: {report['vehicle_keys_covered']}",
-            f"Cobertura: {report['coverage_pct']}%",
+            f"Cobertura: {report['vehicle_keys_covered']}/{report['vehicle_keys_distinct']} keys ({report['coverage_pct']}%)",
             "",
             "Top ausentes:",
         ]
@@ -499,7 +499,15 @@ async def _admin_fipe(update: Update, raw_args: List[str]):
             lines.extend([f"- {item['vehicle_key']}: {item['count']} listings" for item in top_missing])
         else:
             lines.append("- nenhum")
-        lines.extend(["", "Próximo passo:", "importe CSV com essas chaves em scripts/import_fipe_prices.py"])
+        lines.extend(
+            [
+                "",
+                "Próximo passo:",
+                "1. copie as chaves de Top ausentes para um CSV",
+                f"2. dry-run: python scripts/import_fipe_prices.py --file <csv> --reference-month {report['reference_month']}",
+                "3. se estiver ok, rode novamente com --apply",
+            ]
+        )
         await update.message.reply_text("\n".join(lines))
         return
 

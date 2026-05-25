@@ -649,6 +649,8 @@ Resumo:
 
 ## FIPE operacional (import + coverage)
 
+Guia detalhado da primeira carga controlada: `docs/FIPE_OPERATIONAL_LOAD.md`.
+
 Formato CSV aceito (`vehicle_key`, `fipe_price`, opcional `reference_month`, opcional `currency`).
 
 Dry-run (padrão):
