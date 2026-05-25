@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Text, Numeric
+from sqlalchemy import Text, Numeric, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base, TimestampMixin
@@ -31,6 +31,6 @@ class FipePrice(TimestampMixin, Base):
 
     # Constraint do schema (deve bater com migration)
     __table_args__ = (
-        # vehicle_key + reference_month únicos (uma FIPE por competência)
+        UniqueConstraint("vehicle_key", "reference_month", name="uq_fipe_vehicle_month"),
         {"sqlite_autoincrement": True},
     )

@@ -126,6 +126,7 @@ from app.services.cross_source_dedupe_observability_service import build_cross_s
 from app.services.weekly_digest_service import build_weekly_digest_candidates, build_weekly_digest_for_user
 from app.bot.weekly_digest_renderer import render_weekly_digest, render_weekly_digest_candidates
 from app.scheduler.weekly_digest_job import run_weekly_digest_once
+from app.services.fipe_prices_import_service import build_fipe_coverage_report
 from app.services.weekly_digest_preferences_service import (
     get_or_create_digest_preference,
     get_digest_preference,
@@ -455,6 +456,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "digest":
         await _admin_digest(update, args[1:])
         return
+    if action == "fipe":
+        await _admin_fipe(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -474,6 +478,49 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest")
+
+
+
+async def _admin_fipe(update: Update, raw_args: List[str]):
+    args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if not args or args[0].lower() == "coverage":
+        month = args[1] if len(args) >= 2 else None
+        limit = 20
+        if len(args) >= 3:
+            try:
+                limit = int(args[2])
+            except Exception:
+                limit = 20
+        limit = max(1, min(50, limit))
+        with SessionLocal() as db:
+            try:
+                report = build_fipe_coverage_report(db, reference_month=month, limit=limit)
+            except ValueError as exc:
+                await update.message.reply_text(str(exc))
+                return
+        lines = [
+            "📊 FIPE coverage",
+            "",
+            f"Competência: {report['reference_month']}",
+            "",
+            f"Listings com chave FIPE: {report['listings_with_fipe_keys']}",
+            f"Vehicle keys distintas: {report['vehicle_keys_distinct']}",
+            f"Cobertas: {report['vehicle_keys_covered']}",
+            f"Cobertura: {report['coverage_pct']}%",
+            "",
+            "Top ausentes:",
+        ]
+        top_missing = report.get("top_missing_keys", [])
+        if top_missing:
+            lines.extend([f"- {item['vehicle_key']}: {item['count']} listings" for item in top_missing])
+        else:
+            lines.append("- nenhum")
+        lines.extend(["", "Próximo passo:", "importe CSV com essas chaves em scripts/import_fipe_prices.py"])
+        await update.message.reply_text("\n".join(lines))
+        return
+
+    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50]")
+
 
 
 
