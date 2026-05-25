@@ -148,6 +148,9 @@ class Settings(BaseSettings):
     tracking_price_drop_alert_cooldown_hours: int = 24
     tracking_price_drop_alert_min_amount: int = 500
     tracking_price_drop_alert_min_pct: float = 1.0
+    cross_source_dedupe_enabled: bool = False
+    cross_source_dedupe_shadow_mode: bool = True
+    cross_source_dedupe_window_days: int = 30
     wishlist_summaries_cache_ttl_seconds: int = 10
     wishlist_summaries_cache_max_entries: int = 512
 

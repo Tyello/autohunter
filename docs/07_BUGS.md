@@ -132,18 +132,20 @@ python scripts/validate_postgres_schema.py
 
 **Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P1 aberto
 
-**Status atual:** **Modo diagnóstico implementado**.
+**Status atual:** **Dedupe funcional preparado com feature flag (supressão default OFF)**.
 
 **O que está ativo agora:**
 - fingerprint `cross_source_fingerprint` é calculado no ingest/upsert com sinais estruturados conservadores (`make`, `model`, `year`, buckets de `price` e `mileage_km`, com `version/transmission` opcionais quando presentes);
 - fingerprint é persistido em `car_listings` sem alterar a política atual de matching/notificação;
 - existe consulta de diagnóstico para observar colisões cross-source (mesmo fingerprint em mais de uma source).
 
-**Importante:** nenhuma notificação é suprimida nesta fase. Não houve mudança em queue/matching/sender/daily limit.
+**Importante:** a supressão real segue desativada por padrão (`cross_source_dedupe_enabled=false`).  
+Com `enabled=true` + `shadow_mode=true`, o runtime apenas registra o que **seria** suprimido; não altera fila.  
+Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
 
-**Observabilidade admin:** comando `/admin dedupe collisions [N]` disponível para listar colisões persistidas de `cross_source_fingerprint` em modo de observação.
+**Observabilidade admin:** comando `/admin dedupe collisions [N]` exibe colisões e estado das flags (`suppression enabled`, `shadow mode`, `window`).
 
-**Próximo passo (pendente):** ativar dedupe real somente após janela de observação de colisões em produção para calibrar falso positivo/falso negativo. Nenhuma supressão de notificação está ativa nesta fase.
+**Próximo passo (operação controlada):** ativar dedupe live somente após janela de observação em shadow + revisão de `/admin dedupe collisions` e logs de shadow para calibrar falso positivo/falso negativo.
 
 ---
 

@@ -467,10 +467,18 @@ Comando operacional:
 ```
 
 Notas:
-- Modo atual é **observação**: nenhuma notificação é suprimida por esse diagnóstico.
+- Flags de runtime:
+  - `cross_source_dedupe_enabled` (default: `false`)
+  - `cross_source_dedupe_shadow_mode` (default: `true`)
+  - `cross_source_dedupe_window_days` (default: `30`)
+- Modos:
+  - `enabled=false`: dedupe cross-source não suprime nada;
+  - `enabled=true` + `shadow_mode=true`: calcula e loga `would_suppress`, mas enfileira normalmente;
+  - `enabled=true` + `shadow_mode=false`: suprime duplicata cross-source por usuário+wishlist na janela configurada.
 - Colisão de fingerprint **não implica** duplicata real automaticamente; use como sinal para análise.
-- Recomendação operacional: observar por alguns dias, amostrar títulos/preço/km entre sources e só depois avaliar ativação de dedupe real.
+- Recomendação operacional: manter shadow por alguns dias, amostrar títulos/preço/km entre sources, revisar logs (`component=notifications_queue`) e só depois avaliar ativação live.
 - Limite padrão de fingerprints: 10. Limite máximo seguro no comando: 20.
+- Rollback: voltar `cross_source_dedupe_enabled=false`.
 
 ## Diagnóstico de tracking e price_drop
 
