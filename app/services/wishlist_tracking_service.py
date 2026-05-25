@@ -42,6 +42,16 @@ class TrackedListingResult:
     price: Decimal | None = None
 
 
+@dataclass
+class TrackingCapacitySnapshot:
+    wishlist_id: str
+    used_slots: list[int]
+    free_slots: list[int]
+    used_count: int
+    max_slots: int
+    can_add: bool
+
+
 def _build_tracked_result(
     *,
     ok: bool,
@@ -238,7 +248,7 @@ def add_tracked_listing_result(
             return _build_tracked_result(
                 ok=False,
                 status="already_tracked",
-                message=f"Esse anúncio já está rastreado no slot {row.slot}. Notificações automáticas: {auto_txt}.",
+                message="Esse anúncio já está sendo rastreado nesta wishlist.",
                 wishlist=wishlist,
                 wishlist_index=wishlist_index,
                 tracked=row,
@@ -272,7 +282,7 @@ def add_tracked_listing_result(
         return _build_tracked_result(
             ok=False,
             status="slots_full",
-            message=tracking_slots_full_message(allowed_slots),
+            message="Você já rastreia 3 anúncios nesta wishlist. Remova um para adicionar outro.",
             wishlist=wishlist,
             wishlist_index=wishlist_index,
             listing=listing,
@@ -325,10 +335,11 @@ def add_tracked_listing_result(
     invalidate_wishlist_summaries_cache(user_id)
 
     if automation_allowed:
-        message = "✅ Anúncio rastreado.\nVou acompanhar preço/status e te avisar sobre mudanças importantes."
+        message = f"✅ Anúncio rastreado no slot {slot}/3.\nVou avisar se houver queda relevante de preço."
     else:
         message = (
-            "✅ Anúncio rastreado.\n"
+            f"✅ Anúncio rastreado no slot {slot}/3.\n"
+            "Vou avisar se houver queda relevante de preço.\n"
             f"Você pode acompanhar preço e status em:\n/wishlist_track_list {wishlist_index}\n\n"
             "Notificações automáticas de mudança são um recurso Premium."
         )
@@ -348,6 +359,25 @@ def add_tracked_listing_result(
 def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_ref: str) -> tuple[bool, str]:
     result = add_tracked_listing_result(db, user_id=user_id, wishlist_index=wishlist_index, listing_ref=listing_ref)
     return result.ok, result.message
+
+
+def get_tracking_capacity_snapshot(db: Session, wishlist_id) -> TrackingCapacitySnapshot:
+    rows = (
+        db.query(WishlistTrackedListing.slot)
+        .filter(WishlistTrackedListing.wishlist_id == wishlist_id)
+        .order_by(WishlistTrackedListing.slot.asc())
+        .all()
+    )
+    used_slots = sorted({int(r[0]) for r in rows if r and r[0] is not None})
+    free_slots = [s for s in range(1, MAX_TRACKED_PER_WISHLIST + 1) if s not in used_slots]
+    return TrackingCapacitySnapshot(
+        wishlist_id=str(wishlist_id),
+        used_slots=used_slots,
+        free_slots=free_slots,
+        used_count=len(used_slots),
+        max_slots=MAX_TRACKED_PER_WISHLIST,
+        can_add=bool(free_slots),
+    )
 
 
 def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple[bool, str]:
@@ -383,7 +413,11 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
         row, listing = pair
         refresh_tracked_listing_snapshot(db, row, listing)
         if listing is None:
-            lines.append(f"\nSlot {slot} — anúncio indisponível\nStatus: indisponível")
+            lines.append(
+                f"\nSlot {slot} — anúncio indisponível\n"
+                "Status: indisponível\n"
+                "Esse anúncio não está mais disponível na base, mas o histórico foi preservado."
+            )
             continue
         label = _short_label(listing.title or listing.external_id or "Anúncio", max_len=70)
         ref = listing.external_id or "-"
@@ -419,27 +453,48 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
     return True, "\n".join(lines)
 
 
-def remove_tracked_listing(db: Session, *, user_id, wishlist_index: int, slot: int) -> tuple[bool, str]:
+def remove_tracked_listing(
+    db: Session, *, user_id, wishlist_index: int, slot: int | None = None, car_listing_id: str | None = None
+) -> tuple[bool, str]:
     wishlist = _wishlist_from_index(db, user_id=user_id, wishlist_index=wishlist_index)
     if not wishlist:
         return False, "Wishlist não encontrada para você. Use /wishlist para listar os índices válidos."
 
-    if slot < 1 or slot > MAX_TRACKED_PER_WISHLIST:
-        return False, f"Slot inválido. Use um valor entre 1 e {MAX_TRACKED_PER_WISHLIST}."
+    if slot is None and not car_listing_id:
+        return False, "Informe um slot ou identificador do anúncio para remover."
 
-    row = (
-        db.query(WishlistTrackedListing)
-        .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
-        .filter(WishlistTrackedListing.slot == slot)
-        .first()
-    )
+    row = None
+    if slot is not None:
+        if slot < 1 or slot > MAX_TRACKED_PER_WISHLIST:
+            return False, f"Slot inválido. Use um valor entre 1 e {MAX_TRACKED_PER_WISHLIST}."
+        row = (
+            db.query(WishlistTrackedListing)
+            .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+            .filter(WishlistTrackedListing.slot == slot)
+            .first()
+        )
+    elif car_listing_id:
+        import uuid
+        try:
+            listing_uuid = uuid.UUID(str(car_listing_id))
+        except Exception:
+            return False, "Identificador de anúncio inválido."
+        row = (
+            db.query(WishlistTrackedListing)
+            .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+            .filter(WishlistTrackedListing.car_listing_id == listing_uuid)
+            .first()
+        )
+
     if not row:
-        return False, "Esse slot já está vazio. Confira os slots com /wishlist_track_list <n>."
+        if slot is not None:
+            return False, "Não há anúncio rastreado nesse slot."
+        return False, "Esse anúncio não está sendo rastreado nesta wishlist."
 
     db.delete(row)
     db.commit()
     invalidate_wishlist_summaries_cache(user_id)
-    return True, f"Rastreamento removido do slot {slot}. Use /wishlist_track_list <n> para conferir."
+    return True, f"Rastreamento removido do slot {row.slot}. Use /wishlist_track_list <n> para conferir."
 
 
 def set_price_drop_alert_enabled(db: Session, *, user_id, wishlist_index: int, slot: int, enabled: bool) -> tuple[bool, str]:

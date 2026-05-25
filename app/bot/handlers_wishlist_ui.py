@@ -577,13 +577,13 @@ def _format_track_result_message(result: TrackedListingResult, wishlist_name: st
     wl_label = (wishlist_name or "wishlist").strip() or "wishlist"
     if result.status == "added":
         if bool(result.automation_enabled):
-            return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot} da wishlist {wl_label}.\n\nVou acompanhar preço e status automaticamente.\nVeja seus rastreados:\n/wishlist_track_list"
-        return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot} da wishlist {wl_label}.\n\nVocê pode acompanhar preço e status em:\n/wishlist_track_list\n\nNotificações automáticas são Premium."
+            return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot}/3.\n\nVou avisar se houver queda relevante de preço.\nVeja seus rastreados:\n/wishlist_track_list"
+        return f"Rastreado no slot {slot}", f"✅ Anúncio rastreado no slot {slot}/3.\n\nVou avisar se houver queda relevante de preço.\nVeja seus rastreados:\n/wishlist_track_list\n\nNotificações automáticas são Premium."
 
     if result.status == "already_tracked":
-        return "Já rastreado", f"Esse anúncio já está rastreado no slot {slot} da wishlist {wl_label}.\n\nVeja em:\n/wishlist_track_list"
+        return "Já rastreado", "Esse anúncio já está sendo rastreado nesta wishlist."
     if result.status == "slots_full":
-        return "Slots cheios", f"Você já usa todos os slots da wishlist {wl_label}.\n\nVeja e remova algum slot em:\n/wishlist_track_list"
+        return "Slots cheios", "Você já rastreia 3 anúncios nesta wishlist. Remova um para adicionar outro."
     if result.status in {"listing_not_found", "unavailable"}:
         return "Anúncio indisponível", "Não consegui rastrear esse anúncio porque ele não está mais disponível."
     if result.status in {"wishlist_not_found", "invalid_slot"}:
