@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -21,10 +22,33 @@ class BackupHealthResult:
     message: str
 
 
+def _resolve_backup_dir() -> str:
+    configured = getattr(settings, "backup_dir", None)
+    if configured and str(configured).strip():
+        return str(configured).strip()
+    return (os.getenv("AUTOHUNTER_BACKUP_DIR") or "/var/backups/autohunter").strip()
+
+
+def _resolve_max_age_hours() -> int:
+    configured = getattr(settings, "backup_max_age_hours", None)
+    if configured is not None:
+        try:
+            return int(configured)
+        except (TypeError, ValueError):
+            pass
+    raw = os.getenv("AUTOHUNTER_BACKUP_MAX_AGE_HOURS")
+    if raw is not None:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return 30
+
+
 def get_backup_health(now: datetime | None = None) -> BackupHealthResult:
     now_utc = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
-    backup_dir = str(getattr(settings, "backup_dir", "/var/backups/autohunter") or "/var/backups/autohunter")
-    max_age_hours = int(getattr(settings, "backup_max_age_hours", 30) or 30)
+    backup_dir = _resolve_backup_dir()
+    max_age_hours = _resolve_max_age_hours()
     base = Path(backup_dir)
 
     if not base.exists() or not base.is_dir():

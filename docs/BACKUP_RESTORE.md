@@ -163,8 +163,8 @@ Use o comando:
 
 O painel de health agora inclui uma linha de backup com semáforo operacional:
 
-- `OK` (`✅`): existe backup recente (idade `<= BACKUP_MAX_AGE_HOURS`).
-- `WARNING` (`⚠️`): existe backup, mas está antigo (idade `> BACKUP_MAX_AGE_HOURS`).
+- `OK` (`✅`): existe backup recente (idade `<= AUTOHUNTER_BACKUP_MAX_AGE_HOURS`).
+- `WARNING` (`⚠️`): existe backup, mas está antigo (idade `> AUTOHUNTER_BACKUP_MAX_AGE_HOURS`).
 - `FAIL` (`❌`): diretório ausente ou nenhum arquivo `autohunter_*.sql.gz` encontrado.
 
 Próximos passos quando não estiver `OK`:
@@ -172,6 +172,6 @@ Próximos passos quando não estiver `OK`:
 1. Rodar `bash scripts/check_latest_backup.sh` para diagnóstico rápido.
 2. Verificar se o cron diário de backup está ativo.
 3. Verificar `DATABASE_URL` do ambiente operacional usado pelo cron/script.
-4. Verificar permissões e existência de `/var/backups/autohunter` (ou `BACKUP_DIR` configurado).
+4. Verificar permissões e existência de `/var/backups/autohunter` (ou `AUTOHUNTER_BACKUP_DIR` configurado).
 
 > Esta checagem é somente de observabilidade no admin/Telegram; não executa backup e não executa restore.
