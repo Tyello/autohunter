@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.user import User
