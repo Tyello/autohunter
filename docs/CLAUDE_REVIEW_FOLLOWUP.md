@@ -70,3 +70,10 @@ Este documento consolida o estado real após as entregas recentes.
 - Fluxo segue read-only nesta fase: sem escrita em fipe_prices, sem score_v2, sem chamadas externas.
 - Próximo passo planejado: etapa dry-run/apply para persistir somente matches high não ambíguos.
 
+
+
+## Follow-up FIPE plan dry-run
+
+- Implementado planejamento dry-run de `fipe_prices` a partir do resolver AutoHunter→FIPE.
+- Admin agora pode estimar `planned_inserts`, `would_updates` e `skipped reasons` sem persistir dados.
+- Próximo passo: fluxo `apply` controlado com confirmação explícita e estratégia de rollback em PR separada.

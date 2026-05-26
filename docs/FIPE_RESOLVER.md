@@ -39,3 +39,30 @@ Permitir persistência controlada (dry-run/apply) apenas para matches high confi
 - Fluxo segue read-only nesta fase: sem escrita em fipe_prices, sem score_v2, sem chamadas externas.
 - Próximo passo planejado: etapa dry-run/apply para persistir somente matches high não ambíguos.
 
+
+
+## Planejamento dry-run de `fipe_prices`
+
+Novo comando admin:
+- `/admin fipe plan`
+- `/admin fipe plan 2026-05`
+- `/admin fipe plan 2026-05 100`
+
+Critérios para entrar em `planned_inserts` (read-only):
+- resolver `status=matched`;
+- `best_candidate` presente;
+- `confidence_label=high`;
+- `confidence_score >= min_confidence`;
+- preço presente e maior que zero;
+- listing com chave FIPE derivada de `listing_vehicle_keys`.
+
+Motivos de skip:
+- `insufficient_data`
+- `no_match`
+- `ambiguous`
+- `below_confidence`
+- `missing_price`
+- `missing_vehicle_key`
+- `already_exists`
+
+Read-only: esta etapa não grava em `fipe_prices`, não altera `score_v2` e não chama API externa.

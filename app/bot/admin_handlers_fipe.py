@@ -12,6 +12,7 @@ from app.services.fipe_catalog_resolver_service import (
     build_fipe_resolver_coverage_report,
     resolve_listing_to_fipe_candidates,
 )
+from app.services.fipe_prices_planning_service import build_fipe_price_plan
 
 def _format_brl(value) -> str:
     if value is None:
@@ -112,6 +113,36 @@ def render_admin_fipe_resolver_status(report: dict) -> str:
     ])
 
 
+def render_admin_fipe_plan(report: dict) -> str:
+    skipped = report.get("skipped_counts", {})
+    lines = [
+        "🧪 FIPE price plan — dry-run",
+        "",
+        f"Competência: {report['reference_month']}",
+        f"Amostra: {report['sample_size']} listings",
+        "",
+        "Planejado:",
+        f"- inserts: {report['planned_inserts_count']}",
+        f"- would updates: {report['would_update_count']}",
+        f"- already exists: {report.get('already_exists_count', skipped.get('already_exists', 0))}",
+        "",
+        "Skipped:",
+    ]
+    for reason in ["ambiguous", "no_match", "insufficient_data", "below_confidence", "missing_price", "missing_vehicle_key", "already_exists"]:
+        lines.append(f"- {reason}: {skipped.get(reason, 0)}")
+    lines.extend(["", "Exemplos de inserts:"])
+    inserts = report.get("planned_inserts", [])[:2]
+    if inserts:
+        for item in inserts:
+            lines.append(
+                f"- {item.get('vehicle_key')} -> {_format_brl(item.get('fipe_price'))} | score {item.get('confidence_score')} | {item.get('model_name') or '-'}"
+            )
+    else:
+        lines.append("- nenhum")
+    lines.extend(["", "Read-only: nada foi gravado."])
+    return "\n".join(lines)
+
+
 async def admin_fipe(update: Update, raw_args: list[str]) -> None:
     args = [a.strip() for a in (raw_args or []) if a.strip()]
     if args and args[0].lower() == "catalog":
@@ -174,6 +205,32 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_resolve(result, listing))
         return
 
+    if args and args[0].lower() == "plan":
+        month = args[1] if len(args) >= 2 else None
+        limit = 100
+        if len(args) >= 3:
+            try:
+                limit = int(args[2])
+            except Exception:
+                limit = 100
+        limit = max(1, min(500, limit))
+        try:
+            with SessionLocal() as db:
+                if month:
+                    month = normalize_fipe_month(month)
+                else:
+                    month_row = db.query(FipeCatalogEntry.reference_month).order_by(FipeCatalogEntry.reference_month.desc()).first()
+                    month = month_row[0] if month_row else None
+                if not month:
+                    await update.message.reply_text("Sem dados no catálogo FIPE staging.")
+                    return
+                report = build_fipe_price_plan(db, reference_month=month, limit=limit)
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
+        await update.message.reply_text(render_admin_fipe_plan(report))
+        return
+
     if args and args[0].lower() == "resolver_status":
         month = args[1] if len(args) >= 2 else None
         limit = 100
@@ -210,4 +267,4 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_coverage(report))
         return
 
-    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200]")
+    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500]")

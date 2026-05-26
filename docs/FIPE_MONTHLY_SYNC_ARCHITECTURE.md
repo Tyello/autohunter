@@ -51,3 +51,10 @@ Separação explícita:
 - Fluxo segue read-only nesta fase: sem escrita em fipe_prices, sem score_v2, sem chamadas externas.
 - Próximo passo planejado: etapa dry-run/apply para persistir somente matches high não ambíguos.
 
+
+
+## Status atualizado
+
+- ✅ Planejamento dry-run AutoHunter→FIPE implementado via `/admin fipe plan`.
+- ✅ Etapa continua read-only (sem escrita em `fipe_prices`).
+- 🔜 Apply controlado (com confirmação explícita) permanece pendente em PR separada.
