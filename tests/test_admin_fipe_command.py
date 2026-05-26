@@ -233,6 +233,8 @@ def test_admin_fipe_resolver_status(monkeypatch):
     monkeypatch.setattr(admin_handlers_fipe, "build_fipe_resolver_coverage_report", lambda *a, **k: {
         "reference_month": "2026-05", "sample_size": 10,
         "status_counts": {"matched": 2, "ambiguous": 3, "no_match": 4, "insufficient_data": 1},
+        "confidence_label_counts": {"high": 3, "medium": 2, "low": 1},
+        "detailed_counts": {"matched_high": 2, "ambiguous_high": 1, "ambiguous_medium": 2},
     })
     class _DB:
         def __enter__(self): return self
@@ -242,3 +244,21 @@ def test_admin_fipe_resolver_status(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "resolver_status", "2026-05", "20")))
     assert "FIPE resolver status" in up.message.sent[-1]
     assert "matched: 2" in up.message.sent[-1]
+    assert "Read-only" in up.message.sent[-1]
+
+
+def test_render_admin_fipe_resolve_details():
+    listing = SimpleNamespace(make="Honda", model="Civic Si", year=2015)
+    msg = admin_handlers_fipe.render_admin_fipe_resolve({
+        "reference_month": "2026-05",
+        "status": "ambiguous",
+        "ambiguity_reason": "segundo candidato também high e próximo",
+        "best_candidate": {"model_name":"Civic Sedan SI 2.4 16V", "fipe_code":"015088-6", "model_year":2015, "fuel":"Gasolina", "price":95000, "confidence_score":86, "confidence_label":"high", "matched_tokens":["civic","si"], "missing_tokens":["2","4"], "warnings":["ano próximo (diferença de 1 ano)"]},
+        "candidates": [
+            {"model_name":"Civic Sedan SI 2.4 16V", "confidence_score":86, "confidence_label":"high", "model_year":2015, "fuel":"Gasolina", "fipe_code":"015088-6"},
+            {"model_name":"Civic Sedan LXR 2.0", "confidence_score":82, "confidence_label":"high", "model_year":2015, "fuel":"Gasolina", "fipe_code":"001"},
+        ],
+    }, listing)
+    assert "R$ 95.000,00" in msg
+    assert "Outros candidatos" in msg
+    assert "Motivo ambiguidade" in msg

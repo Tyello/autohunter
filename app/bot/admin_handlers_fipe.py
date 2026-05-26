@@ -13,6 +13,11 @@ from app.services.fipe_catalog_resolver_service import (
     resolve_listing_to_fipe_candidates,
 )
 
+def _format_brl(value) -> str:
+    if value is None:
+        return "-"
+    return "R$ " + format(float(value), ",.2f").replace(",", "X").replace(".", ",").replace("X", ".")
+
 
 def render_admin_fipe_coverage(report: dict) -> str:
     lines = [
@@ -61,28 +66,49 @@ def render_admin_fipe_resolve(result: dict, listing: CarListing) -> str:
             f"FIPE: {best.get('fipe_code') or '-'}",
             f"Ano: {best.get('model_year') or '-'}",
             f"Combustível: {best.get('fuel') or '-'}",
-            f"Preço: R$ {best.get('price') or '-'}",
+            f"Preço: {_format_brl(best.get('price'))}",
             f"Confiança: {best.get('confidence_score')} ({best.get('confidence_label')})",
             "",
-            "Razões:",
+            "Tokens:",
+            f"- encontrados: {', '.join(best.get('matched_tokens') or ['-'])}",
+            f"- ausentes: {', '.join(best.get('missing_tokens') or ['-'])}",
+            "",
+            "Avisos:",
         ])
-        lines.extend([f"- {r}" for r in (best.get("reasons") or ["sem razões registradas"])])
+        lines.extend([f"- {w}" for w in (best.get("warnings") or ["nenhum"])])
+    if result.get("status") == "ambiguous" and result.get("ambiguity_reason"):
+        lines.extend(["", f"Motivo ambiguidade: {result['ambiguity_reason']}"])
     others = result.get("candidates", [])[1:3]
     if others:
         lines.extend(["", "Outros candidatos:"])
-        lines.extend([f"- {c.get('model_name')}... score {c.get('confidence_score')}" for c in others])
+        lines.extend([f"- {c.get('model_name')} — {c.get('confidence_score')} {c.get('confidence_label')} | ano {c.get('model_year')} | comb {c.get('fuel')} | FIPE {c.get('fipe_code')}" for c in others])
     return "\n".join(lines)
 
 def render_admin_fipe_resolver_status(report: dict) -> str:
     c = report["status_counts"]
+    l = report.get("confidence_label_counts", {})
+    d = report.get("detailed_counts", {})
     return "\n".join([
         "📈 FIPE resolver status",
         f"Competência: {report['reference_month']}",
-        f"Amostra: {report['sample_size']}",
+        f"Amostra: {report['sample_size']} (amostra limitada)",
+        "Read-only: diagnóstico sem persistência em fipe_prices.",
+        "",
+        "Status:",
         f"matched: {c['matched']}",
         f"ambiguous: {c['ambiguous']}",
         f"no_match: {c['no_match']}",
         f"insufficient_data: {c['insufficient_data']}",
+        "",
+        "Labels:",
+        f"high: {l.get('high', 0)}",
+        f"medium: {l.get('medium', 0)}",
+        f"low: {l.get('low', 0)}",
+        "",
+        "Detalhado:",
+        f"matched_high: {d.get('matched_high', 0)}",
+        f"ambiguous_high: {d.get('ambiguous_high', 0)}",
+        f"ambiguous_medium: {d.get('ambiguous_medium', 0)}",
     ])
 
 
