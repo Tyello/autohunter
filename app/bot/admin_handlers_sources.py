@@ -149,13 +149,21 @@ async def admin_sources_set_simple(update, source: str, field: str, value: str):
                 "fallback": bool(cfg.browser_fallback_enabled),
                 "force": bool(cfg.force_browser),
             }
+            impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
             db.commit()
 
+        extra_note = ""
+        if str(field).strip().lower() == "extra":
+            extra_note = (
+                f"\nextra=updated impl={impl_flags.impl} "
+                f"mercadolivre_v2_canary_enabled={bool(impl_flags.canary_v2_enabled)}"
+            )
         await update.message.reply_text(
             sanitize_for_telegram(
                 f"✅ Atualizado {snap['source']}: {field}={value}\n"
                 f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
                 f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
+                f"{extra_note}"
             )
         )
     except Exception as e:

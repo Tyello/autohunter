@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict, List
@@ -130,6 +131,7 @@ _FIELD_ALIASES = {
     "browser_fallback_enabled": "browser_fallback_enabled",
     "force": "force_browser",
     "force_browser": "force_browser",
+    "extra": "extra",
 }
 
 
@@ -262,6 +264,26 @@ def set_source_field(db: Session, source: str, field: str, value: str) -> Source
     if key == "proxy_server":
         v = (value or "").strip()
         setattr(row, key, v if v else None)
+        invalidate_source_config_cache(src)
+        return row
+
+    if key == "extra":
+        raw = (value or "").strip()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            raise ValueError("valor JSON inválido para extra")
+        if not isinstance(payload, dict):
+            raise ValueError("extra deve ser um objeto JSON")
+
+        cur = dict(row.extra) if isinstance(row.extra, dict) else {}
+        for k, v in payload.items():
+            kk = str(k)
+            if v is None:
+                cur.pop(kk, None)
+            else:
+                cur[kk] = v
+        row.extra = cur
         invalidate_source_config_cache(src)
         return row
 
