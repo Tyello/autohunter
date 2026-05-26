@@ -148,6 +148,14 @@ def _is_missing_on_conflict_constraint(exc: ProgrammingError) -> bool:
     return "there is no unique or exclusion constraint matching the on conflict specification" in msg
 
 
+def _homogenize_bulk_insert_rows(rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+
+    bulk_keys: set[str] = set().union(*(row.keys() for row in rows))
+    return [{k: row.get(k) for k in bulk_keys} for row in rows]
+
+
 def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, with_stats: bool):
     now = datetime.now(timezone.utc)
     ids: list[uuid.UUID] = []
@@ -306,7 +314,7 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
             prepared_listing["cross_source_fingerprint"] = computed_fp
         prepared.append(prepared_listing)
 
-    listings = prepared
+    listings = _homogenize_bulk_insert_rows(prepared)
     if not listings:
         return []
 
