@@ -82,3 +82,7 @@ Confirme avanço de cobertura (`vehicle_keys_covered` e `%`) e redução de `Top
 - Validar origem antes da carga (fonte confiável e auditável).
 - Não usar scraping/API externa nesta rotina.
 - Não alterar score_v2/ranking nesta operação; apenas aumentar cobertura de `fipe_prices`.
+
+
+## Atualização 2026-05 (opção 2)
+CSV manual deixa de ser caminho principal e passa a fallback/legado operacional simples.

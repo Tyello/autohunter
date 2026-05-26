@@ -102,6 +102,64 @@ def test_admin_dispatch_calls_new_fipe_handler(monkeypatch):
     assert calls["raw_args"] == ["coverage"]
 
 
+def test_admin_fipe_catalog_summary(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+
+    class _Q:
+        def __init__(self, value):
+            self.value = value
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return self.value
+
+        def count(self):
+            return self.value
+
+        def distinct(self):
+            return self
+
+    class _DB:
+        def query(self, *args, **kwargs):
+            name = getattr(args[0], "name", None) if args else None
+            table = getattr(args[0], "__tablename__", None) if args else None
+            if name == "reference_month":
+                return _Q(("2026-05",))
+            if name == "brand_name":
+                return _Q(3)
+            if name == "model_name":
+                return _Q(10)
+            if name == "model_year":
+                return _Q(8)
+            if table == "fipe_sync_runs":
+                return _Q(SimpleNamespace(id="run-1", status="completed", source="external_pipeline"))
+            return _Q(42)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "catalog", "2026-05")))
+    assert "FIPE catálogo staging" in up.message.sent[-1]
+    assert "Competência: 2026-05" in up.message.sent[-1]
+
+
+def test_admin_fipe_catalog_invalid_month(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "catalog", "foo")))
+    assert up.message.sent[-1] == "reference_month inválido; esperado YYYY-MM"
+
+
 def test_admin_invalid_action_help_lists_fipe(monkeypatch):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     up = _Up(1)

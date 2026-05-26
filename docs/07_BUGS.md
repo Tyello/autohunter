@@ -162,3 +162,5 @@ Implementado:
 - Refactor admin/settings: arquitetura em `03_ARQUITETURA.md`.
 - Teste de carga Raspberry: eficiência em `08_EFICIENCIA.md`.
 - `/admin metrics` v1: já concluído.
+
+- Decisão 2026-05: opção 2 adotada (base local mensal). API externa não será chamada em score/wishlist; CSV manual permanece fallback.
