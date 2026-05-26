@@ -1,16 +1,102 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from app.bot.text_sanitize import sanitize_for_telegram
 from app.core.settings import settings
 from app.db.session import SessionLocal
+from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.sources.flags import read_source_impl_flags
 
 _SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
 _MERCADOLIVRE = "mercadolivre"
+
+
+def _extract_runtime_impl(payload: dict | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    runtime_impl = payload.get("runtime_impl")
+    if runtime_impl:
+        return str(runtime_impl)
+    run_summary = payload.get("run_summary")
+    if isinstance(run_summary, dict) and run_summary.get("runtime_impl"):
+        return str(run_summary.get("runtime_impl"))
+    return None
+
+
+def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=max(1, int(window_hours or 24)))
+    rows = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == source)
+        .filter(SourceRun.created_at >= since)
+        .order_by(SourceRun.created_at.desc())
+        .all()
+    )
+
+    success = 0
+    blocked = 0
+    error = 0
+    last_runtime_impl = "-"
+    last_success_at = "-"
+    last_success_found = 0
+    last_success_inserted = 0
+    last_success_matched = 0
+    last_success_queued = 0
+    last_success_duration_ms = 0
+    last_blocked_at = "-"
+    last_error_at = "-"
+
+    for row in rows:
+        if last_runtime_impl == "-":
+            runtime_any = _extract_runtime_impl(getattr(row, "payload", None))
+            if runtime_any:
+                last_runtime_impl = runtime_any
+
+        runtime_impl = _extract_runtime_impl(getattr(row, "payload", None))
+        if runtime_impl != "v2_canary":
+            continue
+
+        status = str(getattr(row, "status", "") or "").strip().lower()
+        created_at = getattr(row, "created_at", None)
+        created_iso = created_at.isoformat() if created_at else "-"
+        if status == "success":
+            success += 1
+            if last_success_at == "-":
+                last_success_at = created_iso
+                last_success_found = int(getattr(row, "items_found", 0) or 0)
+                last_success_inserted = int(getattr(row, "items_ingested", 0) or 0)
+                last_success_matched = int(getattr(row, "items_matched", 0) or 0)
+                last_success_queued = int(getattr(row, "notifications_queued", 0) or 0)
+                last_success_duration_ms = int(getattr(row, "duration_ms", 0) or 0)
+        elif status in ("blocked", "skipped"):
+            blocked += 1
+            if last_blocked_at == "-":
+                last_blocked_at = created_iso
+        elif status == "error":
+            error += 1
+            if last_error_at == "-":
+                last_error_at = created_iso
+
+    return {
+        "window": f"{int(window_hours)}h",
+        "v2_canary_success": success,
+        "v2_canary_blocked": blocked,
+        "v2_canary_error": error,
+        "last_runtime_impl": last_runtime_impl,
+        "last_success_at": last_success_at,
+        "last_success_found": last_success_found,
+        "last_success_inserted": last_success_inserted,
+        "last_success_matched": last_success_matched,
+        "last_success_queued": last_success_queued,
+        "last_success_duration_ms": last_success_duration_ms,
+        "last_blocked_at": last_blocked_at,
+        "last_error_at": last_error_at,
+    }
 
 
 def _canary_effective_for_cfg(cfg) -> tuple[bool, str | None, bool]:
@@ -213,8 +299,8 @@ async def admin_sources_canary(update, source: str, action: str):
     if src != _MERCADOLIVRE:
         await update.message.reply_text("Canary V2 manual está disponível apenas para mercadolivre nesta etapa.")
         return
-    if action not in ("status", "on", "off"):
-        await update.message.reply_text("Use: /admin sources canary mercadolivre status|on|off")
+    if action not in ("status", "report", "on", "off"):
+        await update.message.reply_text("Use: /admin sources canary mercadolivre status|report|on|off")
         return
     with SessionLocal() as db:
         ensure_source_configs(db)
@@ -222,9 +308,19 @@ async def admin_sources_canary(update, source: str, action: str):
         if not cfg:
             await update.message.reply_text("Source não encontrada.")
             return
-        if action == "status":
+        if action in ("status", "report"):
             impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
             canary_effective, canary_reason, playwright_enabled = _canary_effective_for_cfg(cfg)
+            report = _build_canary_recent_runs_report(db, src, window_hours=24)
+            recommendation = "run_manual_validation"
+            if not canary_effective:
+                recommendation = "canary_not_effective"
+            elif int(report["v2_canary_blocked"]) > 0 or int(report["v2_canary_error"]) > 0:
+                recommendation = "keep_canary_or_rollback_review"
+            elif int(report["v2_canary_success"]) >= 3:
+                recommendation = "continue_soak_candidate"
+            elif int(report["v2_canary_success"]) >= 1:
+                recommendation = "continue_soak"
             lines = [
                 "Mercado Livre — V2 Canary",
                 f"source={cfg.source}",
@@ -233,9 +329,25 @@ async def admin_sources_canary(update, source: str, action: str):
                 f"playwright_enabled={bool(playwright_enabled)}",
                 f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
                 f"canary_effective={bool(canary_effective)}",
+                "",
+                "Canary recent runs:",
+                f"window={report['window']}",
+                f"v2_canary_success={report['v2_canary_success']}",
+                f"v2_canary_blocked={report['v2_canary_blocked']}",
+                f"v2_canary_error={report['v2_canary_error']}",
+                f"last_runtime_impl={report['last_runtime_impl']}",
+                f"last_success_at={report['last_success_at']}",
+                f"last_success_found={report['last_success_found']}",
+                f"last_success_inserted={report['last_success_inserted']}",
+                f"last_success_matched={report['last_success_matched']}",
+                f"last_success_queued={report['last_success_queued']}",
+                f"last_success_duration_ms={report['last_success_duration_ms']}",
+                f"last_blocked_at={report['last_blocked_at']}",
+                f"last_error_at={report['last_error_at']}",
             ]
             if not canary_effective:
                 lines.append(f"reason={canary_reason}")
+            lines.append(f"recommendation={recommendation}")
             await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
             return
 

@@ -320,3 +320,21 @@ Decision:
 
 - Registro operacional: execução real com canary V2 em Mercado Livre retornou success com found=186, inserted=5, matched=8, queued=0 e dur=87132ms.
 - A trilha de observabilidade agora deve expor sempre configured_impl x runtime_impl em `/admin runall` e `/admin sources`.
+
+
+### Soak operacional pós-canary (Mercado Livre V2)
+
+1. Ativar canary:
+   - `/admin sources canary mercadolivre on`
+2. Rodar validação:
+   - `/admin runall mercadolivre`
+3. Acompanhar estabilidade:
+   - `/admin sources canary mercadolivre status` (ou `/admin sources canary mercadolivre report`)
+4. Critério de soak antes de qualquer flip manual:
+   - múltiplas execuções `v2_canary` com `success`;
+   - sem `blocked/error` recente;
+   - `found > 0`;
+   - parse/ingest/match sem exceções;
+   - revisão manual explícita antes de qualquer flip.
+
+O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_success/blocked/error`, último sucesso com found/inserted/matched/queued/duração, e recomendação de soak sem auto-flip).

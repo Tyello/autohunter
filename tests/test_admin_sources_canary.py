@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.bot import admin_handlers_sources as mod
@@ -19,8 +20,35 @@ class _Update:
 
 
 class _DB:
+    def __init__(self, runs=None):
+        self._runs = runs or []
+
     def commit(self):
         return None
+
+    def query(self, model):
+        if getattr(model, "__name__", "") == "SourceRun":
+            return _Query(self._runs)
+        return _EmptyQuery()
+
+
+class _EmptyQuery:
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def all(self):
+        return []
+
+
+class _Query(_EmptyQuery):
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
 
 
 class _Ctx:
@@ -45,6 +73,20 @@ def _cfg(extra=None, browser_fallback_enabled=True):
         browser_fallback_enabled=browser_fallback_enabled,
         force_browser=False,
         extra=extra or {},
+    )
+
+
+def _run(status="success", *, runtime_impl="v2_canary", dt=None, found=0, inserted=0, matched=0, queued=0, duration=0):
+    payload = {"runtime_impl": runtime_impl} if runtime_impl is not None else {"run_summary": {}}
+    return SimpleNamespace(
+        status=status,
+        created_at=dt or datetime.now(timezone.utc),
+        payload=payload,
+        items_found=found,
+        items_ingested=inserted,
+        items_matched=matched,
+        notifications_queued=queued,
+        duration_ms=duration,
     )
 
 
@@ -151,3 +193,93 @@ def test_admin_sources_canary_blocks_other_sources(monkeypatch):
     up = _Update()
     asyncio.run(mod.admin_sources_canary(up, "olx", "on"))
     assert "apenas para mercadolivre" in up.message.texts[-1]
+
+
+def test_canary_status_no_v2_runs(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    runs = [_run(status="success", runtime_impl="v1")]
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_success=0" in out
+    assert "recommendation=run_manual_validation" in out
+
+
+def test_canary_status_one_success(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    runs = [_run(found=186, inserted=5, matched=8, queued=0, duration=87132)]
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_success=1" in out
+    assert "last_success_found=186" in out
+    assert "last_success_inserted=5" in out
+    assert "last_success_matched=8" in out
+    assert "last_success_queued=0" in out
+    assert "last_success_duration_ms=87132" in out
+    assert "recommendation=continue_soak" in out
+
+
+def test_canary_status_three_success_candidate(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    now = datetime.now(timezone.utc)
+    runs = [
+        _run(dt=now),
+        _run(dt=now - timedelta(minutes=5)),
+        _run(dt=now - timedelta(minutes=10)),
+    ]
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    assert "recommendation=continue_soak_candidate" in up.message.texts[-1]
+
+
+def test_canary_status_blocked_recent(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    runs = [_run(status="blocked"), _run(status="success")]
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_blocked=1" in out
+    assert "recommendation=keep_canary_or_rollback_review" in out
+
+
+def test_canary_status_flag_off_recommendation(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": False})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=[])))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "canary_effective=False" in out
+    assert "recommendation=canary_not_effective" in out
+
+
+def test_canary_status_legacy_payload_without_runtime_impl_safe(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    runs = [_run(runtime_impl=None), _run(runtime_impl="v2_canary")]
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_success=1" in out
