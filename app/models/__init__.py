@@ -4,6 +4,8 @@ from .wishlist_filter import WishlistFilter
 from .wishlist_token import WishlistToken
 from .car_listing import CarListing
 from .fipe_price import FipePrice
+from .fipe_sync_run import FipeSyncRun
+from .fipe_catalog_entry import FipeCatalogEntry
 from .notification import Notification
 from .system_log import SystemLog
 from .telemetry_event import TelemetryEvent
@@ -33,6 +35,8 @@ __all__ = [
     "WishlistToken",
     "CarListing",
     "FipePrice",
+    "FipeSyncRun",
+    "FipeCatalogEntry",
     "Notification",
     "SystemLog",
     "TelemetryEvent",

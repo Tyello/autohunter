@@ -51,3 +51,5 @@ Este documento consolida o estado real após as entregas recentes.
 - Evolução de comandos guiados/botões no Telegram.
 - Refinamentos futuros de FIPE/dados reais (qualidade/cobertura).
 - Eventual ativação live de dedupe cross-source após observação real consistente.
+
+- Decisão FIPE (2026-05): opção 2 adotada com base local mensal; próximo passo é ingestão mensal de catálogo staging; CSV manual deixa de ser caminho principal.
