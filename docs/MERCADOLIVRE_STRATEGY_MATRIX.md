@@ -82,12 +82,14 @@ Registrar como fatos, não hipótese:
 - Prefer single dual-run validation over full strategy matrix.
 - Keep V1 operational while V2 is being validated.
 - Require v1_count > 0 and v2_count > 0 before any V2 flip.
+- Se V1 cair em `ml_shell_without_results`, aceitar gate alternativo de validação do V2 quando houver recorrência de itens válidos e revisão manual.
 
 ## DO NOT
 
 - Do not propose API-first again.
 - Do not use lista_generic_slug as a new fix.
 - Do not run full strategy_probe with --include-browser repeatedly.
+- Do not run full strategy_probe sequence back-to-back; prefer one single dual-run after cooldown.
 - Do not use --ignore-security-wall unless explicitly debugging.
 - Do not interpret shell as zero real results.
 - Do not interpret captcha/security as parser failure.
@@ -141,6 +143,16 @@ Registrar como fatos, não hipótese:
 
 - If v1_count>0 and v2_count>0:
   compare matched_count, only_v1, only_v2, field_diffs.
+
+- Gate alternativo (somente validação operacional do V2, não flip automático):
+  quando V1 falhar com `ml_shell_without_results` e V2 repetir itens válidos,
+  exigir simultaneamente:
+  1) `v2_blocked=false`;
+  2) `v2_count > 0`;
+  3) `raw_items_found == items_valid` **ou** `items_valid > 0` sem `parse_errors`;
+  4) IDs do V2 compatíveis com o último baseline bom conhecido;
+  5) ausência de `blocking_field_diffs` conhecidos;
+  6) revisão manual obrigatória para qualquer decisão de flip.
 
 ## Safe Commands
 
@@ -230,6 +242,35 @@ Before generating a Codex task about Mercado Livre:
 - Keep this file optimized for agents, not prose.
 
 ## Recent Validation Log
+
+### Date: 2026-05-26
+
+Command:
+
+```bash
+python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json
+```
+
+Observed:
+
+- `v1_count=0`
+- `v1_error=FetchBlocked reason=ml_shell_without_results`
+- `v2_count=14`
+- `v2_unique_count=14`
+- `v2_blocked=false`
+- `v2_metrics.fetch_method=browser_fallback`
+- `v2_metrics.raw_items_found=14`
+- `v2_metrics.items_parsed=14`
+- `v2_metrics.items_valid=14`
+- `parse_errors=0`
+
+Interpretation:
+
+- FAIL do relatório foi causado por V1 (shell), não por regressão de V2.
+- `V1 shell` não é prova contra V2.
+- V2 com `14/14` válidos é evidência positiva de operação.
+- Não abrir nova PR de parser/fetch V2 com base isolada neste resultado.
+- Não rodar `strategy_probe` completo em sequência; usar single dual-run após cooldown.
 
 ### Date: 2026-05-24
 

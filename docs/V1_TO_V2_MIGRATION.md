@@ -121,6 +121,28 @@ Caminho ativo é robusto e contém mecanismos anti-bloqueio/anti-ruído que não
 - Diretriz para futuros agentes:
   - não reabrir PR de parser/fetch V2 com base apenas nesse resultado de 2026-05-24.
 
+### Atualização operacional (2026-05-26)
+- Novo dual-run registrou:
+  - `v1_count=0`
+  - `v1_error=FetchBlocked reason=ml_shell_without_results`
+  - `v2_count=14`
+  - `v2_unique_count=14`
+  - `v2_blocked=false`
+  - `v2_metrics.fetch_method=browser_fallback`
+  - `v2_metrics.raw_items_found=14`
+  - `v2_metrics.items_parsed=14`
+  - `v2_metrics.items_valid=14`
+  - `parse_errors=0`
+- Interpretação obrigatória:
+  - V2 permaneceu funcional no cenário observado;
+  - o FAIL do relatório foi provocado pelo V1 em shell (`ml_shell_without_results`);
+  - `V1 shell` não constitui evidência contra o V2;
+  - V2 com 14 itens válidos é evidência positiva operacional.
+- Diretriz operacional imediata:
+  - não abrir nova PR de parser/fetch V2 com base isolada nesse resultado;
+  - não rodar `strategy_probe` completo em sequência;
+  - preferir single dual-run após cooldown.
+
 ### Já implementado no caminho ativo
 - `curl_cffi` intermediário.
 - POLYCARD + merge com parser HTML.
@@ -136,6 +158,21 @@ Caminho ativo é robusto e contém mecanismos anti-bloqueio/anti-ruído que não
 
 ### Próxima ação recomendada
 Priorizar matriz de paridade v1→v2 para ML antes de qualquer flip para `impl=v2`.
+
+### Gates para decisão de flip (Mercado Livre)
+- Gate preferencial (permanece obrigatório como primeira escolha):
+  - `v1_count > 0` e `v2_count > 0` na mesma janela limpa.
+- Gate alternativo de validação (quando V1 está instável por shell):
+  - aplicar **somente** se V1 falhar com `ml_shell_without_results` e V2 retornar itens válidos de forma repetida;
+  - exigir simultaneamente:
+    1. `v2_blocked=false`;
+    2. `v2_count > 0`;
+    3. `raw_items_found == items_valid` **ou** `items_valid > 0` sem `parse_errors`;
+    4. IDs do V2 compatíveis com o último baseline bom conhecido;
+    5. ausência de `blocking_field_diffs` conhecidos;
+    6. revisão manual obrigatória para qualquer decisão de flip.
+- Regra final:
+  - mesmo no gate alternativo, a decisão de flip não é automática e continua dependente de revisão manual.
 
 ## OLX
 
