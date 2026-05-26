@@ -241,18 +241,21 @@ python scripts/source_dual_run_report.py mercadolivre --query "civic si" --forma
 
 Observed:
 
-- V1 blocked with `ml_shell_without_results` (`v1_count=0`, `v1_error=FetchBlocked`).
-- V2 returned 14 valid items (`v2_count=14`, `v2_blocked=false`).
+- V1 and V2 returned data in the same window.
+- `v1_count=30`, `v2_count=15`, `matched_count=15`.
+- `only_v1_count=0`, `only_v2_count=0`.
+- V2 is functional and not blocked (`v2_blocked=false`).
 - V2 `fetch_method=browser_fallback`.
-- V2 `raw_items_found=14`.
-- V2 `items_parsed=14`.
-- V2 `items_valid=14`.
+- V2 `raw_items_found=15`.
+- V2 `items_parsed=15`.
+- V2 `items_valid=15`.
 - V2 `parse_errors=0`.
+- Current pending item is report quality: distinguish raw count vs unique count and classify enrichment diffs.
 
 Decision:
 
-- V2 parser/fetch path is no longer the current blocker in this validation event.
+- V2 parser/fetch path is not the blocker in this validation event.
 - Do **not** open another V2 parser/fetch PR based only on this result.
 - Do **not** flip to V2 yet.
-- Wait cooldown and rerun a **single dual-run** validation.
+- Improve dual-run parity diagnostics (`raw_count`, `unique_count`, duplicate counts, enrichment classification).
 - Flip gate remains: `v1_count > 0` and `v2_count > 0` in the same clean window.
