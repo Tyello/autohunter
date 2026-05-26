@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from app.core.settings import settings
 from app.sources.adapters.v1 import adapt_v1
 from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
@@ -18,14 +19,22 @@ def build_scrape_dispatch(
     """Build scraper dispatch preserving v1/v2/dual runtime behavior."""
 
     def _scrape_dispatch(search_url: str, ctx):
-        if flags.impl == "v2" and v2_scraper is not None:
+        canary_guarded_v2 = (
+            src == "mercadolivre"
+            and bool(getattr(flags, "canary_v2_enabled", False))
+            and bool(getattr(settings, "enable_playwright", False))
+            and bool(getattr(ctx, "browser_fallback_enabled", False))
+        )
+        use_v2 = flags.impl == "v2" or canary_guarded_v2
+
+        if use_v2 and v2_scraper is not None:
             result = v2_scraper.scrape(search_url, ctx)
             ads, meta = adapt_v2(src, result)
             object.__setattr__(
                 ctx,
                 "_last_adapter_meta",
                 {
-                    "impl": "v2",
+                    "impl": "v2_canary" if canary_guarded_v2 and flags.impl != "v2" else "v2",
                     "raw_count": int(getattr(meta, "raw_count", 0) or 0),
                     "normalized_count": int(getattr(meta, "normalized_count", 0) or 0),
                     "partial_failure": bool(getattr(meta, "partial_failure", False)),

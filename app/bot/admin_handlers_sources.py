@@ -6,6 +6,7 @@ from app.bot.text_sanitize import sanitize_for_telegram
 from app.db.session import SessionLocal
 from app.models.source_state import SourceState
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
+from app.sources.flags import read_source_impl_flags
 
 _SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
 
@@ -105,6 +106,7 @@ async def admin_sources_show(update, source: str):
             await update.message.reply_text("Source não encontrada.")
             return
         st = db.query(SourceState).filter(SourceState.source == cfg.source).one_or_none()
+        impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
         lines = [
             f"🧰 Admin — Source: {cfg.source}",
             f"enabled={bool(cfg.is_enabled)}",
@@ -114,6 +116,8 @@ async def admin_sources_show(update, source: str):
             f"proxy_server={cfg.proxy_server or '-'}",
             f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
             f"force_browser={bool(cfg.force_browser)}",
+            f"impl={impl_flags.impl}",
+            f"mercadolivre_v2_canary_enabled={bool(impl_flags.canary_v2_enabled)}",
             f"extra={_sanitize_source_extra(cfg.extra)}",
         ]
         role = None
@@ -145,13 +149,21 @@ async def admin_sources_set_simple(update, source: str, field: str, value: str):
                 "fallback": bool(cfg.browser_fallback_enabled),
                 "force": bool(cfg.force_browser),
             }
+            impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
             db.commit()
 
+        extra_note = ""
+        if str(field).strip().lower() == "extra":
+            extra_note = (
+                f"\nextra=updated impl={impl_flags.impl} "
+                f"mercadolivre_v2_canary_enabled={bool(impl_flags.canary_v2_enabled)}"
+            )
         await update.message.reply_text(
             sanitize_for_telegram(
                 f"✅ Atualizado {snap['source']}: {field}={value}\n"
                 f"enabled={snap['enabled']} sched={snap['sched']}m cool={snap['cool']}m "
                 f"rate={snap['rate']}s proxy={snap['proxy']} fallback={snap['fallback']} force={snap['force']}"
+                f"{extra_note}"
             )
         )
     except Exception as e:

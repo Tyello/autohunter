@@ -9,6 +9,7 @@ class SourceImplFlags:
     impl: str = "v1"
     dual_mode: str = "compare_only"
     compare_cfg: dict[str, Any] = field(default_factory=dict)
+    canary_v2_enabled: bool = False
 
 
 def read_source_impl_flags(extra: dict[str, Any] | None) -> SourceImplFlags:
@@ -23,5 +24,11 @@ def read_source_impl_flags(extra: dict[str, Any] | None) -> SourceImplFlags:
         dual_mode = "compare_only"
 
     compare_cfg = payload.get("compare_cfg") if isinstance(payload.get("compare_cfg"), dict) else {}
+    canary_v2_enabled = bool(payload.get("mercadolivre_v2_canary_enabled", False))
 
-    return SourceImplFlags(impl=impl, dual_mode=dual_mode, compare_cfg=compare_cfg)
+    return SourceImplFlags(
+        impl=impl,
+        dual_mode=dual_mode,
+        compare_cfg=compare_cfg,
+        canary_v2_enabled=canary_v2_enabled,
+    )

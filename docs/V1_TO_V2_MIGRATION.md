@@ -493,3 +493,12 @@ Notas de operação:
 
 - Gate atual de flip continua bloqueado quando Mercado Livre estiver em `ml_security_or_captcha_page` ou `ml_shell_without_results`; não decidir flip V2 durante janela de bloqueio/captcha.
 - V1 e V2 já têm caminho técnico viável, porém a decisão operacional depende de estabilidade fora de security wall temporária.
+
+## Mercado Livre — canary operacional controlado (manual)
+
+- O runtime já suporta `extra.impl` (`v1|v2|dual`), mas o canary manual adiciona um caminho conservador para Mercado Livre sem flip global.
+- Configuração manual (DB-driven em `source_configs.extra`):
+  - ativar canary: `mercadolivre_v2_canary_enabled=true`;
+  - rollback: `mercadolivre_v2_canary_enabled=false` (V1 permanece disponível).
+- O canary só aplica V2 quando Playwright está ativo e `browser_fallback_enabled=true`.
+- Não há promoção automática para outras sources e não há flip automático pós-sucesso.
