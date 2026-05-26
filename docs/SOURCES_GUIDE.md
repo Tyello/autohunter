@@ -477,3 +477,22 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 
 - Anti-hammering: ao detectar `Seguridad — Mercado Libre` ou `\/captcha\/wall`, interrompa novas tentativas browser em sequência para a mesma query e aguarde janela de cooldown antes de repetir o probe completo.
 - Shell sem cards (`ml_shell_without_results`) deve usar no máximo 1 retry com contexto Playwright fresco e limpeza de storage da source.
+
+### Mercado Livre — habilitar/desabilitar canary V2 com rollback simples
+
+1. Conferir status atual:
+   - `/admin sources show mercadolivre`
+   - validar `impl=...` e `mercadolivre_v2_canary_enabled=...`.
+2. Ativar canary manual:
+   - `/admin sources set mercadolivre extra {"impl":"v1","mercadolivre_v2_canary_enabled":true}`
+   - manter `browser_fallback_enabled=true`.
+3. Validar paridade operacional (somente observabilidade):
+   - `python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json`
+   - `python scripts/source_v2_inventory.py --format markdown`
+4. Rollback manual imediato:
+   - `/admin sources set mercadolivre extra {"impl":"v1","mercadolivre_v2_canary_enabled":false}`
+
+Notas:
+- O canary não altera WebMotors nem outras sources.
+- Backoff/circuit breaker do source continuam válidos.
+- Flip global/automático continua proibido.

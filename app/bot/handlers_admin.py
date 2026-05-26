@@ -42,6 +42,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.fb_session import FBSession
 from app.models.auction_lot import AuctionLot
 from app.sources.registry import list_sources
+from app.sources.flags import read_source_impl_flags
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
 from app.services.plan_capabilities import normalize_plan_code
 from app.services.operational_alerts_service import collect_operational_alerts
@@ -2627,6 +2628,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
         fb = bool(cfg.browser_fallback_enabled) if cfg is not None else bool(getattr(p, 'default_browser_fallback_enabled', False))
         force_b = bool(cfg.force_browser) if cfg is not None else bool(getattr(p, 'default_force_browser', False))
         implemented = p.scrape is not None
+        cfg_extra = cfg.extra if (cfg is not None and isinstance(cfg.extra, dict)) else None
+        impl_flags = read_source_impl_flags(cfg_extra)
 
         st = states.get(p.name)
         op_class = classify_source_operational_role(p, cfg=cfg, state=st)
@@ -2661,6 +2664,9 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 flags.append("fallback=on")
             if force_b:
                 flags.append("force=on")
+            flags.append(f"impl={impl_flags.impl}")
+            if p.name == "mercadolivre":
+                flags.append(f"v2_canary={'on' if impl_flags.canary_v2_enabled else 'off'}")
 
         # causa (usa last_effective se last=skipped)
         lr_cause = lr

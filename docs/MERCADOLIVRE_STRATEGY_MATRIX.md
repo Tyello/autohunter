@@ -300,3 +300,15 @@ Decision:
 - Do **not** flip to V2 yet.
 - Improve dual-run parity diagnostics (`raw_count`, `unique_count`, duplicate counts, enrichment classification).
 - Flip gate remains: `v1_count > 0` and `v2_count > 0` in the same clean window.
+
+## Canary manual V2 (guarded, sem flip global)
+
+- Data operacional de referência: **2026-05-26**.
+- Estado observado no scheduler/admin: V1 bloqueado por `ml_shell_without_results` (blocks seguidos=15), com backoff ativo; V2 com evidência positiva em dual-run (ex.: `v2_count=14/15`, `v2_blocked=false`, `fetch_method=browser_fallback`, `parse_errors=0`).
+- Próximo passo permitido: canary manual para **somente `mercadolivre`**, sem auto-flip e mantendo rollback para V1.
+- Gate técnico do canary:
+  1. `source=mercadolivre`;
+  2. `extra.mercadolivre_v2_canary_enabled=true`;
+  3. Playwright habilitado;
+  4. `browser_fallback_enabled=true`.
+- Backoff/circuit breaker continuam obrigatórios (não executar V1 e V2 no mesmo ciclo para bypass de cooldown).
