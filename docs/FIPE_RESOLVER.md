@@ -64,5 +64,6 @@ Motivos de skip:
 - `missing_price`
 - `missing_vehicle_key`
 - `already_exists`
+- `already_planned`
 
 Read-only: esta etapa não grava em `fipe_prices`, não altera `score_v2` e não chama API externa.

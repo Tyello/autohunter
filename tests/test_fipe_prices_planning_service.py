@@ -76,3 +76,21 @@ def test_build_plan_no_persist(db, monkeypatch):
     assert out["planned_inserts_count"] == 1
     assert out["skipped_counts"]["no_match"] == 1
     assert before == after == 0
+
+
+def test_build_plan_deduplicates_same_vehicle_key(db, monkeypatch):
+    l1 = _listing(db, make="Honda", model="Civic", year=2015)
+    _listing(db, make="Honda", model="Civic", year=2015)
+
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.resolve_listing_to_fipe_candidates", lambda *a, **k: {
+        "status": "matched",
+        "best_candidate": {"confidence_label": "high", "confidence_score": 90, "price": 95000, "model_name": "Civic"},
+    })
+
+    before = db.query(FipePrice).count()
+    out = build_fipe_price_plan(db, reference_month="2026-05", limit=100)
+    after = db.query(FipePrice).count()
+
+    assert out["planned_inserts_count"] == 1
+    assert out["skipped_counts"]["already_planned"] == 1
+    assert before == after == 0

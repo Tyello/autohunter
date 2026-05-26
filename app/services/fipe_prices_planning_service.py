@@ -20,6 +20,7 @@ SKIPPED_REASONS = (
     "missing_price",
     "missing_vehicle_key",
     "already_exists",
+    "already_planned",
 )
 
 
@@ -113,6 +114,7 @@ def build_fipe_price_plan(db: Session, *, reference_month: str, limit: int = 100
 
     skipped_counts = Counter({k: 0 for k in SKIPPED_REASONS})
     planned_inserts = []
+    planned_keys = set()
     would_updates = []
     examples_skipped = []
 
@@ -124,7 +126,21 @@ def build_fipe_price_plan(db: Session, *, reference_month: str, limit: int = 100
             min_confidence=min_confidence,
         )
         if row.get("status") == "planned":
-            planned_inserts.append(row["item"])
+            item = row["item"]
+            planned_key = (item.get("vehicle_key"), item.get("reference_month"))
+            if planned_key in planned_keys:
+                reason = "already_planned"
+                skipped_counts[reason] += 1
+                if len(examples_skipped) < 20:
+                    examples_skipped.append(
+                        {
+                            "listing_id": str(getattr(listing, "id", "")),
+                            "reason": reason,
+                        }
+                    )
+                continue
+            planned_keys.add(planned_key)
+            planned_inserts.append(item)
             continue
         reason = row.get("reason") or "no_match"
         skipped_counts[reason] += 1

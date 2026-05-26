@@ -128,7 +128,7 @@ def render_admin_fipe_plan(report: dict) -> str:
         "",
         "Skipped:",
     ]
-    for reason in ["ambiguous", "no_match", "insufficient_data", "below_confidence", "missing_price", "missing_vehicle_key", "already_exists"]:
+    for reason in ["ambiguous", "no_match", "insufficient_data", "below_confidence", "missing_price", "missing_vehicle_key", "already_exists", "already_planned"]:
         lines.append(f"- {reason}: {skipped.get(reason, 0)}")
     lines.extend(["", "Exemplos de inserts:"])
     inserts = report.get("planned_inserts", [])[:2]
