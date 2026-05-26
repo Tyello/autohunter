@@ -109,6 +109,8 @@ Inclui:
 - `--apply` recusando SQLite;
 - `queued` antigo tratado como sinal operacional, não lixo.
 
+Observação: cleanup de filesystem atua apenas em artifacts/debug permitidos; `pw-browsers`, profiles e storage Playwright não são limpos automaticamente.
+
 ### EFF-06 — Backup health
 
 **Status:** implementado.

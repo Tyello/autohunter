@@ -400,11 +400,17 @@ python scripts/disk_audit.py
 Ações:
 
 1. Rodar `python scripts/disk_audit.py`.
-2. Verificar `journalctl --disk-usage`.
-3. Confirmar `FILESYSTEM_CLEANUP_ENABLED=true`.
-4. Reduzir TTLs de artifacts/debug temporariamente se necessário.
+2. Rodar `python scripts/filesystem_cleanup.py` (dry-run padrão) para estimar impacto seguro.
+3. Se o dry-run fizer sentido, rodar `python scripts/filesystem_cleanup.py --apply`.
+4. Verificar `journalctl --disk-usage`.
+5. Confirmar `FILESYSTEM_CLEANUP_ENABLED=true`.
+6. Reduzir TTLs de artifacts/debug temporariamente se necessário.
 
-O cleanup diário remove artefatos antigos de audit/debug, mas não remove storage persistente sensível como Playwright storage/profile sem ação explícita.
+Distinções importantes:
+- Alerta de cache mede o total de `runtime_cache_dir` (ex.: `/var/cache/autohunter`).
+- Cleanup automático/manual só remove conteúdo antigo em `source_audit_root` e `runtime_cache_dir/debug`.
+- Paths sensíveis como `pw-browsers`, Playwright storage, profiles e sessões FB **não** são removidos automaticamente.
+- O alerta inclui top subdirs do cache para diagnóstico acionável sem apagar paths sensíveis.
 
 ## 12) Backup / restore
 

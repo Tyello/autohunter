@@ -89,6 +89,26 @@ def _dir_size_bytes(path: Path) -> int:
     return total
 
 
+def _top_subdirs(path: Path, *, limit: int = 5, max_depth: int = 2) -> list[tuple[int, str]]:
+    if not path.exists() or not path.is_dir():
+        return []
+    rows: list[tuple[int, str]] = []
+    base_depth = len(path.parts)
+    for node in path.rglob("*"):
+        if not node.is_dir():
+            continue
+        depth = len(node.parts) - base_depth
+        if depth <= 0 or depth > max_depth:
+            continue
+        try:
+            size = _dir_size_bytes(node)
+        except Exception:
+            continue
+        rows.append((size, str(node)))
+    rows.sort(key=lambda x: x[0], reverse=True)
+    return rows[: max(1, int(limit))]
+
+
 def _human_gb(n: int) -> str:
     return f"{(int(n) / (1024**3)):.2f}GB"
 
@@ -175,7 +195,9 @@ def collect_operational_alerts(
         cache_dir = Path(getattr(settings, "runtime_cache_dir", "/var/cache/autohunter")).expanduser().resolve()
         cache_size_bytes = _dir_size_bytes(cache_dir)
         if cache_size_bytes >= cache_limit_bytes > 0:
-            alerts.append(OperationalAlert("disk_cache_pressure", f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Próximo passo: executar cleanup filesystem e revisar artifacts/debug.", _resource_cooldown_minutes()))
+            top = _top_subdirs(cache_dir, limit=4, max_depth=2)
+            top_msg = ", ".join([f"{Path(p).name}={_human_gb(s)}" for s, p in top]) if top else "sem subdirs legíveis"
+            alerts.append(OperationalAlert("disk_cache_pressure", f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Top dirs: {top_msg}. Próximo passo: rode python scripts/disk_audit.py e python scripts/filesystem_cleanup.py --apply.", _resource_cooldown_minutes()))
     except Exception:
         pass
 
