@@ -1,6 +1,10 @@
 # Planos — Estrutura e Evolução
-> Estado atual: Free e Premium no código. Pricing doc (`docs/pricing.md`) define 3 tiers (Free, Enthusiast, Pro) mas o código implementa apenas 2 (Free, Premium).
-> Este documento alinha código, produto e estratégia.
+
+Atualizado em: 2026-05-25.  
+Estado confrontado com a `main`.
+
+> Fonte de verdade atual: `app/services/plan_capabilities.py` + tabela `plans` para limites persistidos.  
+> Produto atual: dois planos operacionais — Free e Premium.
 
 ---
 
@@ -11,124 +15,226 @@ PLAN_CODE_FREE = "free"
 PLAN_CODE_PREMIUM = "premium"
 ```
 
-**Limites Free (código):**
-- 2 wishlists salvas
-- 1 anúncio rastreado total
-- 5 alertas/dia por busca
-- Sem alertas automáticos de tracking
+A `main` implementa apenas dois códigos de plano reconhecidos pelo runtime:
 
-**Limites Premium (código):**
-- 15 wishlists salvas
-- 5 anúncios rastreados total (3 por wishlist)
-- 200 alertas/dia por busca
-- Alertas automáticos de tracking
+- `free`
+- `premium`
+
+Qualquer documentação antiga com três tiers (`Free`, `Enthusiast`, `Pro`) deve ser tratada como proposta histórica, não como estado real do produto.
 
 ---
 
-## Gap entre `pricing.md` e o código
+## Capacidades atuais
 
-O `pricing.md` define 3 tiers (Free + Enthusiast + Pro) mas o código tem 2. O tier "Enthusiast" (R$ 9,90) e "Pro" (R$ 19,90) não existem no banco, nem nas migrations, nem nos handlers.
+### Free
 
-**Decisão recomendada:** manter 2 planos para o lançamento. Free e Premium. Adicionar tiers só após ter dados reais de uso e disposição de pagamento dos beta users. Tentar vender 3 opções antes de ter produto validado aumenta fricção de decisão sem benefício.
+Estado em `app/services/plan_capabilities.py`:
+
+```text
+max_active_wishlists=2
+max_tracked_total=1
+max_tracked_slots_per_wishlist=3
+tracking_auto_alerts=false
+daily_notifications_per_wishlist=5
+premium=false
+```
+
+Resumo user-facing:
+
+- até 2 buscas salvas;
+- até 1 anúncio rastreado no total;
+- até 3 slots por wishlist, mas limitado pelo total do plano;
+- sem alertas automáticos de tracking;
+- 5 alertas/dia por busca.
+
+### Premium
+
+Estado em `app/services/plan_capabilities.py`:
+
+```text
+max_active_wishlists=15
+max_tracked_total=5
+max_tracked_slots_per_wishlist=3
+tracking_auto_alerts=true
+daily_notifications_per_wishlist=200
+premium=true
+launch_price_brl=5.99
+future_price_brl=9.99
+```
+
+Resumo user-facing:
+
+- até 15 buscas salvas;
+- até 5 anúncios rastreados no total;
+- até 3 rastreados por wishlist;
+- alertas automáticos de tracking;
+- 200 alertas/dia por busca;
+- preço de lançamento tratado no código como R$ 5,99/mês;
+- preço futuro tratado no código como R$ 9,99/mês.
+
+---
+
+## Observação sobre limites no banco
+
+`resolve_plan_capabilities` usa a tabela `plans` para sobrescrever, quando existir:
+
+- `max_wishlists`;
+- `daily_alert_limit`.
+
+Já os limites de tracking e preços de lançamento/futuro vêm hoje do fallback em `plan_capabilities.py`.
+
+**Diretriz:** se a operação quiser mudar limite comercial, confirmar primeiro se o limite é DB-driven ou code-driven para evitar divergência entre `/plan`, `/upgrade` e regra real.
+
+---
+
+## Gap entre proposta de pricing e código
+
+Se `docs/pricing.md` ou qualquer doc histórico falar em `Enthusiast` e `Pro`, isso não reflete a `main`.
+
+**Decisão recomendada para lançamento:** manter dois planos.
+
+Motivo:
+
+- reduz fricção de decisão;
+- simplifica suporte no beta;
+- evita migrations/handlers prematuros;
+- permite precificar melhor após dados reais de uso.
+
+Adicionar tiers só depois de medir:
+
+- quantas buscas usuários realmente criam;
+- quantos rastreados usam;
+- quantos alertas recebem;
+- quanto aceitam pagar;
+- quais features Premium realmente geram conversão.
 
 ---
 
 ## PLAN-01 — Trial de 7 dias automático
 
+**Status:** aberto.
+
 **Objetivo:** dar ao usuário novo a experiência completa antes de pedir dinheiro.
 
-**Como funciona:**
-- Ao criar conta, subscription criada automaticamente com `source="trial"` e `ends_at = now() + 7 days`
-- Usuário tem limites de Premium durante o trial
-- Aviso nos dias 5, 6 e 7
-- Downgrade automático para Free ao expirar
+**Estado atual confrontado:** não há evidência de trial automático implementado na `main`.
 
-**Schema:** já suportado pelo modelo `Subscription` (campo `source` e `ends_at`)
+Direção:
 
-**Migration:** não necessária — só lógica no `premium_subscription_service.py`
+```text
+novo usuário
+→ cria subscription Premium trial por 7 dias
+→ usa capacidades Premium no período
+→ recebe avisos antes de terminar
+→ volta para Free ao expirar se não pagar
+```
+
+Possível implementação:
 
 ```python
-def create_trial_subscription(db, account_id: UUID):
+def create_trial_subscription(db, account_id):
     premium_plan = db.query(Plan).filter_by(code="premium").first()
     sub = Subscription(
         account_id=account_id,
         plan_id=premium_plan.id,
         status="active",
         source="trial",
-        starts_at=datetime.now(UTC),
-        ends_at=datetime.now(UTC) + timedelta(days=7),
+        starts_at=now,
+        ends_at=now + timedelta(days=7),
     )
-    db.add(sub)
-    db.commit()
 ```
+
+**Atenção:** antes de ativar trial, decidir se ele é universal ou apenas para beta/founders.
 
 ---
 
-## PLAN-02 — Founders: plano especial de lançamento
+## PLAN-02 — Founders
 
-**Objetivo:** validar disposição de pagamento antes do lançamento público. 20 vagas.
+**Status:** proposta comercial, ainda depende de fluxo de ativação/pagamento.
 
-**Definição:**
-- Preço: R$ 149/ano (equivale a R$ 12,42/mês)
-- Duração: 24 meses (preço travado)
-- Benefício extra: acesso a canal privado de feedback
+**Objetivo:** validar disposição de pagamento antes do lançamento público amplo.
 
-**Como implementar sem criar novo plan_code:**
-- Criar subscription com `source="founders"` e `ends_at = now() + 24 months`
-- `metadata_json = {"tier": "founders", "locked_price": 149}`
-- Usar o mesmo `plan_id` do Premium
+Direção recomendada:
 
-**Handler de ativação:**
+- usar o mesmo `plan_id` Premium;
+- marcar `Subscription.source = "founders"`;
+- registrar metadata com preço, duração e operador;
+- limitar vagas operacionalmente.
+
+Exemplo de metadata:
+
+```json
+{
+  "tier": "founders",
+  "locked_price_brl": 149,
+  "duration_months": 24,
+  "activated_by": "admin"
+}
 ```
-/admin premium activate <chat_id> founders
-```
 
-**Limite de vagas:** checar com `SELECT COUNT(*) FROM subscriptions WHERE source='founders'` antes de ativar.
+**Importante:** não criar novo `plan_code` só para Founders enquanto o runtime está desenhado para `free|premium`.
 
 ---
 
 ## PLAN-03 — Ajuste de limites Free para conversão
 
-**Estado atual:** Free tem 2 buscas e 5 alertas/dia. É generoso o suficiente para nunca precisar de Premium para uso casual.
+**Status:** decisão pós-beta.
 
-**Proposta para aumentar pressão de conversão:**
+Estado atual Free:
 
-| Limite | Atual | Proposto |
-|---|---|---|
-| Buscas salvas | 2 | 1 |
-| Alertas/dia | 5 | 3 |
-| Rastreados | 1 | 0 |
+| Limite | Atual |
+|---|---:|
+| Buscas salvas | 2 |
+| Alertas/dia por busca | 5 |
+| Rastreados totais | 1 |
 
-Com 1 busca e 3 alertas, o usuário que busca mais de um modelo ou quer mais cobertura sente o limite rápido. O rastreamento zero garante que qualquer usuário que queira acompanhar preço precisa do Premium.
+Possível ajuste futuro:
 
-**Quando fazer:** após beta. Não mudar limites enquanto está testando produto — confunde análise de uso.
+| Limite | Proposto pós-beta |
+|---|---:|
+| Buscas salvas | 1 |
+| Alertas/dia por busca | 3 |
+| Rastreados totais | 0 ou 1 |
 
-**Como mudar:** update no banco, não no código:
-```sql
-UPDATE plans SET max_wishlists = 1 WHERE code = 'free';
+**Diretriz:** não apertar limite durante beta inicial sem métrica. Primeiro medir uso real via `/admin metrics` e feedback qualitativo.
+
+---
+
+## PLAN-04 — Modo silencioso
+
+**Status:** aberto, pós-beta.
+
+**Objetivo:** reduzir churn por alerta em horário ruim.
+
+Direção:
+
+- permitir janela de não perturbe por usuário;
+- sender posterga envio para o fim da janela;
+- feature Premium;
+- configurar via Telegram.
+
+Possível schema:
+
+```text
+users.quiet_hours_start
+users.quiet_hours_end
+users.timezone
 ```
-Os limites são lidos do banco via `Plan`, não hardcoded.
+
+**Critério:** não perder alerta; apenas postergar.
 
 ---
 
-## PLAN-04 — Modo silencioso (horário de não-disturbar)
+## Prioridade atual
 
-**Objetivo:** Premium feature que reduz churn de usuários que recebem alertas de madrugada.
-
-**Implementação:**
-- Campo `users.quiet_hours_start` e `users.quiet_hours_end` (nullable)
-- Sender verifica antes de enviar: se horário atual está no intervalo, adicionar à fila com `next_attempt_at = quiet_end`
-- Configurável via `/settings silencioso`
-
-**Disponível apenas para:** Premium
-
----
-
-## Prioridade
-
-| # | Item | Semana | Impacto |
+| # | Item | Status | Momento |
 |---|---|---|---|
-| PLAN-01 | Trial 7 dias | 1 | Ativação e conversão |
-| PLAN-02 | Founders | 2 | Validação comercial |
-| PLAN-03 | Limites Free mais apertados | pós-beta | Pressão de conversão |
-| PLAN-04 | Modo silencioso | pós-beta | Retenção Premium |
+| 1 | PLAN-01 — Trial 7 dias | Aberto | Beta/lançamento |
+| 2 | PLAN-02 — Founders | Aberto | Após fluxo de pagamento/ativação |
+| 3 | PLAN-03 — Limites Free | Aberto | Pós-beta, com dados |
+| 4 | PLAN-04 — Modo silencioso | Aberto | Pós-beta |
+
+---
+
+## Próxima decisão de produto
+
+Antes de mudar preço ou limite, fechar o fluxo de pagamento/ativação descrito em `06_SUBSCRIPTION.md`. Sem isso, plano existe no código, mas monetização ainda depende de operação manual.
