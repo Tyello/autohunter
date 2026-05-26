@@ -83,3 +83,7 @@ Exemplos:
 - `/admin fipe apply_plan`
 - `/admin fipe apply_plan 2026-05 dry`
 - `/admin fipe apply_plan 2026-05 live 100`
+
+- `/admin fipe apply_plan` agora registra auditoria persistente em `system_logs` via sessão dedicada (dry-run e live).
+- Dry-run também é auditável sem depender da transação principal de aplicação.
+- O logging de auditoria não altera regra de aplicação (critérios, `allow_updates=False`, sem updates automáticos).
