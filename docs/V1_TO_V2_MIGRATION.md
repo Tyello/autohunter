@@ -98,21 +98,24 @@ Caminho ativo é robusto e contém mecanismos anti-bloqueio/anti-ruído que não
 - Próximo gate operacional: retomar paridade dual-run com V1 e V2 > 0 quando não houver captcha temporário no ML.
 
 ### Atualização operacional (2026-05-24)
-- Validação parcial de V2 atingida em dual-run:
-  - `v2_count=14`
+- Validação de paridade V1/V2 atingida em dual-run:
+  - `v1_count=30`
+  - `v2_count=15`
+  - `matched_count=15`
+  - `only_v1_count=0`
+  - `only_v2_count=0`
   - `v2_metrics.fetch_method=browser_fallback`
-  - `v2_metrics.raw_items_found=14`
-  - `v2_metrics.items_parsed=14`
-  - `v2_metrics.items_valid=14`
+  - `v2_metrics.raw_items_found=15`
+  - `v2_metrics.items_parsed=15`
+  - `v2_metrics.items_valid=15`
   - `parse_errors=0`
-- No mesmo teste, V1 ficou bloqueado com shell:
-  - `v1_count=0`
-  - `v1_error=FetchBlocked reason=ml_shell_without_results`
 - Interpretação obrigatória:
-  - bloqueador atual é janela instável do Mercado Livre / shell no V1 no mesmo teste;
-  - **não** é regressão ativa de parser/fetch do V2 nesse evento.
+  - V2 está funcional, não bloqueado e validou 15 itens;
+  - diferença `v1_count` vs `v2_count` parece contagem bruta/duplicidade no V1 (não ausência de IDs no V2);
+  - `field_diffs` observados de `year` (vazio no V1, preenchido no V2) representam enriquecimento positivo, não regressão.
 - Próxima etapa recomendada:
-  - validação operacional (cooldown + **single dual-run**), e não novo strategy probe completo.
+  - explicitar paridade de únicos e duplicidade no relatório (`raw_count` vs `unique_count`);
+  - classificar `field_diffs` em bloqueantes vs enriquecimento para evitar falso WARN por ruído de contagem.
 - Gate de flip permanece inalterado:
   - só considerar `impl=v2` após `v1_count > 0` e `v2_count > 0` na mesma janela limpa.
 - Diretriz para futuros agentes:

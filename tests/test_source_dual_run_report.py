@@ -44,6 +44,7 @@ def test_compare_items_matching_and_diffs():
     assert cmp["only_v1_count"] == 1
     assert cmp["only_v2_count"] == 1
     assert cmp["field_diffs_count"] == 1
+    assert cmp["blocking_field_diffs_count"] >= 1
 
 
 @pytest.mark.parametrize(
@@ -52,14 +53,60 @@ def test_compare_items_matching_and_diffs():
         (0, 0, "INCONCLUSIVE", "both_paths_returned_zero_items"),
         (2, 0, "FAIL", "v2_returned_zero_items_while_v1_found_items"),
         (0, 2, "WARN", "v1_returned_zero_items_while_v2_found_items"),
-        (10, 6, "WARN", "count_difference_above_threshold"),
-        (10, 9, "OK", "counts_within_threshold"),
+        (10, 6, "WARN", "unique_id_mismatch_between_paths"),
+        (10, 9, "WARN", "unique_id_mismatch_between_paths"),
     ],
 )
 def test_summary_status_and_reason(v1_count, v2_count, expected_status, expected_reason):
     report = build_dual_run_report("mercadolivre", "https://x", [{"id": i} for i in range(v1_count)], [{"id": i} for i in range(v2_count)])
     assert report["summary_status"] == expected_status
     assert report["summary_reason"] == expected_reason
+
+
+def test_v1_duplicates_v2_unique_same_ids_unique_parity_ok():
+    v1 = [{"external_id": "A1", "title": "Civic", "price": "100"}, {"external_id": "A1", "title": "Civic", "price": "100"}]
+    v2 = [{"external_id": "A1", "title": "Civic", "price": "100"}]
+    report = build_dual_run_report("mercadolivre", "https://x", v1, v2)
+    assert report["only_v1_count"] == 0
+    assert report["only_v2_count"] == 0
+    assert report["v1_duplicate_count"] == 1
+    assert report["v2_duplicate_count"] == 0
+    assert report["summary_status"] == "OK"
+    assert report["summary_reason"] == "unique_parity_ok"
+
+
+def test_year_diff_with_v2_filled_is_enrichment():
+    v1 = [{"external_id": "A1", "year": ""}]
+    v2 = [{"external_id": "A1", "year": "2014"}]
+    report = build_dual_run_report("mercadolivre", "https://x", v1, v2)
+    diff = report["field_diff_examples"][0]["diff_fields"]["year"]
+    assert diff["classification"] == "v2_enrichment"
+    assert report["enrichment_field_diffs_count"] == 1
+
+
+def test_price_diff_is_blocking():
+    v1 = [{"external_id": "A1", "price": "100"}]
+    v2 = [{"external_id": "A1", "price": "999"}]
+    report = build_dual_run_report("mercadolivre", "https://x", v1, v2)
+    diff = report["field_diff_examples"][0]["diff_fields"]["price"]
+    assert diff["classification"] == "blocking"
+    assert report["blocking_field_diffs_count"] == 1
+
+
+def test_thumbnail_v2_filled_is_enrichment():
+    v1 = [{"external_id": "A1", "thumbnail": ""}]
+    v2 = [{"external_id": "A1", "thumbnail": "http://img"}]
+    report = build_dual_run_report("mercadolivre", "https://x", v1, v2)
+    diff = report["field_diff_examples"][0]["diff_fields"]["thumbnail"]
+    assert diff["classification"] == "v2_enrichment"
+
+
+def test_real_id_difference_keeps_warn():
+    v1 = [{"external_id": "A1"}]
+    v2 = [{"external_id": "A2"}]
+    report = build_dual_run_report("mercadolivre", "https://x", v1, v2)
+    assert report["only_v1_count"] > 0
+    assert report["summary_status"] in {"WARN", "FAIL"}
 
 
 def test_summary_status_fails_when_any_side_errors():
@@ -101,7 +148,7 @@ def test_script_parse_args_validation_and_success_path(monkeypatch, capsys):
     rc = script.main(["mercadolivre", "--query", "civic", "--format", "json", "--limit", "5"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert '"summary_reason": "counts_within_threshold"' in out
+    assert '"summary_reason": "unique_parity_ok"' in out
 
 
 def test_script_generates_report_when_v1_fails(monkeypatch, capsys):

@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 
 _COMPARE_FIELDS = ("title", "price", "year", "km", "city", "uf", "url", "external_id", "thumbnail")
+_ENRICHMENT_FIELDS = {"year", "km", "city", "uf", "thumbnail"}
 
 
 def _to_clean_str(value: Any) -> str:
@@ -112,25 +113,55 @@ def compare_items(v1_items: list[dict], v2_items: list[dict]) -> dict:
     only_v1_keys = sorted(keys_v1 - keys_v2)
     only_v2_keys = sorted(keys_v2 - keys_v1)
 
+    v1_unique_count = len(v1_map)
+    v2_unique_count = len(v2_map)
     field_diffs: list[dict[str, Any]] = []
+    blocking_field_diffs_count = 0
+    non_blocking_field_diffs_count = 0
+    enrichment_field_diffs_count = 0
+    blocking_examples: list[dict[str, Any]] = []
+    enrichment_examples: list[dict[str, Any]] = []
     for key in matched_keys:
         left, right = v1_map[key], v2_map[key]
         diffs = {}
         for field in _COMPARE_FIELDS:
             if (left.get(field) or "") != (right.get(field) or ""):
-                diffs[field] = {"v1": left.get(field) or "", "v2": right.get(field) or ""}
+                classification = "blocking"
+                if field in _ENRICHMENT_FIELDS and not (left.get(field) or "") and (right.get(field) or ""):
+                    classification = "v2_enrichment"
+                diffs[field] = {"v1": left.get(field) or "", "v2": right.get(field) or "", "classification": classification}
+                if classification == "blocking":
+                    blocking_field_diffs_count += 1
+                elif classification == "v2_enrichment":
+                    enrichment_field_diffs_count += 1
+                else:
+                    non_blocking_field_diffs_count += 1
         if diffs:
-            field_diffs.append({"key": key, "diff_fields": diffs, "v1": left, "v2": right})
+            diff_entry = {"key": key, "diff_fields": diffs, "v1": left, "v2": right}
+            field_diffs.append(diff_entry)
+            if any(v.get("classification") == "blocking" for v in diffs.values()) and len(blocking_examples) < 5:
+                blocking_examples.append(diff_entry)
+            if all(v.get("classification") == "v2_enrichment" for v in diffs.values()) and len(enrichment_examples) < 5:
+                enrichment_examples.append(diff_entry)
 
     return {
         "v1_count": len(v1_norm),
         "v2_count": len(v2_norm),
+        "v1_unique_count": v1_unique_count,
+        "v2_unique_count": v2_unique_count,
+        "v1_duplicate_count": max(0, len(v1_norm) - v1_unique_count),
+        "v2_duplicate_count": max(0, len(v2_norm) - v2_unique_count),
         "matched_count": len(matched_keys),
         "only_v1_count": len(only_v1_keys),
         "only_v2_count": len(only_v2_keys),
         "field_diffs_count": len(field_diffs),
+        "blocking_field_diffs_count": blocking_field_diffs_count,
+        "non_blocking_field_diffs_count": non_blocking_field_diffs_count,
+        "enrichment_field_diffs_count": enrichment_field_diffs_count,
         "only_v1_examples": [v1_map[k] for k in only_v1_keys[:5]],
         "only_v2_examples": [v2_map[k] for k in only_v2_keys[:5]],
+        "blocking_field_diff_examples": blocking_examples,
+        "enrichment_diff_examples": enrichment_examples,
         "field_diff_examples": field_diffs[:5],
     }
 
@@ -304,7 +335,14 @@ def _build_diagnostics(
         "hints": hints,
         **({"fetch_probe": fetch_probe} if fetch_probe else {}),
     }
-def _summary_status_and_reason(v1_count: int, v2_count: int, *, v1_error: str = "", v2_error: str = "") -> tuple[str, str]:
+def _summary_status_and_reason(compare: dict[str, Any], *, v1_error: str = "", v2_error: str = "") -> tuple[str, str]:
+    v1_count = int(compare.get("v1_count", 0))
+    v2_count = int(compare.get("v2_count", 0))
+    v1_unique_count = int(compare.get("v1_unique_count", v1_count))
+    v2_unique_count = int(compare.get("v2_unique_count", v2_count))
+    only_v1_count = int(compare.get("only_v1_count", 0))
+    only_v2_count = int(compare.get("only_v2_count", 0))
+    blocking_diffs = int(compare.get("blocking_field_diffs_count", 0))
     if v1_error or v2_error:
         return "FAIL", "path_execution_error"
     if v1_count == 0 and v2_count == 0:
@@ -313,6 +351,12 @@ def _summary_status_and_reason(v1_count: int, v2_count: int, *, v1_error: str = 
         return "FAIL", "v2_returned_zero_items_while_v1_found_items"
     if v1_count == 0 and v2_count > 0:
         return "WARN", "v1_returned_zero_items_while_v2_found_items"
+    if only_v1_count > 0 or only_v2_count > 0:
+        return "WARN", "unique_id_mismatch_between_paths"
+    if only_v1_count == 0 and only_v2_count == 0 and v1_unique_count == v2_unique_count and blocking_diffs == 0:
+        if int(compare.get("enrichment_field_diffs_count", 0)) > 0:
+            return "OK", "unique_parity_ok_enrichment_only"
+        return "OK", "unique_parity_ok"
     if max(v1_count, v2_count, 1) and abs(v1_count - v2_count) / max(v1_count, v2_count, 1) > 0.30:
         return "WARN", "count_difference_above_threshold"
     return "OK", "counts_within_threshold"
@@ -338,12 +382,7 @@ def build_dual_run_report(
         "search_url": _to_clean_str(search_url),
         **compare,
     }
-    status, reason = _summary_status_and_reason(
-        report["v1_count"],
-        report["v2_count"],
-        v1_error=_to_clean_str(v1_error),
-        v2_error=_to_clean_str(v2_error),
-    )
+    status, reason = _summary_status_and_reason(report, v1_error=_to_clean_str(v1_error), v2_error=_to_clean_str(v2_error))
     report["summary_status"] = status
     report["summary_reason"] = reason
     if v1_error:
@@ -364,6 +403,20 @@ def build_dual_run_report(
         v2_metrics=v2_metrics,
         fetch_probe=fetch_probe,
     )
+    hints = report["diagnostics"].get("hints", [])
+    if report.get("v1_duplicate_count", 0) > 0:
+        hints.append("v1_duplicates_detected")
+    if report.get("only_v1_count", 0) == 0 and report.get("only_v2_count", 0) == 0 and report.get("v1_unique_count", 0) == report.get("v2_unique_count", -1):
+        hints.append("unique_parity_ok")
+    if report.get("enrichment_field_diffs_count", 0) > 0 and any(
+        (diff.get("classification") == "v2_enrichment" and field == "year")
+        for ex in report.get("field_diff_examples", [])
+        for field, diff in (ex.get("diff_fields") or {}).items()
+    ):
+        hints.append("v2_enriched_year_from_title")
+    if report.get("summary_status") == "OK" and report.get("v1_duplicate_count", 0) > 0 and report.get("only_v1_count", 0) == 0 and report.get("only_v2_count", 0) == 0:
+        hints.append("not_blocking_for_v2_flip_candidate")
+    report["diagnostics"]["hints"] = list(dict.fromkeys(hints))
     return report
 
 
@@ -376,11 +429,18 @@ def render_dual_run_report_markdown(report: dict) -> str:
         f"- status: **{rpt.get('summary_status', 'UNKNOWN')}**",
         f"- summary_reason: {rpt.get('summary_reason', '')}",
         f"- v1_count: {rpt.get('v1_count', 0)}",
+        f"- v1_unique_count: {rpt.get('v1_unique_count', 0)}",
+        f"- v1_duplicate_count: {rpt.get('v1_duplicate_count', 0)}",
         f"- v2_count: {rpt.get('v2_count', 0)}",
+        f"- v2_unique_count: {rpt.get('v2_unique_count', 0)}",
+        f"- v2_duplicate_count: {rpt.get('v2_duplicate_count', 0)}",
         f"- matched_count: {rpt.get('matched_count', 0)}",
         f"- only_v1_count: {rpt.get('only_v1_count', 0)}",
         f"- only_v2_count: {rpt.get('only_v2_count', 0)}",
         f"- field_diffs_count: {rpt.get('field_diffs_count', 0)}",
+        f"- blocking_field_diffs_count: {rpt.get('blocking_field_diffs_count', 0)}",
+        f"- non_blocking_field_diffs_count: {rpt.get('non_blocking_field_diffs_count', 0)}",
+        f"- enrichment_field_diffs_count: {rpt.get('enrichment_field_diffs_count', 0)}",
         f"- v2_blocked: {rpt.get('v2_blocked', False)}",
         f"- v2_warnings: {rpt.get('v2_warnings', [])}",
         f"- diagnostics_hints: {(rpt.get('diagnostics') or {}).get('hints', [])}",
