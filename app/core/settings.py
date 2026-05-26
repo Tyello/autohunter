@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from pydantic import PrivateAttr
+from pydantic import AliasChoices, Field, PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -68,8 +68,14 @@ class Settings(BaseSettings):
     runtime_cache_dir: str = '/var/cache/autohunter'
     runtime_log_dir: str = '/var/log/autohunter'
 
-    backup_dir: str = '/var/backups/autohunter'
-    backup_max_age_hours: int = 30
+    backup_dir: str = Field(
+        default='/var/backups/autohunter',
+        validation_alias=AliasChoices("BACKUP_DIR", "AUTOHUNTER_BACKUP_DIR"),
+    )
+    backup_max_age_hours: int = Field(
+        default=30,
+        validation_alias=AliasChoices("BACKUP_MAX_AGE_HOURS", "AUTOHUNTER_BACKUP_MAX_AGE_HOURS"),
+    )
 
     health_state_dir: str = '/var/lib/autohunter/health'
     source_audit_root: str = '/var/cache/autohunter/artifacts/source_audit_candidates'

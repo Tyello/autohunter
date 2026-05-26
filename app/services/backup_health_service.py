@@ -9,6 +9,8 @@ from app.core.settings import settings
 
 
 BackupHealthStatus = Literal["OK", "WARNING", "FAIL"]
+DEFAULT_BACKUP_DIR = "/var/backups/autohunter"
+DEFAULT_BACKUP_MAX_AGE_HOURS = 30
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,7 @@ def _resolve_backup_dir() -> str:
     configured = getattr(settings, "backup_dir", None)
     if configured and str(configured).strip():
         return str(configured).strip()
-    return "/var/backups/autohunter"
+    return DEFAULT_BACKUP_DIR
 
 
 def _resolve_max_age_hours() -> int:
@@ -35,7 +37,7 @@ def _resolve_max_age_hours() -> int:
             return int(configured)
         except (TypeError, ValueError):
             pass
-    return 30
+    return DEFAULT_BACKUP_MAX_AGE_HOURS
 
 
 def get_backup_health(now: datetime | None = None) -> BackupHealthResult:
