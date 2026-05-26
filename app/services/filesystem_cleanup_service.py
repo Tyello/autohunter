@@ -112,4 +112,7 @@ def run_filesystem_cleanup(*, dry_run: bool = False) -> dict:
     result["skipped_total"] = artifacts.skipped + debug.skipped
     result["bytes_candidate_total"] = artifacts.bytes_candidate + debug.bytes_candidate
     result["bytes_freed_total"] = artifacts.bytes_freed + debug.bytes_freed
+    if dry_run:
+        result["would_delete_total"] = result["deleted_total"]
+        result["would_free_total"] = result["bytes_freed_total"]
     return result

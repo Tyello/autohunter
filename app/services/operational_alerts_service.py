@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
 import shutil
 import psutil
@@ -92,19 +93,28 @@ def _dir_size_bytes(path: Path) -> int:
 def _top_subdirs(path: Path, *, limit: int = 5, max_depth: int = 2) -> list[tuple[int, str]]:
     if not path.exists() or not path.is_dir():
         return []
-    rows: list[tuple[int, str]] = []
-    base_depth = len(path.parts)
-    for node in path.rglob("*"):
-        if not node.is_dir():
-            continue
-        depth = len(node.parts) - base_depth
-        if depth <= 0 or depth > max_depth:
-            continue
-        try:
-            size = _dir_size_bytes(node)
-        except Exception:
-            continue
-        rows.append((size, str(node)))
+    dir_sizes: dict[str, int] = {}
+    base_depth = len(path.resolve().parts)
+    for root, dirs, files in os.walk(path, topdown=True, onerror=lambda _e: None):
+        root_p = Path(root)
+        depth = len(root_p.parts) - base_depth
+        if depth >= max_depth:
+            dirs[:] = []
+        for name in files:
+            fp = root_p / name
+            try:
+                if fp.is_symlink():
+                    continue
+                size = int(fp.stat().st_size)
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
+            for d in (1, 2):
+                if d > max_depth or depth < d:
+                    continue
+                anc = root_p.parents[depth - d]
+                k = str(anc)
+                dir_sizes[k] = dir_sizes.get(k, 0) + size
+    rows = sorted([(size, p) for p, size in dir_sizes.items()], key=lambda x: x[0], reverse=True)
     rows.sort(key=lambda x: x[0], reverse=True)
     return rows[: max(1, int(limit))]
 
@@ -194,10 +204,12 @@ def collect_operational_alerts(
         cache_limit_bytes = int(cache_limit_gb * (1024 ** 3))
         cache_dir = Path(getattr(settings, "runtime_cache_dir", "/var/cache/autohunter")).expanduser().resolve()
         cache_size_bytes = _dir_size_bytes(cache_dir)
-        if cache_size_bytes >= cache_limit_bytes > 0:
+        alert_key = "disk_cache_pressure"
+        cooldown_m = _resource_cooldown_minutes()
+        if cache_size_bytes >= cache_limit_bytes > 0 and _is_cooldown_open(db, alert_key, cooldown_m, now):
             top = _top_subdirs(cache_dir, limit=4, max_depth=2)
             top_msg = ", ".join([f"{Path(p).name}={_human_gb(s)}" for s, p in top]) if top else "sem subdirs legíveis"
-            alerts.append(OperationalAlert("disk_cache_pressure", f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Top dirs: {top_msg}. Próximo passo: rode python scripts/disk_audit.py e python scripts/filesystem_cleanup.py --apply.", _resource_cooldown_minutes()))
+            alerts.append(OperationalAlert(alert_key, f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Top dirs: {top_msg}. Próximo passo: rode python scripts/disk_audit.py e python scripts/filesystem_cleanup.py --apply.", cooldown_m))
     except Exception:
         pass
 
