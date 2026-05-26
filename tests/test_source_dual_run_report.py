@@ -82,6 +82,8 @@ def test_year_diff_with_v2_filled_is_enrichment():
     diff = report["field_diff_examples"][0]["diff_fields"]["year"]
     assert diff["classification"] == "v2_enrichment"
     assert report["enrichment_field_diffs_count"] == 1
+    assert report["summary_status"] == "OK"
+    assert report["summary_reason"] == "unique_parity_ok_enrichment_only"
 
 
 def test_price_diff_is_blocking():
@@ -91,6 +93,18 @@ def test_price_diff_is_blocking():
     diff = report["field_diff_examples"][0]["diff_fields"]["price"]
     assert diff["classification"] == "blocking"
     assert report["blocking_field_diffs_count"] == 1
+    assert report["summary_status"] == "WARN"
+    assert report["summary_reason"] == "blocking_field_diffs_between_paths"
+
+
+def test_title_diff_is_blocking_and_warn():
+    v1 = [{"external_id": "A1", "title": "Civic"}]
+    v2 = [{"external_id": "A1", "title": "Civic SI"}]
+    report = build_dual_run_report("mercadolivre", "https://x", v1, v2)
+    diff = report["field_diff_examples"][0]["diff_fields"]["title"]
+    assert diff["classification"] == "blocking"
+    assert report["summary_status"] == "WARN"
+    assert report["summary_reason"] == "blocking_field_diffs_between_paths"
 
 
 def test_thumbnail_v2_filled_is_enrichment():

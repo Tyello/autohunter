@@ -353,6 +353,8 @@ def _summary_status_and_reason(compare: dict[str, Any], *, v1_error: str = "", v
         return "WARN", "v1_returned_zero_items_while_v2_found_items"
     if only_v1_count > 0 or only_v2_count > 0:
         return "WARN", "unique_id_mismatch_between_paths"
+    if blocking_diffs > 0:
+        return "WARN", "blocking_field_diffs_between_paths"
     if only_v1_count == 0 and only_v2_count == 0 and v1_unique_count == v2_unique_count and blocking_diffs == 0:
         if int(compare.get("enrichment_field_diffs_count", 0)) > 0:
             return "OK", "unique_parity_ok_enrichment_only"
