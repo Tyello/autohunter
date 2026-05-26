@@ -311,4 +311,9 @@ Decision:
   2. `extra.mercadolivre_v2_canary_enabled=true`;
   3. Playwright habilitado;
   4. `browser_fallback_enabled=true`.
+- Comandos operacionais recomendados:
+  - ativar: `/admin sources canary mercadolivre on`
+  - status: `/admin sources canary mercadolivre status`
+  - rollback: `/admin sources canary mercadolivre off`
+- Comando JSON (`/admin sources set ... extra {...}`) permanece apenas como opção avançada.
 - Backoff/circuit breaker continuam obrigatórios (não executar V1 e V2 no mesmo ciclo para bypass de cooldown).

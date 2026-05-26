@@ -483,14 +483,18 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 1. Conferir status atual:
    - `/admin sources show mercadolivre`
    - validar `impl=...` e `mercadolivre_v2_canary_enabled=...`.
-2. Ativar canary manual:
-   - `/admin sources set mercadolivre extra {"impl":"v1","mercadolivre_v2_canary_enabled":true}`
+2. Ativar canary manual (caminho recomendado):
+   - `/admin sources canary mercadolivre on`
    - manter `browser_fallback_enabled=true`.
+   - se `browser_fallback_enabled=false`, o canary fica configurado porém não efetivo; ative com `/admin sources fallback mercadolivre on`.
 3. Validar paridade operacional (somente observabilidade):
    - `python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json`
    - `python scripts/source_v2_inventory.py --format markdown`
 4. Rollback manual imediato:
-   - `/admin sources set mercadolivre extra {"impl":"v1","mercadolivre_v2_canary_enabled":false}`
+   - `/admin sources canary mercadolivre off`
+
+Comando avançado (JSON) continua disponível:
+- `/admin sources set mercadolivre extra {"impl":"v1","mercadolivre_v2_canary_enabled":true|false}`
 
 Notas:
 - O canary não altera WebMotors nem outras sources.
