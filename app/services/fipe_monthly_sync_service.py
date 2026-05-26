@@ -57,6 +57,38 @@ def _parse_price(value) -> Decimal | None:
     return price if price > 0 else None
 
 
+def _parse_model_year(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value).strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _build_identity_key(payload: dict) -> str | None:
+    fipe_code = payload.get("fipe_code")
+    if fipe_code:
+        return f"fipe_code:{fipe_code.lower()}"
+
+    brand_code = payload.get("brand_code")
+    model_code = payload.get("model_code")
+    year_code = payload.get("year_code")
+    if brand_code and model_code and year_code:
+        return f"codes:{brand_code}|{model_code}|{year_code}".lower()
+
+    model_name = payload.get("model_name")
+    brand_name = payload.get("brand_name")
+    model_year = payload.get("model_year")
+    fuel = payload.get("fuel")
+    if not model_name:
+        return None
+    has_differentiator = bool(brand_name or model_year is not None or fuel)
+    if not has_differentiator:
+        return None
+    return f"text:{brand_name or ''}|{model_name}|{model_year or ''}|{fuel or ''}".lower()
+
+
 def upsert_fipe_catalog_entries(db: Session, rows: list[dict], *, reference_month: str, source: str = "external_pipeline", dry_run: bool = False) -> dict:
     month = normalize_fipe_month(reference_month)
     source_norm = normalize_fipe_text(source) or "external_pipeline"
@@ -73,7 +105,10 @@ def upsert_fipe_catalog_entries(db: Session, rows: list[dict], *, reference_mont
         if not model_name or price is None:
             counters["skipped_invalid"] += 1
             continue
-        counters["valid"] += 1
+        model_year = _parse_model_year(item.get("model_year"))
+        if item.get("model_year") not in (None, "") and model_year is None:
+            counters["skipped_invalid"] += 1
+            continue
         payload = {
             "reference_month": row_month,
             "vehicle_type": normalize_fipe_text(item.get("vehicle_type")) or "car",
@@ -82,7 +117,7 @@ def upsert_fipe_catalog_entries(db: Session, rows: list[dict], *, reference_mont
             "model_code": normalize_fipe_text(item.get("model_code")) or None,
             "model_name": model_name,
             "year_code": normalize_fipe_text(item.get("year_code")) or None,
-            "model_year": int(item.get("model_year")) if item.get("model_year") not in (None, "") else None,
+            "model_year": model_year,
             "fuel": normalize_fipe_text(item.get("fuel")) or None,
             "fipe_code": normalize_fipe_text(item.get("fipe_code")) or None,
             "price": price,
@@ -90,13 +125,17 @@ def upsert_fipe_catalog_entries(db: Session, rows: list[dict], *, reference_mont
             "raw_payload": item.get("raw_payload"),
             "source": source_norm,
         }
+        identity_key = _build_identity_key(payload)
+        if not identity_key:
+            counters["skipped_invalid"] += 1
+            continue
+        payload["identity_key"] = identity_key
+        counters["valid"] += 1
         existing = db.query(FipeCatalogEntry).filter(
             FipeCatalogEntry.reference_month == payload["reference_month"],
             FipeCatalogEntry.vehicle_type == payload["vehicle_type"],
-            FipeCatalogEntry.brand_code == payload["brand_code"],
-            FipeCatalogEntry.model_code == payload["model_code"],
-            FipeCatalogEntry.year_code == payload["year_code"],
             FipeCatalogEntry.source == payload["source"],
+            FipeCatalogEntry.identity_key == payload["identity_key"],
         ).first()
         if existing:
             counters["updated"] += 1

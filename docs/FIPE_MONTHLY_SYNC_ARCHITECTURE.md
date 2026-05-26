@@ -33,3 +33,9 @@ Separação explícita:
 2. Adapter para output do pipeline externo.
 3. Resolver AutoHunter→FIPE para produzir/atualizar `fipe_prices`.
 4. Operação mensal com observabilidade e rollback seguro.
+
+## Ajustes de segurança (PR 356)
+- `fipe_catalog_entries` usa `identity_key` para upsert estável por (`reference_month`,`vehicle_type`,`source`,`identity_key`).
+- Ordem de identidade: `fipe_code` -> `codes` -> fallback textual com diferenciador.
+- `model_year` inválido não aborta carga: linha é `skipped_invalid`.
+- Dry-run do importador **não** grava `fipe_sync_runs`; run é criado apenas em `--apply`.

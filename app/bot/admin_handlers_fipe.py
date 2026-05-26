@@ -43,20 +43,24 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
     args = [a.strip() for a in (raw_args or []) if a.strip()]
     if args and args[0].lower() == "catalog":
         month = args[1] if len(args) >= 2 else None
-        with SessionLocal() as db:
-            if month:
-                month = normalize_fipe_month(month)
-            else:
-                month_row = db.query(FipeCatalogEntry.reference_month).order_by(FipeCatalogEntry.reference_month.desc()).first()
-                month = month_row[0] if month_row else None
-            if not month:
-                await update.message.reply_text("Sem dados no catálogo FIPE staging.")
-                return
-            total = db.query(FipeCatalogEntry).filter(FipeCatalogEntry.reference_month == month).count()
-            brands = db.query(FipeCatalogEntry.brand_name).filter(FipeCatalogEntry.reference_month == month, FipeCatalogEntry.brand_name.isnot(None)).distinct().count()
-            models = db.query(FipeCatalogEntry.model_name).filter(FipeCatalogEntry.reference_month == month).distinct().count()
-            years = db.query(FipeCatalogEntry.model_year).filter(FipeCatalogEntry.reference_month == month, FipeCatalogEntry.model_year.isnot(None)).distinct().count()
-            run = db.query(FipeSyncRun).filter(FipeSyncRun.reference_month == month).order_by(FipeSyncRun.created_at.desc()).first()
+        try:
+            with SessionLocal() as db:
+                if month:
+                    month = normalize_fipe_month(month)
+                else:
+                    month_row = db.query(FipeCatalogEntry.reference_month).order_by(FipeCatalogEntry.reference_month.desc()).first()
+                    month = month_row[0] if month_row else None
+                if not month:
+                    await update.message.reply_text("Sem dados no catálogo FIPE staging.")
+                    return
+                total = db.query(FipeCatalogEntry).filter(FipeCatalogEntry.reference_month == month).count()
+                brands = db.query(FipeCatalogEntry.brand_name).filter(FipeCatalogEntry.reference_month == month, FipeCatalogEntry.brand_name.isnot(None)).distinct().count()
+                models = db.query(FipeCatalogEntry.model_name).filter(FipeCatalogEntry.reference_month == month).distinct().count()
+                years = db.query(FipeCatalogEntry.model_year).filter(FipeCatalogEntry.reference_month == month, FipeCatalogEntry.model_year.isnot(None)).distinct().count()
+                run = db.query(FipeSyncRun).filter(FipeSyncRun.reference_month == month).order_by(FipeSyncRun.created_at.desc()).first()
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
         msg = [
             "📦 FIPE catálogo staging",
             f"Competência: {month}",

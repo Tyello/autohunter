@@ -22,6 +22,7 @@ class FipeCatalogEntry(TimestampMixin, Base):
     model_year: Mapped[int | None] = mapped_column(nullable=True)
     fuel: Mapped[str | None] = mapped_column(Text, nullable=True)
     fipe_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identity_key: Mapped[str] = mapped_column(Text, nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="BRL")
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -29,7 +30,7 @@ class FipeCatalogEntry(TimestampMixin, Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "reference_month", "vehicle_type", "brand_code", "model_code", "year_code", "source", name="uq_fipe_catalog_entries_key"
+            "reference_month", "vehicle_type", "source", "identity_key", name="uq_fipe_catalog_entries_identity"
         ),
         Index("ix_fipe_catalog_month_type", "reference_month", "vehicle_type"),
         Index("ix_fipe_catalog_brand_model_year", "brand_name", "model_name", "model_year"),

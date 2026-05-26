@@ -153,6 +153,13 @@ def test_admin_fipe_catalog_summary(monkeypatch):
     assert "Competência: 2026-05" in up.message.sent[-1]
 
 
+def test_admin_fipe_catalog_invalid_month(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "catalog", "foo")))
+    assert up.message.sent[-1] == "reference_month inválido; esperado YYYY-MM"
+
+
 def test_admin_invalid_action_help_lists_fipe(monkeypatch):
     monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
     up = _Up(1)

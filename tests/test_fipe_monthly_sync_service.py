@@ -20,7 +20,12 @@ def test_normalization_month_and_text():
 
 
 def test_upsert_dry_run(db):
-    out = upsert_fipe_catalog_entries(db, [{"model_name": "Civic", "price": "100000"}], reference_month="2026-05", dry_run=True)
+    out = upsert_fipe_catalog_entries(
+        db,
+        [{"brand_name": "Honda", "model_name": "Civic", "model_year": 2019, "price": "100000"}],
+        reference_month="2026-05",
+        dry_run=True,
+    )
     assert out["valid"] == 1
     assert db.query(FipeCatalogEntry).count() == 0
 
@@ -36,10 +41,40 @@ def test_upsert_insert_and_update(db):
 
 
 def test_validation_skips_invalid_and_month_error(db):
-    out = upsert_fipe_catalog_entries(db, [{"model_name": "", "price": "100"}, {"model_name": "X", "price": 0}], reference_month="2026-05")
-    assert out["skipped_invalid"] == 2
+    out = upsert_fipe_catalog_entries(
+        db,
+        [{"model_name": "", "price": "100"}, {"model_name": "X", "price": 0}, {"model_name": "X", "price": "100"}],
+        reference_month="2026-05",
+    )
+    assert out["skipped_invalid"] == 3
     with pytest.raises(ValueError):
         upsert_fipe_catalog_entries(db, [{"model_name": "X", "price": "100"}], reference_month="2026-99")
+
+
+def test_text_identity_prevents_collapse(db):
+    out = upsert_fipe_catalog_entries(
+        db,
+        [
+            {"brand_name": "Honda", "model_name": "Civic", "price": "100000", "model_year": 2019},
+            {"brand_name": "VW", "model_name": "Golf", "price": "120000", "model_year": 2019},
+        ],
+        reference_month="2026-05",
+    )
+    assert out["inserted"] == 2
+    assert db.query(FipeCatalogEntry).count() == 2
+
+
+def test_invalid_model_year_is_skipped_without_aborting(db):
+    out = upsert_fipe_catalog_entries(
+        db,
+        [
+            {"brand_name": "Honda", "model_name": "Civic", "model_year": "abc", "price": "100000"},
+            {"brand_name": "VW", "model_name": "Golf", "model_year": 2018, "price": "120000"},
+        ],
+        reference_month="2026-05",
+    )
+    assert out["skipped_invalid"] == 1
+    assert out["inserted"] == 1
 
 
 def test_sync_run_start_finish(db):

@@ -40,16 +40,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     with SessionLocal() as db:
-        run = start_fipe_sync_run(db, reference_month=args.reference_month, source=args.source)
+        run = None
         try:
             result = upsert_fipe_catalog_entries(db, rows, reference_month=args.reference_month, source=args.source, dry_run=not args.apply)
             if result["valid"] == 0:
-                finish_fipe_sync_run(db, run.id, status="failed", counters=result, error="zero linhas válidas")
                 print("Nenhuma linha válida para importar")
                 return 1
-            finish_fipe_sync_run(db, run.id, status="completed", counters=result)
+            if args.apply:
+                run = start_fipe_sync_run(db, reference_month=args.reference_month, source=args.source)
+                finish_fipe_sync_run(db, run.id, status="completed", counters=result)
         except Exception as exc:
-            finish_fipe_sync_run(db, run.id, status="failed", error=str(exc))
+            if args.apply and run is not None:
+                finish_fipe_sync_run(db, run.id, status="failed", error=str(exc))
             print(str(exc))
             return 1
 

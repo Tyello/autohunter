@@ -46,6 +46,7 @@ def upgrade() -> None:
         sa.Column("model_year", sa.Integer(), nullable=True),
         sa.Column("fuel", sa.Text(), nullable=True),
         sa.Column("fipe_code", sa.Text(), nullable=True),
+        sa.Column("identity_key", sa.Text(), nullable=False),
         sa.Column("price", sa.Numeric(12, 2), nullable=False),
         sa.Column("currency", sa.Text(), nullable=False, server_default="BRL"),
         sa.Column("raw_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
@@ -53,7 +54,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.CheckConstraint("reference_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'", name="ck_fipe_catalog_entries_reference_month"),
-        sa.UniqueConstraint("reference_month", "vehicle_type", "brand_code", "model_code", "year_code", "source", name="uq_fipe_catalog_entries_key"),
+        sa.UniqueConstraint("reference_month", "vehicle_type", "source", "identity_key", name="uq_fipe_catalog_entries_identity"),
     )
     op.create_index("ix_fipe_catalog_month_type", "fipe_catalog_entries", ["reference_month", "vehicle_type"])
     op.create_index("ix_fipe_catalog_brand_model_year", "fipe_catalog_entries", ["brand_name", "model_name", "model_year"])
