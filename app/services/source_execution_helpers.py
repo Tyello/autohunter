@@ -28,17 +28,31 @@ def build_scrape_dispatch(
         use_v2 = flags.impl == "v2" or canary_guarded_v2
 
         if use_v2 and v2_scraper is not None:
+            runtime_impl = "v2_canary" if canary_guarded_v2 and flags.impl != "v2" else "v2"
+            object.__setattr__(
+                ctx,
+                "_last_adapter_meta",
+                {
+                    "impl": runtime_impl,
+                    "raw_count": 0,
+                    "normalized_count": 0,
+                    "partial_failure": False,
+                    "blocked": False,
+                    "attempted": True,
+                },
+            )
             result = v2_scraper.scrape(search_url, ctx)
             ads, meta = adapt_v2(src, result)
             object.__setattr__(
                 ctx,
                 "_last_adapter_meta",
                 {
-                    "impl": "v2_canary" if canary_guarded_v2 and flags.impl != "v2" else "v2",
+                    "impl": runtime_impl,
                     "raw_count": int(getattr(meta, "raw_count", 0) or 0),
                     "normalized_count": int(getattr(meta, "normalized_count", 0) or 0),
                     "partial_failure": bool(getattr(meta, "partial_failure", False)),
                     "blocked": bool(getattr(meta, "blocked", False)),
+                    "attempted": True,
                 },
             )
             return [ad_to_listing(ad) for ad in ads if ad.external_id]

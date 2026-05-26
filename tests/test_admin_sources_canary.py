@@ -264,6 +264,7 @@ def test_canary_status_with_blocked_recommends_review(monkeypatch):
     asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "report"))
     out = up.message.texts[-1]
     assert "v2_canary_blocked=1" in out
+    assert "last_runtime_impl=v2_canary" in out
     assert "recommendation=keep_canary_or_rollback_review" in out
 
 
