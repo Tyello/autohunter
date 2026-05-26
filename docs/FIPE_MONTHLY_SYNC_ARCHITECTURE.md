@@ -66,3 +66,6 @@ Separação explícita:
 - ✅ Fluxo dry-run default com live explícito.
 - ⏳ Scheduler mensal automático permanece pendente.
 - ⏳ Updates de preços existentes permanecem desabilitados por padrão (guardados para flag futura).
+
+- O apply controlado de FIPE agora possui trilha de auditoria persistente em `system_logs`, inclusive em dry-run.
+- Scheduler mensal continua pendente e fora deste escopo.

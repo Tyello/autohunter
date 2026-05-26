@@ -92,3 +92,6 @@ Próximo passo operacional:
 2. validar `/admin fipe apply_plan ... dry`;
 3. aplicar `/admin fipe apply_plan ... live` com limite pequeno;
 4. validar cobertura via `/admin fipe coverage`.
+
+- Implementada auditoria persistente para `/admin fipe apply_plan` (dry-run/live) desacoplada da transação principal.
+- Próximo passo operacional: rodar dry-run/live pequeno e validar coverage de logs/resultados em produção controlada.

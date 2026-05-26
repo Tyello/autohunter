@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from app.models.car_listing import CarListing
 from app.models.fipe_price import FipePrice
+from app.models.system_log import SystemLog
 from app.services.fipe_prices_planning_service import build_fipe_price_plan, build_fipe_price_plan_for_listing, apply_fipe_price_plan
 
 
@@ -127,3 +128,48 @@ def test_apply_plan_live_persists_and_no_duplicates(db, monkeypatch):
     assert db.query(FipePrice).filter(FipePrice.reference_month == "2026-05").count() == 2
     existing = db.query(FipePrice).filter(FipePrice.vehicle_key == "honda|civic|2015", FipePrice.reference_month == "2026-05").first()
     assert int(existing.fipe_price) == 90000
+
+
+
+def test_apply_plan_dry_run_persists_audit_log(db, monkeypatch):
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.build_fipe_price_plan", lambda *a, **k: {
+        "reference_month": "2026-05", "sample_size": 1, "planned_inserts_count": 1, "would_update_count": 0,
+        "planned_inserts": [{"vehicle_key": "honda|civic|2015", "reference_month": "2026-05", "fipe_price": 95000}],
+        "would_updates": [], "skipped_counts": {"already_planned": 0}
+    })
+    out = apply_fipe_price_plan(db, reference_month="2026-05", dry_run=True)
+    assert out["inserted_count"] == 0
+    assert db.query(FipePrice).count() == 0
+    log = db.query(SystemLog).filter(SystemLog.component == "fipe_apply_plan", SystemLog.message.ilike("%dry-run%")).order_by(SystemLog.created_at.desc()).first()
+    assert log is not None
+    assert log.payload["reference_month"] == "2026-05"
+    assert log.payload["dry_run"] is True
+    assert "planned_inserts_count" in log.payload
+    assert "inserted_count" in log.payload
+    assert "skipped_counts" in log.payload
+
+
+def test_apply_plan_live_persists_audit_log(db, monkeypatch):
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.build_fipe_price_plan", lambda *a, **k: {
+        "reference_month": "2026-05", "sample_size": 1, "planned_inserts_count": 1, "would_update_count": 0,
+        "planned_inserts": [{"vehicle_key": "vw|golf|2017", "reference_month": "2026-05", "fipe_price": 118000}],
+        "would_updates": [], "skipped_counts": {"already_planned": 0}
+    })
+    out = apply_fipe_price_plan(db, reference_month="2026-05", dry_run=False)
+    assert out["inserted_count"] == 1
+    assert db.query(FipePrice).count() == 1
+    log = db.query(SystemLog).filter(SystemLog.component == "fipe_apply_plan", SystemLog.message.ilike("%live%")).order_by(SystemLog.created_at.desc()).first()
+    assert log is not None
+
+
+def test_apply_plan_log_failure_does_not_break_apply(db, monkeypatch):
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.build_fipe_price_plan", lambda *a, **k: {
+        "reference_month": "2026-05", "sample_size": 1, "planned_inserts_count": 1, "would_update_count": 0,
+        "planned_inserts": [{"vehicle_key": "vw|golf|2017", "reference_month": "2026-05", "fipe_price": 118000}],
+        "would_updates": [], "skipped_counts": {"already_planned": 0}
+    })
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.log_fipe_apply_plan_run", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("audit down")))
+
+    out = apply_fipe_price_plan(db, reference_month="2026-05", dry_run=False)
+    assert out["inserted_count"] == 1
+    assert db.query(FipePrice).count() == 1
