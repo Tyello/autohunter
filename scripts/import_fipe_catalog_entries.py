@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from app.db.session import SessionLocal
+from app.services.fipe_external_pipeline_adapter import normalize_external_fipe_rows
 from app.services.fipe_monthly_sync_service import start_fipe_sync_run, finish_fipe_sync_run, upsert_fipe_catalog_entries
 
 
@@ -26,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reference-month", required=True)
     parser.add_argument("--source", default="external_pipeline")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--format", choices=["generic", "external-pipeline"], default="generic")
     args = parser.parse_args(argv)
 
     file_path = Path(args.file)
@@ -38,6 +40,12 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"Falha ao ler arquivo: {exc}")
         return 2
+
+    if args.format == "external-pipeline":
+        rows, adapter_counters = normalize_external_fipe_rows(rows, reference_month=args.reference_month)
+        if adapter_counters["normalized"] == 0:
+            print("Nenhuma linha normalizada pelo adapter externo")
+            return 1
 
     with SessionLocal() as db:
         run = None
@@ -54,6 +62,15 @@ def main(argv: list[str] | None = None) -> int:
                 finish_fipe_sync_run(db, run.id, status="failed", error=str(exc))
             print(str(exc))
             return 1
+
+    if args.format == "external-pipeline":
+        print(
+            "Adapter externo: "
+            f"total={adapter_counters['total']} normalized={adapter_counters['normalized']} "
+            f"skipped_invalid={adapter_counters['skipped_invalid']} "
+            f"skipped_missing_price={adapter_counters['skipped_missing_price']} "
+            f"skipped_missing_model={adapter_counters['skipped_missing_model']}"
+        )
 
     print(
         "Resumo: "

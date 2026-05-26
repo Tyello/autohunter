@@ -53,3 +53,9 @@ Este documento consolida o estado real após as entregas recentes.
 - Eventual ativação live de dedupe cross-source após observação real consistente.
 
 - Decisão FIPE (2026-05): opção 2 adotada com base local mensal; próximo passo é ingestão mensal de catálogo staging; CSV manual deixa de ser caminho principal.
+
+## FIPE mensal (update 2026-05)
+
+- staging mensal de catálogo FIPE implementado (`fipe_catalog_entries` + `fipe_sync_runs`).
+- adapter de pipeline externo implementado para JSON/CSV com aliases comuns e preservação de `raw_payload`.
+- próximo passo: resolver AutoHunter → FIPE para alimentar `fipe_prices` (sem alteração em `score_v2` nesta etapa).

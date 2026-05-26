@@ -28,10 +28,10 @@ Separação explícita:
 - qualidade do match entre catálogo e veículos AutoHunter;
 - operação em Raspberry (I/O e memória em carga mensal).
 
-## Fases futuras
-1. Contrato de staging mensal (esta PR).
-2. Adapter para output do pipeline externo.
-3. Resolver AutoHunter→FIPE para produzir/atualizar `fipe_prices`.
+## Fases
+1. ✅ Contrato de staging mensal implementado.
+2. ✅ Adapter para output do pipeline externo implementado.
+3. 🔜 Resolver AutoHunter→FIPE para produzir/atualizar `fipe_prices` (pendente).
 4. Operação mensal com observabilidade e rollback seguro.
 
 ## Ajustes de segurança (PR 356)
