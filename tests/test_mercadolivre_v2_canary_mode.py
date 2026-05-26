@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.source_execution_helpers import build_scrape_dispatch
 from app.sources.flags import read_source_impl_flags
 
@@ -59,3 +61,27 @@ def test_canary_requires_playwright_and_browser_fallback(monkeypatch):
     monkeypatch.setattr("app.services.source_execution_helpers.settings.enable_playwright", True)
     ctx2 = SimpleNamespace(browser_fallback_enabled=False)
     assert [row.external_id for row in dispatch("https://x", ctx2)] == ["v1"]
+
+
+def test_canary_sets_attempted_meta_before_v2_scrape_exception(monkeypatch):
+    monkeypatch.setattr("app.services.source_execution_helpers.settings.enable_playwright", True)
+    flags = read_source_impl_flags({"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    plugin = SimpleNamespace(scrape=lambda *_args, **_kwargs: [{"external_id": "v1"}])
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("fetch failed")
+
+    dispatch = build_scrape_dispatch(
+        src="mercadolivre",
+        flags=flags,
+        plugin=plugin,
+        v2_scraper=SimpleNamespace(scrape=_boom),
+        ad_to_listing=lambda ad: ad,
+    )
+    ctx = SimpleNamespace(browser_fallback_enabled=True)
+
+    with pytest.raises(RuntimeError):
+        dispatch("https://x", ctx)
+
+    assert ctx._last_adapter_meta["impl"] == "v2_canary"
+    assert ctx._last_adapter_meta["attempted"] is True
