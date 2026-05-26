@@ -78,6 +78,10 @@ def test_resource_alerts_ram_disk_cache_and_throttle(db, monkeypatch, tmp_path):
     assert "ram_pressure" in keys1
     assert "disk_root_pressure" in keys1
     assert "disk_cache_pressure" in keys1
+    cache_alert = next(a for a in a1 if a.key == "disk_cache_pressure")
+    assert "Top dirs:" in cache_alert.message
+    assert "disk_audit.py" in cache_alert.message
+    assert "filesystem_cleanup.py --apply" in cache_alert.message
 
     a2 = collect_operational_alerts(db, now=now + timedelta(minutes=10))
     keys2 = {a.key for a in a2}

@@ -35,16 +35,14 @@ def dir_size(path: Path) -> int:
     if not path.exists() or not path.is_dir():
         return 0
     total = 0
-    for root, _, files in os.walk(path):
+    for root, _, files in os.walk(path, onerror=lambda _e: None):
         for name in files:
             fp = Path(root) / name
             try:
                 if fp.is_symlink():
                     continue
                 total += fp.stat().st_size
-            except FileNotFoundError:
-                continue
-            except PermissionError:
+            except (FileNotFoundError, PermissionError, OSError):
                 continue
     return total
 
@@ -55,18 +53,40 @@ def top_files(paths: list[str], limit: int = 30):
         p = Path(base)
         if not p.exists() or not p.is_dir():
             continue
-        for root, _, files in os.walk(p):
+        for root, _, files in os.walk(p, onerror=lambda _e: None):
             for name in files:
                 fp = Path(root) / name
                 try:
                     if fp.is_symlink():
                         continue
                     size = fp.stat().st_size
-                except (FileNotFoundError, PermissionError):
+                except (FileNotFoundError, PermissionError, OSError):
                     continue
                 items.append((size, str(fp)))
     items.sort(key=lambda x: x[0], reverse=True)
     return items[:limit]
+
+
+def top_subdirs(base: Path, limit: int = 12, max_depth: int = 2):
+    if not base.exists() or not base.is_dir():
+        return []
+    rows: list[tuple[int, str]] = []
+    base_depth = len(base.parts)
+    for root, dirs, _files in os.walk(base, onerror=lambda _e: None):
+        root_p = Path(root)
+        depth = len(root_p.parts) - base_depth
+        if depth > max_depth:
+            dirs[:] = []
+            continue
+        if root_p == base:
+            continue
+        try:
+            size = dir_size(root_p)
+        except Exception:
+            continue
+        rows.append((size, str(root_p)))
+    rows.sort(key=lambda x: x[0], reverse=True)
+    return rows[:limit]
 
 
 def main() -> None:
@@ -82,6 +102,23 @@ def main() -> None:
         size = dir_size(p) if exists and p.is_dir() else 0
         status = "ok" if exists else "missing"
         print(f"{raw}\t{human(size)}\t{status}")
+
+    cache_root = Path("/var/cache/autohunter")
+    print("\n# Cache hotspots (/var/cache/autohunter)")
+    if not cache_root.exists():
+        print("/var/cache/autohunter\tmissing")
+    else:
+        for size, path in top_subdirs(cache_root, limit=15, max_depth=2):
+            print(f"{human(size):>8}  {path}")
+
+    print("\n# Focus areas")
+    for p in [
+        Path("/var/cache/autohunter/artifacts"),
+        Path("/var/cache/autohunter/debug"),
+        Path("/var/cache/autohunter/pw-browsers"),
+        Path("/var/cache/autohunter"),
+    ]:
+        print(f"{str(p)}\t{human(dir_size(p))}\t{'ok' if p.exists() else 'missing'}")
 
     print("\n# Top 30 largest files")
     for idx, (size, path) in enumerate(top_files(TARGET_DIRS, 30), start=1):
