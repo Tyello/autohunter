@@ -142,11 +142,20 @@ async def admin_sources_show(update, source: str):
             f"proxy_server={cfg.proxy_server or '-'}",
             f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
             f"force_browser={bool(cfg.force_browser)}",
-            f"impl={impl_flags.impl}",
+            f"configured_impl={impl_flags.impl}",
             f"mercadolivre_v2_canary_enabled={bool(impl_flags.canary_v2_enabled)}",
             f"canary_effective={bool(canary_effective)}",
             f"extra={_sanitize_source_extra(cfg.extra)}",
         ]
+        last_runtime_impl = None
+        if st is not None and isinstance(st.last_payload, dict):
+            run_summary = st.last_payload.get("run_summary")
+            if isinstance(run_summary, dict):
+                last_runtime_impl = run_summary.get("runtime_impl")
+            if not last_runtime_impl:
+                last_runtime_impl = st.last_payload.get("runtime_impl")
+        if last_runtime_impl:
+            lines.append(f"last_runtime_impl={last_runtime_impl}")
         if not canary_effective:
             lines.append(f"canary_reason={canary_reason}")
         role = None

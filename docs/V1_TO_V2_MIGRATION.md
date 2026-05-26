@@ -504,3 +504,6 @@ Notas de operação:
 - Opção avançada permanece disponível via JSON em `/admin sources set mercadolivre extra ...`.
 - O canary só aplica V2 quando Playwright está ativo e `browser_fallback_enabled=true`.
 - Não há promoção automática para outras sources e não há flip automático pós-sucesso.
+
+- Próxima melhoria operacional consolidada: outputs administrativos devem sempre diferenciar `configured_impl` de `runtime_impl` para rastreabilidade de canary/dual.
+- Evidência de canary em produção (Mercado Livre): found=186, inserted=5, matched=8, queued=0, dur=87132ms.
