@@ -1,205 +1,235 @@
 # Subscription — Pagamento e Ciclo de Vida
-> O modelo de dados suporta subscriptions. O fluxo de pagamento não existe. Este documento especifica o que implementar.
+
+Atualizado em: 2026-05-25.  
+Estado confrontado com a `main`.
+
+> O modelo de assinatura existe e Premium pode ser ativado manualmente.  
+> O fluxo de pagamento/ativação ainda não está fechado para escala.
 
 ---
 
 ## Estado atual
 
-- Modelo `Subscription` completo: `account_id`, `plan_id`, `status`, `source`, `starts_at`, `ends_at`, `current_period_start`, `current_period_end`, `cancel_at_period_end`, `metadata_json`
-- `premium_subscription_service.py` tem `activate_premium`, `expire_premium`, `get_active_subscription`
-- `premium_expiration_job.py` já roda no scheduler
-- `/upgrade` mostra link Mercado Pago configurável
-- **Nada disso é automático.** Admin ativa manualmente após validar comprovante.
+### Existe na `main`
+
+- Modelo `Subscription` com campos para ciclo de vida:
+  - `account_id`;
+  - `plan_id`;
+  - `status`;
+  - `source`;
+  - `starts_at`;
+  - `ends_at`;
+  - `current_period_start`;
+  - `current_period_end`;
+  - `cancel_at_period_end`;
+  - `metadata_json`.
+- Serviço `premium_subscription_service.py` com ativação/expiração/consulta de Premium.
+- Job de expiração Premium no scheduler.
+- `/upgrade` com oferta Premium e link Mercado Pago configurável.
+- `/admin premium` para ativação manual/admin.
+- `/admin metrics` para acompanhar usuários Free/Premium.
+
+### Não existe na `main`
+
+- Webhook Mercado Pago.
+- Rota `app/web/routes_webhooks.py`.
+- Serviço operacional `mercadopago_service.py`.
+- Criação dinâmica de preferência de pagamento por usuário/período.
+- Aprovação de comprovante em 1 clique por botão admin.
+- Fluxo user-facing completo de avisos antes da expiração.
+- Auditoria padronizada de ativações manuais no `metadata_json`.
 
 ---
 
-## SUB-01 — Webhook Mercado Pago (caminho principal)
+## SUB-01 — Webhook Mercado Pago
 
-**Pré-requisito:** conta Mercado Pago com aplicação criada e webhook configurado.
+**Status:** aberto.  
+**Caminho principal para escala.**
 
-### Fluxo técnico
+### Fluxo técnico desejado
 
-```
-1. Usuário toca "Assinar Mensal" no bot
-2. Bot chama MP API: criar preferência de pagamento
-   POST https://api.mercadopago.com/checkout/preferences
-   {
-     "items": [{"title": "Garagem Alvo Premium Mensal", "unit_price": 9.90, ...}],
-     "metadata": {"chat_id": "123456789", "plan_period": "monthly"},
-     "notification_url": "https://seudominio.com/webhooks/mercadopago",
-     "back_urls": {...}
-   }
-3. MP retorna preference_id + init_point (URL de checkout)
-4. Bot envia URL para o usuário
-
-5. Usuário paga no Mercado Pago
-
-6. MP envia POST /webhooks/mercadopago com evento payment.updated
-7. App valida assinatura HMAC do webhook (header x-signature)
-8. Extrai chat_id do metadata do pagamento
-9. Verifica status == "approved"
-10. Chama premium_subscription_service.activate_premium(db, chat_id, period)
-11. Bot notifica usuário: "✅ Premium ativado!"
-12. Bot notifica admin: "💰 Nova assinatura: @username"
+```text
+1. Usuário toca Assinar Mensal/Anual no bot
+2. Bot cria preferência de pagamento no Mercado Pago
+3. Preferência recebe metadata {chat_id, plan_period, account_id?}
+4. Bot envia URL de checkout ao usuário
+5. Usuário paga
+6. Mercado Pago envia POST /webhooks/mercadopago
+7. App valida assinatura/origem do webhook
+8. App busca detalhes do pagamento aprovado
+9. App extrai metadata
+10. App ativa Premium
+11. Bot notifica usuário
+12. Bot notifica admin
 ```
 
-### Arquivos a criar
+### Arquivos prováveis
 
-**`app/web/routes_webhooks.py`:**
-```python
-from fastapi import APIRouter, Request, HTTPException
-import hmac, hashlib
-
-router = APIRouter()
-
-@router.post("/webhooks/mercadopago")
-async def handle_mercadopago_webhook(request: Request):
-    # 1. Validar assinatura
-    body = await request.body()
-    signature = request.headers.get("x-signature", "")
-    expected = hmac.new(settings.mp_webhook_secret.encode(), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, f"sha256={expected}"):
-        raise HTTPException(status_code=401)
-
-    # 2. Processar evento
-    data = await request.json()
-    if data.get("type") == "payment" and data.get("action") == "payment.updated":
-        payment_id = data["data"]["id"]
-        # Buscar detalhes do pagamento na API do MP
-        payment = await mp_client.get_payment(payment_id)
-        if payment["status"] == "approved":
-            chat_id = payment["metadata"]["chat_id"]
-            period = payment["metadata"]["plan_period"]
-            with SessionLocal() as db:
-                await activate_and_notify(db, chat_id, period)
-
-    return {"status": "ok"}
+```text
+app/web/routes_webhooks.py
+app/services/mercadopago_service.py
+app/services/payment_activation_service.py
 ```
 
-**`app/services/mercadopago_service.py`:**
-```python
-import mercadopago
+### Settings a adicionar
 
-class MercadoPagoService:
-    def __init__(self):
-        self.sdk = mercadopago.SDK(settings.mp_access_token)
-
-    def create_preference(self, chat_id: str, period: str) -> dict:
-        price = 9.90 if period == "monthly" else 59.99
-        title = f"Garagem Alvo Premium {'Mensal' if period == 'monthly' else 'Anual'}"
-        preference_data = {
-            "items": [{"title": title, "quantity": 1, "unit_price": price}],
-            "metadata": {"chat_id": chat_id, "plan_period": period},
-            "notification_url": settings.mp_webhook_url,
-        }
-        result = self.sdk.preference().create(preference_data)
-        return result["response"]
-
-    async def get_payment(self, payment_id: str) -> dict:
-        result = self.sdk.payment().get(payment_id)
-        return result["response"]
-```
-
-**Settings a adicionar:**
 ```python
 mp_access_token: str | None = None
 mp_webhook_secret: str | None = None
-mp_webhook_url: str | None = None  # URL pública do webhook
+mp_webhook_url: str | None = None
+mp_checkout_success_url: str | None = None
+mp_checkout_failure_url: str | None = None
+mp_checkout_pending_url: str | None = None
 ```
+
+### Critérios de aceite
+
+- Webhook rejeita assinatura inválida.
+- Evento duplicado não cria múltiplas assinaturas ativas conflitantes.
+- Pagamento aprovado ativa Premium correto.
+- Pagamento pendente/rejeitado não ativa Premium.
+- Usuário e admin são notificados.
+- Testes cobrem aprovado, duplicado, inválido e pendente.
+- Logs não expõem token, assinatura, documento ou dados sensíveis.
 
 ---
 
-## SUB-02 — Aprovação em 1 clique (fallback para beta)
+## SUB-02 — Aprovação em 1 clique
 
-Para o beta, antes do webhook estar pronto:
+**Status:** aberto.  
+**Fallback recomendado para beta.**
 
-```
-1. Usuário envia comprovante (imagem ou texto) no chat
-2. Handler detecta: contém "paguei" ou "comprovante" ou é imagem em resposta a mensagem de upgrade
-3. Bot encaminha para admin com contexto:
-   "💰 Pedido de ativação Premium
-   Usuário: @username (chat_id: 123)
-   Plano desejado: mensal (R$ 9,90)
-   [Comprovante anexo]"
-4. Botões inline:
+### Fluxo desejado
+
+```text
+1. Usuário envia comprovante ou mensagem de pagamento no chat
+2. Bot identifica intenção de ativação Premium
+3. Bot encaminha resumo para o admin
+4. Admin recebe botões:
    [✅ Ativar Mensal] [✅ Ativar Anual] [❌ Recusar]
-5. Admin toca → bot ativa Premium → notifica usuário
+5. Admin toca no botão
+6. Bot chama serviço de ativação Premium
+7. Bot notifica usuário
+8. Bot registra metadata operacional
 ```
 
-**Handler a criar:** `app/bot/handlers_payment.py::handle_comprovante`
+### Handler provável
 
-```python
-async def handle_comprovante(update, context):
-    user_id = update.effective_user.id
-    # Verificar se usuário está em fluxo de upgrade
-    # Encaminhar para admin com botões InlineKeyboard
-    await context.bot.send_message(
-        chat_id=settings.admin_chat_id,
-        text=f"💰 Pedido Premium\n@{update.effective_user.username}\nchat_id: {user_id}",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Mensal", callback_data=f"ADMIN:ACTIVATE:monthly:{user_id}")],
-            [InlineKeyboardButton("✅ Anual", callback_data=f"ADMIN:ACTIVATE:annual:{user_id}")],
-            [InlineKeyboardButton("❌ Recusar", callback_data=f"ADMIN:ACTIVATE:refuse:{user_id}")],
-        ])
-    )
+```text
+app/bot/handlers_payment.py
 ```
+
+### Callback sugerido
+
+```text
+ADMIN:PREMIUM_ACTIVATE:<period>:<telegram_chat_id>
+ADMIN:PREMIUM_REFUSE:<telegram_chat_id>
+```
+
+### Critérios de aceite
+
+- Apenas admin pode acionar botões.
+- Callback inválido ou expirado não ativa assinatura.
+- Ativação registra `source="manual"` ou `source="founders"` conforme caso.
+- `metadata_json` registra operador, data e origem.
+- Usuário recebe confirmação clara.
+- Admin recebe confirmação da ação.
 
 ---
 
 ## SUB-03 — Lifecycle completo de expiração
 
-**Hoje:** `premium_expiration_job.py` expira subscriptions. Sem aviso prévio.
+**Status:** aberto.
 
-**O que adicionar:**
+**Hoje:** há expiração operacional, mas falta fluxo de comunicação user-facing completo.
 
-```python
-# Adicionar ao scheduler — rodar 1x/dia às 9h BRT:
-async def premium_expiry_warning_job(db):
-    # Subscriptions que expiram em 7 dias
-    expiring_7d = get_subscriptions_expiring_in(db, days=7)
-    for sub in expiring_7d:
-        user = get_user_by_account(db, sub.account_id)
-        await bot.send_message(
-            chat_id=user.telegram_chat_id,
-            text=f"⚠️ Seu Premium expira em 7 dias ({sub.ends_at.strftime('%d/%m')}).\n\nRenove para continuar recebendo todos os alertas.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Renovar", callback_data="MENU:UPGRADE")
-            ]])
-        )
+### O que adicionar
 
-    # Subscriptions que expiram amanhã
-    expiring_1d = get_subscriptions_expiring_in(db, days=1)
-    for sub in expiring_1d:
-        # Mensagem mais urgente
-        ...
+```text
+7 dias antes → aviso de renovação
+1 dia antes → aviso final
+no dia → downgrade + mensagem clara
 ```
+
+### Serviço provável
+
+```text
+app/services/premium_expiry_notification_service.py
+```
+
+### Job provável
+
+```text
+app/scheduler/premium_expiry_warning_job.py
+```
+
+### Critérios de aceite
+
+- Não envia aviso duplicado para a mesma assinatura/janela.
+- Respeita subscription ativa e datas UTC.
+- Não avisa subscriptions canceladas/expiradas indevidamente.
+- Mensagem inclui CTA para renovar.
+- Downgrade informa limites Free após expiração.
 
 ---
 
 ## SUB-04 — Auditoria de ativações
 
-**Estado atual:** ativações manuais via `/admin premium activate` não ficam registradas com detalhe suficiente. `admin_deploy_audits` existe mas é para deploy, não para Premium.
+**Status:** aberto.
 
-**O que adicionar:** campo `metadata_json` na Subscription já suporta rastreio:
+`metadata_json` já permite registrar rastreabilidade sem migration imediata.
 
-```python
-# Ao ativar Premium manualmente:
-sub.metadata_json = {
-    "activated_by": "admin",
-    "activated_at": datetime.now(UTC).isoformat(),
-    "admin_chat_id": admin_chat_id,
-    "reason": reason or "manual",
-    "payment_ref": payment_ref or None,
+### Metadata mínima recomendada
+
+```json
+{
+  "activated_by": "admin",
+  "activated_at": "2026-05-25T23:00:00Z",
+  "admin_chat_id": 123456,
+  "source": "manual",
+  "period": "monthly",
+  "payment_ref": null,
+  "reason": "beta_activation"
 }
 ```
 
+### Critérios de aceite
+
+- Toda ativação manual registra operador e data.
+- Ativações por webhook registram payment id/preference id sem expor dados sensíveis.
+- `/admin premium` ou comando equivalente permite consultar origem da assinatura.
+
 ---
 
-## Prioridade
+## SUB-05 — Trial de 7 dias
 
-| # | Item | Semana | Impacto |
+**Status:** aberto, dependente de decisão de produto.
+
+Trial pode usar `Subscription.source = "trial"` e `ends_at`, mas precisa de regra clara:
+
+- todos os usuários novos recebem trial?
+- apenas beta users?
+- trial pode virar Founders?
+- trial exige pagamento cadastrado ou não?
+
+**Diretriz:** não implementar trial antes de decidir como ele aparece na jornada de upgrade e expiração.
+
+---
+
+## Prioridade atual
+
+| # | Item | Status | Impacto |
 |---|---|---|---|
-| SUB-02 | Aprovação 1 clique | 0 | Desbloqueio imediato para beta |
-| SUB-01 | Webhook Mercado Pago | 1 | Escala de pagamento |
-| SUB-03 | Aviso de expiração | 1 | Retenção Premium |
-| SUB-04 | Auditoria de ativações | 2 | Rastreabilidade operacional |
+| 1 | SUB-02 — Aprovação 1 clique | Aberto | Desbloqueia beta rápido |
+| 2 | SUB-01 — Webhook Mercado Pago | Aberto | Escala pagamento |
+| 3 | SUB-04 — Auditoria de ativações | Aberto | Rastreabilidade operacional |
+| 4 | SUB-03 — Aviso de expiração | Aberto | Retenção Premium |
+| 5 | SUB-05 — Trial 7 dias | Aberto | Ativação/conversão |
+
+---
+
+## Próxima PR recomendada
+
+Implementar primeiro **SUB-02 — Aprovação em 1 clique**, porque reduz imediatamente o gargalo manual do beta sem exigir URL pública/webhook.
+
+Depois, implementar **SUB-01 — Webhook Mercado Pago** para lançamento público amplo.

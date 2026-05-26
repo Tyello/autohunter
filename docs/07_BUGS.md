@@ -1,8 +1,11 @@
 # Bugs — Status operacional e pendências
 
+Atualizado em: 2026-05-25.  
+Estado confrontado com a `main`.
+
 > Este documento consolida o estado dos bugs mapeados na tranche de estabilização.  
-> Ele não deve ser lido como uma lista de bugs ainda abertos: a maioria dos itens abaixo já está corrigida ou operacionalizada.  
-> As pendências restantes são principalmente validação operacional em ambiente real, carga de dados e decisões controladas por feature flag.
+> Ele não deve ser lido como lista de bugs abertos: a maioria dos itens abaixo já está corrigida, validada ou operacionalizada.  
+> As pendências restantes são validação operacional, carga de dados e decisões controladas por feature flag.
 
 ---
 
@@ -16,166 +19,143 @@
 
 ---
 
-## BUG-01 — `max_overflow` não passado ao `create_engine` (crítico para escala)
+## Estado adicional confrontado com a `main`
 
-**Arquivo:** `app/db/session.py`
-
-**Status:** corrigido no código atual.
-
-**Nota de validação:** `app/db/session.py` já aplica `max_overflow=settings.db_max_overflow` e `connect_args={"connect_timeout": int(settings.db_connect_timeout)}` para conexões não-SQLite.
-
-**Impacto histórico:** sem a correção, o pool poderia abrir mais conexões do que o banco suporta sob carga.
-
-**Status operacional:** fechado. Manter apenas cobertura/regressão de configuração de DB.
+- `/admin metrics` existe e não deve ser tratado como bug ou bloqueador técnico.
+- `admin_handlers_metrics.py` cobre métricas básicas de beta: usuários, buscas, alertas, backlog, Free/Premium e sources 7d.
+- O índice `ix_notifications_user_sent_today` está documentado como validado em PostgreSQL/Supabase real.
+- Pagamento automático, aprovação 1-clique e trial não são bugs de runtime; são pendências de fluxo/produto em `02_FLUXO.md`, `05_PLAN.md` e `06_SUBSCRIPTION.md`.
 
 ---
 
-## BUG-02 — Index `notifications(user_id, sent_at WHERE status='sent')` não confirmado
+## BUG-01 — `max_overflow` não passado ao `create_engine`
+
+**Arquivo:** `app/db/session.py`
+
+**Status:** corrigido.
+
+`app/db/session.py` já aplica:
+
+- `max_overflow=settings.db_max_overflow`;
+- `pool_timeout=settings.db_pool_timeout` quando aplicável;
+- `connect_args={"connect_timeout": int(settings.db_connect_timeout)}` para conexões não-SQLite;
+- tratamento específico para SQLite sem parâmetros incompatíveis.
+
+**Status operacional:** fechado.
+
+---
+
+## BUG-02 — Índice parcial de notifications enviado
 
 **Arquivo:** `migrations/versions/f6a1b2c3d4e5_notifications_sent_at_index.py`
 
-**Status:** resolvido e validado em banco real (PostgreSQL/Supabase).
+**Status:** resolvido e validado em banco real PostgreSQL/Supabase.
 
-**Nota de validação:** a migration `f6a1b2c3d4e5_notifications_sent_at_index.py` já cria em PostgreSQL o índice:
-
-`ix_notifications_user_sent_today ON notifications (user_id, sent_at) WHERE status = 'sent'`
-
-`count_sent_today` faz:
+A migration cria em PostgreSQL:
 
 ```sql
-SELECT COUNT(*) FROM notifications
-WHERE user_id = $1
-  AND status = 'sent'
-  AND sent_at >= now() - interval '24 hours'
+CREATE INDEX ix_notifications_user_sent_today
+ON notifications (user_id, sent_at)
+WHERE status = 'sent';
 ```
 
-Sem `WHERE status='sent'` no índice, esse filtro faz varredura parcial.
+Queries protegidas:
 
-**Validação executada (banco real):**
-
-```sql
-SELECT indexname, indexdef
-FROM pg_indexes
-WHERE tablename = 'notifications'
-  AND indexname LIKE '%sent%';
-```
-
-**Resultado confirmado:** `ix_notifications_user_sent_today` é índice partial com `WHERE status = 'sent'` no banco real, conforme validação do script `scripts/validate_postgres_schema.py` (OK).
+- `app/services/limits_service.py::count_sent_today`;
+- `app/services/limits_service.py::count_notifications_sent_last_n_days`;
+- leituras agregadas de alertas enviadas em `/admin metrics`.
 
 **Status operacional:** fechado. Revalidar apenas se houver nova migration envolvendo `notifications`.
 
 ---
 
-## BUG-03 — Scripts legados de cache/otimização removidos (ARCH-06)
+## BUG-03 — Scripts legados de cache/otimização removidos
 
 **Arquivo:** `config/raspberry-pi/crontab`
 
 **Status:** corrigido e concluído.
 
-**Correção aplicada:** removidas referências a scripts legados e consolidada limpeza operacional em:
+O fluxo oficial de limpeza operacional é:
 
 ```bash
 /home/autohunter/autohunter/venv/bin/python /home/autohunter/autohunter/scripts/cleanup_operational_data.py --apply
 ```
 
-**Validação operacional contínua:**
+Removidos:
 
-```bash
-grep -E "cache_manager|database_optimizer" config/raspberry-pi/crontab
+```text
+scripts/cache_manager.py
+scripts/database_optimizer.py
 ```
 
 **Status operacional:** fechado. Manter atenção a crescimento de dados/logs no Raspberry por rotinas novas.
 
 ---
 
-## BUG-08 — Chamada incompatível em `match_listings_for_active_wishlists` (P0 runtime)
-
-**Arquivo:** `app/services/matching_service.py`
-
-**Problema confirmado:** havia chamada incorreta `match_listing_to_wishlist(w, l).ok` dentro do loop de match ativo.
-
-- assinatura real exige `db` como primeiro parâmetro;
-- retorno é `bool`, sem atributo `.ok`.
-
-**Status:** corrigido na main para `match_listing_to_wishlist(db, w, l)`.
-
-**Cobertura de regressão:** adicionada para garantir execução sem `TypeError`/`AttributeError` e inclusão de listing compatível no resultado.
-
-**Status operacional:** fechado.
-
----
-
 ## BUG-04 — Validação end-to-end de migrations em PostgreSQL real
-
-**Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P0 histórico
 
 **Status:** resolvido e validado em PostgreSQL/Supabase real.
 
-**Mudança implementada:** script read-only `scripts/validate_postgres_schema.py` valida conexão PostgreSQL, estado Alembic, colunas críticas de `car_listings` e índice partial de `notifications`.
+Script read-only:
 
-**Importante:** o script **não** executa `alembic upgrade head` automaticamente e não aplica alterações destrutivas.
-
-**Validação executada (resultado):**
-
-```bash
-python scripts/validate_postgres_schema.py
+```text
+scripts/validate_postgres_schema.py
 ```
 
-**Resultado confirmado em banco real:**
+Valida:
 
-- conexão PostgreSQL estabelecida e dialect confirmado;
-- Alembic com head único `aa21b3c4d5e6`;
-- revision atual do banco em `aa21b3c4d5e6` (alinhada ao head esperado);
-- `car_listings` contém `doors`, `body_type`, `cross_source_fingerprint`;
-- resumo da execução: `OK=8, WARNING=0, FAIL=0`.
+- conexão PostgreSQL;
+- estado Alembic;
+- colunas críticas de `car_listings`;
+- índice partial de `notifications`.
 
-**Status operacional:** fechado. Reexecutar o script antes/depois de deploys com migrations relevantes.
+Resultado já documentado historicamente:
+
+```text
+OK=8, WARNING=0, FAIL=0
+```
+
+**Status operacional:** fechado. Reexecutar antes/depois de deploys com migrations relevantes.
 
 ---
 
 ## BUG-05 — Filtros estruturados para `km`, `seller`, `body_type`, `doors`
 
-**Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P1 histórico
+**Status:** resolvido no comando oficial.
 
-**Status atual:** resolvido para fluxo por comando (`/wishlist filter ...`) com UX atualizada, parsing composto e testes cobrindo normalização + matching.
+O backend já suporta:
 
-**O que já existia no backend (confirmado):**
+- normalização/aliases em `normalize_wishlist_filter_input`;
+- operadores e validação para filtros estruturados;
+- aplicação em matching, matching fast e explicação de match.
 
-- normalização/aliases em `normalize_wishlist_filter_input` para `mileage_km`, `seller_type`, `body_type`, `doors`;
-- validação de operadores e valores para esses campos;
-- aplicação de filtros em matching (`_apply_filters`, `_apply_filters_fast`, `explain_match`).
+Fechado no fluxo:
 
-**O que foi fechado:**
+- `/wishlist filter` com ajuda atualizada;
+- `/wishlist filter add` aceitando valor composto, incluindo `between 30000 90000`;
+- mensagens de erro mais acionáveis;
+- listagem textual com labels amigáveis.
 
-- help do `/wishlist filter` atualizado com campos e exemplos de `km`, `vendedor`, `carroceria`, `portas`;
-- handler legado `/wishlist filter add` aceita valor composto (`value = " ".join(args[5:])`), incluindo `between 30000 90000`;
-- mensagens de uso/erro tornadas acionáveis com exemplos diretos;
-- listagem textual de filtros no comando legado com labels amigáveis (`km`, `vendedor`, `carroceria`, `portas`) sem alterar persistência.
-
-**Nota de produto:** fluxo guiado por botões para filtro estruturado completo pode evoluir depois; BUG-05 permanece **resolvido** no comando oficial já funcional.
-
-**Status operacional:** fechado como bug. Evolução por botões deve ser tratada como melhoria de UX, não correção.
+**Status operacional:** fechado como bug. Evolução por botões é melhoria de UX, não correção.
 
 ---
 
 ## BUG-06 — Cross-source dedupe
 
-**Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P1 histórico
+**Status:** preparado com feature flag; live OFF; shadow observável.
 
-**Status atual:** **dedupe funcional preparado com feature flag; live OFF por padrão; shadow observável**.
+O que está pronto na `main`:
 
-**O que está pronto na main:**
-
-- fingerprint `cross_source_fingerprint` é calculado no ingest/upsert com sinais estruturados conservadores (`make`, `model`, `year`, buckets de `price` e `mileage_km`, com `version/transmission` opcionais quando presentes);
-- fingerprint é persistido em `car_listings` sem alterar a política atual de matching/notificação;
-- existe consulta de diagnóstico para observar colisões cross-source (mesmo fingerprint em mais de uma source);
-- runtime de dedupe está integrado à fila de notifications com feature flag;
+- `cross_source_fingerprint` calculado no ingest/upsert;
+- fingerprint persistido em `car_listings`;
+- diagnóstico de colisões cross-source;
+- runtime de dedupe integrado à fila de notifications;
 - modo shadow registra o que seria suprimido sem alterar a fila;
-- modo live suprime apenas se ativado explicitamente;
-- falhas na avaliação de dedupe são isoladas para não quebrar enqueue;
+- modo live só suprime se habilitado explicitamente;
+- falhas na avaliação são isoladas;
 - observabilidade admin disponível.
 
-**Flags atuais esperadas:**
+Flags esperadas:
 
 ```env
 cross_source_dedupe_enabled=false
@@ -183,94 +163,74 @@ cross_source_dedupe_shadow_mode=true
 cross_source_dedupe_window_days=30
 ```
 
-**Importante:** a supressão real segue desativada por padrão (`cross_source_dedupe_enabled=false`).  
-Com `enabled=true` + `shadow_mode=true`, o runtime apenas registra o que **seria** suprimido; não altera fila.  
-Só existe supressão efetiva quando `enabled=true` + `shadow_mode=false`.
+Admin:
 
-**Observabilidade admin:**
+```text
+/admin dedupe collisions [N]
+/admin dedupe shadow [horas] [limite]
+```
 
-- `/admin dedupe collisions [N]` exibe colisões por fingerprint e estado das flags (`suppression enabled`, `shadow mode`, `window`).
-- `/admin dedupe shadow [horas] [limite]` exibe relatório de eventos shadow/live (`shadow hit`, `suppressed`, `evaluation error`) com top fingerprints, top pares de source e amostras para revisão operacional.
-
-**Próximo passo operacional:**
-
-1. ativar dedupe em shadow no ambiente real;
-2. rodar por alguns dias;
-3. revisar `/admin dedupe shadow`;
-4. revisar `/admin dedupe collisions`;
-5. calibrar falsos positivos/falsos negativos;
-6. só então decidir se vale ligar live (`cross_source_dedupe_shadow_mode=false`).
-
-**Status operacional:** preparado, mas **não considerar live concluído** até haver evidência real de shadow.
+**Pendência real:** rodar shadow em produção/beta, revisar falsos positivos/falsos negativos e só então decidir live.
 
 ---
 
 ## BUG-07 — `score_v2` automotivo + FIPE operacional
 
-**Arquivo:** `docs/CLAUDE_REVIEW_FOLLOWUP.md` → P2 histórico
+**Status:** mecanismo fechado; carga real FIPE pendente de operação.
 
-**Problema original:** `score_v2` existia no modelo `Notification` e era persistido, mas a lógica automotiva (FIPE, mercado, raridade) estava incompleta.
+Implementado:
 
-**Implementado na P2:**
+- componente `market_price` com fallback neutro;
+- componente `fipe_price` com lookup opcional em `fipe_prices`;
+- componente `rarity` conservador;
+- componente `quality`;
+- breakdown auditável;
+- importador `scripts/import_fipe_prices.py`;
+- exportador `scripts/export_missing_fipe_keys.py`;
+- template `docs/examples/fipe_prices_template.csv`;
+- guia `docs/FIPE_OPERATIONAL_LOAD.md`;
+- diagnóstico `/admin fipe coverage`.
 
-- componente `market_price` com delta vs mediana de mercado quando `market_stats_cohorts` possui amostra mínima (fallback neutro quando não possui);
-- componente `fipe_price` com lookup opcional em `fipe_prices` (sem integração externa) e fallback neutro quando ausente;
-- componente `rarity` leve/conservador com fallback neutro quando não há amostra mínima;
-- componente `quality` com sinais baratos (preço, km, localização, imagem, URL, make/model/year);
-- breakdown auditável com componentes nomeados e alias `price` mantido por compatibilidade.
+**Pendência real:** carregar dados FIPE confiáveis e validar coverage útil.
 
-**Status atual:** **score v2 implementado com fallback; import/coverage FIPE implementado; carga real de dados FIPE pendente de operação**.
+---
 
-**O que está pronto na main:**
+## BUG-08 — Chamada incompatível em `match_listings_for_active_wishlists`
 
-- `score_v2` usa dados de mercado/FIPE/raridade quando disponíveis;
-- fallback neutro evita instabilidade quando faltam dados;
-- importador operacional existe (`scripts/import_fipe_prices.py`);
-- template CSV existe (`docs/examples/fipe_prices_template.csv`);
-- guia operacional existe (`docs/FIPE_OPERATIONAL_LOAD.md`);
-- exportador read-only de chaves ausentes existe (`scripts/export_missing_fipe_keys.py`);
-- cobertura admin existe (`/admin fipe coverage`);
-- handler `/admin fipe` está isolado em módulo dedicado.
+**Arquivo:** `app/services/matching_service.py`
 
-**Clarezas importantes:**
+**Status:** corrigido.
 
-- a fórmula/base do score não foi alterada pelo import FIPE;
-- o import apenas alimenta dados de referência para o componente FIPE já previsto;
-- sem carga FIPE real suficiente, o score continua estável por fallback neutro;
-- o projeto não integra API externa FIPE nem scraping de FIPE neste fluxo.
+A chamada incorreta `match_listing_to_wishlist(w, l).ok` foi corrigida para o contrato real:
 
-**Próximo passo operacional:**
+```python
+match_listing_to_wishlist(db, w, l)
+```
 
-1. rodar `/admin fipe coverage`;
-2. exportar chaves ausentes com `scripts/export_missing_fipe_keys.py`;
-3. preencher CSV com fonte confiável;
-4. rodar dry-run com `scripts/import_fipe_prices.py`;
-5. aplicar com `--apply`;
-6. rodar `/admin fipe coverage` novamente para confirmar avanço.
-
-**Status operacional:** mecanismo fechado; pendente executar carga real e validar cobertura útil.
+**Status operacional:** fechado.
 
 ---
 
 ## Resumo por severidade/status
 
-| Bug | Severidade | Estado na main | Pendência real |
+| Bug | Severidade | Estado na `main` | Pendência real |
 |---|---|---|---|
 | BUG-01 | Alta — escala | Corrigido | Nenhuma |
-| BUG-02 | Alta — performance | Resolvido e validado em banco real | Nenhuma |
-| BUG-03 | Média — operação | Corrigido | Monitorar rotinas novas de limpeza/log |
+| BUG-02 | Alta — performance | Resolvido e validado | Nenhuma |
+| BUG-03 | Média — operação | Corrigido | Monitorar rotinas novas |
+| BUG-04 | Alta — estabilidade | Resolvido e validado | Revalidar em deploys com migration |
+| BUG-05 | Média — produto | Resolvido no comando oficial | UX por botões é melhoria futura |
+| BUG-06 | Alta sensibilidade operacional | Feature flag + shadow | Rodar shadow real antes de live |
+| BUG-07 | Média — produto/dados | Score/FIPE implementados | Carregar FIPE real |
 | BUG-08 | Alta — runtime | Corrigido | Nenhuma |
-| BUG-04 | Alta — estabilidade | Resolvido e validado em PostgreSQL/Supabase real | Revalidar em deploys com migration |
-| BUG-05 | Média — produto | Resolvido no comando oficial | Evolução guiada por botões é melhoria futura |
-| BUG-06 | Baixa — produto / alta sensibilidade operacional | Preparado com feature flag; live OFF; shadow observável | Rodar shadow real antes de live |
-| BUG-07 | Média — produto/dados | Score v2 + import/coverage FIPE implementados | Carregar dados FIPE reais e validar coverage |
 
 ---
 
-## Pendências abertas que não são mais “bug de código”
+## Pendências abertas que não são bug de código
 
-1. **Dedupe live:** depende de observação real em shadow e decisão operacional.
-2. **FIPE real:** depende de carga de dados confiável no ambiente operacional.
-3. **UX guiada por botões:** melhoria de produto, não bug.
-4. **Refactor de admin/settings:** melhoria estrutural, não bug funcional.
-5. **Cron/systemd externo no Raspberry:** decisão operacional; o scheduler interno já existe para os fluxos implementados.
+1. Dedupe live depende de observação real em shadow.
+2. FIPE real depende de carga de dados confiável.
+3. Pagamento/ativação Premium depende de fluxo de produto.
+4. Trial depende de decisão comercial.
+5. UX guiada por botões é evolução, não bug funcional.
+6. Refactor de admin/settings é melhoria estrutural.
