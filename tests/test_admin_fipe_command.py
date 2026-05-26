@@ -262,3 +262,43 @@ def test_render_admin_fipe_resolve_details():
     assert "R$ 95.000,00" in msg
     assert "Outros candidatos" in msg
     assert "Motivo ambiguidade" in msg
+
+def test_admin_fipe_plan_default_and_limit_cap(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    calls = {}
+
+    def _fake(db, reference_month, limit=100, min_confidence=80):
+        calls["reference_month"] = reference_month
+        calls["limit"] = limit
+        return {
+            "reference_month": "2026-05",
+            "sample_size": 100,
+            "planned_inserts_count": 1,
+            "would_update_count": 0,
+            "already_exists_count": 0,
+            "skipped_counts": {"ambiguous": 1, "no_match": 1, "insufficient_data": 0, "below_confidence": 0, "missing_price": 0, "missing_vehicle_key": 0, "already_exists": 0},
+            "planned_inserts": [{"vehicle_key": "honda|civic|2015", "fipe_price": 95000, "confidence_score": 86, "model_name": "Civic"}],
+        }
+
+    class _Q:
+        def __init__(self, value): self.value = value
+        def order_by(self,*a,**k): return self
+        def first(self): return self.value
+
+    class _DB:
+        def query(self,*a,**k): return _Q(("2026-05",))
+        def __enter__(self): return self
+        def __exit__(self,*a): return False
+
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(admin_handlers_fipe, "build_fipe_price_plan", _fake)
+
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "plan")))
+    assert calls["limit"] == 100
+    assert "Read-only" in up.message.sent[-1]
+
+    up2 = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up2, _ctx("fipe", "plan", "2026-05", "9999")))
+    assert calls["reference_month"] == "2026-05"
+    assert calls["limit"] == 500
