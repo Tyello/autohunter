@@ -170,3 +170,75 @@ def test_admin_invalid_action_help_lists_fipe(monkeypatch):
     assert "/admin dedupe" in msg
     assert "/admin tracking" in msg
     assert "/admin digest" in msg
+
+
+
+def test_admin_fipe_resolve_not_found(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+
+    class _Q:
+        def __init__(self, value): self.value=value
+        def filter(self,*a,**k): return self
+        def order_by(self,*a,**k): return self
+        def first(self): return self.value
+
+    class _DB:
+        def query(self,*args,**kwargs):
+            name = getattr(args[0], "name", None) if args else None
+            if name == "reference_month": return _Q(("2026-05",))
+            return _Q(None)
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "resolve", "bad-id")))
+    assert "Listing não encontrado" in up.message.sent[-1]
+
+
+def test_admin_fipe_resolve_success(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+
+    listing = SimpleNamespace(id="l1", make="Honda", model="Civic", year=2015)
+
+    class _Q:
+        def __init__(self, value): self.value=value
+        def filter(self,*a,**k): return self
+        def order_by(self,*a,**k): return self
+        def first(self): return self.value
+
+    class _DB:
+        def query(self,*args,**kwargs):
+            name = getattr(args[0], "name", None) if args else None
+            if name == "reference_month": return _Q(("2026-05",))
+            return _Q(listing)
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(admin_handlers_fipe, "resolve_listing_to_fipe_candidates", lambda *a, **k: {
+        "reference_month": "2026-05",
+        "status": "matched",
+        "candidates": [{"model_name":"Civic","confidence_score":90,"confidence_label":"high","fipe_code":"001","model_year":2015,"fuel":"Gasolina","price":95000,"reasons":["modelo compatível"]}],
+        "best_candidate": {"model_name":"Civic","confidence_score":90,"confidence_label":"high","fipe_code":"001","model_year":2015,"fuel":"Gasolina","price":95000,"reasons":["modelo compatível"]},
+    })
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "resolve", "l1")))
+    assert "FIPE resolver" in up.message.sent[-1]
+    assert "Status: matched" in up.message.sent[-1]
+
+
+def test_admin_fipe_resolver_status(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_handlers_fipe, "build_fipe_resolver_coverage_report", lambda *a, **k: {
+        "reference_month": "2026-05", "sample_size": 10,
+        "status_counts": {"matched": 2, "ambiguous": 3, "no_match": 4, "insufficient_data": 1},
+    })
+    class _DB:
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "resolver_status", "2026-05", "20")))
+    assert "FIPE resolver status" in up.message.sent[-1]
+    assert "matched: 2" in up.message.sent[-1]
