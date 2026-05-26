@@ -1,10 +1,26 @@
 # Fluxo — Melhorias de Jornada do Usuário
 
 Atualizado em: 2026-05-25.  
-Estado confrontado com a `main` após a entrada de `/admin metrics`.
+Estado confrontado com a `main`.
 
-> Este documento lista gaps reais de jornada.  
-> Itens já entregues no produto ou em observabilidade admin não devem voltar como bloqueadores de fluxo.
+> Documento dono de **jornadas e gaps de fluxo**.  
+> Não detalhar aqui implementação de pagamento, regras de plano, arquitetura ou carga operacional.
+
+---
+
+## Escopo deste documento
+
+Este documento responde: “quais jornadas ainda quebram, ficam manuais ou geram silêncio para o usuário?”
+
+Detalhes canônicos ficam assim:
+
+| Assunto | Documento dono |
+|---|---|
+| Implementação de pagamento/webhook/aprovação | `06_SUBSCRIPTION.md` |
+| Trial, Founders e limites | `05_PLAN.md` |
+| UX/copy das mensagens | `01_UX.md` |
+| Lançamento/beta | `04_LAUNCH_PLAN.md` |
+| Eficiência/carga Raspberry | `08_EFICIENCIA.md` |
 
 ---
 
@@ -14,93 +30,50 @@ Estado confrontado com a `main` após a entrada de `/admin metrics`.
 
 - Entrada por `/start` e `/menu`.
 - Criação e gestão de buscas/wishlists pelo Telegram.
-- Filtros implícitos e filtros guiados.
-- Busca pontual em `/buscar`/menu, sem salvar monitoramento.
+- Filtros implícitos e guiados.
+- Busca pontual em `/buscar`/menu.
 - Tracking de anúncios por wishlist.
 - Plano Free/Premium, `/plan` e `/upgrade`.
 - Link Mercado Pago configurável no upgrade.
 - Ativação Premium manual/admin.
 - Scheduler, filas persistentes, workers e sender.
-- `/admin metrics` v1 para acompanhar beta e funil operacional básico.
+- `/admin metrics` v1 para acompanhamento operacional básico.
 
 ### Ainda não existe como fluxo fechado
 
-- Pagamento automático com webhook Mercado Pago.
-- Aprovação de comprovante em 1 clique pelo admin.
+- Pagamento/ativação Premium sem ação manual digitada pelo admin.
 - Trial automático de 7 dias para usuário novo.
 - Avisos user-facing antes da expiração Premium.
 - Nudge interativo quando uma busca fica 7 dias sem alerta.
 - Diagnóstico automático de busca muito restritiva após primeira varredura sem resultado.
 
-### Evidência importante
-
-- `app/web/routes_webhooks.py` não existe na `main`.
-- `/admin metrics` existe em `app/bot/admin_handlers_metrics.py` e está registrado em `app/bot/handlers_admin.py`.
-- Portanto, métricas não são mais gap deste documento; pagamento/ativação continua sendo o principal gap de fluxo comercial.
-
 ---
 
-## FLOW-01 — Pagamento: fluxo ainda manual
+## FLOW-01 — Pagamento/ativação ainda manual
 
 **Status:** aberto.  
-**Impacto:** bloqueador comercial para lançamento público.
+**Impacto:** bloqueador comercial.
 
-**Estado atual:** usuário toca em upgrade, recebe link do Mercado Pago, paga fora do bot e depende de validação/ativação manual pelo admin. Isso funciona para operação assistida, mas não escala.
+**Fluxo atual:** usuário recebe link Mercado Pago e depende de validação/ativação manual.
 
-### Opção A — Webhook Mercado Pago
+**Fluxo desejado:** Premium ativado sem comando manual digitado pelo admin.
 
-Fluxo desejado:
+Há dois caminhos:
 
-```text
-usuário toca Assinar Mensal/Anual
-→ bot gera preferência de pagamento com metadata {chat_id, plan, period}
-→ bot envia link de checkout personalizado
-→ usuário paga
-→ Mercado Pago envia webhook POST /webhooks/mercadopago
-→ app valida assinatura do webhook
-→ app extrai chat_id/period do pagamento
-→ premium_subscription_service ativa assinatura
-→ bot notifica usuário
-→ bot notifica admin
-```
+1. webhook Mercado Pago para escala;
+2. aprovação admin em 1 clique para beta.
 
-Arquivos prováveis:
+**Detalhamento canônico:** `06_SUBSCRIPTION.md`.
 
-```text
-app/web/routes_webhooks.py
-app/services/mercadopago_service.py
-app/bot/handlers_upgrade.py ou handler equivalente de upgrade
-```
-
-### Opção B — Aprovação admin em 1 clique
-
-Fallback recomendado para beta:
-
-```text
-usuário envia comprovante no chat
-→ bot encaminha para admin com contexto
-→ admin toca em Ativar Mensal / Ativar Anual / Recusar
-→ bot ativa Premium automaticamente
-→ bot notifica usuário
-```
-
-Arquivo provável:
-
-```text
-app/bot/handlers_payment.py
-```
-
-**Critério:** Premium ativado sem o admin digitar comando manual.
+**Critério de fluxo:** usuário paga ou envia comprovante e recebe confirmação clara, sem ficar preso em conversa manual indefinida.
 
 ---
 
-## FLOW-02 — Fluxo de expiração do Premium
+## FLOW-02 — Expiração Premium sem comunicação completa
 
 **Status:** aberto.
 
-**Estado atual:** existe job de expiração Premium, mas este documento não encontrou, na `main`, um fluxo user-facing completo de aviso 7 dias/1 dia antes e mensagem de downgrade no dia da expiração.
-
-Fluxo desejado:
+**Fluxo desejado:**
 
 ```text
 7 dias antes → aviso de renovação
@@ -108,12 +81,7 @@ Fluxo desejado:
 no dia → downgrade + mensagem clara do que mudou
 ```
 
-Arquivos prováveis:
-
-```text
-app/scheduler/premium_expiration_job.py
-app/services/premium_expiry_notification_service.py
-```
+**Detalhamento canônico:** `06_SUBSCRIPTION.md::SUB-03`.
 
 **Critério:** usuário não descobre a expiração apenas quando perde uma capacidade Premium.
 
@@ -121,28 +89,17 @@ app/services/premium_expiry_notification_service.py
 
 ## FLOW-03 — Busca sem alerta por 7 dias
 
-**Status:** aberto, parcialmente relacionado ao digest semanal v2.
+**Status:** aberto.
 
-**Estado atual:** o digest semanal existe como base, mas ainda falta um fluxo interativo específico por wishlist silenciosa.
+**Problema:** busca ativa sem alerta pode parecer bot parado.
 
-Fluxo desejado:
+**Fluxo desejado:** enviar nudge por wishlist silenciosa com opções:
 
 ```text
-Sua busca "ek9 b16" está ativa, mas não encontrou nada em 7 dias.
-
-Possíveis motivos:
-• Carro muito raro
-• Filtros muito restritivos
-• Preço abaixo do mercado
-
 [🔧 Ajustar filtros] [⏸️ Pausar busca] [Continuar monitorando]
 ```
 
-Arquivo provável:
-
-```text
-app/scheduler/wishlist_no_alert_nudge_job.py
-```
+**Relação com UX:** o texto final e o digest semanal v2 ficam em `01_UX.md`.
 
 **Critério:** não enviar mais de 1 vez por wishlist por semana.
 
@@ -152,19 +109,11 @@ app/scheduler/wishlist_no_alert_nudge_job.py
 
 **Status:** aberto.
 
-**Estado atual:** não há evidência na `main` de trial automático para novos usuários. O modelo de subscription suporta `source` e `ends_at`, então a evolução parece possível sem migration grande.
+**Fluxo desejado:** usuário novo experimenta capacidades Premium por tempo limitado e recebe avisos antes de cair para Free.
 
-Fluxo desejado:
+**Detalhamento canônico:** `05_PLAN.md::PLAN-01`.
 
-```text
-/start de usuário novo
-→ cria conta com acesso Premium trial por 7 dias
-→ avisa que o acesso completo é temporário
-→ avisa antes de terminar
-→ downgrade automático para Free ao expirar
-```
-
-**Critério:** usuário novo sente valor do Premium antes de pagar.
+**Critério:** trial tem regra clara de elegibilidade, duração e downgrade.
 
 ---
 
@@ -172,29 +121,9 @@ Fluxo desejado:
 
 **Status:** aberto.
 
-**Problema:** usuário cria busca com muitos filtros, não recebe alerta e não sabe se o carro é raro, caro demais ou se os filtros bloquearam tudo.
+**Problema:** primeira varredura sem resultado não explica se o carro é raro, caro demais ou se os filtros bloquearam tudo.
 
-Direção:
-
-```python
-diagnosis = diagnose_zero_results(wishlist, source_runs)
-```
-
-Saída desejada:
-
-```text
-Não encontrei nada agora.
-Seus filtros podem estar muito restritivos:
-km baixo + preço abaixo do mercado + apenas uma cidade.
-
-[Relaxar filtros] [Manter e aguardar]
-```
-
-Arquivo provável:
-
-```text
-app/services/wishlist_diagnosis_service.py
-```
+**Fluxo desejado:** após zero resultado, orientar o usuário com causa provável e opção de relaxar filtros.
 
 **Critério:** primeira varredura sem resultado vira orientação, não silêncio.
 
@@ -202,19 +131,19 @@ app/services/wishlist_diagnosis_service.py
 
 ## Prioridade atual
 
-| # | Item | Status | Impacto |
+| # | Item | Status | Documento dono do detalhe |
 |---|---|---|---|
-| 1 | FLOW-01 — Pagamento automático ou 1 clique | Aberto | Bloqueador comercial |
-| 2 | FLOW-04 — Trial 7 dias | Aberto | Ativação e conversão |
-| 3 | FLOW-02 — Expiração com aviso | Aberto | Retenção Premium |
-| 4 | FLOW-03 — Nudge busca sem alerta | Aberto | Retenção Free/Premium |
-| 5 | FLOW-05 — Diagnóstico busca restritiva | Aberto | Reduz abandono silencioso |
+| 1 | FLOW-01 — Pagamento/ativação | Aberto | `06_SUBSCRIPTION.md` |
+| 2 | FLOW-04 — Trial 7 dias | Aberto | `05_PLAN.md` |
+| 3 | FLOW-02 — Expiração com aviso | Aberto | `06_SUBSCRIPTION.md` |
+| 4 | FLOW-03 — Nudge busca sem alerta | Aberto | `01_UX.md` + este documento |
+| 5 | FLOW-05 — Diagnóstico busca restritiva | Aberto | este documento |
 
 ---
 
 ## Fora da fila deste documento
 
 - `/admin metrics` v1: concluído.
-- Refactor de admin handlers: fica em `03_ARQUITETURA.md`.
-- Ajustes de throughput/Raspberry: ficam em `08_EFICIENCIA.md`.
-- BUGs e validações técnicas: ficam em `07_BUGS.md`.
+- Refactor de admin handlers: `03_ARQUITETURA.md`.
+- Throughput/Raspberry: `08_EFICIENCIA.md`.
+- Bugs e validações técnicas: `07_BUGS.md`.

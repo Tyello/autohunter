@@ -1,80 +1,70 @@
 # Launch Plan — Garagem Alvo
 
 Atualizado em: 2026-05-25.  
-Estado confrontado com a `main` após a entrada de `/admin metrics`.
+Estado confrontado com a `main`.
 
-> Produto funcional, UX base melhorada, operação técnica mais madura.  
-> Lacuna atual: pagamento/ativação Premium, teste de carga, beta real e comunicação honesta de cobertura.
+> Documento dono de **lançamento, beta, go-to-market e critérios de sucesso**.  
+> Não detalhar aqui implementação de assinatura, plano, UX ou eficiência; apenas apontar para os documentos donos.
 
 ---
 
-## O que está pronto para beta controlado
+## Escopo deste documento
 
-- Bot com onboarding guiado, `/start`, `/menu`, filtros, busca manual e rastreamento.
-- Alertas com score, contexto, recência e contexto de preço quando disponível.
-- Plano Free/Premium com limites, `/plan` e `/upgrade`.
+Este documento responde: “o que falta para lançar com segurança e medir resultado?”
+
+| Assunto | Documento dono |
+|---|---|
+| Pagamento, webhook, aprovação 1-clique | `06_SUBSCRIPTION.md` |
+| Trial, Founders, limites e preço | `05_PLAN.md` |
+| UX/copy/digest | `01_UX.md` |
+| Jornada de usuário | `02_FLUXO.md` |
+| Carga Raspberry e operação técnica | `08_EFICIENCIA.md` |
+| Bugs e validações | `07_BUGS.md` |
+
+---
+
+## Pronto para beta controlado
+
+- Bot Telegram com onboarding, `/start`, `/menu`, filtros, busca manual e tracking.
+- Alertas com score, contexto, recência e preço quando disponível.
+- Free/Premium com `/plan` e `/upgrade`.
 - Scheduler, filas persistentes, workers e sender.
-- `/admin metrics` v1 para acompanhamento de usuários, buscas, alertas, backlog, conversão e sources 7d.
+- `/admin metrics` v1.
 - Backup/restore operacional.
-- Admin deploy via Telegram.
 - Source health/admin diagnostics.
-- FIPE import/coverage operacional, com carga real ainda dependente de operação.
-- Dedupe cross-source preparado com feature flag, shadow observável e live OFF por padrão.
-- Leilões em piloto controlado, com opt-in por busca e gates admin.
+- FIPE import/coverage disponível, com carga real ainda operacional.
+- Dedupe cross-source em shadow/live flagado.
+- Leilões em piloto controlado.
 
 ---
 
-## O que bloqueia lançamento público amplo
+## Bloqueadores de lançamento público amplo
 
-### BL-01 — Pagamento sem intervenção manual
+### BL-01 — Pagamento/ativação Premium sem gargalo manual
 
 **Status:** aberto.  
-**Prioridade:** P0 comercial.
+**Documento dono:** `06_SUBSCRIPTION.md`.
 
-Ver `02_FLUXO.md::FLOW-01` e `06_SUBSCRIPTION.md` para implementação completa.
-
-**Caminho principal:** webhook Mercado Pago.
-
-**Fallback aceitável para beta:** aprovação admin em 1 clique, sem comando manual digitado.
-
-**Critério mínimo para público desconhecido:** usuário paga e recebe Premium sem depender de conversa manual com o operador.
+Critério de lançamento: usuário paga ou é aprovado pelo fluxo de beta e recebe Premium sem depender de comando manual digitado pelo operador.
 
 ---
 
 ### BL-02 — Teste de carga em Raspberry Pi real
 
 **Status:** aberto.  
-**Prioridade:** P0 operacional.
+**Documento dono:** `08_EFICIENCIA.md`.
 
-O código já recebeu correções de eficiência, pool, sender, backup e cleanup, mas precisa de validação operacional com carga representativa.
-
-Cenário mínimo:
-
-```bash
-# Criar base sintética controlada
-python scripts/load_test_seed.py --users 50 --wishlists-per-user 2
-
-# Monitorar por 24h no host real
-watch -n 300 "free -h && ps aux | grep playwright | wc -l && psql -c 'SELECT status, count(*) FROM scrape_jobs GROUP BY status;'"
-```
-
-Critérios:
-
-- RAM estável, sem crescimento indefinido.
-- `scrape_jobs` drena, sem acúmulo progressivo.
-- Sender sem atraso maior que 5 minutos.
-- Sem processo Playwright zumbi após 24h.
-- `/admin health` e `/admin metrics` coerentes durante a janela.
+Critério de lançamento: validar 50 usuários / 24h no host real, com RAM, backlog, sender e Playwright estáveis.
 
 ---
 
-### BL-03 — Beta real com acompanhamento
+### BL-03 — Beta real acompanhado por métricas
 
 **Status:** aberto.
 
-`/admin metrics` já existe, então a lacuna não é mais ferramenta básica de acompanhamento. A lacuna agora é rodar beta real e usar as métricas.
+`/admin metrics` já existe; a lacuna agora é rodar o beta e acompanhar dados reais.
 
-Métricas mínimas a acompanhar:
+Métricas mínimas:
 
 - novos usuários 7d;
 - usuários com busca ativa;
@@ -86,22 +76,13 @@ Métricas mínimas a acompanhar:
 
 ---
 
-## Itens que eram bloqueadores e foram fechados
+## Itens fechados que não devem voltar como bloqueadores
 
-### `/admin metrics` v1
-
-**Status:** concluído na `main`.
-
-Evidência:
-
-```text
-app/bot/admin_handlers_metrics.py
-app/bot/handlers_admin.py
-
-tests/test_admin_metrics_command.py
-```
-
-Não reabrir como requisito de lançamento. Evoluções de métricas devem ser incrementais.
+- `/admin metrics` v1.
+- Source health/admin diagnostics.
+- Backup health básico.
+- Baseline de eficiência documentado.
+- Índice de notifications enviado/validado.
 
 ---
 
@@ -109,29 +90,28 @@ Não reabrir como requisito de lançamento. Evoluções de métricas devem ser i
 
 ```text
 Semana 0 — Pré-beta técnico
-├── BL-01: pagamento webhook ou aprovação 1-clique
-├── BL-02: teste de carga 50 usuários/24h no Raspberry real
+├── fechar ativação Premium sem comando manual
+├── validar carga 50 usuários/24h no Raspberry real
 ├── revisar copy pós-criação de busca
 ├── validar /admin health e /admin metrics durante carga
 └── preparar lista fechada de beta users
 
-Semana 1 — Beta fechado (30–50 pessoas)
-├── grupos de nicho: Civic Si, Golf GTI, WRX, BMW/Audi específicos
-├── convite honesto: beta gratuito e cobertura limitada
+Semana 1 — Beta fechado
+├── convidar 30–50 pessoas de nichos automotivos
+├── comunicar cobertura real sem prometer WebMotors
 ├── acompanhar /admin metrics diariamente
 ├── acompanhar /admin health e filas
 └── corrigir críticos de UX/operação
 
-Semana 2 — Valor recorrente
-├── UX-01: digest semanal v2
-├── FLOW-04: trial 7 dias, se fizer sentido para o beta
-├── primeiros posts de achados reais
-└── contato com canais automotivos pequenos/médios
+Semana 2 — Retenção e valor recorrente
+├── melhorar digest semanal v2
+├── decidir trial 7 dias com dados do beta
+├── publicar achados reais
+└── testar parceria com canais automotivos pequenos/médios
 
 Semana 3 — Founders
-├── lote limitado de Founders para beta
-├── preço de lançamento controlado
-├── ativação por fluxo já fechado
+├── abrir lote limitado para beta users
+├── usar fluxo de pagamento/ativação já fechado
 └── medir conversão e suporte manual
 
 Semana 4 — Abertura gradual
@@ -152,13 +132,11 @@ Semana 4 — Abertura gradual
 - [ ] Nenhuma notificação duplicada em massa.
 - [ ] 3 relatos espontâneos de valor real.
 - [ ] 20 usuários usaram tracking ou abriram anúncio via alerta.
-- [ ] Backlog de notificações não cresce de forma contínua.
+- [ ] Backlog de notificações não cresce continuamente.
 
 ---
 
 ## Comunicação de cobertura honesta
-
-Não prometer WebMotors como fonte estável.
 
 Copy recomendada:
 
@@ -178,11 +156,13 @@ Monitoramos todos os principais portais.
 
 ## Próxima tarefa recomendada
 
-**Pagamento/ativação Premium sem comando manual.**
+Fechar **ativação Premium sem comando manual**.
 
-Ordem recomendada:
+Ordem sugerida:
 
 1. Aprovação admin em 1 clique para beta.
 2. Webhook Mercado Pago para escala.
-3. Auditoria de ativações no metadata da subscription.
+3. Auditoria de ativações.
 4. Avisos de expiração Premium.
+
+Detalhes: `06_SUBSCRIPTION.md`.

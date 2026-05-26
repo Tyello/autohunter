@@ -1,43 +1,51 @@
 # Subscription — Pagamento e Ciclo de Vida
 
-Atualizado em: 2026-05-25.  
-Estado confrontado com a `main`.
+Atualizado em: 2026-05-25.
 
-> O modelo de assinatura existe e Premium pode ser ativado manualmente.  
-> O fluxo de pagamento/ativação ainda não está fechado para escala.
+> Documento dono de ativação Premium, cobrança, ciclo de vida de assinatura e auditoria.  
+> Regras comerciais de plano, trial e Founders ficam em `05_PLAN.md`.
 
 ---
 
-## Estado atual
+## Escopo deste documento
 
-### Existe na `main`
+Este documento cobre:
 
-- Modelo `Subscription` com campos para ciclo de vida:
-  - `account_id`;
-  - `plan_id`;
-  - `status`;
-  - `source`;
-  - `starts_at`;
-  - `ends_at`;
-  - `current_period_start`;
-  - `current_period_end`;
-  - `cancel_at_period_end`;
-  - `metadata_json`.
-- Serviço `premium_subscription_service.py` com ativação/expiração/consulta de Premium.
-- Job de expiração Premium no scheduler.
-- `/upgrade` com oferta Premium e link Mercado Pago configurável.
-- `/admin premium` para ativação manual/admin.
-- `/admin metrics` para acompanhar usuários Free/Premium.
+- ativação Premium;
+- webhook Mercado Pago;
+- aprovação admin em 1 clique;
+- expiração e renovação;
+- auditoria de ativações.
 
-### Não existe na `main`
+| Assunto relacionado | Documento dono |
+|---|---|
+| Limites, preço, trial e Founders | `05_PLAN.md` |
+| Jornada de usuário | `02_FLUXO.md` |
+| Lançamento e beta | `04_LAUNCH_PLAN.md` |
+| Métricas de conversão | `08_EFICIENCIA.md` |
+
+---
+
+## Estado atual confrontado com a `main`
+
+### Existe
+
+- Modelo `Subscription` com campos de ciclo de vida.
+- Serviço de ativação/expiração/consulta Premium.
+- Job de expiração Premium.
+- `/upgrade` com oferta Premium e link configurável.
+- `/admin premium` para ativação manual.
+- `/admin metrics` para leitura Free/Premium.
+
+### Não existe
 
 - Webhook Mercado Pago.
 - Rota `app/web/routes_webhooks.py`.
-- Serviço operacional `mercadopago_service.py`.
-- Criação dinâmica de preferência de pagamento por usuário/período.
-- Aprovação de comprovante em 1 clique por botão admin.
-- Fluxo user-facing completo de avisos antes da expiração.
-- Auditoria padronizada de ativações manuais no `metadata_json`.
+- Serviço operacional de Mercado Pago.
+- Preferência de pagamento dinâmica por usuário/período.
+- Aprovação de comprovante por botão admin.
+- Avisos user-facing antes da expiração.
+- Auditoria padronizada de ativações manuais.
 
 ---
 
@@ -46,24 +54,19 @@ Estado confrontado com a `main`.
 **Status:** aberto.  
 **Caminho principal para escala.**
 
-### Fluxo técnico desejado
+Fluxo desejado:
 
 ```text
-1. Usuário toca Assinar Mensal/Anual no bot
-2. Bot cria preferência de pagamento no Mercado Pago
-3. Preferência recebe metadata {chat_id, plan_period, account_id?}
-4. Bot envia URL de checkout ao usuário
-5. Usuário paga
-6. Mercado Pago envia POST /webhooks/mercadopago
-7. App valida assinatura/origem do webhook
-8. App busca detalhes do pagamento aprovado
-9. App extrai metadata
-10. App ativa Premium
-11. Bot notifica usuário
-12. Bot notifica admin
+usuário escolhe assinatura
+→ bot cria checkout com metadata
+→ usuário paga
+→ Mercado Pago chama webhook
+→ app valida evento
+→ app ativa Premium
+→ usuário e admin são notificados
 ```
 
-### Arquivos prováveis
+Arquivos prováveis:
 
 ```text
 app/web/routes_webhooks.py
@@ -71,79 +74,51 @@ app/services/mercadopago_service.py
 app/services/payment_activation_service.py
 ```
 
-### Settings a adicionar
+Critérios:
 
-```python
-mp_access_token: str | None = None
-mp_webhook_secret: str | None = None
-mp_webhook_url: str | None = None
-mp_checkout_success_url: str | None = None
-mp_checkout_failure_url: str | None = None
-mp_checkout_pending_url: str | None = None
-```
-
-### Critérios de aceite
-
-- Webhook rejeita assinatura inválida.
-- Evento duplicado não cria múltiplas assinaturas ativas conflitantes.
-- Pagamento aprovado ativa Premium correto.
-- Pagamento pendente/rejeitado não ativa Premium.
-- Usuário e admin são notificados.
-- Testes cobrem aprovado, duplicado, inválido e pendente.
-- Logs não expõem token, assinatura, documento ou dados sensíveis.
+- rejeitar evento inválido;
+- não duplicar assinatura em evento repetido;
+- ativar apenas pagamento aprovado;
+- notificar usuário e admin;
+- não expor tokens ou dados sensíveis em logs.
 
 ---
 
-## SUB-02 — Aprovação em 1 clique
+## SUB-02 — Aprovação admin em 1 clique
 
 **Status:** aberto.  
 **Fallback recomendado para beta.**
 
-### Fluxo desejado
+Fluxo desejado:
 
 ```text
-1. Usuário envia comprovante ou mensagem de pagamento no chat
-2. Bot identifica intenção de ativação Premium
-3. Bot encaminha resumo para o admin
-4. Admin recebe botões:
-   [✅ Ativar Mensal] [✅ Ativar Anual] [❌ Recusar]
-5. Admin toca no botão
-6. Bot chama serviço de ativação Premium
-7. Bot notifica usuário
-8. Bot registra metadata operacional
+usuário envia comprovante
+→ bot manda resumo ao admin
+→ admin toca em ativar ou recusar
+→ bot ativa Premium ou informa recusa
+→ metadata registra operador e origem
 ```
 
-### Handler provável
+Handler provável:
 
 ```text
 app/bot/handlers_payment.py
 ```
 
-### Callback sugerido
+Critérios:
 
-```text
-ADMIN:PREMIUM_ACTIVATE:<period>:<telegram_chat_id>
-ADMIN:PREMIUM_REFUSE:<telegram_chat_id>
-```
-
-### Critérios de aceite
-
-- Apenas admin pode acionar botões.
-- Callback inválido ou expirado não ativa assinatura.
-- Ativação registra `source="manual"` ou `source="founders"` conforme caso.
-- `metadata_json` registra operador, data e origem.
-- Usuário recebe confirmação clara.
-- Admin recebe confirmação da ação.
+- apenas admin aciona botões;
+- callback inválido não ativa assinatura;
+- metadata registra operador, data e origem;
+- usuário recebe confirmação clara.
 
 ---
 
-## SUB-03 — Lifecycle completo de expiração
+## SUB-03 — Avisos de expiração
 
 **Status:** aberto.
 
-**Hoje:** há expiração operacional, mas falta fluxo de comunicação user-facing completo.
-
-### O que adicionar
+Fluxo desejado:
 
 ```text
 7 dias antes → aviso de renovação
@@ -151,25 +126,12 @@ ADMIN:PREMIUM_REFUSE:<telegram_chat_id>
 no dia → downgrade + mensagem clara
 ```
 
-### Serviço provável
+Critérios:
 
-```text
-app/services/premium_expiry_notification_service.py
-```
-
-### Job provável
-
-```text
-app/scheduler/premium_expiry_warning_job.py
-```
-
-### Critérios de aceite
-
-- Não envia aviso duplicado para a mesma assinatura/janela.
-- Respeita subscription ativa e datas UTC.
-- Não avisa subscriptions canceladas/expiradas indevidamente.
-- Mensagem inclui CTA para renovar.
-- Downgrade informa limites Free após expiração.
+- sem aviso duplicado;
+- respeita datas UTC e status ativo;
+- inclui CTA de renovação;
+- downgrade informa limites Free.
 
 ---
 
@@ -177,42 +139,25 @@ app/scheduler/premium_expiry_warning_job.py
 
 **Status:** aberto.
 
-`metadata_json` já permite registrar rastreabilidade sem migration imediata.
+`metadata_json` já permite rastreabilidade sem migration imediata.
 
-### Metadata mínima recomendada
+Metadata mínima:
 
-```json
-{
-  "activated_by": "admin",
-  "activated_at": "2026-05-25T23:00:00Z",
-  "admin_chat_id": 123456,
-  "source": "manual",
-  "period": "monthly",
-  "payment_ref": null,
-  "reason": "beta_activation"
-}
+```text
+activated_by
+activated_at
+admin_chat_id
+source
+period
+payment_ref
+reason
 ```
 
-### Critérios de aceite
+Critérios:
 
-- Toda ativação manual registra operador e data.
-- Ativações por webhook registram payment id/preference id sem expor dados sensíveis.
-- `/admin premium` ou comando equivalente permite consultar origem da assinatura.
-
----
-
-## SUB-05 — Trial de 7 dias
-
-**Status:** aberto, dependente de decisão de produto.
-
-Trial pode usar `Subscription.source = "trial"` e `ends_at`, mas precisa de regra clara:
-
-- todos os usuários novos recebem trial?
-- apenas beta users?
-- trial pode virar Founders?
-- trial exige pagamento cadastrado ou não?
-
-**Diretriz:** não implementar trial antes de decidir como ele aparece na jornada de upgrade e expiração.
+- ativação manual registra operador e data;
+- ativação por webhook registra payment/preference id sem expor dado sensível;
+- admin consegue consultar origem da assinatura.
 
 ---
 
@@ -224,7 +169,6 @@ Trial pode usar `Subscription.source = "trial"` e `ends_at`, mas precisa de regr
 | 2 | SUB-01 — Webhook Mercado Pago | Aberto | Escala pagamento |
 | 3 | SUB-04 — Auditoria de ativações | Aberto | Rastreabilidade operacional |
 | 4 | SUB-03 — Aviso de expiração | Aberto | Retenção Premium |
-| 5 | SUB-05 — Trial 7 dias | Aberto | Ativação/conversão |
 
 ---
 
