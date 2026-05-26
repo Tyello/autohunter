@@ -507,8 +507,40 @@ def _compact_filters(ad: Any) -> list[str]:
 
     alias = {"price": "preço", "year": "ano", "source": "fonte", "color": "cor", "city": "cidade", "state": "estado"}
     op_map = {"eq": "=", "neq": "≠", "lte": "≤", "gte": "≥", "lt": "<", "gt": ">"}
+    interval_fields = {"year"}
+    interval_values: dict[str, dict[str, str]] = {}
 
-    for f in raw[:2]:
+    for f in raw:
+        if not isinstance(f, dict):
+            continue
+        field = str(f.get("field") or "").strip().lower()
+        op = str(f.get("operator") or "").strip().lower()
+        value = _clip(str(f.get("value") or ""), _MAX_FILTER_VALUE)
+        if field not in interval_fields or not value:
+            continue
+        if op in {"gte", "gt"}:
+            interval_values.setdefault(field, {})["min"] = value
+        elif op in {"lte", "lt"}:
+            interval_values.setdefault(field, {})["max"] = value
+
+    for field in interval_fields:
+        bounds = interval_values.get(field)
+        if not bounds:
+            continue
+        min_v = bounds.get("min")
+        max_v = bounds.get("max")
+        label = alias.get(field, field)
+        if min_v and max_v:
+            if min_v == max_v:
+                out.append(f"{label} = {min_v}")
+            else:
+                out.append(f"{label} {min_v} a {max_v}")
+        elif min_v:
+            out.append(f"{label} ≥ {min_v}")
+        elif max_v:
+            out.append(f"{label} ≤ {max_v}")
+
+    for f in raw:
         if not isinstance(f, dict):
             continue
         field = str(f.get("field") or "").strip().lower()
@@ -516,8 +548,10 @@ def _compact_filters(ad: Any) -> list[str]:
         value = _clip(str(f.get("value") or ""), _MAX_FILTER_VALUE)
         if not field or not op or not value:
             continue
+        if field in interval_fields and op in {"gte", "gt", "lte", "lt"}:
+            continue
         out.append(f"{alias.get(field, field)} {op_map.get(op, op)} {value}")
-    return out
+    return out[:2]
 
 
 def _main_reason(reasons: list[str]) -> str | None:
