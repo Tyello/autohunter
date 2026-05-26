@@ -267,6 +267,8 @@ def run_source_for_all_wishlists(
     any_hybrid_browser = False
     any_hybrid_blocked = False
     last_hybrid_blocked_status: int | None = None
+    last_runtime_impl: str | None = None
+    last_adapter_meta: dict[str, Any] | None = None
 
     for url, g in groups.items():
         job_name = f"scraper_{src}"
@@ -284,6 +286,10 @@ def run_source_for_all_wishlists(
         any_hybrid_blocked = any_hybrid_blocked or bool(res.get("hybrid_blocked"))
         if res.get("hybrid_blocked_status") is not None:
             last_hybrid_blocked_status = int(res.get("hybrid_blocked_status"))
+        if res.get("runtime_impl"):
+            last_runtime_impl = str(res.get("runtime_impl"))
+        if isinstance(res.get("adapter_meta"), dict):
+            last_adapter_meta = dict(res.get("adapter_meta") or {})
 
         if not res.get("ok"):
             reason = res.get("reason") or "error"
@@ -332,6 +338,11 @@ def run_source_for_all_wishlists(
                 )
             health.set_error(category, str(res.get("error") or reason), http_status=http_status, retryable=retryable)
             run_summary_err = add_anomaly_notes(health.finalize(status_cls)).model_dump(mode="json")
+            run_summary_err["impl"] = flags.impl
+            run_summary_err["runtime_impl"] = last_runtime_impl
+            if isinstance(last_adapter_meta, dict):
+                run_summary_err["adapter_raw_count"] = last_adapter_meta.get("raw_count")
+                run_summary_err["adapter_normalized_count"] = last_adapter_meta.get("normalized_count")
             if reason == "blocked":
                 duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
                 minutes = mark_blocked(
@@ -350,6 +361,8 @@ def run_source_for_all_wishlists(
                     backoff_minutes=minutes,
                     webmotors_diag=wm_diag,
                     dual_report=getattr(ctx, "_dual_run_report_path", None),
+                    runtime_impl=last_runtime_impl,
+                    adapter_meta=last_adapter_meta,
                 )
                 run_row = record_run(
                     db,
@@ -409,6 +422,8 @@ def run_source_for_all_wishlists(
                         is_bug=True,
                         webmotors_diag=wm_diag,
                         dual_report=getattr(ctx, "_dual_run_report_path", None),
+                        runtime_impl=last_runtime_impl,
+                        adapter_meta=last_adapter_meta,
                     ),
                 )
                 logger.info("source_run_summary", extra=run_summary_err)
@@ -467,6 +482,8 @@ def run_source_for_all_wishlists(
                     backoff_minutes=minutes,
                     webmotors_diag=wm_diag,
                     dual_report=getattr(ctx, "_dual_run_report_path", None),
+                    runtime_impl=last_runtime_impl,
+                    adapter_meta=last_adapter_meta,
                 ),
             )
             logger.info("source_run_summary", extra=run_summary_err)
@@ -498,6 +515,11 @@ def run_source_for_all_wishlists(
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
     run_summary_ok = add_anomaly_notes(health.finalize(RunStatus.OK)).model_dump(mode="json")
+    run_summary_ok["impl"] = flags.impl
+    run_summary_ok["runtime_impl"] = last_runtime_impl
+    if isinstance(last_adapter_meta, dict):
+        run_summary_ok["adapter_raw_count"] = last_adapter_meta.get("raw_count")
+        run_summary_ok["adapter_normalized_count"] = last_adapter_meta.get("normalized_count")
 
     mark_success(
         db,
@@ -528,6 +550,8 @@ def run_source_for_all_wishlists(
             hybrid_blocked_status=last_hybrid_blocked_status,
             thumb_present=total_thumb_present,
             thumb_rate=(float(total_thumb_present) / float(total_found)) if total_found else 0.0,
+            runtime_impl=last_runtime_impl,
+            adapter_meta=last_adapter_meta,
         ),
     )
 
@@ -560,4 +584,4 @@ def run_source_for_all_wishlists(
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, reason, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason, "runtime_impl": last_runtime_impl, "adapter_meta": last_adapter_meta, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}

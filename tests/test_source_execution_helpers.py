@@ -39,3 +39,18 @@ def test_build_run_payload_error_shape():
     assert payload["backoff_minutes"] == 15
     assert payload["webmotors_diag"]["bucket"] == "BLOCKED"
     assert payload["dual_report"].endswith("report.json")
+
+
+def test_build_run_payload_includes_runtime_impl_and_adapter_meta():
+    payload = build_run_payload(
+        run_summary={"status": "ok"},
+        run_reason="admin",
+        hybrid_browser_used=False,
+        hybrid_blocked=False,
+        hybrid_blocked_status=None,
+        runtime_impl="v2_canary",
+        adapter_meta={"impl": "v2_canary", "raw_count": 10, "normalized_count": 10},
+    )
+
+    assert payload["runtime_impl"] == "v2_canary"
+    assert payload["adapter_meta"]["impl"] == "v2_canary"

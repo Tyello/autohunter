@@ -2362,8 +2362,9 @@ async def _admin_runall(update: Update, raw_args: List[str]):
                 st = res.get("status")
 
                 if st == "success":
+                    impl_note = f" impl={res.get('runtime_impl')}" if res.get("runtime_impl") else ""
                     lines.append(
-                        f"- {src}: ✅ success found={res.get('found')} ins={res.get('inserted')} "
+                        f"- {src}: ✅ success{impl_note} found={res.get('found')} ins={res.get('inserted')} "
                         f"match={res.get('matched')} queued={res.get('queued')} dur={res.get('duration_ms')}ms"
                     )
                     for extra in _render_run_summary_lines(res.get("run_summary")):
@@ -2786,6 +2787,9 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 last_line += f" http={lr.http_status}"
             payload = lr.payload or {}
             if isinstance(payload, dict):
+                runtime_impl = payload.get("runtime_impl")
+                if runtime_impl:
+                    last_line += f" runtime_impl={runtime_impl}"
                 if payload.get("hybrid_browser_used") is True:
                     last_line += " browser=hybrid"
                 if payload.get("hybrid_blocked") is True:

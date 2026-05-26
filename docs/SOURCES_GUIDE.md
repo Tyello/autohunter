@@ -500,3 +500,6 @@ Notas:
 - O canary não altera WebMotors nem outras sources.
 - Backoff/circuit breaker do source continuam válidos.
 - Flip global/automático continua proibido.
+
+- Observabilidade de runtime: os resumos/payloads administrativos agora distinguem `configured_impl` (config persistida) de `runtime_impl` (impl realmente executada no run), incluindo metadados de adapter quando disponíveis.
+- Caso real validado (Mercado Livre V2 canary): found=186, inserted=5, matched=8, queued=0, dur=87132ms.

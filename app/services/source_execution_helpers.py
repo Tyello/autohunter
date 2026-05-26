@@ -99,6 +99,8 @@ def build_run_payload(
     is_bug: bool | None = None,
     webmotors_diag: dict[str, Any] | None = None,
     dual_report: str | None = None,
+    runtime_impl: str | None = None,
+    adapter_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "hybrid_browser_used": bool(hybrid_browser_used),
@@ -121,4 +123,8 @@ def build_run_payload(
         payload["webmotors_diag"] = webmotors_diag
     if dual_report:
         payload["dual_report"] = dual_report
+    if runtime_impl:
+        payload["runtime_impl"] = str(runtime_impl)
+    if isinstance(adapter_meta, dict):
+        payload["adapter_meta"] = adapter_meta
     return payload

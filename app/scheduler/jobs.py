@@ -439,6 +439,19 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     This collapses duplicate work when multiple users share the same query/URL for a given source.
     """
+    adapter_meta = None
+
+    def _runtime_fields() -> dict:
+        meta = adapter_meta if isinstance(adapter_meta, dict) else None
+        return {
+            "runtime_impl": (meta or {}).get("impl"),
+            "adapter_meta": meta,
+            "adapter_raw_count": (meta or {}).get("raw_count"),
+            "adapter_normalized_count": (meta or {}).get("normalized_count"),
+            "adapter_partial_failure": (meta or {}).get("partial_failure"),
+            "adapter_blocked": (meta or {}).get("blocked"),
+        }
+
     try:
         try:
             listings = scraper_fn(search_url, ctx=ctx)
@@ -449,7 +462,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         url = getattr(e, "url", search_url)
         emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
         log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
-        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "error": str(e), "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_ctx_fetch_diag(ctx)}
+        return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "error": str(e), "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_runtime_fields(), **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
         err = f"{exc_type}: {e}"
@@ -469,9 +482,11 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             "exc_type": exc_type,
             "is_bug": _is_bug_type(exc_type),
             "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="parse_or_runtime_error", stage="scrape_exception", parse_error=True),
+            **_runtime_fields(),
             **_ctx_fetch_diag(ctx),
         }
 
+    adapter_meta = getattr(ctx, "_last_adapter_meta", None)
     listings_all = list(listings or [])
     found = len(listings_all)
     parse_failure = decide_parse_failure(
@@ -492,6 +507,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             "exc_type": "ParseFailure",
             "is_bug": False,
             "audit_artifacts": _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="explicit_parse_failure", stage="post_scrape", parse_error=True),
+            **_runtime_fields(),
             **_ctx_fetch_diag(ctx),
         }
     audit_artifacts = _capture_if_needed(ctx=ctx, found=found, listings=listings_all, reason="post_scrape_check", stage="post_scrape")
@@ -527,6 +543,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                     "thumb_present": thumb_present,
                     "thumb_rate": thumb_rate,
                     "incremental": {"mode": "skip", "cursor": top},
+                    "runtime_impl": (adapter_meta or {}).get("impl"),
+                    "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
                 }, tags=["ok", "incremental"])
                 log(db, "info", job_name, "pipeline_summary_many", {
                     "url": search_url,
@@ -540,9 +558,11 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                     "thumb_present": thumb_present,
                     "thumb_rate": thumb_rate,
                     "incremental": {"mode": "skip", "cursor": top},
+                    "runtime_impl": (adapter_meta or {}).get("impl"),
+                    "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
                 }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok", "incremental"])
                 db.commit()
-                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
+                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", "audit_artifacts": audit_artifacts, **_runtime_fields(), **_ctx_fetch_diag(ctx)}
 
             if cur and inc_cursor:
                 inc_mode = "cut"
@@ -636,6 +656,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
+        "runtime_impl": (adapter_meta or {}).get("impl"),
+        "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
     }, tags=["ok"])
 
     log(db, "info", job_name, "pipeline_summary_many", {
@@ -652,8 +674,10 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
+        "runtime_impl": (adapter_meta or {}).get("impl"),
+        "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
     }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"])
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, "seen_identities_by_wishlist": seen_identities_by_wishlist, **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, "seen_identities_by_wishlist": seen_identities_by_wishlist, **_runtime_fields(), **_ctx_fetch_diag(ctx)}

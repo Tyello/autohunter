@@ -317,3 +317,6 @@ Decision:
   - rollback: `/admin sources canary mercadolivre off`
 - Comando JSON (`/admin sources set ... extra {...}`) permanece apenas como opção avançada.
 - Backoff/circuit breaker continuam obrigatórios (não executar V1 e V2 no mesmo ciclo para bypass de cooldown).
+
+- Registro operacional: execução real com canary V2 em Mercado Livre retornou success com found=186, inserted=5, matched=8, queued=0 e dur=87132ms.
+- A trilha de observabilidade agora deve expor sempre configured_impl x runtime_impl em `/admin runall` e `/admin sources`.
