@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -23,9 +22,6 @@ class BackupHealthResult:
 
 
 def _resolve_backup_dir() -> str:
-    env_dir = (os.getenv("AUTOHUNTER_BACKUP_DIR") or "").strip()
-    if env_dir:
-        return env_dir
     configured = getattr(settings, "backup_dir", None)
     if configured and str(configured).strip():
         return str(configured).strip()
@@ -33,12 +29,6 @@ def _resolve_backup_dir() -> str:
 
 
 def _resolve_max_age_hours() -> int:
-    raw = os.getenv("AUTOHUNTER_BACKUP_MAX_AGE_HOURS")
-    if raw is not None:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
     configured = getattr(settings, "backup_max_age_hours", None)
     if configured is not None:
         try:

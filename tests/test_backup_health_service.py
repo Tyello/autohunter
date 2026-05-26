@@ -78,47 +78,17 @@ def test_backup_health_message_does_not_leak_database_url(monkeypatch, tmp_path)
     assert "database_url" not in out.message.lower()
 
 
-def test_backup_health_uses_autohunter_backup_dir_env_when_setting_empty(monkeypatch, tmp_path):
-    now = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
-    f = tmp_path / "autohunter_20260525_100000.sql.gz"
-    f.write_bytes(b"x")
-    import os
-    ts = (now - timedelta(hours=1)).timestamp()
-    os.utime(f, (ts, ts))
-
+def test_backup_health_falls_back_to_default_dir_when_setting_empty(monkeypatch):
     monkeypatch.setattr(svc.settings, "backup_dir", "")
-    monkeypatch.setenv("AUTOHUNTER_BACKUP_DIR", str(tmp_path))
-    monkeypatch.setattr(svc.settings, "backup_max_age_hours", 30)
-
-    out = svc.get_backup_health(now=now)
-    assert out.status == "OK"
-    assert out.backup_dir == str(tmp_path)
+    assert svc._resolve_backup_dir() == "/var/backups/autohunter"
 
 
-def test_backup_health_uses_autohunter_max_age_env_when_setting_invalid(monkeypatch, tmp_path):
-    now = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
-    f = tmp_path / "autohunter_20260524_000000.sql.gz"
-    f.write_bytes(b"x")
-    import os
-    ts = (now - timedelta(hours=12)).timestamp()
-    os.utime(f, (ts, ts))
-
-    monkeypatch.setattr(svc.settings, "backup_dir", str(tmp_path))
+def test_backup_health_falls_back_to_default_max_age_when_setting_invalid(monkeypatch):
     monkeypatch.setattr(svc.settings, "backup_max_age_hours", "invalid")
-    monkeypatch.setenv("AUTOHUNTER_BACKUP_MAX_AGE_HOURS", "10")
-
-    out = svc.get_backup_health(now=now)
-    assert out.status == "WARNING"
-    assert out.max_age_hours == 10
+    assert svc._resolve_max_age_hours() == 30
 
 
-def test_env_example_contains_autohunter_backup_vars():
-    content = Path(".env.example").read_text(encoding="utf-8")
-    assert "AUTOHUNTER_BACKUP_DIR=" in content
-    assert "AUTOHUNTER_BACKUP_MAX_AGE_HOURS=" in content
-
-
-def test_backup_health_env_dir_has_precedence_over_settings_default(monkeypatch, tmp_path):
+def test_backup_health_ignores_backup_dir_env_and_uses_settings(monkeypatch, tmp_path):
     now = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
     f = tmp_path / "autohunter_20260525_100000.sql.gz"
     f.write_bytes(b"x")
@@ -131,13 +101,13 @@ def test_backup_health_env_dir_has_precedence_over_settings_default(monkeypatch,
     monkeypatch.setattr(svc.settings, "backup_max_age_hours", 30)
 
     out = svc.get_backup_health(now=now)
-    assert out.status == "OK"
-    assert out.backup_dir == str(tmp_path)
+    assert out.status == "FAIL"
+    assert out.backup_dir == "/var/backups/autohunter"
 
 
-def test_backup_health_env_max_age_has_precedence_over_settings_default(monkeypatch, tmp_path):
+def test_backup_health_ignores_max_age_env_and_uses_settings(monkeypatch, tmp_path):
     now = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
-    f = tmp_path / "autohunter_20260525_000000.sql.gz"
+    f = tmp_path / "autohunter_20260524_000000.sql.gz"
     f.write_bytes(b"x")
     import os
     ts = (now - timedelta(hours=12)).timestamp()
@@ -148,5 +118,12 @@ def test_backup_health_env_max_age_has_precedence_over_settings_default(monkeypa
     monkeypatch.setenv("AUTOHUNTER_BACKUP_MAX_AGE_HOURS", "10")
 
     out = svc.get_backup_health(now=now)
-    assert out.status == "WARNING"
-    assert out.max_age_hours == 10
+    assert out.status == "OK"
+    assert out.max_age_hours == 30
+
+
+def test_env_example_contains_autohunter_backup_vars():
+    content = Path(".env.example").read_text(encoding="utf-8")
+    assert "AUTOHUNTER_BACKUP_DIR=" in content
+    assert "AUTOHUNTER_BACKUP_MAX_AGE_HOURS=" in content
+
