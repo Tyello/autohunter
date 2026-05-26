@@ -5,8 +5,13 @@ from telegram import Update
 from app.db.session import SessionLocal
 from app.models.fipe_catalog_entry import FipeCatalogEntry
 from app.models.fipe_sync_run import FipeSyncRun
+from app.models.car_listing import CarListing
 from app.services.fipe_prices_import_service import build_fipe_coverage_report
 from app.services.fipe_monthly_sync_service import normalize_fipe_month
+from app.services.fipe_catalog_resolver_service import (
+    build_fipe_resolver_coverage_report,
+    resolve_listing_to_fipe_candidates,
+)
 
 
 def render_admin_fipe_coverage(report: dict) -> str:
@@ -37,6 +42,48 @@ def render_admin_fipe_coverage(report: dict) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def render_admin_fipe_resolve(result: dict, listing: CarListing) -> str:
+    lines = [
+        "🧭 FIPE resolver",
+        "",
+        f"Listing: {(listing.make or '').strip()} {(listing.model or '').strip()} {listing.year or ''}".strip(),
+        f"Competência: {result['reference_month']}",
+        f"Status: {result['status']}",
+    ]
+    best = result.get("best_candidate")
+    if best:
+        lines.extend([
+            "",
+            "Melhor candidato:",
+            str(best.get("model_name") or "-"),
+            f"FIPE: {best.get('fipe_code') or '-'}",
+            f"Ano: {best.get('model_year') or '-'}",
+            f"Combustível: {best.get('fuel') or '-'}",
+            f"Preço: R$ {best.get('price') or '-'}",
+            f"Confiança: {best.get('confidence_score')} ({best.get('confidence_label')})",
+            "",
+            "Razões:",
+        ])
+        lines.extend([f"- {r}" for r in (best.get("reasons") or ["sem razões registradas"])])
+    others = result.get("candidates", [])[1:3]
+    if others:
+        lines.extend(["", "Outros candidatos:"])
+        lines.extend([f"- {c.get('model_name')}... score {c.get('confidence_score')}" for c in others])
+    return "\n".join(lines)
+
+def render_admin_fipe_resolver_status(report: dict) -> str:
+    c = report["status_counts"]
+    return "\n".join([
+        "📈 FIPE resolver status",
+        f"Competência: {report['reference_month']}",
+        f"Amostra: {report['sample_size']}",
+        f"matched: {c['matched']}",
+        f"ambiguous: {c['ambiguous']}",
+        f"no_match: {c['no_match']}",
+        f"insufficient_data: {c['insufficient_data']}",
+    ])
 
 
 async def admin_fipe(update: Update, raw_args: list[str]) -> None:
@@ -74,6 +121,51 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text("\n".join(msg))
         return
 
+    if args and args[0].lower() == "resolve":
+        if len(args) < 2:
+            await update.message.reply_text("Use: /admin fipe resolve <listing_id> [YYYY-MM]")
+            return
+        listing_id = args[1]
+        month = args[2] if len(args) >= 3 else None
+        try:
+            with SessionLocal() as db:
+                if month:
+                    month = normalize_fipe_month(month)
+                else:
+                    month_row = db.query(FipeCatalogEntry.reference_month).order_by(FipeCatalogEntry.reference_month.desc()).first()
+                    month = month_row[0] if month_row else None
+                if not month:
+                    await update.message.reply_text("Sem dados no catálogo FIPE staging.")
+                    return
+                listing = db.query(CarListing).filter(CarListing.id == listing_id).first()
+                if not listing:
+                    await update.message.reply_text("Listing não encontrado para o ID informado.")
+                    return
+                result = resolve_listing_to_fipe_candidates(db, listing=listing, reference_month=month, limit=10)
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
+        await update.message.reply_text(render_admin_fipe_resolve(result, listing))
+        return
+
+    if args and args[0].lower() == "resolver_status":
+        month = args[1] if len(args) >= 2 else None
+        limit = 100
+        if len(args) >= 3:
+            try:
+                limit = int(args[2])
+            except Exception:
+                limit = 100
+        limit = max(1, min(200, limit))
+        try:
+            with SessionLocal() as db:
+                report = build_fipe_resolver_coverage_report(db, reference_month=month, limit=limit)
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
+        await update.message.reply_text(render_admin_fipe_resolver_status(report))
+        return
+
     if not args or args[0].lower() == "coverage":
         month = args[1] if len(args) >= 2 else None
         limit = 20
@@ -92,4 +184,4 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_coverage(report))
         return
 
-    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM]")
+    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200]")

@@ -59,3 +59,7 @@ Este documento consolida o estado real após as entregas recentes.
 - staging mensal de catálogo FIPE implementado (`fipe_catalog_entries` + `fipe_sync_runs`).
 - adapter de pipeline externo implementado para JSON/CSV com aliases comuns e preservação de `raw_payload`.
 - próximo passo: resolver AutoHunter → FIPE para alimentar `fipe_prices` (sem alteração em `score_v2` nesta etapa).
+
+
+- Resolver diagnóstico FIPE implementado (preview read-only).
+- Próximo passo: persistir mapping ou alimentar `fipe_prices` apenas para matches high com fluxo dry-run/apply.

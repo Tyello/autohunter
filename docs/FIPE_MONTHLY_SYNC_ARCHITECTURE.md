@@ -39,3 +39,8 @@ Separação explícita:
 - Ordem de identidade: `fipe_code` -> `codes` -> fallback textual com diferenciador.
 - `model_year` inválido não aborta carga: linha é `skipped_invalid`.
 - Dry-run do importador **não** grava `fipe_sync_runs`; run é criado apenas em `--apply`.
+
+
+## Fase 3 (parcial)
+- Resolver diagnóstico AutoHunter → FIPE implementado (cálculo de candidatos + confiança).
+- Atualização automática de `fipe_prices` permanece pendente e fora do escopo desta fase.
