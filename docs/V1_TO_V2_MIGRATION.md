@@ -498,7 +498,9 @@ Notas de operação:
 
 - O runtime já suporta `extra.impl` (`v1|v2|dual`), mas o canary manual adiciona um caminho conservador para Mercado Livre sem flip global.
 - Configuração manual (DB-driven em `source_configs.extra`):
-  - ativar canary: `mercadolivre_v2_canary_enabled=true`;
-  - rollback: `mercadolivre_v2_canary_enabled=false` (V1 permanece disponível).
+  - ativar canary (recomendado): `/admin sources canary mercadolivre on`;
+  - status: `/admin sources canary mercadolivre status`;
+  - rollback: `/admin sources canary mercadolivre off` (V1 permanece disponível).
+- Opção avançada permanece disponível via JSON em `/admin sources set mercadolivre extra ...`.
 - O canary só aplica V2 quando Playwright está ativo e `browser_fallback_enabled=true`.
 - Não há promoção automática para outras sources e não há flip automático pós-sucesso.
