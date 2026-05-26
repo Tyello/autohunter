@@ -10,6 +10,7 @@ from app.models.fipe_price import FipePrice
 from app.services.fipe_catalog_resolver_service import resolve_listing_to_fipe_candidates
 from app.services.fipe_monthly_sync_service import normalize_fipe_month
 from app.services.fipe_service import listing_vehicle_keys
+from app.services import system_logs_service
 
 
 SKIPPED_REASONS = (
@@ -165,3 +166,96 @@ def build_fipe_price_plan(db: Session, *, reference_month: str, limit: int = 100
         "would_updates": would_updates,
         "examples_skipped": examples_skipped,
     }
+
+
+def apply_fipe_price_plan(
+    db: Session,
+    *,
+    reference_month: str,
+    limit: int = 100,
+    min_confidence: int = 80,
+    dry_run: bool = True,
+    allow_updates: bool = False,
+) -> dict:
+    plan = build_fipe_price_plan(
+        db,
+        reference_month=reference_month,
+        limit=limit,
+        min_confidence=min_confidence,
+    )
+
+    inserted_count = 0
+    updated_count = 0
+    applied_items = []
+    skipped_counts = Counter(plan.get("skipped_counts") or {})
+
+    for item in plan.get("planned_inserts", []):
+        vehicle_key = item.get("vehicle_key")
+        month = item.get("reference_month")
+        if not vehicle_key or not month:
+            skipped_counts["missing_vehicle_key"] += 1
+            continue
+
+        exists = (
+            db.query(FipePrice)
+            .filter(FipePrice.vehicle_key == vehicle_key)
+            .filter(FipePrice.reference_month == month)
+            .first()
+        )
+        if exists:
+            skipped_counts["already_exists"] += 1
+            continue
+
+        if dry_run:
+            continue
+
+        row = FipePrice(
+            vehicle_key=vehicle_key,
+            reference_month=month,
+            fipe_price=item.get("fipe_price"),
+            currency="BRL",
+        )
+        db.add(row)
+        inserted_count += 1
+        applied_items.append(item)
+
+    if not dry_run:
+        db.commit()
+
+    result = {
+        "reference_month": plan.get("reference_month"),
+        "sample_size": plan.get("sample_size", 0),
+        "dry_run": dry_run,
+        "inserted_count": inserted_count,
+        "updated_count": updated_count,
+        "skipped_counts": dict(skipped_counts),
+        "would_update_count": plan.get("would_update_count", 0),
+        "planned_inserts_count": plan.get("planned_inserts_count", 0),
+        "applied_items": applied_items,
+        "would_updates": plan.get("would_updates", []),
+        "allow_updates": allow_updates,
+    }
+
+    try:
+        system_logs_service.log(
+            db,
+            level="info",
+            component="fipe_apply_plan",
+            message="fipe apply plan dry-run" if dry_run else "fipe apply plan live",
+            payload={
+                "reference_month": result["reference_month"],
+                "limit": int(limit),
+                "planned_inserts_count": result["planned_inserts_count"],
+                "inserted_count": result["inserted_count"],
+                "updated_count": result["updated_count"],
+                "dry_run": result["dry_run"],
+            },
+        )
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+    except Exception:
+        db.rollback()
+
+    return result

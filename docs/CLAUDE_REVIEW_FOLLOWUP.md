@@ -77,3 +77,18 @@ Este documento consolida o estado real após as entregas recentes.
 - Implementado planejamento dry-run de `fipe_prices` a partir do resolver AutoHunter→FIPE.
 - Admin agora pode estimar `planned_inserts`, `would_updates` e `skipped reasons` sem persistir dados.
 - Próximo passo: fluxo `apply` controlado com confirmação explícita e estratégia de rollback em PR separada.
+
+
+## FIPE apply plan controlado
+
+Implementado apply controlado para `fipe_prices` com guardrails:
+- dry-run default;
+- live explícito;
+- sem scheduler e sem apply automático pós-import;
+- sem update automático de `would_updates`.
+
+Próximo passo operacional:
+1. rodar `/admin fipe plan`;
+2. validar `/admin fipe apply_plan ... dry`;
+3. aplicar `/admin fipe apply_plan ... live` com limite pequeno;
+4. validar cobertura via `/admin fipe coverage`.

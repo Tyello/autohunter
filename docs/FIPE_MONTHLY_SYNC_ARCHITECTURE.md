@@ -58,3 +58,11 @@ Separação explícita:
 - ✅ Planejamento dry-run AutoHunter→FIPE implementado via `/admin fipe plan`.
 - ✅ Etapa continua read-only (sem escrita em `fipe_prices`).
 - 🔜 Apply controlado (com confirmação explícita) permanece pendente em PR separada.
+
+
+## Status do apply controlado
+
+- ✅ Apply controlado implementado via `/admin fipe apply_plan`.
+- ✅ Fluxo dry-run default com live explícito.
+- ⏳ Scheduler mensal automático permanece pendente.
+- ⏳ Updates de preços existentes permanecem desabilitados por padrão (guardados para flag futura).

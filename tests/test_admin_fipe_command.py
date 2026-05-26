@@ -302,3 +302,58 @@ def test_admin_fipe_plan_default_and_limit_cap(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("fipe", "plan", "2026-05", "9999")))
     assert calls["reference_month"] == "2026-05"
     assert calls["limit"] == 500
+
+
+def test_admin_fipe_apply_plan_default_dry(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    calls = {}
+
+    def _fake(db, **kwargs):
+        calls.update(kwargs)
+        return {
+            "reference_month": "2026-05", "dry_run": True, "sample_size": 100,
+            "planned_inserts_count": 1, "would_update_count": 0, "inserted_count": 0, "updated_count": 0,
+            "skipped_counts": {"ambiguous": 0, "no_match": 0, "insufficient_data": 0, "below_confidence": 0, "missing_price": 0, "missing_vehicle_key": 0, "already_exists": 0, "already_planned": 0},
+        }
+
+    class _Q:
+        def __init__(self, value): self.value = value
+        def order_by(self,*a,**k): return self
+        def first(self): return self.value
+    class _DB:
+        def query(self,*a,**k): return _Q(("2026-05",))
+        def __enter__(self): return self
+        def __exit__(self,*a): return False
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(admin_handlers_fipe, "apply_fipe_price_plan", _fake)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "apply_plan")))
+    assert calls["dry_run"] is True
+
+
+def test_admin_fipe_apply_plan_live_and_limit_cap(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    calls = {}
+
+    def _fake(db, **kwargs):
+        calls.update(kwargs)
+        return {
+            "reference_month": "2026-05", "dry_run": False, "sample_size": 500,
+            "planned_inserts_count": 2, "would_update_count": 0, "inserted_count": 2, "updated_count": 0,
+            "skipped_counts": {"ambiguous": 0, "no_match": 0, "insufficient_data": 0, "below_confidence": 0, "missing_price": 0, "missing_vehicle_key": 0, "already_exists": 0, "already_planned": 0},
+        }
+
+    class _Q:
+        def __init__(self, value): self.value = value
+        def order_by(self,*a,**k): return self
+        def first(self): return self.value
+    class _DB:
+        def query(self,*a,**k): return _Q(("2026-05",))
+        def __enter__(self): return self
+        def __exit__(self,*a): return False
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(admin_handlers_fipe, "apply_fipe_price_plan", _fake)
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "apply_plan", "2026-05", "live", "9999")))
+    assert calls["dry_run"] is False
+    assert calls["limit"] == 500
