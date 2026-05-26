@@ -490,7 +490,12 @@ Com ML + Chaves na Mão estáveis + OLX e Webmotors funcionando, o produto tem c
 3. Validar paridade operacional (somente observabilidade):
    - `python scripts/source_dual_run_report.py mercadolivre --query "civic si" --format json`
    - `python scripts/source_v2_inventory.py --format markdown`
-4. Rollback manual imediato:
+4. Acompanhar soak operacional:
+   - `/admin sources canary mercadolivre status` (ou `/admin sources canary mercadolivre report`)
+   - janela recomendada: últimas 24h.
+   - critério mínimo: múltiplos `success` em `v2_canary`, `found > 0`, sem `blocked/error` recente e sem exceções de parse/ingest/match.
+   - manter revisão manual antes de qualquer decisão de flip.
+5. Rollback manual imediato:
    - `/admin sources canary mercadolivre off`
 
 Comando avançado (JSON) continua disponível:

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from app.bot.text_sanitize import sanitize_for_telegram
 from app.core.settings import settings
 from app.db.session import SessionLocal
+from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.sources.flags import read_source_impl_flags
 
 _SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
 _MERCADOLIVRE = "mercadolivre"
+_CANARY_RUNTIME_IMPL = "v2_canary"
 
 
 def _canary_effective_for_cfg(cfg) -> tuple[bool, str | None, bool]:
@@ -116,7 +119,7 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
         "/admin sources rate <source> <seconds>\n"
         "/admin sources proxy <source> <url|off>\n"
         "/admin sources fallback <source> on|off\n"
-        "/admin sources canary mercadolivre status|on|off\n"
+        "/admin sources canary mercadolivre status|report|on|off\n"
         "/admin sources force <source> on|off\n"
         "/admin sources set <source> <field> <value>\n"
         "/admin sources reset <source>"
@@ -204,8 +207,8 @@ async def admin_sources_canary(update, source: str, action: str):
     if src != _MERCADOLIVRE:
         await update.message.reply_text("Canary V2 manual está disponível apenas para mercadolivre nesta etapa.")
         return
-    if action not in ("status", "on", "off"):
-        await update.message.reply_text("Use: /admin sources canary mercadolivre status|on|off")
+    if action not in ("status", "report", "on", "off"):
+        await update.message.reply_text("Use: /admin sources canary mercadolivre status|report|on|off")
         return
     with SessionLocal() as db:
         ensure_source_configs(db)
@@ -213,9 +216,11 @@ async def admin_sources_canary(update, source: str, action: str):
         if not cfg:
             await update.message.reply_text("Source não encontrada.")
             return
-        if action == "status":
+        if action in ("status", "report"):
             impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
             canary_effective, canary_reason, playwright_enabled = _canary_effective_for_cfg(cfg)
+            recent = _build_canary_recent_runs_summary(db, cfg.source, window_hours=24)
+            recommendation = _build_canary_recommendation(canary_effective, recent)
             lines = [
                 "Mercado Livre — V2 Canary",
                 f"source={cfg.source}",
@@ -227,6 +232,26 @@ async def admin_sources_canary(update, source: str, action: str):
             ]
             if not canary_effective:
                 lines.append(f"reason={canary_reason}")
+            lines.extend(
+                [
+                    "",
+                    "Canary recent runs:",
+                    f"window={recent['window_hours']}h",
+                    f"v2_canary_success={recent['success']}",
+                    f"v2_canary_blocked={recent['blocked']}",
+                    f"v2_canary_error={recent['error']}",
+                    f"last_runtime_impl={recent['last_runtime_impl']}",
+                    f"last_success_at={recent['last_success_at']}",
+                    f"last_success_found={recent['last_success_found']}",
+                    f"last_success_inserted={recent['last_success_inserted']}",
+                    f"last_success_matched={recent['last_success_matched']}",
+                    f"last_success_queued={recent['last_success_queued']}",
+                    f"last_success_duration_ms={recent['last_success_duration_ms']}",
+                    f"last_blocked_at={recent['last_blocked_at']}",
+                    f"last_error_at={recent['last_error_at']}",
+                    f"recommendation={recommendation}",
+                ]
+            )
             await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
             return
 
@@ -260,6 +285,86 @@ async def admin_sources_canary(update, source: str, action: str):
                 ]
             )
         await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
+
+
+def _extract_runtime_impl(run: SourceRun) -> str:
+    if getattr(run, "payload", None) and isinstance(run.payload, dict):
+        payload = run.payload
+        if isinstance(payload.get("runtime_impl"), str):
+            return str(payload.get("runtime_impl") or "")
+        run_summary = payload.get("run_summary")
+        if isinstance(run_summary, dict) and isinstance(run_summary.get("runtime_impl"), str):
+            return str(run_summary.get("runtime_impl") or "")
+    impl = getattr(run, "runtime_impl", None)
+    return str(impl or "")
+
+
+def _safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def _fmt_dt(value) -> str:
+    if not value:
+        return "-"
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
+def _build_canary_recent_runs_summary(db, source: str, *, window_hours: int = 24) -> dict[str, object]:
+    window_start = datetime.utcnow() - timedelta(hours=window_hours)
+    runs = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == source, SourceRun.created_at >= window_start)
+        .order_by(SourceRun.created_at.desc())
+        .all()
+    )
+    canary_runs: list[SourceRun] = [r for r in runs if _extract_runtime_impl(r) == _CANARY_RUNTIME_IMPL]
+    success_statuses = {"success", "ok"}
+    blocked_statuses = {"blocked", "skipped"}
+    error_statuses = {"error", "failed"}
+    success_runs = [r for r in canary_runs if str(r.status or "").strip().lower() in success_statuses]
+    blocked_runs = [r for r in canary_runs if str(r.status or "").strip().lower() in blocked_statuses]
+    error_runs = [r for r in canary_runs if str(r.status or "").strip().lower() in error_statuses]
+    last_run = canary_runs[0] if canary_runs else None
+    last_success = success_runs[0] if success_runs else None
+    return {
+        "window_hours": window_hours,
+        "success": len(success_runs),
+        "blocked": len(blocked_runs),
+        "error": len(error_runs),
+        "last_runtime_impl": _extract_runtime_impl(last_run) if last_run else "-",
+        "last_success_at": _fmt_dt(getattr(last_success, "created_at", None)),
+        "last_success_found": _safe_int(getattr(last_success, "items_found", 0)) if last_success else 0,
+        "last_success_inserted": _safe_int(getattr(last_success, "items_ingested", 0)) if last_success else 0,
+        "last_success_matched": _safe_int(getattr(last_success, "items_matched", 0)) if last_success else 0,
+        "last_success_queued": _safe_int(getattr(last_success, "notifications_queued", 0)) if last_success else 0,
+        "last_success_duration_ms": _safe_int(getattr(last_success, "duration_ms", 0)) if last_success else 0,
+        "last_blocked_at": _fmt_dt(getattr(blocked_runs[0], "created_at", None)) if blocked_runs else "-",
+        "last_error_at": _fmt_dt(getattr(error_runs[0], "created_at", None)) if error_runs else "-",
+        "has_canary_runs": bool(canary_runs),
+    }
+
+
+def _build_canary_recommendation(canary_effective: bool, recent: dict[str, object]) -> str:
+    if not canary_effective:
+        return "canary_not_effective"
+    if not bool(recent.get("has_canary_runs")):
+        return "run_manual_validation"
+    blocked = int(recent.get("blocked") or 0)
+    errors = int(recent.get("error") or 0)
+    success = int(recent.get("success") or 0)
+    if blocked > 0 or errors > 0:
+        return "keep_canary_or_rollback_review"
+    if success >= 3:
+        return "continue_soak_candidate"
+    if success >= 1:
+        return "continue_soak"
+    return "run_manual_validation"
 
 
 async def admin_sources_reset(update, source: str):

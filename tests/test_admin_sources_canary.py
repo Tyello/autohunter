@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from app.bot import admin_handlers_sources as mod
@@ -19,8 +20,41 @@ class _Update:
 
 
 class _DB:
+    def __init__(self, runs=None):
+        self.runs = runs or []
+
     def commit(self):
         return None
+
+    def query(self, model):
+        assert model.__name__ == "SourceRun"
+        return _Query(self.runs)
+
+
+class _Query:
+    def __init__(self, runs):
+        self._runs = runs
+
+    def filter(self, *conditions):
+        out = self._runs
+        for cond in conditions:
+            left = getattr(cond, "left", None)
+            right = getattr(cond, "right", None)
+            col = getattr(left, "name", None)
+            val = getattr(right, "value", right)
+            if col == "source":
+                out = [r for r in out if getattr(r, "source", None) == val]
+            elif col == "created_at":
+                out = [r for r in out if getattr(r, "created_at", None) >= val]
+        self._runs = out
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        self._runs = sorted(self._runs, key=lambda r: r.created_at, reverse=True)
+        return self
+
+    def all(self):
+        return list(self._runs)
 
 
 class _Ctx:
@@ -45,6 +79,22 @@ def _cfg(extra=None, browser_fallback_enabled=True):
         browser_fallback_enabled=browser_fallback_enabled,
         force_browser=False,
         extra=extra or {},
+    )
+
+
+def _run(*, status="success", runtime_impl="v2_canary", created_at=None, payload=None, found=0, inserted=0, matched=0, queued=0, dur=0):
+    now = created_at or datetime.utcnow()
+    payload_val = payload if payload is not None else {"runtime_impl": runtime_impl}
+    return SimpleNamespace(
+        source="mercadolivre",
+        status=status,
+        created_at=now,
+        payload=payload_val,
+        items_found=found,
+        items_ingested=inserted,
+        items_matched=matched,
+        notifications_queued=queued,
+        duration_ms=dur,
     )
 
 
@@ -106,7 +156,7 @@ def test_admin_sources_canary_off_sets_flag_false_preserving_other_keys(monkeypa
 
 def test_admin_sources_canary_status_effective_true(monkeypatch):
     cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True}, browser_fallback_enabled=True)
-    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB()))
     monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
     monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
     monkeypatch.setattr(mod.settings, "enable_playwright", True)
@@ -119,7 +169,7 @@ def test_admin_sources_canary_status_effective_true(monkeypatch):
 
 
 def test_admin_sources_canary_status_reason_when_not_effective(monkeypatch):
-    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB()))
     monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
 
     # flag false
@@ -151,3 +201,93 @@ def test_admin_sources_canary_blocks_other_sources(monkeypatch):
     up = _Update()
     asyncio.run(mod.admin_sources_canary(up, "olx", "on"))
     assert "apenas para mercadolivre" in up.message.texts[-1]
+
+
+def test_canary_status_without_v2_runs_recommends_manual_validation(monkeypatch):
+    old_run = _run(status="success", runtime_impl="v1")
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB([old_run])))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_success=0" in out
+    assert "recommendation=run_manual_validation" in out
+
+
+def test_canary_status_with_one_success_recommends_continue_soak(monkeypatch):
+    run = _run(status="success", found=186, inserted=5, matched=8, queued=0, dur=87132)
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB([run])))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_success=1" in out
+    assert "last_success_found=186" in out
+    assert "last_success_inserted=5" in out
+    assert "last_success_matched=8" in out
+    assert "last_success_queued=0" in out
+    assert "last_success_duration_ms=87132" in out
+    assert "recommendation=continue_soak" in out
+
+
+def test_canary_status_with_three_successes_recommends_candidate(monkeypatch):
+    now = datetime.utcnow()
+    runs = [
+        _run(status="success", created_at=now),
+        _run(status="success", created_at=now - timedelta(minutes=5)),
+        _run(status="success", created_at=now - timedelta(minutes=10)),
+    ]
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    assert "recommendation=continue_soak_candidate" in up.message.texts[-1]
+
+
+def test_canary_status_with_blocked_recommends_review(monkeypatch):
+    runs = [_run(status="blocked"), _run(status="success")]
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "report"))
+    out = up.message.texts[-1]
+    assert "v2_canary_blocked=1" in out
+    assert "recommendation=keep_canary_or_rollback_review" in out
+
+
+def test_canary_status_with_flag_off_recommends_not_effective(monkeypatch):
+    runs = [_run(status="success")]
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": False})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "canary_effective=False" in out
+    assert "recommendation=canary_not_effective" in out
+
+
+def test_canary_status_ignores_legacy_payload_without_runtime_impl(monkeypatch):
+    runs = [_run(status="success", payload={}), _run(status="success", runtime_impl="v2_canary")]
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    assert "v2_canary_success=1" in up.message.texts[-1]

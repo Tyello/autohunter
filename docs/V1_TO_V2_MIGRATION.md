@@ -500,7 +500,13 @@ Notas de operação:
 - Configuração manual (DB-driven em `source_configs.extra`):
   - ativar canary (recomendado): `/admin sources canary mercadolivre on`;
   - status: `/admin sources canary mercadolivre status`;
+  - relatório detalhado: `/admin sources canary mercadolivre report`;
   - rollback: `/admin sources canary mercadolivre off` (V1 permanece disponível).
 - Opção avançada permanece disponível via JSON em `/admin sources set mercadolivre extra ...`.
 - O canary só aplica V2 quando Playwright está ativo e `browser_fallback_enabled=true`.
 - Não há promoção automática para outras sources e não há flip automático pós-sucesso.
+- Operação sugerida pós-canary:
+  1. ativar canary;
+  2. rodar validação com `/admin runall mercadolivre`;
+  3. acompanhar janela de 24h com `status/report` (success/blocked/error e último sucesso com found/inserted/matched/queued/duração);
+  4. somente considerar avanço após múltiplos `success`, `found > 0`, ausência de `blocked/error` recente e revisão manual.

@@ -314,6 +314,12 @@ Decision:
 - Comandos operacionais recomendados:
   - ativar: `/admin sources canary mercadolivre on`
   - status: `/admin sources canary mercadolivre status`
+  - report: `/admin sources canary mercadolivre report`
   - rollback: `/admin sources canary mercadolivre off`
+- Soak recomendado (sem auto-flip):
+  1. `/admin runall mercadolivre`;
+  2. acompanhar últimas 24h via `status/report`;
+  3. exigir múltiplos `v2_canary success`, `found > 0`, zero `blocked/error` recente, sem exceções parse/ingest/match;
+  4. decisão manual antes de qualquer flip.
 - Comando JSON (`/admin sources set ... extra {...}`) permanece apenas como opção avançada.
 - Backoff/circuit breaker continuam obrigatórios (não executar V1 e V2 no mesmo ciclo para bypass de cooldown).
