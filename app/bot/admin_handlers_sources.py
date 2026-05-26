@@ -38,10 +38,16 @@ def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24)
         .all()
     )
 
+    canary_runs: list[tuple[object, str]] = []
+    for row in rows:
+        runtime_impl = _extract_runtime_impl(getattr(row, "payload", None))
+        if runtime_impl == "v2_canary":
+            canary_runs.append((row, runtime_impl))
+
     success = 0
     blocked = 0
     error = 0
-    last_runtime_impl = "-"
+    last_runtime_impl = "v2_canary" if canary_runs else "-"
     last_success_at = "-"
     last_success_found = 0
     last_success_inserted = 0
@@ -51,16 +57,7 @@ def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24)
     last_blocked_at = "-"
     last_error_at = "-"
 
-    for row in rows:
-        if last_runtime_impl == "-":
-            runtime_any = _extract_runtime_impl(getattr(row, "payload", None))
-            if runtime_any:
-                last_runtime_impl = runtime_any
-
-        runtime_impl = _extract_runtime_impl(getattr(row, "payload", None))
-        if runtime_impl != "v2_canary":
-            continue
-
+    for row, _runtime_impl in canary_runs:
         status = str(getattr(row, "status", "") or "").strip().lower()
         created_at = getattr(row, "created_at", None)
         created_iso = created_at.isoformat() if created_at else "-"
@@ -202,7 +199,7 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
         "/admin sources rate <source> <seconds>\n"
         "/admin sources proxy <source> <url|off>\n"
         "/admin sources fallback <source> on|off\n"
-        "/admin sources canary mercadolivre status|on|off\n"
+        "/admin sources canary mercadolivre status|report|on|off\n"
         "/admin sources force <source> on|off\n"
         "/admin sources set <source> <field> <value>\n"
         "/admin sources reset <source>"

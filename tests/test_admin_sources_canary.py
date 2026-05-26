@@ -283,3 +283,21 @@ def test_canary_status_legacy_payload_without_runtime_impl_safe(monkeypatch):
     asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
     out = up.message.texts[-1]
     assert "v2_canary_success=1" in out
+
+
+def test_canary_status_last_runtime_impl_uses_last_canary_not_last_any(monkeypatch):
+    cfg = _cfg(extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True})
+    now = datetime.now(timezone.utc)
+    runs = [
+        _run(status="success", runtime_impl="v1", dt=now),
+        _run(status="success", runtime_impl="v2_canary", dt=now - timedelta(minutes=5)),
+    ]
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx(_DB(runs=runs)))
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+    monkeypatch.setattr(mod.settings, "enable_playwright", True)
+    up = _Update()
+    asyncio.run(mod.admin_sources_canary(up, "mercadolivre", "status"))
+    out = up.message.texts[-1]
+    assert "v2_canary_success=1" in out
+    assert "last_runtime_impl=v2_canary" in out
