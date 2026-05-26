@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -10,6 +9,8 @@ from app.core.settings import settings
 
 
 BackupHealthStatus = Literal["OK", "WARNING", "FAIL"]
+DEFAULT_BACKUP_DIR = "/var/backups/autohunter"
+DEFAULT_BACKUP_MAX_AGE_HOURS = 30
 
 
 @dataclass(frozen=True)
@@ -23,29 +24,20 @@ class BackupHealthResult:
 
 
 def _resolve_backup_dir() -> str:
-    env_dir = (os.getenv("AUTOHUNTER_BACKUP_DIR") or "").strip()
-    if env_dir:
-        return env_dir
     configured = getattr(settings, "backup_dir", None)
     if configured and str(configured).strip():
         return str(configured).strip()
-    return "/var/backups/autohunter"
+    return DEFAULT_BACKUP_DIR
 
 
 def _resolve_max_age_hours() -> int:
-    raw = os.getenv("AUTOHUNTER_BACKUP_MAX_AGE_HOURS")
-    if raw is not None:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
     configured = getattr(settings, "backup_max_age_hours", None)
     if configured is not None:
         try:
             return int(configured)
         except (TypeError, ValueError):
             pass
-    return 30
+    return DEFAULT_BACKUP_MAX_AGE_HOURS
 
 
 def get_backup_health(now: datetime | None = None) -> BackupHealthResult:
