@@ -44,3 +44,10 @@ Separação explícita:
 ## Fase 3 (parcial)
 - Resolver diagnóstico AutoHunter → FIPE implementado (cálculo de candidatos + confiança).
 - Atualização automática de `fipe_prices` permanece pendente e fora do escopo desta fase.
+
+## Update 2026-05-26
+- Resolver diagnóstico FIPE refinado para busca por tokens, melhor recall (ex.: Civic Si, Golf GTI), e scoring com explicabilidade ampliada.
+- Critério de ambiguidade atualizado: high+high próximo (<15) => ambiguous; high com folga >=15 => matched; medium => ambiguous.
+- Fluxo segue read-only nesta fase: sem escrita em fipe_prices, sem score_v2, sem chamadas externas.
+- Próximo passo planejado: etapa dry-run/apply para persistir somente matches high não ambíguos.
+

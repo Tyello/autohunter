@@ -32,3 +32,10 @@ Labels:
 
 ## Próximo passo
 Permitir persistência controlada (dry-run/apply) apenas para matches high confiáveis.
+
+## Update 2026-05-26
+- Resolver diagnóstico FIPE refinado para busca por tokens, melhor recall (ex.: Civic Si, Golf GTI), e scoring com explicabilidade ampliada.
+- Critério de ambiguidade atualizado: high+high próximo (<15) => ambiguous; high com folga >=15 => matched; medium => ambiguous.
+- Fluxo segue read-only nesta fase: sem escrita em fipe_prices, sem score_v2, sem chamadas externas.
+- Próximo passo planejado: etapa dry-run/apply para persistir somente matches high não ambíguos.
+
