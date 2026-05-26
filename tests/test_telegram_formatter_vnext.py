@@ -180,6 +180,56 @@ def test_score_zero_with_filters_shows_criteria_context():
     assert "• Critério: ano ≥ 2018" in payload.text
 
 
+def test_year_filters_single_year_are_consolidated():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    ad.wishlist_filters = [
+        {"field": "year", "operator": "gte", "value": "2019"},
+        {"field": "year", "operator": "lte", "value": "2019"},
+    ]
+    payload = format_ad_message(ad)
+
+    assert "• Critério: ano = 2019" in payload.text
+    assert "• Critério: ano ≥ 2019" not in payload.text
+    assert "• Critério: ano ≤ 2019" not in payload.text
+
+
+def test_year_filters_range_are_consolidated():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    ad.wishlist_filters = [
+        {"field": "year", "operator": "gte", "value": "2019"},
+        {"field": "year", "operator": "lte", "value": "2021"},
+    ]
+    payload = format_ad_message(ad)
+
+    assert "• Critério: ano 2019 a 2021" in payload.text
+    assert "• Critério: ano ≥ 2019" not in payload.text
+    assert "• Critério: ano ≤ 2021" not in payload.text
+
+
+def test_year_filters_only_min_keeps_gte_format():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    ad.wishlist_filters = [{"field": "year", "operator": "gte", "value": "2019"}]
+    payload = format_ad_message(ad)
+
+    assert "• Critério: ano ≥ 2019" in payload.text
+
+
+def test_year_filters_only_max_keeps_lte_format():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
+    ad.wishlist_filters = [{"field": "year", "operator": "lte", "value": "2021"}]
+    payload = format_ad_message(ad)
+
+    assert "• Critério: ano ≤ 2021" in payload.text
+
+
 def test_without_context_does_not_add_empty_context_block():
     from app.notifications.telegram_formatter import format_ad_message
 
