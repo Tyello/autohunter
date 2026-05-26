@@ -12,7 +12,7 @@ from app.services.fipe_catalog_resolver_service import (
     build_fipe_resolver_coverage_report,
     resolve_listing_to_fipe_candidates,
 )
-from app.services.fipe_prices_planning_service import build_fipe_price_plan
+from app.services.fipe_prices_planning_service import build_fipe_price_plan, apply_fipe_price_plan
 
 def _format_brl(value) -> str:
     if value is None:
@@ -143,6 +143,37 @@ def render_admin_fipe_plan(report: dict) -> str:
     return "\n".join(lines)
 
 
+def render_admin_fipe_apply_plan(report: dict) -> str:
+    skipped = report.get("skipped_counts", {})
+    mode = "dry-run" if report.get("dry_run", True) else "live"
+    lines = [
+        "🧾 FIPE apply plan",
+        "",
+        f"Competência: {report['reference_month']}",
+        f"Modo: {mode}",
+        f"Amostra: {report.get('sample_size', 0)} listings",
+        "",
+        "Plano:",
+        f"- planned inserts: {report.get('planned_inserts_count', 0)}",
+        f"- would updates: {report.get('would_update_count', 0)}",
+        "",
+        "Aplicado:",
+        f"- inserted: {report.get('inserted_count', 0)}",
+        f"- updated: {report.get('updated_count', 0)}",
+        "",
+        "Skipped:",
+    ]
+    for reason in ["ambiguous", "no_match", "insufficient_data", "below_confidence", "missing_price", "missing_vehicle_key", "already_exists", "already_planned"]:
+        lines.append(f"- {reason}: {skipped.get(reason, 0)}")
+
+    if report.get("dry_run", True):
+        lines.extend(["", "Dry-run: nada foi gravado.", f"Para aplicar: /admin fipe apply_plan {report['reference_month']} live 100"])
+    else:
+        lines.extend(["", "fipe_prices atualizado."])
+
+    return "\n".join(lines)
+
+
 async def admin_fipe(update: Update, raw_args: list[str]) -> None:
     args = [a.strip() for a in (raw_args or []) if a.strip()]
     if args and args[0].lower() == "catalog":
@@ -231,6 +262,50 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_plan(report))
         return
 
+
+    if args and args[0].lower() == "apply_plan":
+        month = None
+        mode = "dry"
+        limit = 100
+        rest = args[1:]
+        if rest and rest[0].lower() not in ("dry", "live"):
+            month = rest[0]
+            rest = rest[1:]
+        if rest:
+            mode = rest[0].lower()
+            rest = rest[1:]
+        if rest:
+            try:
+                limit = int(rest[0])
+            except Exception:
+                limit = 100
+        limit = max(1, min(500, limit))
+        dry_run = mode != "live"
+
+        try:
+            with SessionLocal() as db:
+                if month:
+                    month = normalize_fipe_month(month)
+                else:
+                    month_row = db.query(FipeCatalogEntry.reference_month).order_by(FipeCatalogEntry.reference_month.desc()).first()
+                    month = month_row[0] if month_row else None
+                if not month:
+                    await update.message.reply_text("Sem dados no catálogo FIPE staging.")
+                    return
+                report = apply_fipe_price_plan(
+                    db,
+                    reference_month=month,
+                    limit=limit,
+                    min_confidence=80,
+                    dry_run=dry_run,
+                    allow_updates=False,
+                )
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
+        await update.message.reply_text(render_admin_fipe_apply_plan(report))
+        return
+
     if args and args[0].lower() == "resolver_status":
         month = args[1] if len(args) >= 2 else None
         limit = 100
@@ -267,4 +342,4 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_coverage(report))
         return
 
-    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500]")
+    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500] | /admin fipe apply_plan [YYYY-MM] [dry|live] [1-500]")

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from app.models.car_listing import CarListing
 from app.models.fipe_price import FipePrice
-from app.services.fipe_prices_planning_service import build_fipe_price_plan, build_fipe_price_plan_for_listing
+from app.services.fipe_prices_planning_service import build_fipe_price_plan, build_fipe_price_plan_for_listing, apply_fipe_price_plan
 
 
 def _listing(db, id_=None, make="Honda", model="Civic", year=2015):
@@ -94,3 +94,36 @@ def test_build_plan_deduplicates_same_vehicle_key(db, monkeypatch):
     assert out["planned_inserts_count"] == 1
     assert out["skipped_counts"]["already_planned"] == 1
     assert before == after == 0
+
+
+def test_apply_plan_dry_run_does_not_persist(db, monkeypatch):
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.build_fipe_price_plan", lambda *a, **k: {
+        "reference_month": "2026-05", "sample_size": 2, "planned_inserts_count": 2, "would_update_count": 0,
+        "planned_inserts": [
+            {"vehicle_key": "honda|civic|2015", "reference_month": "2026-05", "fipe_price": 95000},
+            {"vehicle_key": "vw|golf|2017", "reference_month": "2026-05", "fipe_price": 118000},
+        ],
+        "would_updates": [], "skipped_counts": {"already_planned": 0}
+    })
+    out = apply_fipe_price_plan(db, reference_month="2026-05", dry_run=True)
+    assert out["inserted_count"] == 0
+    assert db.query(FipePrice).count() == 0
+
+
+def test_apply_plan_live_persists_and_no_duplicates(db, monkeypatch):
+    db.add(FipePrice(vehicle_key="honda|civic|2015", reference_month="2026-05", fipe_price=Decimal("90000"), currency="BRL"))
+    db.commit()
+    monkeypatch.setattr("app.services.fipe_prices_planning_service.build_fipe_price_plan", lambda *a, **k: {
+        "reference_month": "2026-05", "sample_size": 3, "planned_inserts_count": 2, "would_update_count": 1,
+        "planned_inserts": [
+            {"vehicle_key": "honda|civic|2015", "reference_month": "2026-05", "fipe_price": 95000},
+            {"vehicle_key": "vw|golf|2017", "reference_month": "2026-05", "fipe_price": 118000},
+        ],
+        "would_updates": [{"vehicle_key": "honda|civic|2015", "planned_fipe_price": 95000}], "skipped_counts": {"already_planned": 1}
+    })
+    out = apply_fipe_price_plan(db, reference_month="2026-05", dry_run=False, allow_updates=False)
+    assert out["inserted_count"] == 1
+    assert out["would_update_count"] == 1
+    assert db.query(FipePrice).filter(FipePrice.reference_month == "2026-05").count() == 2
+    existing = db.query(FipePrice).filter(FipePrice.vehicle_key == "honda|civic|2015", FipePrice.reference_month == "2026-05").first()
+    assert int(existing.fipe_price) == 90000

@@ -67,3 +67,19 @@ Motivos de skip:
 - `already_planned`
 
 Read-only: esta etapa não grava em `fipe_prices`, não altera `score_v2` e não chama API externa.
+
+
+## Apply controlado do plano (/admin fipe apply_plan)
+
+Comando admin para aplicar explicitamente os `planned_inserts` gerados pelo plano.
+
+- `dry` é padrão (não grava nada).
+- `live` precisa ser explícito.
+- `limit` padrão 100, com cap em 500.
+- Usa `min_confidence=80` e só considera matches high, não ambíguos e deduplicados no plano.
+- `would_updates` são apenas informativos nesta fase (não aplicados por padrão).
+
+Exemplos:
+- `/admin fipe apply_plan`
+- `/admin fipe apply_plan 2026-05 dry`
+- `/admin fipe apply_plan 2026-05 live 100`
