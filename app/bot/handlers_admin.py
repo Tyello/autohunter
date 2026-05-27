@@ -53,6 +53,7 @@ from app.services.source_operational_policy import (
     source_operational_severity,
 )
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config, invalidate_source_config_cache
+from app.services.filesystem_cleanup_service import run_filesystem_cleanup
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.wishlist_tokens_service import reindex_active_wishlists
 from app.services.wishlist_tokens_service import extract_tokens
@@ -393,7 +394,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin cleanup | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
         return
 
     action = args[0].lower()
@@ -448,6 +449,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "metrics":
         await admin_metrics(update, args[1:])
         return
+    if action == "cleanup":
+        await _admin_cleanup(update, args[1:])
+        return
 
     if action == "matchdebug":
         await _admin_matchdebug(update, args[1:])
@@ -466,7 +470,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin cleanup | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
 
 
 
@@ -500,6 +504,48 @@ def _render_warmup_result(source: str, payload: dict) -> str:
     else:
         lines.append("warmup não detectou challenge neste momento; rode /admin runall webmotors para validar efeito real.")
     return "\n".join(lines)
+
+
+async def _admin_cleanup(update: Update, raw_args: List[str]):
+    def _human_bytes(n: int) -> str:
+        n = max(0, int(n or 0))
+        units = ("B", "KB", "MB", "GB", "TB")
+        v = float(n)
+        idx = 0
+        while v >= 1024.0 and idx < len(units) - 1:
+            v /= 1024.0
+            idx += 1
+        return f"{v:.2f}{units[idx]}"
+
+    args = [a.strip().lower() for a in (raw_args or []) if a.strip()]
+    mode = args[0] if args else "status"
+    if mode not in {"status", "dryrun", "apply"}:
+        await update.message.reply_text("Use: /admin cleanup status | /admin cleanup dryrun | /admin cleanup apply")
+        return
+    if mode == "status":
+        await update.message.reply_text(
+            sanitize_for_telegram(
+                "Cleanup config:\n"
+                f"- enabled={bool(getattr(settings, 'filesystem_cleanup_enabled', True))}\n"
+                f"- cache_max_bytes={int(getattr(settings, 'filesystem_cleanup_cache_max_bytes', 0) or 0)}\n"
+                f"- cache_retention_days={int(getattr(settings, 'filesystem_cleanup_cache_retention_days', 14) or 14)}\n"
+                f"- artifacts_days={int(getattr(settings, 'filesystem_cleanup_artifacts_days', 14) or 14)}\n"
+                f"- debug_days={int(getattr(settings, 'filesystem_cleanup_debug_days', 7) or 7)}\n"
+                "Run: /admin cleanup dryrun"
+            )
+        )
+        return
+    dry_run = mode != "apply"
+    res = run_filesystem_cleanup(dry_run=dry_run)
+    verb = "would_free" if dry_run else "freed"
+    msg = (
+        f"Filesystem cleanup ({'dry-run' if dry_run else 'apply'}):\n"
+        f"- scanned={res.get('scanned_total', 0)} candidates={res.get('candidates_total', 0)}\n"
+        f"- deleted={res.get('deleted_total', 0)} skipped={res.get('skipped_total', 0)}\n"
+        f"- {verb}_bytes={res.get('would_free_total', res.get('bytes_freed_total', 0))} "
+        f"({_human_bytes(res.get('would_free_total', res.get('bytes_freed_total', 0)))})"
+    )
+    await update.message.reply_text(sanitize_for_telegram(msg))
 
 
 async def _admin_warmup(update: Update, raw_args: List[str]):
