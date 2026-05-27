@@ -107,8 +107,25 @@ def run_filesystem_cleanup(*, dry_run: bool = False) -> dict:
         ("artifacts", artifacts_root, artifacts_days),
         ("debug", debug_root, debug_days),
     ]
+    # Avoid nested/overlapping roots (e.g. source_audit_root inside cache_artifacts).
+    # Keep the parent root to guarantee each file is scanned/accounted only once.
+    selected_roots: list[tuple[str, Path, int]] = []
+    for label, root, retention_days in sorted(temp_roots, key=lambda item: len(item[1].parts)):
+        resolved = root.resolve()
+        overlap = False
+        for _, parent, _ in selected_roots:
+            try:
+                resolved.relative_to(parent)
+                overlap = True
+                break
+            except ValueError:
+                pass
+        if overlap:
+            continue
+        selected_roots.append((label, resolved, retention_days))
+
     parts: dict[str, dict] = {}
-    for label, root, retention_days in temp_roots:
+    for label, root, retention_days in selected_roots:
         stats = _cleanup_dir(base_dir=root, older_than_days=retention_days, max_delete=max_delete, dry_run=dry_run)
         parts[label] = {"path": str(root), "retention_days": int(retention_days), **stats.to_dict()}
 

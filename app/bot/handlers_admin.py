@@ -507,6 +507,16 @@ def _render_warmup_result(source: str, payload: dict) -> str:
 
 
 async def _admin_cleanup(update: Update, raw_args: List[str]):
+    def _human_bytes(n: int) -> str:
+        n = max(0, int(n or 0))
+        units = ("B", "KB", "MB", "GB", "TB")
+        v = float(n)
+        idx = 0
+        while v >= 1024.0 and idx < len(units) - 1:
+            v /= 1024.0
+            idx += 1
+        return f"{v:.2f}{units[idx]}"
+
     args = [a.strip().lower() for a in (raw_args or []) if a.strip()]
     mode = args[0] if args else "status"
     if mode not in {"status", "dryrun", "apply"}:
@@ -532,7 +542,8 @@ async def _admin_cleanup(update: Update, raw_args: List[str]):
         f"Filesystem cleanup ({'dry-run' if dry_run else 'apply'}):\n"
         f"- scanned={res.get('scanned_total', 0)} candidates={res.get('candidates_total', 0)}\n"
         f"- deleted={res.get('deleted_total', 0)} skipped={res.get('skipped_total', 0)}\n"
-        f"- {verb}_bytes={res.get('would_free_total', res.get('bytes_freed_total', 0))}"
+        f"- {verb}_bytes={res.get('would_free_total', res.get('bytes_freed_total', 0))} "
+        f"({_human_bytes(res.get('would_free_total', res.get('bytes_freed_total', 0)))})"
     )
     await update.message.reply_text(sanitize_for_telegram(msg))
 
