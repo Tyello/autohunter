@@ -68,4 +68,5 @@ Separação explícita:
 - ⏳ Updates de preços existentes permanecem desabilitados por padrão (guardados para flag futura).
 
 - O apply controlado de FIPE agora possui trilha de auditoria persistente em `system_logs`, inclusive em dry-run.
+- A trilha pode ser consultada via Telegram/admin com `/admin fipe apply_history [1-20]` (alias: `/admin fipe audit [1-20]`), somente leitura.
 - Scheduler mensal continua pendente e fora deste escopo.

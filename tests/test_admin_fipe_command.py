@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.bot import handlers_admin
@@ -357,3 +358,88 @@ def test_admin_fipe_apply_plan_live_and_limit_cap(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "apply_plan", "2026-05", "live", "9999")))
     assert calls["dry_run"] is False
     assert calls["limit"] == 500
+
+
+def test_render_admin_fipe_apply_history_without_logs():
+    msg = admin_handlers_fipe.render_admin_fipe_apply_history([])
+    assert "Ainda não há histórico persistente de apply_plan." in msg
+
+
+def test_render_admin_fipe_apply_history_dry_run():
+    row = SimpleNamespace(
+        created_at=datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc),
+        message="fipe apply plan dry-run",
+        payload={
+            "reference_month": "2026-05",
+            "planned_inserts_count": 10,
+            "inserted_count": 0,
+            "updated_count": 0,
+            "sample_size": 100,
+            "skipped_counts": {"no_match": 3, "ambiguous": 1},
+        },
+    )
+    msg = admin_handlers_fipe.render_admin_fipe_apply_history([row])
+    assert "FIPE apply_plan — histórico" in msg
+    assert "dry-run" in msg
+    assert "ref=2026-05" in msg
+
+
+def test_render_admin_fipe_apply_history_live():
+    row = SimpleNamespace(
+        created_at=datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc),
+        message="fipe apply plan live",
+        payload={"reference_month": "2026-05", "planned_inserts_count": 2, "inserted_count": 2, "updated_count": 0, "sample_size": 200},
+    )
+    msg = admin_handlers_fipe.render_admin_fipe_apply_history([row])
+    assert "live" in msg
+    assert "ins=2" in msg
+
+
+def test_render_admin_fipe_apply_history_error_and_legacy_payload():
+    row = SimpleNamespace(
+        created_at=datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc),
+        message="fipe apply plan error",
+        payload={"error": "x" * 200},
+    )
+    msg = admin_handlers_fipe.render_admin_fipe_apply_history([row])
+    assert "error" in msg
+    assert "err=" in msg
+    assert "..." in msg
+
+    row2 = SimpleNamespace(
+        created_at=datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc),
+        message="fipe apply plan dry-run",
+        payload="legacy",
+    )
+    msg2 = admin_handlers_fipe.render_admin_fipe_apply_history([row2])
+    assert "ref=-" in msg2
+
+
+def test_admin_fipe_apply_history_dispatch_and_limit_cap(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    calls = {"limit": None}
+
+    class _Q:
+        def filter(self, *a, **k):
+            return self
+        def order_by(self, *a, **k):
+            return self
+        def limit(self, v):
+            calls["limit"] = v
+            return self
+        def all(self):
+            return []
+
+    class _DB:
+        def query(self, *a, **k):
+            return _Q()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "apply_history", "999")))
+    assert calls["limit"] == 20
+    assert "Ainda não há histórico persistente" in up.message.sent[-1]
