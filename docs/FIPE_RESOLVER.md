@@ -102,3 +102,27 @@ Regras:
 - limite padrão: `5`;
 - cap máximo: `20`;
 - saída compacta (UTC, modo dry-run/live/error, referência, contagens e erro resumido).
+
+
+## Status operacional pós-apply (/admin fipe apply_status)
+
+Comando admin para leitura operacional do fluxo de apply:
+- `/admin fipe apply_status`
+- `/admin fipe apply_status 2026-05`
+- `/admin fipe apply_status 2026-05 20`
+
+Fonte lida (read-only):
+- `system_logs` com `component="fipe_apply_plan"`
+- total de registros atuais em `fipe_prices` na competência
+
+Interpretação:
+- dry-run: valida planejamento e skipped reasons sem escrita
+- live: mostra inserções aplicadas
+- error: sinaliza falha operacional recente para investigação
+
+Ordem recomendada:
+1. `/admin fipe plan`
+2. `/admin fipe apply_plan ... dry`
+3. `/admin fipe apply_status`
+4. `/admin fipe apply_plan ... live`
+5. `/admin fipe coverage`
