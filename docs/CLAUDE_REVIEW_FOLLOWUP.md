@@ -96,3 +96,10 @@ Próximo passo operacional:
 - Implementada auditoria persistente para `/admin fipe apply_plan` (dry-run/live) desacoplada da transação principal.
 - Exposta leitura admin da auditoria via `/admin fipe apply_history` (alias `/admin fipe audit`) com limite padrão 5 e cap 20.
 - Próximo passo operacional: rodar dry-run/live pequeno e validar coverage de logs/resultados em produção controlada.
+
+
+## Update — FIPE apply operational status
+
+- Implementado relatório operacional de FIPE apply com `/admin fipe apply_status` (somente leitura).
+- O relatório consolida últimas execuções dry/live/error, inserted/skipped e contagem de `fipe_prices` na competência.
+- Próximo passo real: rodar em produção com limite pequeno (dry/live) e validar cobertura via `/admin fipe coverage`.

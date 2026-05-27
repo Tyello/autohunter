@@ -443,3 +443,79 @@ def test_admin_fipe_apply_history_dispatch_and_limit_cap(monkeypatch):
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "apply_history", "999")))
     assert calls["limit"] == 20
     assert "Ainda não há histórico persistente" in up.message.sent[-1]
+
+def test_render_admin_fipe_apply_status_without_runs():
+    msg = admin_handlers_fipe.render_admin_fipe_apply_status({
+        "reference_month": "2026-05",
+        "fipe_prices_count": 0,
+        "runs": [],
+        "aggregates": {"total_dry_runs": 0, "total_lives": 0, "total_inserted": 0, "total_errors": 0},
+        "recommendation": "rode /admin fipe apply_plan 2026-05 dry 100",
+    })
+    assert "nenhuma execução" in msg
+    assert "dry 100" in msg
+
+
+def test_render_admin_fipe_apply_status_with_live_and_error():
+    msg = admin_handlers_fipe.render_admin_fipe_apply_status({
+        "reference_month": "2026-05",
+        "fipe_prices_count": 128,
+        "runs": [
+            {
+                "created_at": datetime(2026, 5, 26, 22, 10, tzinfo=timezone.utc),
+                "dry_run": False,
+                "planned_inserts_count": 20,
+                "inserted_count": 20,
+                "skipped_counts": {"no_match": 35},
+                "error": "",
+            },
+            {
+                "created_at": datetime(2026, 5, 26, 22, 5, tzinfo=timezone.utc),
+                "dry_run": True,
+                "planned_inserts_count": 20,
+                "inserted_count": 0,
+                "skipped_counts": {"no_match": 35},
+                "error": "oops",
+            },
+        ],
+        "aggregates": {"total_dry_runs": 1, "total_lives": 1, "total_inserted": 20, "total_errors": 1},
+        "recommendation": "rode /admin fipe coverage para validar cobertura",
+    })
+    assert "live" in msg
+    assert "planned=20 inserted=20 skipped=35" in msg
+    assert "[2] error" in msg
+    assert "alerta:" in msg
+    assert "/admin fipe coverage 2026-05" in msg
+
+
+def test_admin_fipe_apply_status_dispatch_and_limit_cap(monkeypatch):
+    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    calls = {}
+
+    def _fake(db, reference_month=None, limit=10):
+        calls["reference_month"] = reference_month
+        calls["limit"] = limit
+        return {
+            "reference_month": "2026-05",
+            "fipe_prices_count": 1,
+            "runs": [],
+            "aggregates": {"total_dry_runs": 0, "total_lives": 0, "total_inserted": 0, "total_errors": 0},
+            "recommendation": "rode /admin fipe apply_plan 2026-05 dry 100",
+        }
+
+    class _DB:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(admin_handlers_fipe, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(admin_handlers_fipe, "build_fipe_apply_status_report", _fake)
+
+    up = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "apply_status")))
+    assert calls["reference_month"] is None
+    assert calls["limit"] == 10
+
+    up2 = _Up(1)
+    asyncio.run(handlers_admin.cmd_admin(up2, _ctx("fipe", "apply_status", "2026-05", "999")))
+    assert calls["reference_month"] == "2026-05"
+    assert calls["limit"] == 50

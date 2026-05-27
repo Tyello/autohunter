@@ -70,3 +70,10 @@ Separação explícita:
 - O apply controlado de FIPE agora possui trilha de auditoria persistente em `system_logs`, inclusive em dry-run.
 - A trilha pode ser consultada via Telegram/admin com `/admin fipe apply_history [1-20]` (alias: `/admin fipe audit [1-20]`), somente leitura.
 - Scheduler mensal continua pendente e fora deste escopo.
+
+
+## Update — status operacional pós-apply
+
+- ✅ Implementado status operacional pós-apply via `/admin fipe apply_status` (histórico dry/live/error + métricas agregadas + próximo passo).
+- ✅ Leitura baseada em `system_logs` (`component=fipe_apply_plan`) e `fipe_prices` por competência.
+- ✅ Fluxo continua sem scheduler mensal nesta etapa (fora do escopo).
