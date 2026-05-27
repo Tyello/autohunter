@@ -70,3 +70,20 @@ def test_run_filesystem_cleanup_safe_scope_only(monkeypatch, tmp_path):
     assert res["deleted_total"] == 2
     assert not debug_old.exists()
     assert sensitive.exists()
+
+
+def test_run_filesystem_cleanup_dry_run_keeps_files(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    cache = tmp_path / "cache"
+    old = artifacts / "old.txt"
+    _touch_with_age(old, days_old=20, size=32)
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.filesystem_cleanup_enabled", True)
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.filesystem_cleanup_artifacts_days", 7)
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.filesystem_cleanup_debug_days", 7)
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.filesystem_cleanup_cache_retention_days", 7)
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.filesystem_cleanup_max_delete_per_run", 100)
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.source_audit_root", str(artifacts))
+    monkeypatch.setattr("app.services.filesystem_cleanup_service.settings.runtime_cache_dir", str(cache))
+    res = run_filesystem_cleanup(dry_run=True)
+    assert res["would_delete_total"] >= 1
+    assert old.exists()

@@ -395,21 +395,26 @@ df -h
 journalctl --disk-usage
 du -xh --max-depth=2 /var/lib/autohunter /var/cache/autohunter /var/log/autohunter
 python scripts/disk_audit.py
+python -m app.ops.cleanup_filesystem
 ```
 
 Ações:
 
 1. Rodar `python scripts/disk_audit.py`.
-2. Rodar `python scripts/filesystem_cleanup.py` (dry-run padrão) para estimar impacto seguro.
-3. Se o dry-run fizer sentido, rodar `python scripts/filesystem_cleanup.py --apply`.
+2. Rodar `python -m app.ops.cleanup_filesystem` (dry-run padrão) para estimar impacto seguro.
+3. Se o dry-run fizer sentido, rodar `python -m app.ops.cleanup_filesystem --apply`.
 4. Verificar `journalctl --disk-usage`.
-5. Confirmar `FILESYSTEM_CLEANUP_ENABLED=true`.
-6. Reduzir TTLs de artifacts/debug temporariamente se necessário.
+5. Confirmar `AUTOHUNTER_CLEANUP_ENABLED=true`.
+6. Ajustar retenção temporária se necessário:
+   - `AUTOHUNTER_CACHE_RETENTION_DAYS` (default 14)
+   - `AUTOHUNTER_DEBUG_ARTIFACTS_RETENTION_DAYS` (default 7)
+   - `AUTOHUNTER_CACHE_MAX_BYTES` (default 3221225472 = 3GB)
 
 Distinções importantes:
 - Alerta de cache mede o total de `runtime_cache_dir` (ex.: `/var/cache/autohunter`).
-- Cleanup automático/manual só remove conteúdo antigo em `source_audit_root` e `runtime_cache_dir/debug`.
+- Cleanup automático/manual só remove conteúdo antigo em `runtime_cache_dir/tmp`, `runtime_cache_dir/artifacts`, `source_audit_root` e `runtime_cache_dir/debug`.
 - Paths sensíveis como `pw-browsers`, Playwright storage, profiles e sessões FB **não** são removidos automaticamente.
+- Nunca remover: banco, migrations, `.env`, código, backups manuais e storage persistente (`runtime_state_dir`).
 - O alerta inclui top subdirs do cache para diagnóstico acionável sem apagar paths sensíveis.
 
 ## 12) Backup / restore

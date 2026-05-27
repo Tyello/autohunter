@@ -200,16 +200,17 @@ def collect_operational_alerts(
         pass
 
     try:
-        cache_limit_gb = float(getattr(settings, "disk_alert_cache_limit_gb", 5.0) or 5.0)
-        cache_limit_bytes = int(cache_limit_gb * (1024 ** 3))
+        cache_limit_bytes = int(getattr(settings, "filesystem_cleanup_cache_max_bytes", 3 * (1024 ** 3)) or 3 * (1024 ** 3))
         cache_dir = Path(getattr(settings, "runtime_cache_dir", "/var/cache/autohunter")).expanduser().resolve()
         cache_size_bytes = _dir_size_bytes(cache_dir)
         alert_key = "disk_cache_pressure"
         cooldown_m = _resource_cooldown_minutes()
         if cache_size_bytes >= cache_limit_bytes > 0 and _is_cooldown_open(db, alert_key, cooldown_m, now):
-            top = _top_subdirs(cache_dir, limit=4, max_depth=2)
+            top = _top_subdirs(cache_dir, limit=5, max_depth=2)
             top_msg = ", ".join([f"{Path(p).name}={_human_gb(s)}" for s, p in top]) if top else "sem subdirs legíveis"
-            alerts.append(OperationalAlert(alert_key, f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}). Top dirs: {top_msg}. Próximo passo: rode python scripts/disk_audit.py e python scripts/filesystem_cleanup.py --apply.", cooldown_m))
+            over = max(0, cache_size_bytes - cache_limit_bytes)
+            ts = now.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+            alerts.append(OperationalAlert(alert_key, f"⚠️ Cache autohunter em {_human_gb(cache_size_bytes)} (limite {_human_gb(cache_limit_bytes)}, excesso {_human_gb(over)}) em {ts}. Top 5 dirs: {top_msg}. Próximo passo: python -m app.ops.cleanup_filesystem (dry-run) e depois python -m app.ops.cleanup_filesystem --apply.", cooldown_m))
     except Exception:
         pass
 

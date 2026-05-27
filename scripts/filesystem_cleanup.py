@@ -26,9 +26,14 @@ def _print_summary(res: dict, before: int, after: int) -> None:
         f"bytes_candidate={res.get('bytes_candidate_total', 0)} "
         f"{bytes_label}={bytes_total} dry_run={dry_run}"
     )
-    for key in ("artifacts", "debug"):
-        part = res.get(key, {})
-        print(f"{key}: path={part.get('path')} scanned={part.get('scanned', 0)} candidates={part.get('candidates', 0)} deleted={part.get('deleted', 0)} skipped={part.get('skipped', 0)} bytes_freed={part.get('bytes_freed', 0)}")
+    for key, part in res.items():
+        if not isinstance(part, dict) or "scanned" not in part:
+            continue
+        print(
+            f"{key}: path={part.get('path')} retention_days={part.get('retention_days','-')} "
+            f"scanned={part.get('scanned', 0)} candidates={part.get('candidates', 0)} "
+            f"deleted={part.get('deleted', 0)} skipped={part.get('skipped', 0)} bytes_freed={part.get('bytes_freed', 0)}"
+        )
 
 
 def main() -> None:

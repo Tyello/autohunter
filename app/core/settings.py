@@ -288,10 +288,27 @@ class Settings(BaseSettings):
     operational_retention_notifications_days: int = 90
     operational_retention_wishlist_activity_days: int = 90
 
-    # Filesystem cleanup (runtime artifacts/debug only; safe defaults)
-    filesystem_cleanup_enabled: bool = True
-    filesystem_cleanup_artifacts_days: int = 7
-    filesystem_cleanup_debug_days: int = 7
+    # Filesystem cleanup (runtime temp/cache/debug only; safe defaults)
+    filesystem_cleanup_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AUTOHUNTER_CLEANUP_ENABLED", "FILESYSTEM_CLEANUP_ENABLED"),
+    )
+    filesystem_cleanup_cache_max_bytes: int = Field(
+        default=3 * 1024 * 1024 * 1024,
+        validation_alias=AliasChoices("AUTOHUNTER_CACHE_MAX_BYTES", "FILESYSTEM_CLEANUP_CACHE_MAX_BYTES"),
+    )
+    filesystem_cleanup_cache_retention_days: int = Field(
+        default=14,
+        validation_alias=AliasChoices("AUTOHUNTER_CACHE_RETENTION_DAYS", "FILESYSTEM_CLEANUP_CACHE_RETENTION_DAYS"),
+    )
+    filesystem_cleanup_artifacts_days: int = Field(
+        default=14,
+        validation_alias=AliasChoices("AUTOHUNTER_CACHE_RETENTION_DAYS", "FILESYSTEM_CLEANUP_ARTIFACTS_DAYS"),
+    )
+    filesystem_cleanup_debug_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices("AUTOHUNTER_DEBUG_ARTIFACTS_RETENTION_DAYS", "FILESYSTEM_CLEANUP_DEBUG_DAYS"),
+    )
     filesystem_cleanup_max_delete_per_run: int = 1000
 
     # Disk pressure alerts

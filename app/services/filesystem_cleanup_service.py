@@ -98,20 +98,27 @@ def run_filesystem_cleanup(*, dry_run: bool = False) -> dict:
         result["skipped"] = "disabled"
         return result
 
+    cache_root = Path(settings.runtime_cache_dir).expanduser().resolve()
     artifacts_root = Path(settings.source_audit_root).expanduser().resolve()
-    debug_root = Path(settings.runtime_cache_dir).expanduser().resolve() / "debug"
+    debug_root = cache_root / "debug"
+    temp_roots = [
+        ("cache_tmp", cache_root / "tmp", int(getattr(settings, "filesystem_cleanup_cache_retention_days", artifacts_days) or artifacts_days)),
+        ("cache_artifacts", cache_root / "artifacts", artifacts_days),
+        ("artifacts", artifacts_root, artifacts_days),
+        ("debug", debug_root, debug_days),
+    ]
+    parts: dict[str, dict] = {}
+    for label, root, retention_days in temp_roots:
+        stats = _cleanup_dir(base_dir=root, older_than_days=retention_days, max_delete=max_delete, dry_run=dry_run)
+        parts[label] = {"path": str(root), "retention_days": int(retention_days), **stats.to_dict()}
 
-    artifacts = _cleanup_dir(base_dir=artifacts_root, older_than_days=artifacts_days, max_delete=max_delete, dry_run=dry_run)
-    debug = _cleanup_dir(base_dir=debug_root, older_than_days=debug_days, max_delete=max_delete, dry_run=dry_run)
-
-    result["artifacts"] = {"path": str(artifacts_root), **artifacts.to_dict()}
-    result["debug"] = {"path": str(debug_root), **debug.to_dict()}
-    result["deleted_total"] = artifacts.deleted + debug.deleted
-    result["scanned_total"] = artifacts.scanned + debug.scanned
-    result["candidates_total"] = artifacts.candidates + debug.candidates
-    result["skipped_total"] = artifacts.skipped + debug.skipped
-    result["bytes_candidate_total"] = artifacts.bytes_candidate + debug.bytes_candidate
-    result["bytes_freed_total"] = artifacts.bytes_freed + debug.bytes_freed
+    result.update(parts)
+    result["deleted_total"] = sum(int(parts[k]["deleted"]) for k in parts)
+    result["scanned_total"] = sum(int(parts[k]["scanned"]) for k in parts)
+    result["candidates_total"] = sum(int(parts[k]["candidates"]) for k in parts)
+    result["skipped_total"] = sum(int(parts[k]["skipped"]) for k in parts)
+    result["bytes_candidate_total"] = sum(int(parts[k]["bytes_candidate"]) for k in parts)
+    result["bytes_freed_total"] = sum(int(parts[k]["bytes_freed"]) for k in parts)
     if dry_run:
         result["would_delete_total"] = result["deleted_total"]
         result["would_free_total"] = result["bytes_freed_total"]
