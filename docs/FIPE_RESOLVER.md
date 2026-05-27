@@ -87,3 +87,18 @@ Exemplos:
 - `/admin fipe apply_plan` agora registra auditoria persistente em `system_logs` via sessão dedicada (dry-run e live).
 - Dry-run também é auditável sem depender da transação principal de aplicação.
 - O logging de auditoria não altera regra de aplicação (critérios, `allow_updates=False`, sem updates automáticos).
+
+### Histórico persistente (read-only)
+
+Para consultar a trilha recente sem abrir banco manualmente:
+
+- `/admin fipe apply_history`
+- `/admin fipe apply_history 10`
+- `/admin fipe audit 10` (alias curto)
+
+Regras:
+- fonte: `system_logs` com `component="fipe_apply_plan"`;
+- ordenação: `created_at desc`;
+- limite padrão: `5`;
+- cap máximo: `20`;
+- saída compacta (UTC, modo dry-run/live/error, referência, contagens e erro resumido).

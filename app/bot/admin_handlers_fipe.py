@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from telegram import Update
 
 from app.db.session import SessionLocal
 from app.models.fipe_catalog_entry import FipeCatalogEntry
 from app.models.fipe_sync_run import FipeSyncRun
 from app.models.car_listing import CarListing
+from app.models.system_log import SystemLog
 from app.services.fipe_prices_import_service import build_fipe_coverage_report
 from app.services.fipe_monthly_sync_service import normalize_fipe_month
 from app.services.fipe_catalog_resolver_service import (
@@ -173,6 +176,54 @@ def render_admin_fipe_apply_plan(report: dict) -> str:
 
     return "\n".join(lines)
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _apply_mode_from_log(message: str, payload: dict | None) -> str:
+    msg = str(message or "").lower()
+    if "error" in msg:
+        return "error"
+    if "live" in msg:
+        return "live"
+    if isinstance(payload, dict):
+        return "dry-run" if bool(payload.get("dry_run", True)) else "live"
+    return "dry-run"
+
+
+def render_admin_fipe_apply_history(logs: list[SystemLog]) -> str:
+    if not logs:
+        return "Ainda não há histórico persistente de apply_plan."
+    lines = ["🧾 FIPE apply_plan — histórico", ""]
+    for row in logs:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        created = row.created_at or datetime.now(timezone.utc)
+        created_utc = created.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        mode = _apply_mode_from_log(row.message, payload)
+        skipped = payload.get("skipped_counts") if isinstance(payload.get("skipped_counts"), dict) else {}
+        skipped_total = _safe_int(payload.get("skipped_total"), -1)
+        if skipped_total < 0:
+            skipped_total = sum(_safe_int(v) for v in skipped.values())
+        skipped_top = ", ".join(
+            f"{k}:{_safe_int(v)}" for k, v in sorted(skipped.items(), key=lambda i: _safe_int(i[1]), reverse=True)[:3]
+        ) or "-"
+        err = str(payload.get("error") or payload.get("error_message") or "").strip()
+        if len(err) > 120:
+            err = err[:117] + "..."
+        line = (
+            f"- {created_utc} UTC | {mode} | ref={payload.get('reference_month') or '-'} | "
+            f"plan={_safe_int(payload.get('planned_inserts_count'))} | ins={_safe_int(payload.get('inserted_count'))} | "
+            f"upd={_safe_int(payload.get('updated_count'))} | skip={skipped_total} ({skipped_top}) | "
+            f"sample={_safe_int(payload.get('sample_size'))}"
+        )
+        if err:
+            line += f" | err={err}"
+        lines.append(line)
+    return "\n".join(lines)
+
 
 async def admin_fipe(update: Update, raw_args: list[str]) -> None:
     args = [a.strip() for a in (raw_args or []) if a.strip()]
@@ -306,6 +357,25 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_apply_plan(report))
         return
 
+    if args and args[0].lower() in ("apply_history", "audit"):
+        limit = 5
+        if len(args) >= 2:
+            try:
+                limit = int(args[1])
+            except Exception:
+                limit = 5
+        limit = max(1, min(20, limit))
+        with SessionLocal() as db:
+            rows = (
+                db.query(SystemLog)
+                .filter(SystemLog.component == "fipe_apply_plan")
+                .order_by(SystemLog.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+        await update.message.reply_text(render_admin_fipe_apply_history(rows))
+        return
+
     if args and args[0].lower() == "resolver_status":
         month = args[1] if len(args) >= 2 else None
         limit = 100
@@ -342,4 +412,4 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_coverage(report))
         return
 
-    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500] | /admin fipe apply_plan [YYYY-MM] [dry|live] [1-500]")
+    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500] | /admin fipe apply_plan [YYYY-MM] [dry|live] [1-500] | /admin fipe apply_history [1-20] | /admin fipe audit [1-20]")
