@@ -212,7 +212,7 @@ def render_admin_fipe_apply_status(report: dict) -> str:
         lines.append("- nenhuma execução encontrada em system_logs para fipe_apply_plan")
     else:
         for idx, run in enumerate(runs, start=1):
-            mode = "dry-run" if run.get("dry_run", True) else "live"
+            mode = "error" if run.get("error") else ("dry-run" if run.get("dry_run", True) else "live")
             created = run.get("created_at")
             created_txt = created.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M") if created else "-"
             skipped_counts = run.get("skipped_counts") if isinstance(run.get("skipped_counts"), dict) else {}

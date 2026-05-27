@@ -24,13 +24,13 @@ def test_fipe_apply_status_counts_dry_live_error_and_prices(db):
     db.add(FipePrice(vehicle_key="b", fipe_price=2, currency="BRL", reference_month="2026-05"))
     db.commit()
 
-    _log(db, "fipe apply plan dry-run", {"dry_run": True, "planned_inserts_count": 20, "inserted_count": 0, "skipped_counts": {"no_match": 3}, "sample_size": 100})
-    _log(db, "fipe apply plan live", {"dry_run": False, "planned_inserts_count": 20, "inserted_count": 20, "skipped_counts": {"already_exists": 2}, "sample_size": 100})
-    _log(db, "fipe apply plan error", {"error": "boom", "dry_run": True})
+    _log(db, "fipe apply plan dry-run", {"reference_month": "2026-05", "dry_run": True, "planned_inserts_count": 20, "inserted_count": 0, "skipped_counts": {"no_match": 3}, "sample_size": 100})
+    _log(db, "fipe apply plan live", {"reference_month": "2026-05", "dry_run": False, "planned_inserts_count": 20, "inserted_count": 20, "skipped_counts": {"already_exists": 2}, "sample_size": 100})
+    _log(db, "fipe apply plan error", {"reference_month": "2026-05", "error": "boom", "dry_run": True})
 
     report = build_fipe_apply_status_report(db, reference_month="2026-05", limit=10)
     assert report["fipe_prices_count"] == 2
-    assert report["aggregates"]["total_dry_runs"] == 2
+    assert report["aggregates"]["total_dry_runs"] == 1
     assert report["aggregates"]["total_lives"] == 1
     assert report["aggregates"]["total_inserted"] == 20
     assert report["aggregates"]["total_errors"] == 1
@@ -42,6 +42,37 @@ def test_fipe_apply_status_counts_dry_live_error_and_prices(db):
 def test_fipe_apply_status_limit_cap_50(db):
     db.add(FipePrice(vehicle_key="honda|civic|2015", fipe_price=100000, currency="BRL", reference_month="2026-05"))
     for _ in range(60):
-        _log(db, "fipe apply plan dry-run", {"dry_run": True})
+        _log(db, "fipe apply plan dry-run", {"reference_month": "2026-05", "dry_run": True})
     report = build_fipe_apply_status_report(db, reference_month="2026-05", limit=999)
     assert len(report["runs"]) == 50
+
+
+def test_fipe_apply_status_filters_logs_by_reference_month(db):
+    db.add(FipePrice(vehicle_key="m1", fipe_price=1, currency="BRL", reference_month="2026-05"))
+    db.add(FipePrice(vehicle_key="m2", fipe_price=2, currency="BRL", reference_month="2026-06"))
+    db.commit()
+
+    _log(db, "fipe apply plan dry-run", {"reference_month": "2026-05", "dry_run": True, "planned_inserts_count": 10, "inserted_count": 0})
+    _log(db, "fipe apply plan live", {"reference_month": "2026-05", "dry_run": False, "planned_inserts_count": 5, "inserted_count": 5})
+    _log(db, "fipe apply plan live", {"reference_month": "2026-06", "dry_run": False, "planned_inserts_count": 8, "inserted_count": 8})
+
+    report = build_fipe_apply_status_report(db, reference_month="2026-05", limit=10)
+
+    assert report["reference_month"] == "2026-05"
+    assert report["fipe_prices_count"] == 1
+    assert len(report["runs"]) == 2
+    assert all((r.get("message") or "") in ("fipe apply plan dry-run", "fipe apply plan live") for r in report["runs"])
+    assert report["aggregates"]["total_dry_runs"] == 1
+    assert report["aggregates"]["total_lives"] == 1
+    assert report["aggregates"]["total_inserted"] == 5
+
+
+def test_fipe_apply_status_ignores_legacy_logs_without_reference_month(db):
+    db.add(FipePrice(vehicle_key="x", fipe_price=1, currency="BRL", reference_month="2026-05"))
+    db.commit()
+
+    _log(db, "fipe apply plan dry-run", {"dry_run": True, "planned_inserts_count": 10})
+    report = build_fipe_apply_status_report(db, reference_month="2026-05", limit=10)
+
+    assert report["runs"] == []
+    assert report["recommendation"] == "rode /admin fipe apply_plan 2026-05 dry 100"

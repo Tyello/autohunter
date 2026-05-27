@@ -483,6 +483,7 @@ def test_render_admin_fipe_apply_status_with_live_and_error():
     })
     assert "live" in msg
     assert "planned=20 inserted=20 skipped=35" in msg
+    assert "[2] error" in msg
     assert "alerta:" in msg
     assert "/admin fipe coverage 2026-05" in msg
 

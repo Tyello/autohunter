@@ -42,7 +42,7 @@ def build_fipe_apply_status_report(db: Session, *, reference_month: str | None =
         db.query(SystemLog)
         .filter(SystemLog.component == "fipe_apply_plan")
         .order_by(SystemLog.created_at.desc())
-        .limit(size)
+        .limit(min(250, max(size * 10, size)))
         .all()
     )
 
@@ -56,6 +56,8 @@ def build_fipe_apply_status_report(db: Session, *, reference_month: str | None =
 
     for row in rows:
         payload = row.payload if isinstance(row.payload, dict) else {}
+        if str(payload.get("reference_month") or "").strip() != month:
+            continue
         message = str(row.message or "")
         low_msg = message.lower()
         is_error = "error" in low_msg
@@ -77,18 +79,21 @@ def build_fipe_apply_status_report(db: Session, *, reference_month: str | None =
         }
         runs.append(run)
 
-        if dry_run:
+        if run["error"]:
+            total_errors += 1
+        if dry_run and not run["error"]:
             total_dry_runs += 1
             if last_dry_run is None:
                 last_dry_run = run
-        else:
+        elif not run["error"]:
             total_lives += 1
             if last_live is None:
                 last_live = run
 
         total_inserted += run["inserted_count"]
-        if is_error:
-            total_errors += 1
+
+        if len(runs) >= size:
+            break
 
     recommendation = f"rode /admin fipe apply_plan {month} dry 100"
     if total_errors > 0:
