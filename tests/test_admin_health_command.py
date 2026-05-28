@@ -246,6 +246,10 @@ def test_admin_health_includes_backup_status(monkeypatch, db):
             backup_dir="/var/backups/autohunter",
             max_age_hours=30,
             message="antigo — último há 36h, limite 30h",
+            latest_size_bytes=12345678,
+            min_size_bytes=262144,
+            critical_counts={"users": 1, "wishlists": 8, "source_configs": 16},
+            validation_warnings=("tabelas críticas vazias: accounts=0",),
         ),
     )
 
@@ -254,3 +258,6 @@ def test_admin_health_includes_backup_status(monkeypatch, db):
     assert "🗄 Backup:" in text
     assert "WARNING" in text
     assert "autohunter_20260525_020000.sql.gz" in text
+    assert "Tamanho: 12345678 bytes" in text
+    assert "Contagens críticas: users=1, wishlists=8, source_configs=16" in text
+    assert "tabelas críticas vazias: accounts=0" in text

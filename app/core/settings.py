@@ -76,6 +76,29 @@ class Settings(BaseSettings):
         default=30,
         validation_alias=AliasChoices("BACKUP_MAX_AGE_HOURS", "AUTOHUNTER_BACKUP_MAX_AGE_HOURS"),
     )
+    backup_min_size_bytes: int = Field(
+        default=262_144,
+        validation_alias=AliasChoices("BACKUP_MIN_SIZE_BYTES", "AUTOHUNTER_BACKUP_MIN_SIZE_BYTES"),
+    )
+    backup_validate_critical_tables: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "BACKUP_VALIDATE_CRITICAL_TABLES",
+            "AUTOHUNTER_BACKUP_VALIDATE_CRITICAL_TABLES",
+        ),
+    )
+    backup_min_users: int = Field(
+        default=1,
+        validation_alias=AliasChoices("BACKUP_MIN_USERS", "AUTOHUNTER_BACKUP_MIN_USERS"),
+    )
+    backup_min_wishlists: int = Field(
+        default=1,
+        validation_alias=AliasChoices("BACKUP_MIN_WISHLISTS", "AUTOHUNTER_BACKUP_MIN_WISHLISTS"),
+    )
+    backup_min_source_configs: int = Field(
+        default=1,
+        validation_alias=AliasChoices("BACKUP_MIN_SOURCE_CONFIGS", "AUTOHUNTER_BACKUP_MIN_SOURCE_CONFIGS"),
+    )
 
     health_state_dir: str = '/var/lib/autohunter/health'
     source_audit_root: str = '/var/cache/autohunter/artifacts/source_audit_candidates'

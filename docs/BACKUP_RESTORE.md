@@ -63,6 +63,15 @@ Precedência adotada:
 - `AUTOHUNTER_BACKUP_DIR` (default: `/var/backups/autohunter`)
 - `AUTOHUNTER_BACKUP_MAX_AGE_HOURS` (default: `30`)
 
+### `/admin health` / `BackupHealthService`
+- `AUTOHUNTER_BACKUP_DIR` (default: `/var/backups/autohunter`)
+- `AUTOHUNTER_BACKUP_MAX_AGE_HOURS` (default: `30`)
+- `AUTOHUNTER_BACKUP_MIN_SIZE_BYTES` (default: `262144`)
+- `AUTOHUNTER_BACKUP_VALIDATE_CRITICAL_TABLES` (default: `true`)
+- `AUTOHUNTER_BACKUP_MIN_USERS` (default: `1`)
+- `AUTOHUNTER_BACKUP_MIN_WISHLISTS` (default: `1`)
+- `AUTOHUNTER_BACKUP_MIN_SOURCE_CONFIGS` (default: `1`)
+
 ## Recomendação para Raspberry Pi (cron)
 Opção recomendada:
 1. Criar `/etc/default/autohunter` com permissões restritas.
@@ -161,17 +170,44 @@ Use o comando:
 /admin health
 ```
 
-O painel de health agora inclui uma linha de backup com semáforo operacional:
+O painel de health inclui uma seção de backup com semáforo operacional, arquivo, idade, tamanho, contagens estimadas de tabelas críticas e motivo explícito de `FAIL`/`WARNING` quando houver.
 
-- `OK` (`✅`): existe backup recente (idade `<= AUTOHUNTER_BACKUP_MAX_AGE_HOURS`).
-- `WARNING` (`⚠️`): existe backup, mas está antigo (idade `> AUTOHUNTER_BACKUP_MAX_AGE_HOURS`).
-- `FAIL` (`❌`): diretório ausente ou nenhum arquivo `autohunter_*.sql.gz` encontrado.
+Contrato atual:
+
+- `OK` (`✅`): existe backup recente (idade `<= AUTOHUNTER_BACKUP_MAX_AGE_HOURS`) **e** o arquivo passa nos gates mínimos de qualidade.
+- `WARNING` (`⚠️`): o arquivo passa nos gates mínimos de qualidade, mas está antigo (idade `> AUTOHUNTER_BACKUP_MAX_AGE_HOURS`) ou tem alerta não bloqueante em tabela crítica opcional vazia.
+- `FAIL` (`❌`): diretório ausente, nenhum arquivo `autohunter_*.sql.gz`, gzip/dump ilegível, arquivo abaixo de `AUTOHUNTER_BACKUP_MIN_SIZE_BYTES`, ausência de `COPY public.<tabela>` para tabela crítica, ou contagem abaixo dos mínimos obrigatórios.
+
+Tabelas críticas verificadas no dump SQL:
+
+- `users`
+- `wishlists`
+- `wishlist_filters`
+- `accounts`
+- `account_members`
+- `source_configs`
+
+Gates bloqueantes por padrão:
+
+- tamanho do último `autohunter_*.sql.gz` precisa ser `>= AUTOHUNTER_BACKUP_MIN_SIZE_BYTES`;
+- `COPY public.users`, `COPY public.wishlists` e `COPY public.source_configs` precisam existir;
+- `users >= AUTOHUNTER_BACKUP_MIN_USERS`;
+- `wishlists >= AUTOHUNTER_BACKUP_MIN_WISHLISTS`;
+- `source_configs >= AUTOHUNTER_BACKUP_MIN_SOURCE_CONFIGS`.
+
+## Incidente 2026-05-28: backup recente, mas vazio/incompleto
+
+Em 2026-05-28, um arquivo recente em `/var/backups/autohunter/autohunter_20260528_050001.sql.gz` apareceu como saudável apenas por idade, mas era inválido operacionalmente: tinha cerca de 156 KB e continha `users=0`, `wishlists=0`, `wishlist_filters=0`, `notifications=0` e `scrape_jobs=0`. O backup anterior saudável tinha cerca de 12 MB e continha `users=1`, `wishlists=8`, `wishlist_filters=11`, `notifications=156`, `source_configs=16` e `scrape_jobs=2591`.
+
+A partir deste contrato, idade recente não basta. Um backup com `users=0`, `wishlists=0`, `source_configs=0` ou tamanho abaixo do threshold configurado deve aparecer como `❌ FAIL` no `/admin health`, mesmo que tenha acabado de ser gerado.
 
 Próximos passos quando não estiver `OK`:
 
-1. Rodar `bash scripts/check_latest_backup.sh` para diagnóstico rápido.
-2. Verificar se o cron diário de backup está ativo.
-3. Verificar `DATABASE_URL` do ambiente operacional usado pelo cron/script.
-4. Verificar permissões e existência de `/var/backups/autohunter` (ou `AUTOHUNTER_BACKUP_DIR` configurado).
+1. Verificar a seção `🗄 Backup` em `/admin health` e ler o motivo exato de `FAIL`/`WARNING`.
+2. Rodar `bash scripts/check_latest_backup.sh` para diagnóstico rápido de frescor.
+3. Validar o conteúdo do dump com `gunzip -c /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz | less` ou restaurar em staging para conferir contagens reais.
+4. Verificar se o cron diário de backup está ativo.
+5. Verificar `DATABASE_URL` do ambiente operacional usado pelo cron/script.
+6. Verificar permissões e existência de `/var/backups/autohunter` (ou `AUTOHUNTER_BACKUP_DIR` configurado).
 
-> Esta checagem é somente de observabilidade no admin/Telegram; não executa backup e não executa restore.
+> Esta checagem é somente de observabilidade no admin/Telegram; não executa backup e não executa restore. As contagens são estimadas a partir dos blocos `COPY` do `pg_dump`; para confirmação definitiva, restaure em staging e rode `COUNT(*)`.
