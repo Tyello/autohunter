@@ -6,6 +6,7 @@ Create Date: 2026-05-28
 """
 
 from alembic import op
+from sqlalchemy import text
 
 
 revision = "e7a1c9f2b4d3"
@@ -23,7 +24,8 @@ def upgrade():
         return
 
     dup = bind.execute(
-        """
+        text(
+            """
         select source, queue, count(*) as c
         from scrape_jobs
         where status in ('queued','running')
@@ -31,6 +33,7 @@ def upgrade():
         having count(*) > 1
         limit 1
         """
+        )
     ).fetchone()
     if dup:
         raise RuntimeError(
@@ -38,13 +41,17 @@ def upgrade():
             f"active duplicate found for source={dup[0]!r} queue={dup[1]!r} count={int(dup[2])}."
         )
 
-    op.execute(
-        f"""
-        CREATE UNIQUE INDEX IF NOT EXISTS {_CANONICAL_INDEX}
-        ON scrape_jobs (source, queue)
-        WHERE status IN ('queued','running');
-        """
-    )
+    # 24/7 operacional: cria índice sem lock pesado de escrita.
+    with op.get_context().autocommit_block():
+        op.execute(
+            text(
+                f"""
+                CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS {_CANONICAL_INDEX}
+                ON scrape_jobs (source, queue)
+                WHERE status IN ('queued','running');
+                """
+            )
+        )
     op.execute(f"DROP INDEX IF EXISTS {_LEGACY_INDEX};")
 
 
