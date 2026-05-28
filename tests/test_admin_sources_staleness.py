@@ -75,10 +75,10 @@ def test_admin_sources_recent_run_keeps_ok(db, monkeypatch):
     assert "STALE" not in out
 
 
-def test_admin_sources_24h_runs_exposes_expected_window(db, monkeypatch):
+def test_admin_sources_24h_effective_runs_exposes_expected_window(db, monkeypatch):
     _add_source(db, source="sched60", age_minutes=600)
     now = datetime.now(timezone.utc)
-    # only 2 runs in 24h even with sched=60m
+    # only 2 effective runs in 24h even with sched=60m
     db.add(SourceRun(source="sched60", kind="scheduler", status="success", created_at=now - timedelta(hours=10)))
     db.add(SourceRun(source="sched60", kind="scheduler", status="success", created_at=now - timedelta(hours=5)))
     db.commit()
@@ -89,8 +89,9 @@ def test_admin_sources_24h_runs_exposes_expected_window(db, monkeypatch):
     asyncio.run(handlers_admin._admin_sources(update, verbose=False))
 
     out = "\n".join(update.message.sent)
-    assert "runs=" in out
-    assert "/24" in out
+    assert "24h efetivas:" in out
+    assert "total=3/24" in out
+    assert "runs=" not in out
 
 
 def test_admin_sources_preserves_disabled_and_error_states(db, monkeypatch):
@@ -163,3 +164,106 @@ def test_admin_sources_global_stale_with_recent_heartbeat_and_no_runs_shows_acti
     assert "heartbeat recente, mas 0 source runs na janela" in out
     assert "provável falha no enqueue, workers ou persistência" in out
     assert "Fila scrape_jobs: queued=1 running=0" in out
+
+
+def test_admin_sources_separates_effective_runs_from_operational_skips(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SourceConfig(source="olx", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0))
+    db.add(SourceState(source="olx", last_run_at=now - timedelta(minutes=1), last_status="skipped:no_matching_wishlists"))
+    db.add(SourceRun(source="olx", kind="scheduler", status="success", created_at=now - timedelta(hours=23), items_found=10, items_matched=1, duration_ms=1000))
+    for i in range(89):
+        db.add(
+            SourceRun(
+                source="olx",
+                kind="scheduler",
+                status="skipped",
+                created_at=now - timedelta(minutes=i),
+                payload={"reason": "no_matching_wishlists"},
+            )
+        )
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("olx")])
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "runs=90/24" not in out
+    assert "(375%)" not in out
+    assert "24h efetivas: ok=1 err=0 blk=0 total=1/24 (4%)" in out
+    assert "24h skips: 89" in out
+    assert "eventos totais: 90" in out
+    assert "last skipped at=" in out
+    assert "reason=no_matching_wishlists" in out
+    assert "last success at=" in out
+
+
+def test_admin_sources_only_recent_skips_are_observable_not_stale(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SourceConfig(source="mercadolivre", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0))
+    db.add(SourceState(source="mercadolivre", last_run_at=now - timedelta(minutes=2), last_status="skipped:no_active_wishlists"))
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="skipped",
+            created_at=now - timedelta(minutes=2),
+            payload={"reason": "no_active_wishlists"},
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("mercadolivre")])
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "STALE" not in out
+    assert "SKIP" in out
+    assert "last skipped at=" in out
+    assert "reason=no_active_wishlists" in out
+    assert "24h efetivas: ok=0 err=0 blk=0 total=0/24 (0%)" in out
+    assert "24h skips: 1" in out
+
+
+def test_admin_sources_recent_error_is_effective_and_not_masked_by_later_skips(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SourceConfig(source="chavesnamao", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0))
+    db.add(SourceState(source="chavesnamao", last_run_at=now - timedelta(minutes=1), last_status="skipped:backoff"))
+    db.add(SourceRun(source="chavesnamao", kind="scheduler", status="error", created_at=now - timedelta(minutes=10), error="Timeout while fetching"))
+    db.add(SourceRun(source="chavesnamao", kind="scheduler", status="skipped", created_at=now - timedelta(minutes=1), payload={"reason": "backoff"}))
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("chavesnamao")])
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "24h efetivas: ok=0 err=1 blk=0 total=1/24 (4%)" in out
+    assert "24h skips: 1" in out
+    assert "last skipped at=" in out
+    assert "last effective error at=" in out
+    assert "NET" in out or "ERR" in out or "BUG" in out or "DATA" in out
+
+
+def test_admin_sources_experimental_stale_does_not_contaminate_critical_health(db, monkeypatch):
+    _add_source(db, source="primary_src", age_minutes=20)
+    _add_source(db, source="experimental_src", age_minutes=500)
+    db.commit()
+
+    monkeypatch.setattr(
+        handlers_admin,
+        "list_sources",
+        lambda: [_Plugin("primary_src", role="primary"), _Plugin("experimental_src", role="experimental")],
+    )
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "experimental_src" in out
+    assert "note: role=experimental (stale não crítico em /admin health)" in out
+    assert "Sources críticas stale:" not in out

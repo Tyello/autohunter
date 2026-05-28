@@ -134,6 +134,10 @@ class _Agg24h:
     avg_duration_ms: Optional[int] = None
     avg_found: Optional[int] = None
 
+    @property
+    def effective_runs(self) -> int:
+        return int(self.success or 0) + int(self.error or 0) + int(self.blocked or 0)
+
 
 def _get_bool_setting(attr: Optional[str], default: bool = True) -> bool:
     if not attr:
@@ -2632,10 +2636,13 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 elif status == "skipped":
                     a.skipped += cnt
 
-                if avg_ms is not None:
+                # Averages are execution-shape signals. Operational skips keep
+                # last_run_at observable, but must not dilute effective scrape
+                # duration/found metrics.
+                if status != "skipped" and avg_ms is not None:
                     sum_dur += float(avg_ms) * cnt
                     sum_cnt_dur += cnt
-                if avg_f is not None:
+                if status != "skipped" and avg_f is not None:
                     sum_found += float(avg_f) * cnt
                     sum_cnt_found += cnt
 
@@ -2815,14 +2822,20 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 )
             action = "verificar scheduler/orquestrador e fila global"
 
-        ok_pct = int(round((a.success / a.total) * 100)) if a.total else 0
-        snap = f"24h ok={a.success}/{a.total} ({ok_pct}%) err={a.error} blk={a.blocked} skip={a.skipped}"
+        effective_runs = a.effective_runs
+        ok_pct = int(round((a.success / effective_runs) * 100)) if effective_runs else 0
         expected_24h = int((24 * 60) / sched_m) if sched_m and sched_m > 0 else None
+        expected_part = ""
         if expected_24h:
-            cov_pct = int(round((a.total / expected_24h) * 100)) if expected_24h else 0
-            snap += f" runs={a.total}/{expected_24h} ({cov_pct}%)"
+            cov_pct = int(round((effective_runs / expected_24h) * 100)) if expected_24h else 0
+            expected_part = f"/{expected_24h} ({cov_pct}%)"
+        snap_lines = [
+            f"24h efetivas: ok={a.success} err={a.error} blk={a.blocked} total={effective_runs}{expected_part} ok_rate={ok_pct}%",
+            f"24h skips: {a.skipped}",
+            f"eventos totais: {a.total}",
+        ]
         if a.avg_duration_ms is not None:
-            snap += f" avg={a.avg_duration_ms}ms"
+            snap_lines[0] += f" avg={a.avg_duration_ms}ms"
 
         # last run compacto
         last_line = "last: -"
@@ -2858,6 +2871,10 @@ async def _admin_sources(update: Update, verbose: bool = False):
                         last_line += f" thumb={pct}%"
                     except Exception:
                         pass
+                if lr.status == "skipped":
+                    skip_reason = payload.get("reason") or payload.get("skip_reason") or payload.get("status_reason")
+                    if skip_reason:
+                        last_line += f" reason={_short(str(skip_reason), 80)}"
                 for extra in _render_run_summary_lines(payload.get("run_summary")):
                     lines.append(f"   {extra}")
 
@@ -2872,7 +2889,14 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 lines.append(f"   erros seguidos: {st.consecutive_failures}")
 
         lines.append(f"   {last_line}")
-        lines.append(f"   {snap}")
+        if le is not None and lr is not None and getattr(le, "id", None) != getattr(lr, "id", None):
+            if le.status == "success":
+                lines.append(f"   last success at={_fmt_dt(le.created_at)}")
+            else:
+                effective_label = str(le.status or "effective")
+                lines.append(f"   last effective {effective_label} at={_fmt_dt(le.created_at)}")
+        for snap_line in snap_lines:
+            lines.append(f"   {snap_line}")
 
         if verbose and lr_cause is not None and getattr(lr_cause, "payload", None):
             try:
