@@ -52,11 +52,13 @@ def upgrade():
                 """
             )
         )
-    op.execute(f"DROP INDEX IF EXISTS {_LEGACY_INDEX};")
+    with op.get_context().autocommit_block():
+        op.execute(text(f"DROP INDEX CONCURRENTLY IF EXISTS {_LEGACY_INDEX};"))
 
 
 def downgrade():
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
-    op.execute(f"DROP INDEX IF EXISTS {_CANONICAL_INDEX};")
+    with op.get_context().autocommit_block():
+        op.execute(text(f"DROP INDEX CONCURRENTLY IF EXISTS {_CANONICAL_INDEX};"))
