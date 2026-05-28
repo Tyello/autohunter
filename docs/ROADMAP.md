@@ -1,6 +1,6 @@
 # AutoHunter / Garagem Alvo — Roadmap
 
-Atualizado em: 2026-05-22
+Atualizado em: 2026-05-28
 
 ## 1. Visão do produto
 
@@ -64,7 +64,8 @@ Concluído/estabilizado:
 - Tracking de anúncios por wishlist com limite de slots.
 - Alertas de queda de preço/status para tracking quando plano/settings permitem.
 - `/plan` com uso de limites e `/upgrade` com copy comercial.
-- Digest semanal básico.
+- Digest semanal v2 com evidência de monitoramento mesmo sem anúncios ativos.
+- `/admin metrics` de produto/comercial.
 - Backup/restore mínimo.
 - `browser_block_resources` configurável por source.
 - Warmup Webmotors mensurável.
@@ -142,29 +143,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - `/plan` reflete Premium;
 - falhas são visíveis e recuperáveis.
 
-### P2 — `/admin metrics` de produto/comercial
-
-**Objetivo:** operar beta e lançamento com números mínimos, sem dashboard web.
-
-**Métricas mínimas:**
-
-- usuários totais e novos nos últimos 7 dias;
-- usuários com busca ativa;
-- buscas criadas nos últimos 7 dias;
-- percentual de usuários que recebeu pelo menos 1 alerta;
-- alertas enviados 24h/7d;
-- backlog do sender;
-- conversão Free → Premium;
-- top sources por alertas enviados;
-- sinais simples de retenção de 7 dias.
-
-**Critério de aceite:**
-
-- `/admin metrics` responde no Telegram;
-- não expõe dados sensíveis desnecessários;
-- serve para decisão diária do beta.
-
-### P3 — Teste de carga e prontidão de beta
+### P2 — Teste de carga e prontidão de beta
 
 **Objetivo:** validar o runtime em Raspberry Pi 4 4GB antes de abrir para 30–50 beta users.
 
@@ -183,27 +162,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - resultado documentado;
 - gargalos viram tarefas explícitas antes do beta.
 
-### P4 — Digest semanal v2
-
-**Objetivo:** comunicar valor mesmo quando não houve alerta.
-
-**Estado atual:** digest semanal básico existe.
-
-**Escopo:**
-
-- volume monitorado por semana;
-- contexto por wishlist;
-- anúncios encontrados mas bloqueados por filtro quando possível;
-- ausência honesta quando não houve resultado;
-- branding público como Garagem Alvo.
-
-**Critério de aceite:**
-
-- usuário entende que o sistema trabalhou;
-- digest não inventa dados;
-- digest melhora retenção de usuários sem alerta.
-
-### P5 — Operação beta/founders/growth
+### P3 — Operação beta/founders/growth
 
 **Objetivo:** transformar produto funcional em validação real de mercado.
 
@@ -222,7 +181,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - 20 Founders possíveis sem operação caótica;
 - feedback e conversão medidos.
 
-### P6 — Testes de regressão por source com fixtures reais
+### P4 — Testes de regressão por source com fixtures reais
 
 **Objetivo:** reduzir regressões de scraping/parsing por mudança de layout.
 
@@ -250,7 +209,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - parser quebra teste se layout esperado mudar;
 - fixtures não contêm dados sensíveis.
 
-### P7 — V1→V2: dual-run e paridade por source
+### P5 — V1→V2: dual-run e paridade por source
 
 **Objetivo:** migrar tecnicamente sem quebrar ingestão/matching.
 
@@ -269,7 +228,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - divergências conhecidas viram tarefas;
 - nenhuma source crítica muda para v2 sem rollback.
 
-### P8 — Unificação de anúncios equivalentes cross-source
+### P6 — Unificação de anúncios equivalentes cross-source
 
 **Objetivo:** avaliar anúncios equivalentes em plataformas diferentes e reduzir duplicidade.
 
@@ -286,7 +245,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - não altera notificações automaticamente na primeira fase;
 - evita colapsar anúncios distintos por engano.
 
-### P9 — Histórico de notificação e retenção
+### P7 — Histórico de notificação e retenção
 
 **Objetivo:** evitar renotificação indevida e controlar crescimento de histórico.
 
@@ -303,7 +262,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - histórico não cresce sem controle;
 - anúncios inativos têm estado claro.
 
-### P10 — Admin UX incremental
+### P8 — Admin UX incremental
 
 **Objetivo:** reduzir dependência de SQL/log no Raspberry.
 
@@ -322,7 +281,7 @@ POCs futuras possíveis, mas fora do roadmap imediato:
 - mensagens não ficam longas demais;
 - não expõe segredos.
 
-### P11 — Segurança admin
+### P9 — Segurança admin
 
 **Objetivo:** garantir que somente o chat admin autorizado tenha acesso a comandos administrativos.
 
@@ -348,6 +307,9 @@ Os itens abaixo já foram implementados, estabilizados ou absorvidos por frentes
 - busca manual conversacional;
 - contexto mínimo em alerta;
 - contexto conservador de preço;
+- contexto conservador de raridade/frequência;
+- digest semanal v2;
+- `/admin metrics`;
 - texto de upgrade orientado à dor;
 - horário de renovação do limite diário;
 - Admin Deploy via Telegram;
@@ -378,22 +340,21 @@ Esses itens só entram após decisão explícita.
 ## 6. Ordem recomendada de execução
 
 1. Pagamento/ativação Premium sem gargalo manual.
-2. `/admin metrics`.
-3. Teste de carga/prontidão beta.
-4. Digest semanal v2.
-5. Operação beta/founders/growth.
-6. Fixtures reais por source.
-7. Dual-run/paridade V1→V2 por source.
-8. Equivalência cross-source em modo diagnóstico.
-9. Histórico/retenção.
-10. Admin UX.
-11. Segurança admin.
-12. Webmotors POC avançada somente com decisão explícita.
+2. Teste de carga/prontidão beta.
+3. Operação beta/founders/growth.
+4. Fixtures reais por source.
+5. Dual-run/paridade V1→V2 por source.
+6. Equivalência cross-source em modo diagnóstico.
+7. Histórico/retenção.
+8. Admin UX.
+9. Segurança admin.
+10. Webmotors POC avançada somente com decisão explícita.
 
 ## 7. Referências
 
 - `README.md`
 - `AGENTS.md`
+- `docs/README.md`
 - `docs/USER_FLOWS.md`
 - `docs/LLM_CONTEXT.md`
 - `docs/ARCHITECTURE.md`
@@ -401,6 +362,5 @@ Esses itens só entram após decisão explícita.
 - `docs/LAUNCH_PLAN.md`
 - `docs/AUCTION_RUNTIME.md`
 - `docs/OPERATIONS_RUNBOOK.md`
-- `docs/DOCUMENTATION_AUDIT.md`
 - `docs/LEGACY_INVENTORY.md`
 - `docs/V1_TO_V2_MIGRATION.md`

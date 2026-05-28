@@ -6,7 +6,7 @@
 
 ## Status atual
 
-Atualizado em: 2026-05-22.
+Atualizado em: 2026-05-28.
 
 O produto já possui:
 
@@ -15,23 +15,22 @@ O produto já possui:
 - filtros implícitos e guiados;
 - busca manual/pontual;
 - tracking de anúncios;
-- alertas com contexto mínimo, score, recência e preço quando disponível;
+- alertas com contexto mínimo, score, recência, preço e raridade/frequência quando há amostra confiável;
 - plano Free/Premium;
 - upgrade com link Mercado Pago configurável;
 - ativação Premium manual/admin;
 - scheduler, filas persistentes, workers e sender;
+- `/admin metrics` de produto/comercial;
 - source health/admin;
-- digest semanal básico;
+- digest semanal v2;
 - leilões em piloto controlado.
 
 A lacuna de lançamento não é mais “falta produto”. É:
 
 1. ativar Premium sem operação manual frágil;
-2. medir funil de produto;
-3. validar carga/estabilidade no Raspberry;
-4. operar beta com feedback real;
-5. comunicar valor mesmo quando não há alerta;
-6. adquirir os primeiros usuários sem prometer cobertura que ainda não existe.
+2. validar carga/estabilidade no Raspberry;
+3. operar beta com feedback real usando `/admin metrics`;
+4. adquirir os primeiros usuários sem prometer cobertura que ainda não existe.
 
 ---
 
@@ -53,44 +52,24 @@ Não abrir público amplo antes de resolver pagamento/ativação ou, no mínimo,
 
 ### 1.1 Onboarding e primeira busca
 
-**Estado atual:** parcialmente resolvido.
+**Estado atual:** resolvido para beta.
 
 O usuário já consegue criar busca pelo menu/fluxo guiado. A criação agenda primeira varredura imediatamente em fila, sem esperar o scheduler natural.
 
-**O que ainda pode melhorar:**
-
-- Transformar “varredura agendada” em feedback ainda mais tangível.
-- Avaliar se vale renderizar até 3 resultados no fluxo sem bloquear o bot.
-- Se não for viável de forma segura, manter agendamento em fila e melhorar copy para explicar que o monitoramento já começou.
-
-**Tarefa recomendada:**
-
-- `LAUNCH-ONBOARDING-01`: revisar copy pós-criação e, se tecnicamente viável sem travar o callback, adicionar preview assíncrono dos primeiros resultados.
+O fluxo confirma busca monitorada, diferencia varredura em andamento, envio imediato quando houver dado disponível e falha de agendamento sem bloquear a criação.
 
 **Critério de aceite:**
 
 - usuário entende imediatamente que a busca foi criada e que o bot está trabalhando;
-- falha de preview não impede salvar wishlist;
 - não há scraping síncrono pesado dentro do callback.
 
 ---
 
 ### 1.2 Digest semanal v2
 
-**Estado atual:** digest semanal básico existe e está registrado no scheduler.
+**Estado atual:** resolvido para beta.
 
-**Lacuna:** o digest ainda não comunica suficientemente valor quando não houve alerta.
-
-**O que fazer:**
-
-- Mostrar que o sistema trabalhou na semana.
-- Exibir contexto por busca.
-- Diferenciar:
-  - nenhum anúncio encontrado;
-  - anúncios encontrados, mas bloqueados por filtros;
-  - anúncios encontrados, mas score baixo;
-  - source sem dados recentes.
-- Usar marca pública Garagem Alvo.
+O digest semanal v2 usa marca pública Garagem Alvo, mostra buscas monitoradas, anúncios ativos no radar e copy explícita quando não há anúncio ativo dentro dos critérios.
 
 Exemplo desejado:
 
@@ -114,9 +93,9 @@ Continuo monitorando e aviso quando aparecer algo bom.
 
 ### 1.3 Alertas com contexto
 
-**Estado atual:** amplamente resolvido.
+**Estado atual:** resolvido para beta.
 
-O alerta já entrega score, label humanizado, recência, preço, fonte, motivo/critério e contexto conservador de preço quando há base.
+O alerta já entrega score, label humanizado, recência, preço, fonte, motivo/critério, contexto conservador de preço e contexto conservador de raridade/frequência quando há amostra mínima.
 
 **Lacunas possíveis:**
 
@@ -365,8 +344,6 @@ Exemplo de meta:
 ```text
 Semana 0 — Pré-beta técnico
 ├── Pagamento webhook ou aprovação admin 1 clique
-├── /admin metrics v1
-├── Confirmar índice ix_notifications_user_sent_today
 ├── Teste de carga 50 usuários/24h
 └── Ajustar copy pública de cobertura real das sources
 
@@ -377,8 +354,6 @@ Semana 1 — Beta fechado
 └── Coleta estruturada de feedback
 
 Semana 2 — Valor recorrente
-├── Digest semanal v2
-├── Ajustes de alertas/contexto de recorrência
 ├── Primeiros posts de achados
 └── Abordagem de 1 parceiro de nicho
 
@@ -417,20 +392,16 @@ Após 30 dias do lançamento público:
 ### P0
 
 - `LAUNCH-PAY-01`: Mercado Pago webhook ou aprovação admin 1 clique.
-- `LAUNCH-METRICS-01`: `/admin metrics` v1.
-- `LAUNCH-PERF-01`: confirmar/criar índice `ix_notifications_user_sent_today`.
 - `LAUNCH-LOAD-01`: teste de carga 50 usuários/24h.
 
 ### P1
 
-- `LAUNCH-DIGEST-01`: digest semanal v2.
 - `LAUNCH-COPY-01`: copy pública honesta sobre cobertura de sources.
 - `LAUNCH-BETA-01`: checklist beta fechado.
 - `LAUNCH-FOUNDERS-01`: pacote Founders.
 
 ### P2
 
-- `LAUNCH-ALERTS-01`: contexto de recorrência/raridade no alerta.
 - `LAUNCH-GROWTH-01`: rotina de achados para Instagram/X/TikTok.
 - `LAUNCH-PARTNER-01`: abordagem de 1 parceiro de nicho.
 

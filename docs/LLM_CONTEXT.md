@@ -1,6 +1,6 @@
 # Garagem Alvo / AutoHunter — Guia de contexto para LLMs
 
-Atualizado em: 2026-05-22.
+Atualizado em: 2026-05-28.
 
 Este documento existe para orientar qualquer LLM, agente ou pessoa técnica que precise entender o projeto sem depender de memória informal de conversas anteriores.
 
@@ -19,7 +19,7 @@ Ordem de confiança:
 
 1. Código atual e migrations.
 2. Estado operacional em banco: `source_configs`, `source_states` e `AppKV`.
-3. Docs vivos: `README.md`, `AGENTS.md`, `docs/USER_FLOWS.md`, `docs/PROJECT_GUIDELINE.md`, `docs/ARCHITECTURE.md`, `docs/AUCTION_RUNTIME.md`, `docs/OPERATIONS_RUNBOOK.md`.
+3. Docs vivos: `README.md`, `AGENTS.md`, `docs/README.md`, `docs/USER_FLOWS.md`, `docs/PROJECT_GUIDELINE.md`, `docs/ARCHITECTURE.md`, `docs/AUCTION_RUNTIME.md`, `docs/OPERATIONS_RUNBOOK.md`.
 4. Runbooks e inventários específicos.
 5. Documentos históricos somente como contexto.
 
@@ -65,13 +65,14 @@ A API/FastAPI é auxiliar. Não trate `/listings` ou `/admin/health` como jornad
 
 1. `README.md`
 2. `AGENTS.md`
-3. `docs/USER_FLOWS.md`
-4. `docs/PROJECT_GUIDELINE.md`
-5. `docs/ARCHITECTURE.md`
-6. `docs/AUCTION_RUNTIME.md`
-7. `docs/OPERATIONS_RUNBOOK.md`
-8. `docs/LEGACY_INVENTORY.md`
-9. Código central:
+3. `docs/README.md`
+4. `docs/USER_FLOWS.md`
+5. `docs/PROJECT_GUIDELINE.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/AUCTION_RUNTIME.md`
+8. `docs/OPERATIONS_RUNBOOK.md`
+9. `docs/LEGACY_INVENTORY.md`
+10. Código central:
    - `app/bot/run.py`
    - `app/bot/handlers_core.py`
    - `app/bot/handlers.py`
@@ -119,7 +120,8 @@ Já existem:
 - v1/v2/dual-run de sources em trilha técnica;
 - frente de leilões com opt-in por busca, sources controladas, dry-run, samples, readiness, digest e piloto manual controlado;
 - backup/restore mínimo documentado;
-- digest semanal básico.
+- digest semanal v2 comunicando monitoramento mesmo quando não há anúncios ativos;
+- `/admin metrics` de produto/comercial.
 
 ## 8. Pontos sensíveis
 
@@ -173,9 +175,7 @@ Podem conter decisões antigas. Não use documentos históricos como fonte de ve
 ## 9. Lacunas atuais importantes
 
 - Billing automático com Mercado Pago/webhook ou aprovação manual em 1 clique.
-- `/admin metrics` de produto/comercial.
 - Teste de carga mínimo para beta/lançamento.
-- Digest semanal mais explicativo quando não houve alerta.
 - Operação de beta/founders/growth ainda é frente de lançamento, não núcleo técnico.
 
 ## 10. Como classificar recomendações

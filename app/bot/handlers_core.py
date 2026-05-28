@@ -202,28 +202,27 @@ def _normalize_create_feedback(msg: object) -> str:
 
 def _render_initial_run_feedback(summary: dict | None) -> str:
     if not summary:
-        return "Primeira varredura:\n📡 Busca inicial agendada para processamento em segundo plano."
+        return "Primeira varredura em andamento. Resultados chegam em minutos."
     triggered = int(summary.get("triggered") or 0)
     failed = int(summary.get("failed") or 0)
     skipped = int(summary.get("skipped") or 0)
+    immediate = int(summary.get("immediate_results") or summary.get("results_found") or summary.get("listings_found") or 0)
+    sent = int(summary.get("sent") or summary.get("notifications_sent") or 0)
+    if sent > 0 or immediate > 0:
+        return "Já encontrei anúncios — enviando agora."
     if triggered > 0:
-        return (
-            "Primeira varredura:\n"
-            f"📡 Busca inicial agendada em {triggered} fonte(s).\n"
-            "Você receberá os alertas assim que os resultados forem processados."
-        )
+        return "Primeira varredura em andamento. Resultados chegam em minutos."
     if failed > 0:
         return (
-            "Primeira varredura:\n"
             "⚠️ Não consegui agendar a primeira busca agora.\n"
             "Mesmo assim, o monitoramento contínuo segue ativo."
         )
     if skipped > 0:
         return (
-            "Primeira varredura:\n"
-            "⏳ Monitoramento salvo. A próxima execução automática fará a varredura."
+            "Nenhuma fonte disponível para varredura imediata agora.\n"
+            "Aviso na hora que aparecer algo compatível."
         )
-    return "Primeira varredura:\n📡 Monitoramento salvo para processamento em segundo plano."
+    return "Primeira varredura em andamento. Resultados chegam em minutos."
 
 
 def _post_creation_markup() -> InlineKeyboardMarkup:
@@ -1182,6 +1181,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             update,
             (
                 f"✅ Busca criada com sucesso.\n\n"
+                f"✅ {query} monitorado.\n"
                 f"Busca: {query}\n"
                 f"Leilões: {_render_auctions_status(include_auctions)}\n"
                 f"Filtros:\n{filters_text}\n\n"
@@ -1308,7 +1308,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
         _clear_menu_create_wishlist_draft_context(context)
         await _safe_edit_or_send(
             update,
-            f"✅ Busca criada com sucesso.\n\nBusca: {query}\nLeilões: {_render_auctions_status(include_auctions)}\nFiltros:\n{labels}\n\n{initial_run_feedback}",
+            f"✅ Busca criada com sucesso.\n\n✅ {query} monitorado.\nBusca: {query}\nLeilões: {_render_auctions_status(include_auctions)}\nFiltros:\n{labels}\n\n{initial_run_feedback}",
             reply_markup=_post_creation_markup(),
         )
         return ConversationHandler.END

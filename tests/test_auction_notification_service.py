@@ -169,6 +169,14 @@ def test_render_auction_alert_has_no_link_or_url():
     assert "https://x" not in text
 
 
+def test_render_auction_alert_disclosure_is_visible_before_details():
+    m = type("M", (), {"source": "vip_auctions", "title": "Honda Civic", "wishlist_query": "civic", "current_bid": 1000, "url": "https://x"})()
+    text = render_auction_alert(m)
+
+    assert "Lance não é preço final" in text
+    assert text.index("Lance não é preço final") < text.index("Fonte:")
+
+
 def test_build_auction_alert_keyboard():
     kb = build_auction_alert_keyboard("https://x")
     assert kb is not None

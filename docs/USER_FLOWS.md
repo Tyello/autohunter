@@ -1,6 +1,6 @@
 # Garagem Alvo — Fluxos atuais de usuário
 
-Atualizado em: 2026-05-22.
+Atualizado em: 2026-05-28.
 
 Este documento descreve os fluxos de produto hoje, pelo ponto de vista de usuário final, admin e operação. Ele complementa `README.md`, `docs/ARCHITECTURE.md` e `docs/PROJECT_GUIDELINE.md`.
 
@@ -289,6 +289,7 @@ Alertas de anúncios tradicionais usam formatter central e podem incluir:
 - quilometragem;
 - câmbio quando disponível;
 - contexto de preço vs mediana/FIPE quando disponível;
+- contexto de raridade/frequência quando há amostra mínima confiável;
 - motivo principal;
 - critérios/filtros que explicam o alerta;
 - botão para abrir anúncio;
@@ -320,11 +321,12 @@ Características atuais:
 - roda em cron semanal;
 - considera usuários ativos com chat_id e wishlist ativa;
 - lista buscas e anúncios ativos recentes quando houver;
+- comunica monitoramento mesmo quando não há anúncios ativos no momento;
 - evita envio duplicado no mesmo dia por chave em AppKV.
 
-Lacuna conhecida para lançamento:
+Limite conhecido:
 
-- o digest ainda pode evoluir para comunicar volume monitorado, ausência de alertas, filtros que bloquearam resultados e contexto de mercado por wishlist.
+- o digest não inventa volume por source/filtro quando o runtime não tem amostra confiável para aquela busca.
 
 ## 12. Leilões
 
@@ -424,7 +426,6 @@ Exemplos úteis do fluxo legado de filtros estruturados:
 
 - Pagamento/ativação Premium sem intervenção manual.
 - Métricas de produto em `/admin metrics`.
-- Digest semanal mais explicativo quando não houve alerta.
 - Primeira experiência ainda pode evoluir de “varredura agendada” para “resultados renderizados agora”, se tecnicamente viável sem travar o bot.
 - Growth/conteúdo automático com achados ainda é frente separada.
 

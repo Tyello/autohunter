@@ -1,11 +1,17 @@
 from pathlib import Path
 
-def test_ux_flow_doc_exists_and_sections():
-    p = Path('docs/UX_FLOW.md')
+
+def test_user_flows_doc_exists_and_sections():
+    p = Path("docs/USER_FLOWS.md")
     assert p.exists()
-    t = p.read_text(encoding='utf-8')
+    t = p.read_text(encoding="utf-8")
     for s in [
-        'Garagem Alvo', 'AutoHunter é o nome interno',
-        '## 1. Visão geral do produto','## 3. Mapa macro de navegação','## 12. /plan','## 13. /upgrade','## 20. Lacunas conhecidas'
+        "Garagem Alvo",
+        "## 1. Princípios de UX atuais",
+        "## 3. Criar busca monitorada",
+        "## 8. Plano e upgrade",
+        "## 11. Digest semanal",
+        "## 12. Leilões",
+        "## 15. Lacunas de UX/produto ainda relevantes",
     ]:
         assert s in t

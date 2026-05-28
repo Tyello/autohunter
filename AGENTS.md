@@ -43,13 +43,15 @@ Já existem:
 
 - bot Telegram com `/start`, `/menu`, comandos públicos e admin;
 - criação guiada de busca com filtros implícitos e filtros guiados;
+- copy pós-criação específica para busca monitorada, varredura em andamento, envio imediato quando houver dado e falha de agendamento;
 - listagem/pausa/reativação/remoção de buscas;
 - busca manual/pontual (`/buscar` e menu);
 - tracking de anúncios por wishlist;
 - plano Free/Premium, `/plan`, `/upgrade` e ativação Premium manual/admin;
-- alertas com score, contexto mínimo, recência e contexto conservador de preço quando disponível;
-- digest semanal básico;
+- alertas com score, contexto mínimo, recência, contexto conservador de preço e contexto conservador de raridade/frequência quando há amostra mínima;
+- digest semanal v2 comunicando monitoramento mesmo sem anúncios ativos;
 - scheduler, filas persistentes, workers e sender;
+- `/admin metrics` de produto/comercial;
 - source health/admin diagnostics;
 - trilha v1/v2/dual-run de sources;
 - backup/restore mínimo;
@@ -58,9 +60,7 @@ Já existem:
 Lacunas principais para lançamento público:
 
 - billing automático Mercado Pago/webhook ou aprovação manual em 1 clique;
-- `/admin metrics` de produto/comercial;
 - teste de carga mínimo para beta/lançamento;
-- digest semanal mais explicativo quando não há alerta;
 - operação beta/founders/growth.
 
 ## Estado atual de leilões
@@ -70,7 +70,16 @@ Lacunas principais para lançamento público:
 - Admin controla sources, elegibilidade e categorias permitidas.
 - No piloto, apenas `car` deve chegar ao usuário; motos/caminhões/pesados/imóveis/outros ficam bloqueados por padrão.
 - Scheduler de leilões pode rodar em dry-run automático; envio real automático continua bloqueado via comando admin nesta fase (`dry_run=false` não é permitido pelo comando de settings).
-- Qualquer alerta user-facing de leilão deve conter disclosure: `Lance não é preço final.` e orientação sobre edital, taxas/comissão, documentação e vistoria.
+- Qualquer alerta user-facing de leilão deve conter disclosure visível antes do CTA/link: `Lance não é preço final.` e orientação sobre edital, taxas/comissão, documentação e vistoria.
+
+## UX e copy user-facing
+
+- Use `Garagem Alvo` como nome público em qualquer copy para usuário.
+- Não exponha scheduler, filas, scraping, backoff, source internals ou detalhes operacionais ao usuário comum.
+- Digest semanal deve transformar silêncio em evidência de monitoramento, especialmente quando não há anúncios ativos.
+- Contexto de raridade/frequência em alerta só deve aparecer com amostra mínima confiável; não invente precisão estatística.
+- Copy pós-criação deve diferenciar: resultado imediato, varredura em andamento, ausência/fonte indisponível e falha de agendamento.
+- Alertas de leilão devem deixar `Lance não é preço final.` visível antes da ação de abrir o leilão.
 
 ## Sources e WebMotors
 
@@ -100,12 +109,12 @@ Lacunas principais para lançamento público:
 ## Ordem de leitura recomendada
 
 1. `README.md`
-2. `docs/USER_FLOWS.md`
-3. `docs/LLM_CONTEXT.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/PROJECT_GUIDELINE.md`
-6. `docs/AUCTION_RUNTIME.md`
-7. `docs/OPERATIONS_RUNBOOK.md`
-8. `docs/DOCUMENTATION_AUDIT.md`
+2. `docs/README.md`
+3. `docs/USER_FLOWS.md`
+4. `docs/LLM_CONTEXT.md`
+5. `docs/ARCHITECTURE.md`
+6. `docs/PROJECT_GUIDELINE.md`
+7. `docs/AUCTION_RUNTIME.md`
+8. `docs/OPERATIONS_RUNBOOK.md`
 9. `docs/LEGACY_INVENTORY.md`
 10. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`

@@ -104,8 +104,13 @@ def test_create_flow_query_text_parses_implicit_single_year():
 def test_render_initial_run_feedback_success():
     text = handlers_core._render_initial_run_feedback({"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["a"]})
     assert "Primeira varredura" in text
-    assert "agendada em 5 fonte" in text
-    assert "resultados forem processados" in text
+    assert "Resultados chegam em minutos" in text
+
+
+def test_render_initial_run_feedback_immediate_results():
+    text = handlers_core._render_initial_run_feedback({"triggered": 1, "immediate_results": 2})
+    assert "encontrei anúncios" in text
+    assert "enviando agora" in text
 
 
 def test_render_initial_run_feedback_failure():
@@ -125,6 +130,7 @@ def test_cwl_create_calls_add_wishlist_and_ends(monkeypatch):
     assert q.answers == 1
     assert state == ConversationHandler.END
     assert "✅ Busca criada com sucesso." in q.edits[-1]["text"]
+    assert "civic si monitorado" in q.edits[-1]["text"]
     assert "Leilões: desativado" in q.edits[-1]["text"]
     buttons = q.edits[-1]["reply_markup"].inline_keyboard
     assert buttons[0][0].text == "🎯 Ver minhas buscas"

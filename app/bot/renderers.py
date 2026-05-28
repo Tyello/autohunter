@@ -677,6 +677,7 @@ def _render_auction_alert_body(match) -> str:
         "",
         title,
     ]
+    lines.extend(["", "⚠️ Lance não é preço final. Verifique edital e taxas."])
 
     if query:
         lines.append("")
@@ -700,7 +701,7 @@ def _render_auction_alert_body(match) -> str:
             lines.append(f"Ano: {year}")
         else:
             lines.append(f"KM: {mileage}")
-    lines.extend(["", "Atenção:", "Lance não é preço final. Verifique edital, taxas/comissão, documentação e vistoria antes de participar."])
+    lines.extend(["", "Antes de participar, confira comissão, documentação e vistoria."])
     return "\n".join(lines).strip()
 
 

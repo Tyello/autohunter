@@ -301,6 +301,50 @@ def test_price_context_with_small_market_sample():
     assert "Preço informado — base de" in payload.text
 
 
+def test_rarity_context_shows_only_with_enough_sample():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    rare = format_ad_message(
+        _base_ad(
+            score_breakdown={
+                "total": 80,
+                "reasons": ["ok"],
+                "market_context": {"rarity": {"ratio": 0.03, "sample_size": 30}},
+            }
+        )
+    )
+    small_sample = format_ad_message(
+        _base_ad(
+            score_breakdown={
+                "total": 80,
+                "reasons": ["ok"],
+                "market_context": {"rarity": {"ratio": 0.03, "sample_size": 5}},
+            }
+        )
+    )
+
+    assert "vez na amostra recente" in rare.text
+    assert "anúncio raro" in rare.text
+    assert "vez na amostra recente" not in small_sample.text
+
+
+def test_rarity_context_can_show_common_model():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(
+        _base_ad(
+            score_breakdown={
+                "total": 80,
+                "reasons": ["ok"],
+                "market_context": {"rarity": {"ratio": 0.31, "sample_size": 40}},
+            }
+        )
+    )
+
+    assert "Modelo comum" in payload.text
+    assert "aparece com frequência" in payload.text
+
+
 def test_price_context_with_enough_sample_but_missing_delta():
     from app.notifications.telegram_formatter import format_ad_message
 

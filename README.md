@@ -10,7 +10,7 @@ Garagem Alvo é uma plataforma **Telegram-first** para entusiastas monitorarem o
 
 ## Estado atual em uma frase
 
-O produto já opera como bot Telegram com criação/gestão de buscas, filtros, busca manual, tracking de anúncios, alertas, planos Free/Premium, source health/admin, scheduler com filas persistentes e piloto controlado de leilões. O próximo bloco crítico para lançamento público é menos “fazer o produto existir” e mais **fechar operação comercial, métricas, validação de carga e clareza de lançamento**.
+O produto já opera como bot Telegram com criação/gestão de buscas, filtros, busca manual, tracking de anúncios, alertas, planos Free/Premium, digest semanal v2, source health/admin, `/admin metrics`, scheduler com filas persistentes e piloto controlado de leilões. O próximo bloco crítico para lançamento público é menos “fazer o produto existir” e mais **fechar operação comercial, validação de carga e operação beta/growth**.
 
 ## O que o produto é hoje
 
@@ -20,7 +20,7 @@ O produto já opera como bot Telegram com criação/gestão de buscas, filtros, 
 - Usuário pode fazer busca pontual em `/buscar` ou pelo menu, sem salvar monitoramento.
 - Usuário pode rastrear anúncios específicos vinculados às buscas e acompanhar preço/status.
 - Leilões existem em piloto controlado: o usuário escolhe por busca se aceita leilões, mas sources, categorias, scheduler e limites são controlados por admin.
-- Há trilha operacional: source configs, backoff, monitoramento admin, health, readiness, samples, digest, backup/restore e auditoria.
+- Há trilha operacional: source configs, backoff, monitoramento admin, health, readiness, samples, digest semanal, métricas admin, backup/restore e auditoria.
 
 Fluxo resumido (classified runtime):
 
@@ -80,13 +80,13 @@ O estado efetivo de operação é runtime/DB-driven:
 ## Leitura recomendada
 
 - [`AGENTS.md`](AGENTS.md) — mapa mental curto para pessoas técnicas e IAs.
+- [`docs/README.md`](docs/README.md) — índice enxuto da documentação viva.
 - [`docs/LLM_CONTEXT.md`](docs/LLM_CONTEXT.md) — guia de contexto para qualquer LLM entender o projeto sem memória informal.
 - [`docs/USER_FLOWS.md`](docs/USER_FLOWS.md) — fluxos atuais de usuário, admin e produto.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — documentação da arquitetura atual, camadas, fluxos e contratos operacionais.
 - [`docs/PROJECT_GUIDELINE.md`](docs/PROJECT_GUIDELINE.md) — documentação viva do runtime atual.
 - [`docs/AUCTION_RUNTIME.md`](docs/AUCTION_RUNTIME.md) — guia operacional específico de leilões.
 - [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md) — runbook operacional curto.
-- [`docs/DOCUMENTATION_AUDIT.md`](docs/DOCUMENTATION_AUDIT.md) — auditoria de docs vivos, históricos e candidatos a arquivamento/remoção.
 - [`docs/LEGACY_INVENTORY.md`](docs/LEGACY_INVENTORY.md) — inventário de legado/compatibilidade e risco de remoção.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — roadmap oficial consolidado do produto e prioridades de execução.
 - [`docs/LAUNCH_PLAN.md`](docs/LAUNCH_PLAN.md) — plano de lançamento e lacunas de go-to-market.

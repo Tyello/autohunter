@@ -40,10 +40,32 @@ def test_weekly_digest_formatter_includes_sections_and_totals():
 
     assert len(chunks) == 1
     text = chunks[0]
-    assert "Resumo semanal AutoHunter" in text
-    assert "Wishlist: civic" in text
-    assert "Ativos agora: 1" in text
+    assert "Resumo da semana" in text
+    assert "Garagem Alvo" in text
+    assert "Busca: civic" in text
+    assert "Anúncios ativos agora: 1" in text
     assert "Civic Touring" in text
+
+
+def test_weekly_digest_formatter_explains_silence_when_no_active_results():
+    digest = WeeklyDigestUser(
+        user_id=uuid.uuid4(),
+        telegram_chat_id=1,
+        wishlists=[
+            WeeklyDigestWishlist(
+                wishlist_id=uuid.uuid4(),
+                query="civic si manual",
+                total_active=0,
+                latest_listings=[],
+            )
+        ],
+    )
+
+    text = format_weekly_wishlist_digest(digest)[0]
+
+    assert "Monitorei anúncios na semana" in text
+    assert "Continuo monitorando" in text
+    assert "Aviso quando aparecer algo bom" in text
 
 
 def test_weekly_digest_formatter_splits_when_too_large():

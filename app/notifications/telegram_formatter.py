@@ -215,6 +215,32 @@ def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
     return "💰 Preço informado — comparação indisponível"
 
 
+def _rarity_context_line(breakdown: dict) -> str | None:
+    market_context = breakdown.get("market_context") if isinstance(breakdown, dict) else None
+    market_context = market_context if isinstance(market_context, dict) else {}
+    rarity = market_context.get("rarity") if isinstance(market_context.get("rarity"), dict) else {}
+
+    try:
+        sample_size = int(rarity.get("sample_size") or 0)
+    except Exception:
+        sample_size = 0
+    try:
+        ratio = float(rarity.get("ratio")) if rarity.get("ratio") is not None else None
+    except Exception:
+        ratio = None
+
+    if ratio is None or sample_size < 8:
+        return None
+
+    if ratio <= 0.06:
+        occurrences = max(1, int(round(ratio * sample_size)))
+        label = "anúncio raro" if ratio <= 0.03 else "configuração incomum"
+        return f"🔍 {occurrences}ª vez na amostra recente — {label}"
+    if ratio >= 0.25:
+        return "📊 Modelo comum — aparece com frequência"
+    return None
+
+
 def _get_breakdown(ad: Any, score_result: Any | None) -> dict | None:
     if isinstance(score_result, dict):
         return score_result
@@ -640,6 +666,9 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
     lines = [line1]
     if line2:
         lines.append(line2)
+    rarity_context = _rarity_context_line(breakdown)
+    if rarity_context:
+        lines.append(rarity_context)
     lines.append(line3)
 
     context_lines = _build_context_lines(ad, main_reason, matched_filters)

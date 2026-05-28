@@ -21,15 +21,20 @@ def _fmt_dt(dt: datetime) -> str:
 
 def _wishlist_block(item) -> str:
     lines = [
-        f"🔎 Wishlist: {item.query}",
-        f"Ativos agora: {item.total_active}",
+        f"🔎 Busca: {item.query}",
     ]
 
     if not item.latest_listings:
-        lines.append("• Sem anúncios ativos no momento.")
+        lines.extend(
+            [
+                "Monitorei anúncios na semana, mas nenhum está ativo dentro dos seus critérios agora.",
+                "Continuo monitorando. Aviso quando aparecer algo bom.",
+            ]
+        )
         return "\n".join(lines)
 
-    lines.append("Últimos anúncios:")
+    lines.append(f"Anúncios ativos agora: {item.total_active}")
+    lines.append("Mais recentes que continuam no radar:")
     for i, listing in enumerate(item.latest_listings, start=1):
         title = (listing.title or "Sem título").strip()
         lines.append(
@@ -42,7 +47,13 @@ def _wishlist_block(item) -> str:
 
 
 def format_weekly_wishlist_digest(user_digest: WeeklyDigestUser, *, max_chars: int = 3600) -> list[str]:
-    header = "📬 Resumo semanal AutoHunter\nReferência: anúncios ativos neste momento."
+    total_wishlists = len(user_digest.wishlists)
+    total_active = sum(max(int(item.total_active or 0), 0) for item in user_digest.wishlists)
+    header = (
+        "📋 Resumo da semana — Garagem Alvo\n"
+        f"Monitorei {total_wishlists} busca(s). "
+        f"{total_active} anúncio(s) seguem ativos no radar agora."
+    )
     blocks = [_wishlist_block(item) for item in user_digest.wishlists]
 
     chunks: list[str] = []

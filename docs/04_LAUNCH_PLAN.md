@@ -1,6 +1,6 @@
 # Launch Plan — Garagem Alvo
 
-Atualizado em: 2026-05-25.  
+Atualizado em: 2026-05-28.  
 Estado confrontado com a `main`.
 
 > Documento dono de **lançamento, beta, go-to-market e critérios de sucesso**.  
@@ -35,6 +35,9 @@ Este documento responde: “o que falta para lançar com segurança e medir resu
 - FIPE import/coverage disponível, com carga real ainda operacional.
 - Dedupe cross-source em shadow/live flagado.
 - Leilões em piloto controlado.
+- Digest semanal v2.
+- Copy pós-criação específica.
+- Contexto de raridade/frequência nos alertas com amostra mínima.
 
 ---
 
@@ -92,7 +95,6 @@ Métricas mínimas:
 Semana 0 — Pré-beta técnico
 ├── fechar ativação Premium sem comando manual
 ├── validar carga 50 usuários/24h no Raspberry real
-├── revisar copy pós-criação de busca
 ├── validar /admin health e /admin metrics durante carga
 └── preparar lista fechada de beta users
 
@@ -104,7 +106,6 @@ Semana 1 — Beta fechado
 └── corrigir críticos de UX/operação
 
 Semana 2 — Retenção e valor recorrente
-├── melhorar digest semanal v2
 ├── decidir trial 7 dias com dados do beta
 ├── publicar achados reais
 └── testar parceria com canais automotivos pequenos/médios
