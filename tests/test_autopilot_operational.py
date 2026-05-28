@@ -11,7 +11,7 @@ def test_autopilot_detects_stuck_queue(db, monkeypatch):
     now = datetime.now(timezone.utc)
     db.add(ScrapeJob(source="olx", queue="http", run_at=now - timedelta(hours=1), status="running", started_at=now - timedelta(minutes=40), locked_at=now - timedelta(minutes=40)))
     db.commit()
-    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
     cands = autopilot_service.build_candidates(db, now=now)
     assert any(c.kind == "scrape_jobs_stuck" for c in cands)
 
@@ -20,7 +20,7 @@ def test_autopilot_detects_heartbeat_without_runs(db, monkeypatch):
     now = datetime.now(timezone.utc)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
     db.commit()
-    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
     cands = autopilot_service.build_candidates(db, now=now)
     assert any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
 
@@ -30,7 +30,7 @@ def test_autopilot_heartbeat_with_recent_source_runs_does_not_alert(db, monkeypa
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
     db.add(SourceRun(source="vip_auctions", kind="scheduler", status="success", created_at=now - timedelta(minutes=2)))
     db.commit()
-    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
     cands = autopilot_service.build_candidates(db, now=now)
     assert not any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
 
@@ -40,7 +40,7 @@ def test_autopilot_heartbeat_source_run_error_counts_as_recent_run(db, monkeypat
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
     db.add(SourceRun(source="vip_auctions", kind="scheduler", status="error", created_at=now - timedelta(minutes=2), error="boom"))
     db.commit()
-    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
     cands = autopilot_service.build_candidates(db, now=now)
     assert not any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
 
@@ -75,7 +75,7 @@ def test_autopilot_fingerprint_stable_and_digest_no_dupe(db, monkeypatch):
     db.add(SourceRun(source="olx", kind="scheduler", status="error", created_at=now - timedelta(minutes=3), error="Timeout: x"))
     db.add(SourceRun(source="olx", kind="scheduler", status="error", created_at=now - timedelta(minutes=4), error="Timeout: x"))
     db.commit()
-    monkeypatch.setattr(autopilot_service, "has_active_source_queue_partial_index", lambda _db: True)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
 
     cands = autopilot_service.build_candidates(db, now=now)
     stuck = [c for c in cands if c.kind == "scrape_jobs_stuck"][0]
@@ -87,3 +87,23 @@ def test_autopilot_fingerprint_stable_and_digest_no_dupe(db, monkeypatch):
 
     digest = autopilot_service.format_daily_digest([second[0]])
     assert "severity=" in digest
+
+
+def test_autopilot_alerts_when_critical_scrape_jobs_index_missing(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": False, "reason": "not_found"})
+    cands = autopilot_service.build_candidates(db, now=now)
+    miss = [c for c in cands if c.kind == "scrape_jobs_missing_critical_index"]
+    assert miss
+    assert miss[0].evidence.get("reason") == "not_found"
+
+
+def test_autopilot_no_alert_when_critical_scrape_jobs_index_exists(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        autopilot_service,
+        "get_active_source_queue_partial_index_details",
+        lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True},
+    )
+    cands = autopilot_service.build_candidates(db, now=now)
+    assert not any(c.kind == "scrape_jobs_missing_critical_index" for c in cands)

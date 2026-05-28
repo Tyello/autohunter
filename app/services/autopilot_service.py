@@ -14,7 +14,7 @@ from app.models.system_log import SystemLog
 from app.models.autopilot_finding import AutopilotFinding
 from app.models.scrape_job import ScrapeJob
 from app.models.notification import Notification
-from app.services.scrape_jobs_service import has_active_source_queue_partial_index
+from app.services.scrape_jobs_service import get_active_source_queue_partial_index_details
 
 
 def _utcnow() -> datetime:
@@ -437,8 +437,9 @@ def _candidate_operational(db: Session, now: datetime) -> List[FindingCandidate]
     if int(sent_recent) == 0 and int(queued_old) > 0:
         out.append(FindingCandidate(kind="sender_idle_with_backlog", source=None, fingerprint=_sha1("sender_idle_with_backlog"), title=f"Sender sem envios na janela e backlog antigo (queued_old={int(queued_old)})", severity="warn", evidence={"sender_idle_minutes": sender_idle_minutes, "sent_recent": int(sent_recent), "queued_old": int(queued_old)}, suggested_actions="Ações sugeridas: validar sender_job, token Telegram e fila notifications."))
 
-    if not has_active_source_queue_partial_index(db):
-        out.append(FindingCandidate(kind="scrape_jobs_missing_critical_index", source=None, fingerprint=_sha1("scrape_jobs_missing_critical_index"), title="Índice crítico de dedupe em scrape_jobs ausente", severity="error", evidence={"index_check": "active_source_queue_partial_index", "ok": False}, suggested_actions="Ações sugeridas: aplicar migration/DDL do índice parcial para evitar duplicação e lock contention."))
+    idx = get_active_source_queue_partial_index_details(db)
+    if not bool(idx.get("ok", False)):
+        out.append(FindingCandidate(kind="scrape_jobs_missing_critical_index", source=None, fingerprint=_sha1("scrape_jobs_missing_critical_index"), title="Índice crítico de dedupe em scrape_jobs ausente", severity="error", evidence={"index_check": "active_source_queue_partial_index", **idx}, suggested_actions="Ações sugeridas: aplicar migration/DDL do índice parcial para evitar duplicação e lock contention."))
     return out
 
 
