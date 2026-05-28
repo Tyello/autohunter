@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.models.source_config import SourceConfig
+from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.models.user import User
 from app.models.wishlist import Wishlist
@@ -25,6 +26,40 @@ def _make_user(db):
     db.add(user)
     db.commit()
     return user
+
+
+def test_queue_execution_without_active_wishlists_updates_source_observability(db, monkeypatch):
+    db.add(
+        SourceConfig(
+            source="olx",
+            is_enabled=True,
+            user_eligible=True,
+            sched_minutes=60,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr("app.services.source_execution_service.log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *args, **kwargs: None)
+
+    res = run_source_for_all_wishlists(db, "olx", kind="queue", force=False, run_reason="queue")
+
+    assert res["status"] == "skipped"
+    assert res["reason"] == "no_active_wishlists"
+
+    state = db.query(SourceState).filter(SourceState.source == "olx").one()
+    assert state.last_run_at is not None
+    assert state.last_effective_run_at is None
+    assert state.last_status == "skipped:no_active_wishlists"
+    assert state.last_payload["active_wishlists"] == 0
+
+    run = db.query(SourceRun).filter(SourceRun.source == "olx").one()
+    assert run.kind == "queue"
+    assert run.status == "skipped"
+    assert run.payload["reason"] == "no_active_wishlists"
+    assert run.payload["active_wishlists"] == 0
 
 
 def test_add_wishlist_triggers_initial_run_and_feedback(db, monkeypatch):

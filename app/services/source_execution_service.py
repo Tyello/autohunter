@@ -85,6 +85,52 @@ def _ensure_utc(dt: datetime | None) -> datetime | None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
+
+def _record_skipped_run(
+    db: Session,
+    *,
+    source: str,
+    kind: str,
+    cfg: SourceConfig,
+    reason: str,
+    run_reason: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Persist operational evidence for a skipped queued execution.
+
+    Queue workers can legitimately execute a job and discover that there is
+    nothing scrapeable (for example, no active/eligible wishlists).  Without a
+    SourceRun and SourceState update, /admin sources sees completed scrape_jobs
+    but reports zero source runs and missing last_run_at, which is misleading
+    for 24/7 operations.
+    """
+    run_payload: Dict[str, Any] = {"reason": reason, "run_reason": run_reason}
+    if payload:
+        run_payload.update(payload)
+
+    mark_skipped(db, source, reason, run_payload)
+    run_row = record_run(
+        db,
+        source=source,
+        kind=kind,
+        status="skipped",
+        proxy_server=cfg.proxy_server,
+        browser_fallback_enabled=bool(cfg.browser_fallback_enabled),
+        force_browser=bool(cfg.force_browser),
+        payload=run_payload,
+    )
+    emit_event(
+        db,
+        level="info",
+        event_type=f"skipped_{reason}",
+        source=source,
+        run_id=run_row.id,
+        message=f"skipped_{reason}",
+        evidence=run_payload,
+        tags=[kind, run_reason, "ops"],
+    )
+
+
 def _get_state(db: Session, source: str) -> Optional[SourceState]:
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
 
@@ -215,6 +261,15 @@ def run_source_for_all_wishlists(
         wishlists, wishlist_stats = _wishlist_eligibility_snapshot(db, src)
         if not wishlists:
             skip_reason = "no_active_wishlists" if int(wishlist_stats.get("active_wishlists") or 0) == 0 else "no_matching_wishlists"
+            _record_skipped_run(
+                db,
+                source=src,
+                kind=kind,
+                cfg=cfg,
+                reason=skip_reason,
+                run_reason=reason,
+                payload=wishlist_stats,
+            )
             log(db, "info", component, skip_reason, payload=wishlist_stats)
             db.commit()
             return {
@@ -235,6 +290,15 @@ def run_source_for_all_wishlists(
                 g["wishlists"].append(w)
 
         if not groups:
+            _record_skipped_run(
+                db,
+                source=src,
+                kind=kind,
+                cfg=cfg,
+                reason="no_matching_wishlists",
+                run_reason=reason,
+                payload=wishlist_stats,
+            )
             log(db, "info", component, "no_matching_wishlists", payload=wishlist_stats)
             db.commit()
             return {"ok": True, "status": "skipped", "reason": "no_matching_wishlists", "run_reason": reason, **wishlist_stats}
