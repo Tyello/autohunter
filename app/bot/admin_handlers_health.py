@@ -300,9 +300,24 @@ async def admin_health(update: Update, raw_args: Optional[List[str]] = None):
         lines.append("")
         lines.append(f"🗄 Backup: {backup_icon} {backup_health.status} — {backup_health.message}")
         if backup_health.latest_file:
-            lines.append(f"- Último: {backup_health.latest_file}")
+            lines.append(f"- Arquivo: {backup_health.latest_file}")
         if backup_health.latest_age_hours is not None:
             lines.append(f"- Idade: {backup_health.latest_age_hours}h")
+        if backup_health.latest_size_bytes is not None:
+            lines.append(
+                f"- Tamanho: {backup_health.latest_size_bytes} bytes "
+                f"(mín {backup_health.min_size_bytes} bytes)"
+            )
+        if backup_health.critical_counts:
+            counts = ", ".join(
+                f"{table}={('-' if count is None else count)}"
+                for table, count in backup_health.critical_counts.items()
+            )
+            lines.append(f"- Contagens críticas: {counts}")
+        if backup_health.validation_errors:
+            lines.append("- FAIL: " + "; ".join(backup_health.validation_errors[:6]))
+        if backup_health.validation_warnings:
+            lines.append("- WARNING: " + "; ".join(backup_health.validation_warnings[:6]))
         lines.append(f"- Dir: {backup_health.backup_dir}")
 
         cache_stats = get_wishlist_summaries_cache_stats()
