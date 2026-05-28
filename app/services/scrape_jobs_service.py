@@ -125,8 +125,18 @@ def requeue_stale_running_jobs(
         .filter(ScrapeJob.locked_at < cutoff)
         .all()
     )
+    # Defesa adicional para restart/kill abrupto:
+    # running sem locked_at nunca será resgatado pelo filtro acima e pode bloquear
+    # novos enqueues indefinidamente por causa do índice parcial de job ativo.
+    rows_invalid = (
+        db.query(ScrapeJob)
+        .filter(ScrapeJob.queue == queue)
+        .filter(ScrapeJob.status == "running")
+        .filter(ScrapeJob.locked_at.is_(None))
+        .all()
+    )
 
-    for job in rows:
+    for job in [*rows, *rows_invalid]:
         job.status = "queued"
         job.lock_owner = None
         job.locked_at = None
@@ -134,7 +144,31 @@ def requeue_stale_running_jobs(
         job.finished_at = None
         job.run_at = _utcnow() - timedelta(seconds=1)
 
-    return len(rows)
+    return len(rows) + len(rows_invalid)
+
+
+def scrape_jobs_runtime_snapshot(db: Session, *, now: datetime | None = None, stale_after_seconds: int | None = None) -> dict[str, Any]:
+    now = now or _utcnow()
+    ttl = int(stale_after_seconds if stale_after_seconds is not None else getattr(settings, "scrape_job_running_ttl_seconds", 900) or 900)
+    stale_cut = now - timedelta(seconds=max(60, ttl))
+    q = db.query
+    return {
+        "queued": int(q(func.count(ScrapeJob.id)).filter(ScrapeJob.status == "queued").scalar() or 0),
+        "running": int(q(func.count(ScrapeJob.id)).filter(ScrapeJob.status == "running").scalar() or 0),
+        "running_stale": int(
+            q(func.count(ScrapeJob.id))
+            .filter(ScrapeJob.status == "running")
+            .filter(
+                (ScrapeJob.locked_at.is_(None))
+                | (ScrapeJob.locked_at < stale_cut)
+            )
+            .scalar()
+            or 0
+        ),
+        "last_created_at": q(func.max(ScrapeJob.created_at)).scalar(),
+        "last_started_at": q(func.max(ScrapeJob.started_at)).scalar(),
+        "last_finished_at": q(func.max(ScrapeJob.finished_at)).scalar(),
+    }
 
 def count_active_jobs(db: Session, *, queue: str = "browser") -> int:
     return int(

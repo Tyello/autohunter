@@ -101,6 +101,7 @@ from app.services.auction_notification_settings_service import (
     reset_all_runtime_settings,
 )
 from app.services.app_kv_service import get_kv
+from app.services.scrape_jobs_service import scrape_jobs_runtime_snapshot
 from app.services.auction_preview_service import (
     build_auction_alert_previews_for_enabled_wishlists,
     build_auction_alert_previews_for_wishlist,
@@ -2649,6 +2650,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
             .order_by(SystemLog.created_at.desc())
             .first()
         )
+        jobs_snapshot = scrape_jobs_runtime_snapshot(db, now=now)
 
     lines: List[str] = []
     stale_sources = 0
@@ -2903,6 +2905,23 @@ async def _admin_sources(update: Update, verbose: bool = False):
         lines.insert(4, f"Sources críticas stale: {stale_sources}/{critical_enabled_sources} ({int(round(stale_ratio * 100))}%)")
     if stale_sources >= stale_min_sources and stale_ratio >= stale_ratio_cut:
         lines.insert(5, "🚨 indício global: várias sources stale simultaneamente (scheduler/orquestrador)")
+        queued_jobs = int(jobs_snapshot.get("queued", 0) or 0)
+        running_jobs = int(jobs_snapshot.get("running", 0) or 0)
+        stale_running_jobs = int(jobs_snapshot.get("running_stale", 0) or 0)
+        window_runs = int(sum((aggs.get(p.name, _Agg24h()).total for p in plugins)) or 0)
+        if not hb_stale and window_runs == 0:
+            lines.insert(6, "🚨 heartbeat recente, mas 0 source runs na janela (24h)")
+            lines.insert(7, "🚨 provável falha no enqueue, workers ou persistência de source_runs/source_states")
+        lines.insert(8, f"Fila scrape_jobs: queued={queued_jobs} running={running_jobs} stale_running={stale_running_jobs}")
+        lines.insert(9, f"Último job criado: {_fmt_dt(jobs_snapshot.get('last_created_at'))}")
+        lines.insert(10, f"Último job iniciado: {_fmt_dt(jobs_snapshot.get('last_started_at'))}")
+        lines.insert(11, f"Último job finalizado: {_fmt_dt(jobs_snapshot.get('last_finished_at'))}")
+        if queued_jobs > 0 and running_jobs == 0:
+            lines.insert(12, "⚠️ workers aparentam inativos (há jobs pendentes sem consumo)")
+        elif running_jobs > 0:
+            lines.insert(12, "✅ workers aparentam ativos (há consumo em andamento)")
+        if stale_running_jobs > 0:
+            lines.insert(13, "⚠️ jobs running travados/orfãos detectados; aguarde requeue TTL ou rode /admin runall")
 
     text = "\n".join(lines)
     await _reply_chunked(update, text)
