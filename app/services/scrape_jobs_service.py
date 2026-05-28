@@ -14,6 +14,8 @@ from app.models.scrape_job import ScrapeJob
 
 ACTIVE_JOB_CONFLICT_COLUMNS = ("source", "queue")
 ACTIVE_JOB_CONFLICT_PREDICATE_SQL = "status IN ('queued','running')"
+ACTIVE_JOB_CONFLICT_INDEX_NAME = "uq_scrape_jobs_active_source_queue"
+ACTIVE_JOB_CONFLICT_LEGACY_INDEX_NAMES = ("ix_scrape_jobs_active_source_queue_unique",)
 
 
 def _is_missing_on_conflict_constraint(exc: ProgrammingError) -> bool:
@@ -49,6 +51,11 @@ def _build_schema_mismatch_detail(db: Session, *, queue: str) -> str:
 
 
 def has_active_source_queue_partial_index(db: Session) -> bool:
+    details = get_active_source_queue_partial_index_details(db)
+    return bool(details.get("ok", False))
+
+
+def get_active_source_queue_partial_index_details(db: Session) -> dict[str, Any]:
     def _matches_active_conflict_partial_index(definition: str | None) -> bool:
         normalized = " ".join((definition or "").lower().split())
         checks = [
@@ -61,43 +68,48 @@ def has_active_source_queue_partial_index(db: Session) -> bool:
         ]
         return all(token in normalized for token in checks)
 
+    def _name_ok(name: str | None) -> bool:
+        n = (name or "").strip().lower()
+        allowed = {ACTIVE_JOB_CONFLICT_INDEX_NAME, *ACTIVE_JOB_CONFLICT_LEGACY_INDEX_NAMES}
+        return n in {a.lower() for a in allowed}
+
     bind = db.get_bind()
     if not bind:
-        return False
+        return {"ok": False, "reason": "no_bind"}
     dialect = bind.dialect.name
     if dialect == "postgresql":
         rows = db.execute(
             text(
                 """
-                select indexdef
+                select indexname, indexdef
                 from pg_indexes
                 where schemaname = current_schema()
                   and tablename = 'scrape_jobs'
                 """
             )
         ).all()
-        for (indexdef,) in rows:
+        for indexname, indexdef in rows:
             if _matches_active_conflict_partial_index(indexdef):
-                return True
-        return False
+                return {"ok": True, "index_name": indexname, "index_name_ok": _name_ok(indexname), "definition": indexdef}
+        return {"ok": False, "reason": "not_found"}
 
     if dialect == "sqlite":
         rows = db.execute(
             text(
                 """
-                select sql
+                select name, sql
                 from sqlite_master
                 where type = 'index'
                   and tbl_name = 'scrape_jobs'
                 """
             )
         ).all()
-        for (sql_def,) in rows:
+        for name, sql_def in rows:
             if _matches_active_conflict_partial_index(sql_def):
-                return True
-        return False
+                return {"ok": True, "index_name": name, "index_name_ok": _name_ok(name), "definition": sql_def}
+        return {"ok": False, "reason": "not_found"}
 
-    return False
+    return {"ok": False, "reason": f"unsupported_dialect:{dialect}"}
 
 
 def _utcnow() -> datetime:
@@ -125,8 +137,18 @@ def requeue_stale_running_jobs(
         .filter(ScrapeJob.locked_at < cutoff)
         .all()
     )
+    # Defesa adicional para restart/kill abrupto:
+    # running sem locked_at nunca será resgatado pelo filtro acima e pode bloquear
+    # novos enqueues indefinidamente por causa do índice parcial de job ativo.
+    rows_invalid = (
+        db.query(ScrapeJob)
+        .filter(ScrapeJob.queue == queue)
+        .filter(ScrapeJob.status == "running")
+        .filter(ScrapeJob.locked_at.is_(None))
+        .all()
+    )
 
-    for job in rows:
+    for job in [*rows, *rows_invalid]:
         job.status = "queued"
         job.lock_owner = None
         job.locked_at = None
@@ -134,7 +156,31 @@ def requeue_stale_running_jobs(
         job.finished_at = None
         job.run_at = _utcnow() - timedelta(seconds=1)
 
-    return len(rows)
+    return len(rows) + len(rows_invalid)
+
+
+def scrape_jobs_runtime_snapshot(db: Session, *, now: datetime | None = None, stale_after_seconds: int | None = None) -> dict[str, Any]:
+    now = now or _utcnow()
+    ttl = int(stale_after_seconds if stale_after_seconds is not None else getattr(settings, "scrape_job_running_ttl_seconds", 900) or 900)
+    stale_cut = now - timedelta(seconds=max(60, ttl))
+    q = db.query
+    return {
+        "queued": int(q(func.count(ScrapeJob.id)).filter(ScrapeJob.status == "queued").scalar() or 0),
+        "running": int(q(func.count(ScrapeJob.id)).filter(ScrapeJob.status == "running").scalar() or 0),
+        "running_stale": int(
+            q(func.count(ScrapeJob.id))
+            .filter(ScrapeJob.status == "running")
+            .filter(
+                (ScrapeJob.locked_at.is_(None))
+                | (ScrapeJob.locked_at < stale_cut)
+            )
+            .scalar()
+            or 0
+        ),
+        "last_created_at": q(func.max(ScrapeJob.created_at)).scalar(),
+        "last_started_at": q(func.max(ScrapeJob.started_at)).scalar(),
+        "last_finished_at": q(func.max(ScrapeJob.finished_at)).scalar(),
+    }
 
 def count_active_jobs(db: Session, *, queue: str = "browser") -> int:
     return int(

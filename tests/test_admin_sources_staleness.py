@@ -6,6 +6,8 @@ from app.bot import handlers_admin
 from app.models.source_config import SourceConfig
 from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
+from app.models.system_log import SystemLog
+from app.models.scrape_job import ScrapeJob
 
 
 class _Msg:
@@ -140,3 +142,24 @@ def test_admin_sources_global_stale_denominator_uses_only_critical_sources(db, m
     asyncio.run(handlers_admin._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
     assert "Sources críticas stale: 2/2 (100%)" in out
+
+
+def test_admin_sources_global_stale_with_recent_heartbeat_and_no_runs_shows_actionable_diag(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SourceConfig(source="s1", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0))
+    db.add(SourceConfig(source="s2", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0))
+    db.add(SourceConfig(source="s3", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0))
+    db.add(SourceState(source="s1", last_run_at=None, last_status=None))
+    db.add(SourceState(source="s2", last_run_at=None, last_status=None))
+    db.add(SourceState(source="s3", last_run_at=None, last_status=None))
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(seconds=15)))
+    db.add(ScrapeJob(source="s1", queue="http", run_at=now - timedelta(minutes=5), status="queued", attempt=0, max_attempts=3, priority=0))
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("s1"), _Plugin("s2"), _Plugin("s3")])
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+    assert "heartbeat recente, mas 0 source runs na janela" in out
+    assert "provável falha no enqueue, workers ou persistência" in out
+    assert "Fila scrape_jobs: queued=1 running=0" in out

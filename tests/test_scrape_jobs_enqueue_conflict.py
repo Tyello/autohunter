@@ -123,12 +123,16 @@ def test_has_active_source_queue_partial_index_guard_detects_sqlite_partial_inde
     db.commit()
 
     assert svc.has_active_source_queue_partial_index(db) is True
+    details = svc.get_active_source_queue_partial_index_details(db)
+    assert details["ok"] is True
+    assert details["index_name_ok"] is True
 
 
 def test_has_active_source_queue_partial_index_guard_accepts_postgres_any_array_format():
     db = _PgIndexDefDB(
         rows=[
             (
+                "ix_scrape_jobs_active_source_queue_unique",
                 "CREATE UNIQUE INDEX ix_scrape_jobs_active_source_queue_unique ON public.scrape_jobs USING btree (source, queue) "
                 "WHERE ((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying])::text[]))",
             )
@@ -136,3 +140,7 @@ def test_has_active_source_queue_partial_index_guard_accepts_postgres_any_array_
     )
 
     assert svc.has_active_source_queue_partial_index(db) is True
+    details = svc.get_active_source_queue_partial_index_details(db)
+    assert details["ok"] is True
+    assert details["index_name"] == "ix_scrape_jobs_active_source_queue_unique"
+    assert details["index_name_ok"] is True
