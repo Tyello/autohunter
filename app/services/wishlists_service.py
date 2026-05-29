@@ -515,6 +515,7 @@ def list_wishlists(db: Session, user_id):
     return (
         db.query(Wishlist)
         .filter(Wishlist.user_id == user_id)
+        .filter(Wishlist.deleted_at.is_(None))
         .order_by(Wishlist.created_at.asc())
         .all()
     )
@@ -532,6 +533,7 @@ def _compute_wishlist_summaries(db: Session, user_id) -> list[dict[str, Any]]:
         for wishlist_id, count in (
             db.query(WishlistFilter.wishlist_id, func.count(WishlistFilter.id))
             .filter(WishlistFilter.wishlist_id.in_(wishlist_ids))
+            .filter(WishlistFilter.is_active.is_(True))
             .group_by(WishlistFilter.wishlist_id)
             .all()
         )
@@ -540,6 +542,7 @@ def _compute_wishlist_summaries(db: Session, user_id) -> list[dict[str, Any]]:
     for row in (
         db.query(WishlistFilter.wishlist_id, WishlistFilter.field, WishlistFilter.operator, WishlistFilter.value)
         .filter(WishlistFilter.wishlist_id.in_(wishlist_ids))
+        .filter(WishlistFilter.is_active.is_(True))
         .order_by(WishlistFilter.created_at.asc())
         .all()
     ):
@@ -551,6 +554,7 @@ def _compute_wishlist_summaries(db: Session, user_id) -> list[dict[str, Any]]:
         for wishlist_id, count in (
             db.query(WishlistTrackedListing.wishlist_id, func.count(WishlistTrackedListing.id))
             .filter(WishlistTrackedListing.wishlist_id.in_(wishlist_ids))
+            .filter(WishlistTrackedListing.is_active.is_(True))
             .group_by(WishlistTrackedListing.wishlist_id)
             .all()
         )
@@ -1084,13 +1088,27 @@ def add_filter(db: Session, wishlist_id, field: str, operator: str, value: str):
     except ValueError as exc:
         return False, str(exc)
 
-    row = WishlistFilter(
-        wishlist_id=wishlist_id,
-        field=normalized.field,
-        operator=normalized.operator,
-        value=normalized.value,
+    existing = (
+        db.query(WishlistFilter)
+        .filter(WishlistFilter.wishlist_id == wishlist_id)
+        .filter(WishlistFilter.field == normalized.field)
+        .filter(WishlistFilter.operator == normalized.operator)
+        .filter(WishlistFilter.value == normalized.value)
+        .first()
     )
-    db.add(row)
+    if existing:
+        if existing.is_active:
+            return False, "Filtro já existe (duplicado) ou erro ao salvar."
+        existing.is_active = True
+        db.add(existing)
+    else:
+        row = WishlistFilter(
+            wishlist_id=wishlist_id,
+            field=normalized.field,
+            operator=normalized.operator,
+            value=normalized.value,
+        )
+        db.add(row)
     try:
         db.commit()
         wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
@@ -1234,6 +1252,7 @@ def list_filters(db: Session, wishlist_id):
     return (
         db.query(WishlistFilter)
         .filter(WishlistFilter.wishlist_id == wishlist_id)
+        .filter(WishlistFilter.is_active.is_(True))
         .order_by(WishlistFilter.created_at.asc())
         .all()
     )
@@ -1246,7 +1265,8 @@ def remove_filter(db: Session, wishlist_id, index: int):
 
     f = filters[index - 1]
     wishlist = db.query(Wishlist).filter(Wishlist.id == wishlist_id).first()
-    db.delete(f)
+    f.is_active = False
+    db.add(f)
     db.commit()
     if wishlist:
         invalidate_wishlist_summaries_cache(wishlist.user_id)
@@ -1281,24 +1301,31 @@ def _delete_wishlist_explicit(
         event_type="wishlist_delete_explicit",
     )
 
-    deleted_filters = db.execute(
-        delete(WishlistFilter).where(WishlistFilter.wishlist_id == wishlist.id)
-    ).rowcount or 0
-    deleted_listing_activity = db.execute(
-        delete(WishlistListingActivity).where(WishlistListingActivity.wishlist_id == wishlist.id)
-    ).rowcount or 0
-    deleted_tokens = db.execute(
-        delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id)
-    ).rowcount or 0
-    deleted_tracked = db.execute(
-        delete(WishlistTrackedListing).where(WishlistTrackedListing.wishlist_id == wishlist.id)
-    ).rowcount or 0
+    active_filters = (
+        db.query(WishlistFilter)
+        .filter(WishlistFilter.wishlist_id == wishlist.id)
+        .filter(WishlistFilter.is_active.is_(True))
+        .all()
+    )
+    for row in active_filters:
+        row.is_active = False
+        db.add(row)
 
-    payload["deleted_counts"] = {
-        "wishlist_filters": int(deleted_filters),
-        "wishlist_listing_activity": int(deleted_listing_activity),
-        "wishlist_tokens": int(deleted_tokens),
-        "wishlist_tracked_listings": int(deleted_tracked),
+    active_tracked = (
+        db.query(WishlistTrackedListing)
+        .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
+        .all()
+    )
+    for row in active_tracked:
+        row.is_active = False
+        db.add(row)
+
+    wishlist.is_active = False
+    wishlist.deleted_at = _utcnow()
+    db.add(wishlist)
+
+    payload["soft_deleted_counts"] = {
+        "wishlist_filters": len(active_filters),
+        "wishlist_tracked_listings": len(active_tracked),
     }
-
-    db.delete(wishlist)

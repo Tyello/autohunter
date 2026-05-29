@@ -27,6 +27,7 @@ from app.services.source_operational_policy import (
 )
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
 from app.services.backup_health_service import get_backup_health
+from app.services.db_runtime_safety_service import check_database_runtime_role
 from app.services.wishlists_service import get_wishlist_summaries_cache_stats
 from app.sources.registry import list_sources
 
@@ -110,6 +111,19 @@ async def admin_health(update: Update, raw_args: Optional[List[str]] = None):
 
     # Runtime + DB snapshots
     with SessionLocal() as db:
+        db_role = check_database_runtime_role(db)
+        lines.append("")
+        if db_role.ok:
+            role_label = db_role.role or "-"
+            lines.append(f"DB runtime role: ✅ {role_label} (source={db_role.source})")
+        else:
+            role_label = db_role.role or "unknown"
+            lines.append(f"DB runtime role: ⚠️ {role_label} (source={db_role.source})")
+            if db_role.warning:
+                lines.append(f"- WARNING: {db_role.warning}")
+            if verbose and db_role.error:
+                lines.append(f"- detection_error: {_short(db_role.error, 160)}")
+
         hb = (
             db.query(SystemLog)
             .filter(SystemLog.component == "scheduler")

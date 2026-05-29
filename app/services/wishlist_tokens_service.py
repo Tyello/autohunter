@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
-from sqlalchemy import delete, select, func
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.core.text_norm import tokens as tokenize, STOPWORDS as _STOPWORDS
@@ -60,11 +60,18 @@ def extract_tokens(text: str) -> list[str]:
 
 def rebuild_tokens_for_wishlist(db: Session, wishlist: Wishlist) -> int:
     tokens = extract_tokens(wishlist.query)
-    db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id))
     if not tokens:
         return 0
-    db.add_all([WishlistToken(wishlist_id=wishlist.id, token=t) for t in tokens])
-    return len(tokens)
+
+    existing = set(
+        db.execute(
+            select(WishlistToken.token).where(WishlistToken.wishlist_id == wishlist.id)
+        ).scalars().all()
+    )
+    missing = [t for t in tokens if t not in existing]
+    if missing:
+        db.add_all([WishlistToken(wishlist_id=wishlist.id, token=t) for t in missing])
+    return len(missing)
 
 
 def reindex_active_wishlists(db: Session, batch_size: int = 200) -> ReindexResult:

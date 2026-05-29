@@ -228,7 +228,7 @@ def test_remove_by_listing_identifier(db, monkeypatch):
     ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, car_listing_id=str(listing.id))
     assert ok is True
     assert "slot 1" in msg.lower()
-    assert db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id == wl.id).count() == 0
+    assert db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id == wl.id, WishlistTrackedListing.is_active.is_(True)).count() == 0
 
 
 def test_remove_empty_slot_message(db, monkeypatch):

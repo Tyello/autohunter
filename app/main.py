@@ -13,6 +13,7 @@ from app.models.car_listing import CarListing
 from app.schemas.car_listing import CarListingOut
 from app.scrapers.olx import get_olx_health_snapshot
 from app.services.scrape_jobs_service import has_active_source_queue_partial_index
+from app.services.db_runtime_safety_service import check_database_runtime_role
 
 from app.db.deps import get_db
 from app.web.routes_auth_facebook import router as facebook_auth_router
@@ -46,9 +47,16 @@ async def fb_agent_ws(websocket: WebSocket):
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     has_index = has_active_source_queue_partial_index(db)
+    db_role = check_database_runtime_role(db)
     return {
-        "status": "ok" if has_index else "warning",
+        "status": "ok" if has_index and db_role.ok else "warning",
         "scrape_jobs_conflict_index_ok": has_index,
+        "database_runtime_role": {
+            "status": db_role.status,
+            "role": db_role.role,
+            "source": db_role.source,
+            "warning": db_role.warning,
+        },
     }
 
 @app.get("/db-check")
@@ -73,8 +81,15 @@ def list_listings(
 @app.get("/admin/health")
 def admin_health(db: Session = Depends(get_db)):
     has_index = has_active_source_queue_partial_index(db)
+    db_role = check_database_runtime_role(db)
     return {
-        "status": "ok" if has_index else "warning",
+        "status": "ok" if has_index and db_role.ok else "warning",
         "scrape_jobs_conflict_index_ok": has_index,
+        "database_runtime_role": {
+            "status": db_role.status,
+            "role": db_role.role,
+            "source": db_role.source,
+            "warning": db_role.warning,
+        },
         "olx": get_olx_health_snapshot(),
     }
