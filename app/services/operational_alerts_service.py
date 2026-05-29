@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import psutil
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -24,8 +24,91 @@ from app.services.source_operational_policy import (
     should_include_in_critical_stale,
 )
 from app.services.source_staleness_service import evaluate_source_staleness
+from app.sources.flags import read_source_impl_flags
 from app.sources.registry import get_source
 
+
+
+_MERCADOLIVRE = "mercadolivre"
+
+
+def _status_is_backoff(status: Optional[str]) -> bool:
+    return "backoff" in str(status or "").strip().lower()
+
+
+def _is_skipped_backoff_run(run: SourceRun) -> bool:
+    if str(getattr(run, "status", "") or "").lower() != "skipped":
+        return False
+    payload = getattr(run, "payload", None)
+    if isinstance(payload, dict) and str(payload.get("reason") or "").lower() == "backoff":
+        return True
+    return "backoff" in str(getattr(run, "error", "") or "").lower()
+
+
+def _extract_runtime_impl(payload: dict | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("runtime_impl"):
+        return str(payload.get("runtime_impl"))
+    run_summary = payload.get("run_summary")
+    if isinstance(run_summary, dict) and run_summary.get("runtime_impl"):
+        return str(run_summary.get("runtime_impl"))
+    return None
+
+
+def _source_ops_context(db: Session, src: str, cfg: SourceConfig, st: SourceState | None, now: datetime) -> dict[str, Any]:
+    window_start = now - timedelta(minutes=int(getattr(settings, "autopilot_window_minutes", 30) or 30))
+    runs = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == src)
+        .filter(SourceRun.created_at >= window_start)
+        .filter(SourceRun.created_at < now)
+        .order_by(SourceRun.created_at.desc())
+        .all()
+    )
+    flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
+    runtime_impl = None
+    for run in runs:
+        runtime_impl = _extract_runtime_impl(getattr(run, "payload", None))
+        if runtime_impl:
+            break
+    if not runtime_impl and st is not None:
+        runtime_impl = _extract_runtime_impl(getattr(st, "last_payload", None))
+    total = len(runs)
+    blocked = sum(1 for r in runs if str(getattr(r, "status", "") or "").lower() == "blocked")
+    success = sum(1 for r in runs if str(getattr(r, "status", "") or "").lower() == "success")
+    skipped_backoff = sum(1 for r in runs if _is_skipped_backoff_run(r))
+    canary_effective = (
+        src == _MERCADOLIVRE
+        and bool(flags.canary_v2_enabled)
+        and bool(getattr(settings, "enable_playwright", False))
+        and bool(getattr(cfg, "browser_fallback_enabled", False))
+    )
+    return {
+        "source": src,
+        "configured_impl": flags.impl,
+        "runtime_impl": runtime_impl,
+        "mercadolivre_v2_canary_enabled": bool(flags.canary_v2_enabled),
+        "canary_effective": bool(canary_effective),
+        "browser_fallback_enabled": bool(getattr(cfg, "browser_fallback_enabled", False)),
+        "force_browser": bool(getattr(cfg, "force_browser", False)),
+        "backoff_until": getattr(st, "next_allowed_at", None),
+        "status": getattr(st, "last_status", None) if st else None,
+        "blocked_count": blocked,
+        "success_count": success,
+        "skipped_backoff_count": skipped_backoff,
+        "blocked_ratio": (float(blocked) / float(total)) if total else 0.0,
+    }
+
+
+def _source_status_commands(src: str, ctx: dict[str, Any]) -> str:
+    if src == _MERCADOLIVRE and bool(ctx.get("canary_effective")):
+        return (
+            "Diagnóstico: /admin sources canary mercadolivre report\n"
+            "Status: /admin sources show mercadolivre\n"
+            "Health: /admin health"
+        )
+    return f"Status: /admin sources show {src}\nHealth: /admin health"
 
 @dataclass
 class OperationalAlert:
@@ -37,6 +120,14 @@ class OperationalAlert:
 def _now(now: Optional[datetime] = None) -> datetime:
     return now or datetime.now(timezone.utc)
 
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 def _age_minutes(dt: Optional[datetime], now: datetime) -> Optional[int]:
     if not dt:
@@ -150,12 +241,28 @@ def collect_operational_alerts(
             continue
         st = states.get(src)
         eval_ = evaluate_source_staleness(now=now, last_run_at=getattr(st, "last_effective_run_at", None) or getattr(st, "last_run_at", None), sched_minutes=int(cfg.sched_minutes or 0), factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0), min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180))
+        ctx = _source_ops_context(db, src, cfg, st, now)
+        backoff_until_dt = _as_utc(getattr(st, "next_allowed_at", None) if st else None)
+        backoff_active = bool(backoff_until_dt and backoff_until_dt > _as_utc(now))
+        status_backoff = _status_is_backoff(getattr(st, "last_status", None) if st else None)
         if eval_.stale:
-            alerts.append(OperationalAlert(f"source_stale:{src}", f"🚨 Source {src} stale age={eval_.age_minutes}m status={(getattr(st,'last_status',None) or '-').upper()}. Próximo passo: /admin audit ou /admin sources {src}.", 60))
+            if backoff_active or status_backoff:
+                until_dt = backoff_until_dt
+                until = until_dt.astimezone(timezone.utc).strftime("%H:%MZ") if until_dt else "-"
+                alerts.append(
+                    OperationalAlert(
+                        f"source_blocked_backoff:{src}",
+                        f"⚠️ Source {src} sem execução real há {eval_.age_minutes}m porque está em backoff ativo até {until}.\n"
+                        f"{_source_status_commands(src, ctx)}",
+                        60,
+                    )
+                )
+            else:
+                alerts.append(OperationalAlert(f"source_stale:{src}", f"🚨 Source {src} stale age={eval_.age_minutes}m status={(getattr(st,'last_status',None) or '-').upper()}. Próximo passo: /admin audit ou /admin sources show {src}.", 60))
 
-        if st and st.next_allowed_at and st.next_allowed_at > now + timedelta(minutes=30):
-            until = st.next_allowed_at.astimezone(timezone.utc).strftime("%H:%MZ")
-            alerts.append(OperationalAlert(f"source_backoff:{src}", f"⚠️ Source {src} em backoff até {until}. Próximo passo: aguarde backoff ou valide bloqueio em /admin health.", 60))
+        if backoff_active and not (eval_.stale and (backoff_active or status_backoff)) and backoff_until_dt and backoff_until_dt > _as_utc(now + timedelta(minutes=30)):
+            until = backoff_until_dt.astimezone(timezone.utc).strftime("%H:%MZ")
+            alerts.append(OperationalAlert(f"source_blocked_backoff:{src}", f"⚠️ Source {src} em backoff até {until}. Próximo passo: aguarde backoff ou valide bloqueio em /admin health.\n{_source_status_commands(src, ctx)}", 60))
 
     recent_err = db.query(SourceRun).filter(SourceRun.created_at >= now - timedelta(minutes=90), SourceRun.status.in_(["blocked", "error"])).order_by(SourceRun.created_at.desc()).limit(120).all()
     by_source_bucket = {}
@@ -170,7 +277,11 @@ def collect_operational_alerts(
             op_class = classify_source_operational_role(plugin, cfg=cfg)
             if not op_class.include_in_critical_stale:
                 continue
-            alerts.append(OperationalAlert(f"source_error:{src}:{b}", f"⚠️ Source {src} com recorrência {b} ({n}x/90m). Próximo passo: /admin audit e revisar source {src}.", 60))
+            st = states.get(src)
+            st_next = _as_utc(getattr(st, "next_allowed_at", None) if st else None)
+            if b == "BLOCKED" and st_next and st_next > _as_utc(now):
+                continue
+            alerts.append(OperationalAlert(f"source_error:{src}:{b}", f"⚠️ Source {src} com recorrência {b} ({n}x/90m). Próximo passo: /admin audit e revisar /admin sources show {src}.", 60))
 
     for queue in ("http", "browser"):
         running_old = db.query(func.count(ScrapeJob.id)).filter(ScrapeJob.queue == queue, ScrapeJob.status == "running", ScrapeJob.started_at < now - timedelta(minutes=45)).scalar() or 0

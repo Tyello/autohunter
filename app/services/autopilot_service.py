@@ -9,12 +9,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
 from app.core.settings import settings
+from app.models.source_config import SourceConfig
 from app.models.source_run import SourceRun
+from app.models.source_state import SourceState
 from app.models.system_log import SystemLog
 from app.models.autopilot_finding import AutopilotFinding
 from app.models.scrape_job import ScrapeJob
 from app.models.notification import Notification
 from app.services.scrape_jobs_service import get_active_source_queue_partial_index_details
+from app.services.source_operational_policy import classify_source_operational_role
+from app.sources.flags import read_source_impl_flags
+from app.sources.registry import get_source
 
 
 def _utcnow() -> datetime:
@@ -62,6 +67,156 @@ class FindingCandidate:
     evidence: Dict[str, Any]
     suggested_actions: str
 
+
+
+_MERCADOLIVRE = "mercadolivre"
+
+
+def _extract_runtime_impl(payload: dict | None) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    runtime_impl = payload.get("runtime_impl")
+    if runtime_impl:
+        return str(runtime_impl)
+    run_summary = payload.get("run_summary")
+    if isinstance(run_summary, dict) and run_summary.get("runtime_impl"):
+        return str(run_summary.get("runtime_impl"))
+    return None
+
+
+def _dedupe_keep_order(values: List[Any]) -> List[Any]:
+    out: List[Any] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        key = str(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(value)
+    return out
+
+
+def _is_skipped_backoff(run: SourceRun) -> bool:
+    if str(getattr(run, "status", "") or "").lower() != "skipped":
+        return False
+    payload = getattr(run, "payload", None)
+    if isinstance(payload, dict) and str(payload.get("reason") or "").lower() == "backoff":
+        return True
+    return "backoff" in str(getattr(run, "error", "") or "").lower()
+
+
+def _source_context(db: Session, source: str, *, start: datetime, end: datetime, total: int, blocked: int) -> Dict[str, Any]:
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == source).first()
+    st = db.query(SourceState).filter(SourceState.source == source).first()
+    flags = read_source_impl_flags(cfg.extra if cfg and isinstance(cfg.extra, dict) else None)
+
+    recent_runs = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == source)
+        .filter(SourceRun.created_at >= start)
+        .filter(SourceRun.created_at < end)
+        .order_by(SourceRun.created_at.desc())
+        .all()
+    )
+    success_count = sum(1 for r in recent_runs if str(r.status).lower() == "success")
+    skipped_backoff_count = sum(1 for r in recent_runs if _is_skipped_backoff(r))
+    last_success = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == source)
+        .filter(SourceRun.status == "success")
+        .order_by(SourceRun.created_at.desc())
+        .first()
+    )
+    last_blocked = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == source)
+        .filter(SourceRun.status == "blocked")
+        .order_by(SourceRun.created_at.desc())
+        .first()
+    )
+    last_runtime_impl = None
+    for run in recent_runs:
+        last_runtime_impl = _extract_runtime_impl(getattr(run, "payload", None))
+        if last_runtime_impl:
+            break
+    if not last_runtime_impl and st is not None:
+        last_runtime_impl = _extract_runtime_impl(getattr(st, "last_payload", None))
+
+    browser_fallback_enabled = bool(getattr(cfg, "browser_fallback_enabled", False)) if cfg else False
+    force_browser = bool(getattr(cfg, "force_browser", False)) if cfg else False
+    playwright_enabled = bool(getattr(settings, "enable_playwright", False))
+    canary_effective = (
+        source == _MERCADOLIVRE
+        and bool(flags.canary_v2_enabled)
+        and playwright_enabled
+        and browser_fallback_enabled
+    )
+    operational_role = None
+    try:
+        operational_role = classify_source_operational_role(get_source(source), cfg=cfg).role
+    except Exception:
+        operational_role = None
+
+    return {
+        "source": source,
+        "configured_impl": flags.impl,
+        "runtime_impl": last_runtime_impl,
+        "mercadolivre_v2_canary_enabled": bool(flags.canary_v2_enabled),
+        "canary_effective": bool(canary_effective),
+        "browser_fallback_enabled": browser_fallback_enabled,
+        "force_browser": force_browser,
+        "operational_role": operational_role,
+        "last_success_at": getattr(last_success, "created_at", None).isoformat() if last_success else None,
+        "last_blocked_at": getattr(last_blocked, "created_at", None).isoformat() if last_blocked else None,
+        "backoff_until": getattr(st, "next_allowed_at", None).isoformat() if st and getattr(st, "next_allowed_at", None) else None,
+        "status": getattr(st, "last_status", None) if st else None,
+        "blocked_count": int(blocked),
+        "success_count": int(success_count),
+        "skipped_backoff_count": int(skipped_backoff_count),
+        "blocked_ratio": _calc_rates(int(total), int(blocked)),
+        "consecutive_blocks": int(getattr(st, "consecutive_blocks", 0) or 0) if st else 0,
+    }
+
+
+def _blocked_spike_severity(source: str, blocked_rate: float, ctx: Dict[str, Any]) -> str:
+    if source == _MERCADOLIVRE:
+        success_count = int(ctx.get("success_count") or 0)
+        consecutive_blocks = int(ctx.get("consecutive_blocks") or 0)
+        if blocked_rate >= 0.80 and (success_count == 0 or consecutive_blocks >= 3):
+            return "error"
+        return "warn"
+    return "warn" if blocked_rate < 0.60 else "error"
+
+
+def _blocked_spike_actions(source: str, ctx: Dict[str, Any]) -> str:
+    if source == _MERCADOLIVRE and bool(ctx.get("canary_effective")):
+        return (
+            "Ações sugeridas:\n"
+            "- acompanhar canary V2: /admin sources canary mercadolivre report\n"
+            "- respeitar backoff atual; não forçar probes repetidos\n"
+            "- browser_fallback já está ativo\n"
+            "- não habilitar force_browser sem evidência nova\n"
+            "- se blocked_ratio continuar alto, aumentar cooldown/backoff\n"
+            "- rollback manual disponível: /admin sources canary mercadolivre off"
+        )
+    if source == _MERCADOLIVRE:
+        if not bool(ctx.get("browser_fallback_enabled")):
+            return (
+                "Ações sugeridas: avaliar canary V2 controlado se V1 continuar bloqueado, "
+                "habilitar browser_fallback antes do canary quando houver Playwright, aumentar cooldown/backoff "
+                "e consultar /admin sources canary mercadolivre report."
+            )
+        return (
+            "Ações sugeridas: avaliar canary V2 controlado se V1 continuar bloqueado, "
+            "acompanhar /admin sources canary mercadolivre report e aumentar cooldown/backoff se persistir."
+        )
+    return (
+        "Ações sugeridas: reduzir rate, aumentar cooldown/backoff, alternar proxy, "
+        "habilitar browser_fallback/force_browser para a fonte e coletar evidência (HTML/screenshot) "
+        "para ajustar o scraper."
+    )
 
 def _window_bounds(now: datetime) -> Tuple[datetime, datetime]:
     window_m = int(getattr(settings, "autopilot_window_minutes", 30) or 30)
@@ -142,32 +297,33 @@ def _candidate_blocked_spike(db: Session, now: datetime) -> List[FindingCandidat
             .all()
         )
         sample_ids = [str(s.id) for s in samples]
-        sample_urls = [s.url for s in samples if s.url][:5]
+        sample_urls = _dedupe_keep_order([s.url for s in samples if s.url])[:5]
         http = samples[0].http_status if samples else None
+        ctx = _source_context(db, src, start=start, end=end, total=total, blocked=blocked)
 
         fp = _sha1(f"blocked_spike|{src}|{http or ''}|{start.isoformat()}")
+        evidence = {
+            "window": {"start": start.isoformat(), "end": end.isoformat()},
+            "total": total,
+            "blocked": blocked,
+            "blocked_rate": blocked_rate,
+            "baseline": {"total": b_total, "blocked": b_blocked, "blocked_rate": b_rate},
+            "sample_run_ids": sample_ids,
+            "sample_urls": sample_urls,
+            "http_status": http,
+            "source_context": ctx,
+        }
+        if src == _MERCADOLIVRE and (ctx.get("backoff_until") or int(ctx.get("skipped_backoff_count") or 0) > 0):
+            evidence["correlation_key"] = f"source:{src}:blocked_backoff"
         out.append(
             FindingCandidate(
                 kind="blocked_spike",
                 source=src,
                 fingerprint=fp,
                 title=f"Fonte {src}: spike de bloqueios ({blocked}/{total} = {blocked_rate:.0%})",
-                severity="warn" if blocked_rate < 0.60 else "error",
-                evidence={
-                    "window": {"start": start.isoformat(), "end": end.isoformat()},
-                    "total": total,
-                    "blocked": blocked,
-                    "blocked_rate": blocked_rate,
-                    "baseline": {"total": b_total, "blocked": b_blocked, "blocked_rate": b_rate},
-                    "sample_run_ids": sample_ids,
-                    "sample_urls": sample_urls,
-                    "http_status": http,
-                },
-                suggested_actions=(
-                    "Ações sugeridas: reduzir rate, aumentar cooldown/backoff, alternar proxy, "
-                    "habilitar browser_fallback/force_browser para a fonte e coletar evidência (HTML/screenshot) "
-                    "para ajustar o scraper."
-                ),
+                severity=_blocked_spike_severity(src, blocked_rate, ctx),
+                evidence=evidence,
+                suggested_actions=_blocked_spike_actions(src, ctx),
             )
         )
     return out
@@ -521,11 +677,21 @@ def format_alert(row: AutopilotFinding) -> str:
         w = ev.get("window") or {}
         if w.get("start") and w.get("end"):
             lines.append(f"janela: {w.get('start')} → {w.get('end')}")
+    ctx = ev.get("source_context") if isinstance(ev.get("source_context"), dict) else {}
+    if ctx:
+        if ctx.get("configured_impl") is not None:
+            lines.append(f"configured_impl: {ctx.get('configured_impl')}")
+        if ctx.get("runtime_impl"):
+            lines.append(f"runtime_impl: {ctx.get('runtime_impl')}")
+        if src == _MERCADOLIVRE:
+            lines.append(f"canary_effective: {bool(ctx.get('canary_effective'))}")
+    if ev.get("correlation_key"):
+        lines.append(f"correlation_key: {ev.get('correlation_key')}")
     # sample urls
     sample_urls = ev.get("sample_urls") or []
     if isinstance(sample_urls, list) and sample_urls:
         lines.append("exemplos:")
-        for u in sample_urls[:3]:
+        for u in _dedupe_keep_order(sample_urls)[:3]:
             if u:
                 lines.append(f"- {u}")
     if row.suggested_actions:
