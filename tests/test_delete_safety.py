@@ -94,7 +94,7 @@ def test_delete_wishlist_with_filters_requires_explicit_cleanup(db):
     db.rollback()
 
 
-def test_remove_wishlist_service_deletes_children_explicitly(db):
+def test_remove_wishlist_service_soft_deletes_wishlist(db):
     _enable_fk(db)
 
     user = User(id=uuid.uuid4(), telegram_chat_id=999002)
@@ -110,10 +110,10 @@ def test_remove_wishlist_service_deletes_children_explicitly(db):
 
     ok, _msg = remove_wishlist(db, user.id, 1)
     assert ok is True
-    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 0
+    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).one().deleted_at is not None
 
 
-def test_remove_all_wishlists_service_deletes_children_explicitly(db):
+def test_remove_all_wishlists_service_soft_deletes_wishlists(db):
     _enable_fk(db)
 
     user = User(id=uuid.uuid4(), telegram_chat_id=999003)
@@ -129,7 +129,7 @@ def test_remove_all_wishlists_service_deletes_children_explicitly(db):
 
     ok, _msg = remove_all_wishlists(db, user.id)
     assert ok is True
-    assert db.query(Wishlist).filter(Wishlist.user_id == user.id).count() == 0
+    assert db.query(Wishlist).filter(Wishlist.user_id == user.id).one().deleted_at is not None
 
 
 def test_remove_wishlist_service_writes_explicit_audit_log(db):
@@ -177,7 +177,7 @@ def test_scheduler_and_runall_paths_do_not_call_wishlist_remove_services() -> No
     assert offenders == []
 
 
-def test_remove_wishlist_service_deletes_filters_activity_tokens_only(db):
+def test_remove_wishlist_service_soft_deletes_filters_only_and_preserves_history(db):
     _enable_fk(db)
 
     user = User(id=uuid.uuid4(), telegram_chat_id=999005)
@@ -215,17 +215,19 @@ def test_remove_wishlist_service_deletes_filters_activity_tokens_only(db):
     ok, _msg = remove_wishlist(db, user.id, 1)
     assert ok is True
 
-    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 0
-    assert db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).count() == 0
-    assert db.query(WishlistListingActivity).filter(WishlistListingActivity.wishlist_id == wishlist.id).count() == 0
-    assert db.query(WishlistToken).filter(WishlistToken.wishlist_id == wishlist.id).count() == 0
+    removed = db.query(Wishlist).filter(Wishlist.id == wishlist.id).one()
+    assert removed.deleted_at is not None
+    assert removed.is_active is False
+    assert db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id, WishlistFilter.is_active.is_(True)).count() == 0
+    assert db.query(WishlistListingActivity).filter(WishlistListingActivity.wishlist_id == wishlist.id).count() == 1
+    assert db.query(WishlistToken).filter(WishlistToken.wishlist_id == wishlist.id).count() == 1
 
     notification_db = db.query(Notification).filter(Notification.id == notification.id).first()
     telemetry_db = db.query(TelemetryEvent).filter(TelemetryEvent.id == telemetry.id).first()
     assert notification_db is not None
     assert telemetry_db is not None
-    assert notification_db.wishlist_id is None
-    assert telemetry_db.wishlist_id is None
+    assert notification_db.wishlist_id == wishlist.id
+    assert telemetry_db.wishlist_id == wishlist.id
 
 
 def test_remove_wishlist_service_is_transactional_on_delete_failure(db, monkeypatch):
@@ -254,21 +256,21 @@ def test_remove_wishlist_service_is_transactional_on_delete_failure(db, monkeypa
     )
     db.commit()
 
-    original_delete = db.delete
+    original_commit = db.commit
 
-    def _boom(instance):
-        if isinstance(instance, Wishlist):
-            raise SQLAlchemyError("forced-delete-failure")
-        return original_delete(instance)
+    def _boom():
+        raise SQLAlchemyError("forced-soft-delete-failure")
 
-    monkeypatch.setattr(db, "delete", _boom)
+    monkeypatch.setattr(db, "commit", _boom)
 
     ok, msg = remove_wishlist(db, user.id, 1)
     assert ok is False
     assert "falha no banco" in msg
 
-    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 1
-    assert db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).count() == 1
+    monkeypatch.setattr(db, "commit", original_commit)
+    db.rollback()
+    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).one().deleted_at is None
+    assert db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id, WishlistFilter.is_active.is_(True)).count() == 1
     assert db.query(WishlistListingActivity).filter(WishlistListingActivity.wishlist_id == wishlist.id).count() == 1
     assert db.query(WishlistToken).filter(WishlistToken.wishlist_id == wishlist.id).count() == 1
 
@@ -286,4 +288,4 @@ def test_remove_wishlist_service_without_dependencies_still_removes(db):
 
     ok, _msg = remove_wishlist(db, user.id, 1)
     assert ok is True
-    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).count() == 0
+    assert db.query(Wishlist).filter(Wishlist.id == wishlist.id).one().deleted_at is not None

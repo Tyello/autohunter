@@ -228,7 +228,7 @@ def test_remove_by_listing_identifier(db, monkeypatch):
     ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, car_listing_id=str(listing.id))
     assert ok is True
     assert "slot 1" in msg.lower()
-    assert db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id == wl.id).count() == 0
+    assert db.query(WishlistTrackedListing).filter(WishlistTrackedListing.wishlist_id == wl.id, WishlistTrackedListing.is_active.is_(True)).count() == 0
 
 
 def test_remove_empty_slot_message(db, monkeypatch):
@@ -238,3 +238,19 @@ def test_remove_empty_slot_message(db, monkeypatch):
     ok, msg = remove_tracked_listing(db, user_id=user.id, wishlist_index=1, slot=1)
     assert ok is False
     assert msg == "Não há anúncio rastreado nesse slot."
+
+
+def test_tracking_index_ignores_soft_deleted_wishlist(db, monkeypatch):
+    from app.services.wishlists_service import remove_wishlist
+
+    user = _mk_user(db, 8004)
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+    assert add_wishlist(db, user.id, "deleted civic")[0] is True
+    listing = _mk_listing(db, 85)
+
+    ok, _msg = remove_wishlist(db, user.id, 1)
+    assert ok is True
+
+    ok, msg = add_tracked_listing(db, user_id=user.id, wishlist_index=1, listing_ref=listing.external_id)
+    assert ok is False
+    assert "wishlist não encontrada" in msg.lower()

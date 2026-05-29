@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Text, Boolean, ForeignKey, false
+from sqlalchemy import Text, Boolean, ForeignKey, false, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
+from datetime import datetime
 
 from app.db.base import Base, TimestampMixin
 
@@ -14,6 +15,7 @@ class Wishlist(TimestampMixin, Base):
     query: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     include_auctions: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="wishlists")
 

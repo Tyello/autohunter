@@ -18,7 +18,7 @@ from app.core.settings import settings
 from app.services.notifications_queue_service import queue_tracked_price_drop_alert
 from app.services.price_tracking_service import sync_tracked_listing_price
 from app.services.wishlists_service import invalidate_wishlist_summaries_cache
-from app.services.wishlists_service import get_user_plan_snapshot
+from app.services.wishlists_service import get_user_plan_snapshot, list_wishlists
 from app.services.plan_capabilities import (
     get_plan_capabilities,
     tracking_limit_message,
@@ -169,12 +169,7 @@ def evaluate_price_drop_alert(db: Session, tracked: WishlistTrackedListing, chan
 
 
 def _wishlist_from_index(db: Session, *, user_id, wishlist_index: int) -> Wishlist | None:
-    rows = (
-        db.query(Wishlist)
-        .filter(Wishlist.user_id == user_id)
-        .order_by(Wishlist.created_at.asc())
-        .all()
-    )
+    rows = list_wishlists(db, user_id)
     if wishlist_index < 1 or wishlist_index > len(rows):
         return None
     return rows[wishlist_index - 1]
@@ -236,6 +231,7 @@ def add_tracked_listing_result(
     existing = (
         db.query(WishlistTrackedListing)
         .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
         .order_by(WishlistTrackedListing.slot.asc())
         .all()
     )
@@ -263,6 +259,7 @@ def add_tracked_listing_result(
         db.query(WishlistTrackedListing)
         .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
         .filter(Wishlist.user_id == user_id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
         .count()
     )
     if total_tracked >= plan_caps.max_tracked_total:
@@ -364,6 +361,7 @@ def get_tracking_capacity_snapshot(db: Session, wishlist_id) -> TrackingCapacity
     rows = (
         db.query(WishlistTrackedListing.slot)
         .filter(WishlistTrackedListing.wishlist_id == wishlist_id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
         .order_by(WishlistTrackedListing.slot.asc())
         .all()
     )
@@ -388,6 +386,7 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
         db.query(WishlistTrackedListing, CarListing)
         .outerjoin(CarListing, CarListing.id == WishlistTrackedListing.car_listing_id)
         .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
         .order_by(WishlistTrackedListing.slot.asc())
         .all()
     )
@@ -397,6 +396,7 @@ def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple
         db.query(WishlistTrackedListing)
         .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
         .filter(Wishlist.user_id == user_id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
         .count()
     )
     lines: list[str] = [
@@ -469,6 +469,7 @@ def remove_tracked_listing(
         row = (
             db.query(WishlistTrackedListing)
             .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+            .filter(WishlistTrackedListing.is_active.is_(True))
             .filter(WishlistTrackedListing.slot == slot)
             .first()
         )
@@ -481,6 +482,7 @@ def remove_tracked_listing(
         row = (
             db.query(WishlistTrackedListing)
             .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+            .filter(WishlistTrackedListing.is_active.is_(True))
             .filter(WishlistTrackedListing.car_listing_id == listing_uuid)
             .first()
         )
@@ -490,7 +492,8 @@ def remove_tracked_listing(
             return False, "Não há anúncio rastreado nesse slot."
         return False, "Esse anúncio não está sendo rastreado nesta wishlist."
 
-    db.delete(row)
+    row.is_active = False
+    db.add(row)
     db.commit()
     invalidate_wishlist_summaries_cache(user_id)
     return True, f"Rastreamento removido do slot {row.slot}. Use /wishlist_track_list <n> para conferir."
@@ -505,6 +508,7 @@ def set_price_drop_alert_enabled(db: Session, *, user_id, wishlist_index: int, s
     row = (
         db.query(WishlistTrackedListing)
         .filter(WishlistTrackedListing.wishlist_id == wishlist.id)
+        .filter(WishlistTrackedListing.is_active.is_(True))
         .filter(WishlistTrackedListing.slot == slot)
         .first()
     )

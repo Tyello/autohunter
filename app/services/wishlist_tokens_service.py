@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
-from sqlalchemy import delete, select, func
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.core.text_norm import tokens as tokenize, STOPWORDS as _STOPWORDS
@@ -60,15 +60,27 @@ def extract_tokens(text: str) -> list[str]:
 
 def rebuild_tokens_for_wishlist(db: Session, wishlist: Wishlist) -> int:
     tokens = extract_tokens(wishlist.query)
-    db.execute(delete(WishlistToken).where(WishlistToken.wishlist_id == wishlist.id))
     if not tokens:
         return 0
-    db.add_all([WishlistToken(wishlist_id=wishlist.id, token=t) for t in tokens])
-    return len(tokens)
+
+    existing = set(
+        db.execute(
+            select(WishlistToken.token).where(WishlistToken.wishlist_id == wishlist.id)
+        ).scalars().all()
+    )
+    missing = [t for t in tokens if t not in existing]
+    if missing:
+        db.add_all([WishlistToken(wishlist_id=wishlist.id, token=t) for t in missing])
+    return len(missing)
 
 
 def reindex_active_wishlists(db: Session, batch_size: int = 200) -> ReindexResult:
-    q = select(Wishlist).where(Wishlist.is_active.is_(True)).order_by(Wishlist.created_at.asc())
+    q = (
+        select(Wishlist)
+        .where(Wishlist.is_active.is_(True))
+        .where(Wishlist.deleted_at.is_(None))
+        .order_by(Wishlist.created_at.asc())
+    )
     wishlists = db.execute(q).scalars().all()
 
     processed = 0
@@ -95,7 +107,10 @@ def candidate_wishlist_ids_for_listing_tokens(
     # group by wishlist_id, count overlaps
     q = (
         select(WishlistToken.wishlist_id, func.count(WishlistToken.token).label("c"))
+        .join(Wishlist, Wishlist.id == WishlistToken.wishlist_id)
         .where(WishlistToken.token.in_(toks))
+        .where(Wishlist.is_active.is_(True))
+        .where(Wishlist.deleted_at.is_(None))
         .group_by(WishlistToken.wishlist_id)
         .having(func.count(WishlistToken.token) >= int(min_overlap))
         .order_by(func.count(WishlistToken.token).desc())

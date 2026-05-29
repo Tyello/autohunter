@@ -115,3 +115,26 @@ def test_paused_wishlist_still_counts_against_free_limit(db, monkeypatch):
     ok, msg = add_wishlist(db, user.id, "audi a3")
     assert ok is False
     assert "limite" in msg.lower()
+
+
+def test_soft_deleted_wishlist_does_not_count_against_free_limit(db, monkeypatch):
+    from app.services.wishlists_service import list_wishlists, remove_wishlist
+
+    user = User(id=uuid.uuid4(), telegram_chat_id=999008, username="softlimit", is_active=True)
+    db.add(user)
+    db.commit()
+    monkeypatch.setattr("app.services.wishlists_service.trigger_initial_run_for_wishlist", lambda *_args, **_kwargs: {"triggered": 0})
+
+    assert add_wishlist(db, user.id, "civic")[0] is True
+    assert add_wishlist(db, user.id, "corolla")[0] is True
+    ok, msg = add_wishlist(db, user.id, "audi a3")
+    assert ok is False
+    assert "limite" in msg.lower()
+
+    ok, _msg = remove_wishlist(db, user.id, 1)
+    assert ok is True
+    assert len(list_wishlists(db, user.id)) == 1
+
+    ok, msg = add_wishlist(db, user.id, "audi a3")
+    assert ok is True, msg
+    assert len(list_wishlists(db, user.id)) == 2

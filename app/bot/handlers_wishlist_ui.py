@@ -358,6 +358,7 @@ async def cmd_wishlist_track_list(update: Update, context: ContextTypes.DEFAULT_
                     db.query(WishlistTrackedListing)
                     .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
                     .filter(Wishlist.user_id == user.id)
+                    .filter(WishlistTrackedListing.is_active.is_(True))
                     .count()
                 )
             except Exception:

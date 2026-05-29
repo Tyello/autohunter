@@ -562,6 +562,7 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.query(WishlistTrackedListing)
             .join(Wishlist, Wishlist.id == WishlistTrackedListing.wishlist_id)
             .filter(Wishlist.user_id == user.id)
+            .filter(WishlistTrackedListing.is_active.is_(True))
             .count()
         )
         caps = resolve_plan_capabilities(db, snap.get("plan_code"))

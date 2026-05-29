@@ -14,44 +14,43 @@ def cleanup_old_notifications(
     keep_sent_days: int = 30,
     keep_failed_days: int = 90,
 ) -> dict:
-    """Remove notificacoes antigas para manter a tabela enxuta.
+    """Report notification retention candidates without hard-deleting core data.
 
-    Regras padrao (simples e seguras):
-      - suppressed: 7 dias
-      - sent: 30 dias
-      - failed: 90 dias
+    `notifications` is protected by the database guardrail because it is part of
+    user-facing delivery history. Runtime cleanup must not set break-glass or
+    issue physical DELETE; destructive retention is an explicit maintenance task.
     """
     now = datetime.now(timezone.utc)
     cut_suppressed = now - timedelta(days=keep_suppressed_days)
     cut_sent = now - timedelta(days=keep_sent_days)
     cut_failed = now - timedelta(days=keep_failed_days)
 
-    deleted_suppressed = (
+    suppressed_candidates = (
         db.query(Notification)
         .filter(Notification.status == "suppressed")
         .filter(Notification.created_at < cut_suppressed)
-        .delete(synchronize_session=False)
+        .count()
     )
-
-    deleted_sent = (
+    sent_candidates = (
         db.query(Notification)
         .filter(Notification.status == "sent")
         .filter(Notification.sent_at.isnot(None))
         .filter(Notification.sent_at < cut_sent)
-        .delete(synchronize_session=False)
+        .count()
     )
-
-    deleted_failed = (
+    failed_candidates = (
         db.query(Notification)
         .filter(Notification.status == "failed")
         .filter(Notification.created_at < cut_failed)
-        .delete(synchronize_session=False)
+        .count()
     )
 
-    db.commit()
-
     return {
-        "deleted_suppressed": int(deleted_suppressed or 0),
-        "deleted_sent": int(deleted_sent or 0),
-        "deleted_failed": int(deleted_failed or 0),
+        "deleted_suppressed": 0,
+        "deleted_sent": 0,
+        "deleted_failed": 0,
+        "suppressed_candidates": int(suppressed_candidates or 0),
+        "sent_candidates": int(sent_candidates or 0),
+        "failed_candidates": int(failed_candidates or 0),
+        "mode": "report_only_core_data_guardrail",
     }
