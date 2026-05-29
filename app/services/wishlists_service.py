@@ -636,7 +636,13 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
         pass
 
     max_wishlists = get_max_wishlists_for_user(db, user_id)
-    count = db.query(func.count(Wishlist.id)).filter(Wishlist.user_id == user_id).scalar() or 0
+    count = (
+        db.query(func.count(Wishlist.id))
+        .filter(Wishlist.user_id == user_id)
+        .filter(Wishlist.deleted_at.is_(None))
+        .scalar()
+        or 0
+    )
     if count >= max_wishlists:
         return False, wishlist_limit_message(max_wishlists)
 

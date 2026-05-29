@@ -16,7 +16,7 @@ As tabelas abaixo representam identidade, buscas, filtros, rastreamento e fila/h
 - `account_members`
 - `user_digest_preferences`
 
-A PR não protege `source_configs`, `source_states`, `scrape_jobs`, `source_runs` ou tabelas operacionais de scraping.
+A PR não protege `source_configs`, `source_states`, `scrape_jobs`, `source_runs` ou tabelas operacionais de scraping. O guardrail reduz o risco de acidente operacional, mas não substitui role least-privilege, backup validado, revisão de scripts e runbooks de restore.
 
 ## Como o guardrail funciona
 
@@ -54,7 +54,7 @@ Se for necessário executar múltiplos comandos no mesmo bloco, mantenha todos d
 
 ## Usuário runtime do banco
 
-O runtime atual não deve usar `postgres` em `DATABASE_URL`. `postgres` é superusuário/poderoso demais para bot, scheduler, workers e API auxiliar. O usuário recomendado é uma role dedicada, por exemplo `autohunter_app`, com privilégios mínimos para executar o produto.
+O runtime atual não deve usar `postgres` em `DATABASE_URL`. `postgres` é superusuário/poderoso demais para bot, scheduler, workers e API auxiliar. O usuário recomendado é uma role dedicada, por exemplo `autohunter_app`, com privilégios mínimos para executar o produto. Enquanto o runtime continuar conectado como `postgres`, `/health`, `/admin/health` e `/admin health` devem aparecer em `WARNING` com a recomendação de migrar para `autohunter_app`.
 
 Checklist inicial para criar role least-privilege no Supabase/PostgreSQL:
 
@@ -119,3 +119,7 @@ Para não quebrar a UX normal do bot depois da instalação dos triggers:
 - rebuild de `wishlist_tokens` deixa de executar `DELETE` e apenas insere tokens faltantes.
 
 TODO remanescente: se houver necessidade futura de reduzir fisicamente `notifications` ou remover tokens obsoletos, tratar como manutenção controlada com break-glass, backup validado e escopo SQL explícito.
+
+## Observação sobre downgrade
+
+A migration troca constraints únicas físicas de filtros/rastreamentos por índices parciais apenas para linhas ativas. Depois que o runtime criar duplicatas inativas via soft delete, um downgrade que recrie as constraints antigas pode falhar até que duplicatas inativas sejam revisadas/limpas manualmente. Trate esse downgrade como operação de manutenção com backup validado e plano de limpeza explícito.

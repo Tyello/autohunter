@@ -75,7 +75,12 @@ def rebuild_tokens_for_wishlist(db: Session, wishlist: Wishlist) -> int:
 
 
 def reindex_active_wishlists(db: Session, batch_size: int = 200) -> ReindexResult:
-    q = select(Wishlist).where(Wishlist.is_active.is_(True)).order_by(Wishlist.created_at.asc())
+    q = (
+        select(Wishlist)
+        .where(Wishlist.is_active.is_(True))
+        .where(Wishlist.deleted_at.is_(None))
+        .order_by(Wishlist.created_at.asc())
+    )
     wishlists = db.execute(q).scalars().all()
 
     processed = 0
@@ -102,7 +107,10 @@ def candidate_wishlist_ids_for_listing_tokens(
     # group by wishlist_id, count overlaps
     q = (
         select(WishlistToken.wishlist_id, func.count(WishlistToken.token).label("c"))
+        .join(Wishlist, Wishlist.id == WishlistToken.wishlist_id)
         .where(WishlistToken.token.in_(toks))
+        .where(Wishlist.is_active.is_(True))
+        .where(Wishlist.deleted_at.is_(None))
         .group_by(WishlistToken.wishlist_id)
         .having(func.count(WishlistToken.token) >= int(min_overlap))
         .order_by(func.count(WishlistToken.token).desc())
