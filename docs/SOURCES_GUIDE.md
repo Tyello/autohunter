@@ -524,8 +524,9 @@ O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_suc
 
 ### Alertas operacionais e Autopilot canary-aware
 
-- O Autopilot de Mercado Livre é canary-aware: quando `mercadolivre_v2_canary_enabled=true`, Playwright está habilitado e `browser_fallback_enabled=true`, o diagnóstico principal para bloqueios é `/admin sources canary mercadolivre report`.
+- O Autopilot de Mercado Livre é canary-aware: quando `mercadolivre_v2_canary_enabled=true`, Playwright está habilitado e `browser_fallback_enabled=true`, o diagnóstico principal para bloqueios é `/admin sources canary mercadolivre report`. Quando o canary não está efetivo, esse comando não deve aparecer no alerta.
 - `SKIPPED:BACKOFF` não deve ser tratado como scheduler morto nem como source morta; significa pausa operacional esperada pelo circuit breaker/backoff.
+- Backoff ativo e stale causado por backoff representam o mesmo incidente operacional e devem ser consolidados em um único alerta `source_blocked_backoff:<source>`, sem emitir `source_stale:<source>` ou outro alerta de backoff separado para a mesma coleta.
 - `blocked_spike` em Mercado Livre durante canary não implica rollback imediato. Primeiro acompanhe o soak, respeite o backoff e evite probes completos em sequência.
 - Para status detalhado da source use `/admin sources show mercadolivre`; para saúde geral use `/admin health`.
 - Durante canary efetivo, alertas não devem sugerir habilitar `browser_fallback` quando ele já está ativo, nem `force_browser` como primeira ação sem evidência nova.

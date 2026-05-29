@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import psutil
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -104,7 +104,7 @@ def _source_ops_context(db: Session, src: str, cfg: SourceConfig, st: SourceStat
 def _source_status_commands(src: str, ctx: dict[str, Any]) -> str:
     if src == _MERCADOLIVRE and bool(ctx.get("canary_effective")):
         return (
-            "Diagnóstico: /admin sources canary mercadolivre report\n"
+            "Diagnóstico canary: /admin sources canary mercadolivre report\n"
             "Status: /admin sources show mercadolivre\n"
             "Health: /admin health"
         )
@@ -219,6 +219,18 @@ def _resource_cooldown_minutes(default_minutes: int = 30) -> int:
     seconds = int(getattr(settings, "resource_alert_throttle_seconds", default_seconds) or default_seconds)
     return max(1, seconds // 60)
 
+
+def _add_once(
+    alerts: List[OperationalAlert],
+    emitted_keys: Set[str],
+    logical_key: str,
+    alert: OperationalAlert,
+) -> None:
+    if logical_key in emitted_keys:
+        return
+    emitted_keys.add(logical_key)
+    alerts.append(alert)
+
 def collect_operational_alerts(
     db: Session,
     now: Optional[datetime] = None,
@@ -227,6 +239,7 @@ def collect_operational_alerts(
 ) -> List[OperationalAlert]:
     now = _now(now)
     alerts: List[OperationalAlert] = []
+    emitted_source_alerts: Set[str] = set()
 
     last_hb = db.query(SystemLog).filter(SystemLog.component == "scheduler", SystemLog.message == "heartbeat").order_by(SystemLog.created_at.desc()).first()
     hb_age = _age_minutes(getattr(last_hb, "created_at", None), now)
@@ -245,24 +258,45 @@ def collect_operational_alerts(
         backoff_until_dt = _as_utc(getattr(st, "next_allowed_at", None) if st else None)
         backoff_active = bool(backoff_until_dt and backoff_until_dt > _as_utc(now))
         status_backoff = _status_is_backoff(getattr(st, "last_status", None) if st else None)
+        source_backoff_key = f"source_backoff:{src}"
         if eval_.stale:
             if backoff_active or status_backoff:
                 until_dt = backoff_until_dt
                 until = until_dt.astimezone(timezone.utc).strftime("%H:%MZ") if until_dt else "-"
-                alerts.append(
+                _add_once(
+                    alerts,
+                    emitted_source_alerts,
+                    source_backoff_key,
                     OperationalAlert(
                         f"source_blocked_backoff:{src}",
-                        f"⚠️ Source {src} sem execução real há {eval_.age_minutes}m porque está em backoff ativo até {until}.\n"
+                        f"⚠️ Source {src} em backoff ativo até {until}.\n"
+                        f"Sem execução real há {eval_.age_minutes}m porque o circuit breaker/backoff está segurando novas tentativas.\n"
                         f"{_source_status_commands(src, ctx)}",
                         60,
-                    )
+                    ),
                 )
             else:
-                alerts.append(OperationalAlert(f"source_stale:{src}", f"🚨 Source {src} stale age={eval_.age_minutes}m status={(getattr(st,'last_status',None) or '-').upper()}. Próximo passo: /admin audit ou /admin sources show {src}.", 60))
+                _add_once(
+                    alerts,
+                    emitted_source_alerts,
+                    f"source_stale:{src}",
+                    OperationalAlert(f"source_stale:{src}", f"🚨 Source {src} stale age={eval_.age_minutes}m status={(getattr(st,'last_status',None) or '-').upper()}. Próximo passo: /admin audit ou /admin sources show {src}.", 60),
+                )
 
-        if backoff_active and not (eval_.stale and (backoff_active or status_backoff)) and backoff_until_dt and backoff_until_dt > _as_utc(now + timedelta(minutes=30)):
+        if backoff_active and backoff_until_dt and backoff_until_dt > _as_utc(now + timedelta(minutes=30)):
             until = backoff_until_dt.astimezone(timezone.utc).strftime("%H:%MZ")
-            alerts.append(OperationalAlert(f"source_blocked_backoff:{src}", f"⚠️ Source {src} em backoff até {until}. Próximo passo: aguarde backoff ou valide bloqueio em /admin health.\n{_source_status_commands(src, ctx)}", 60))
+            _add_once(
+                alerts,
+                emitted_source_alerts,
+                source_backoff_key,
+                OperationalAlert(
+                    f"source_blocked_backoff:{src}",
+                    f"⚠️ Source {src} em backoff ativo até {until}.\n"
+                    f"Próximo passo: aguarde backoff ou valide bloqueio em /admin health.\n"
+                    f"{_source_status_commands(src, ctx)}",
+                    60,
+                ),
+            )
 
     recent_err = db.query(SourceRun).filter(SourceRun.created_at >= now - timedelta(minutes=90), SourceRun.status.in_(["blocked", "error"])).order_by(SourceRun.created_at.desc()).limit(120).all()
     by_source_bucket = {}
