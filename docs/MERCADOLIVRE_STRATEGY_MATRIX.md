@@ -338,3 +338,12 @@ Decision:
    - revisão manual explícita antes de qualquer flip.
 
 O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_success/blocked/error`, último sucesso com found/inserted/matched/queued/duração, e recomendação de soak sem auto-flip).
+
+## Alertas durante canary V2
+
+- O Autopilot para Mercado Livre considera `configured_impl`, `runtime_impl`, `mercadolivre_v2_canary_enabled`, `canary_effective`, `browser_fallback_enabled`, `force_browser`, backoff e contagens recentes antes de recomendar ações.
+- Com canary efetivo, `blocked_spike` deve ser lido como sinal de soak/backoff, não como rollback automático nem como convite para `force_browser`.
+- Primeiro diagnóstico: `/admin sources canary mercadolivre report`.
+- Status detalhado: `/admin sources show mercadolivre`.
+- Health geral: `/admin health`.
+- `SKIPPED:BACKOFF` é pausa operacional esperada; quando combinado com bloqueios recentes, o alerta deve consolidar/correlacionar o incidente em vez de emitir stale crítico independente.

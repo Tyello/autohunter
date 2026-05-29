@@ -93,3 +93,67 @@ def test_resource_alerts_ram_disk_cache_and_throttle(db, monkeypatch, tmp_path):
     assert "ram_pressure" in keys3
     assert "disk_root_pressure" in keys3
     assert "disk_cache_pressure" in keys3
+
+
+def test_stale_skipped_backoff_is_warning_with_source_show_and_canary_report(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr("app.services.operational_alerts_service.settings.enable_playwright", True)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(
+        SourceConfig(
+            source="mercadolivre",
+            is_enabled=True,
+            sched_minutes=30,
+            browser_fallback_enabled=True,
+            extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True},
+        )
+    )
+    db.add(
+        SourceState(
+            source="mercadolivre",
+            last_effective_run_at=now - timedelta(minutes=181),
+            last_status="skipped:backoff",
+            next_allowed_at=now + timedelta(hours=2),
+        )
+    )
+    db.commit()
+
+    alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
+    keys = {a.key for a in alerts}
+    assert "source_stale:mercadolivre" not in keys
+    alert = next(a for a in alerts if a.key == "source_blocked_backoff:mercadolivre")
+    assert alert.message.startswith("⚠️")
+    assert "sem execução real há 181m porque está em backoff ativo" in alert.message
+    assert "/admin sources canary mercadolivre report" in alert.message
+    assert "/admin sources show mercadolivre" in alert.message
+    assert "/admin sources mercadolivre" not in alert.message
+
+
+def test_backoff_correlation_suppresses_redundant_stale_backoff_blocked_alerts(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr("app.services.operational_alerts_service.settings.enable_playwright", True)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(
+        SourceConfig(
+            source="mercadolivre",
+            is_enabled=True,
+            sched_minutes=30,
+            browser_fallback_enabled=True,
+            extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True},
+        )
+    )
+    db.add(
+        SourceState(
+            source="mercadolivre",
+            last_effective_run_at=now - timedelta(hours=4),
+            last_status="skipped:backoff",
+            next_allowed_at=now + timedelta(hours=2),
+        )
+    )
+    for i in range(3):
+        db.add(SourceRun(source="mercadolivre", kind="scheduler", status="blocked", created_at=now - timedelta(minutes=i + 1)))
+    db.commit()
+
+    alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
+    ml_keys = [a.key for a in alerts if "mercadolivre" in a.key]
+    assert ml_keys == ["source_blocked_backoff:mercadolivre"]
