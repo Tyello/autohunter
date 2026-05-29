@@ -324,3 +324,213 @@ def test_restore_apply_prints_final_status_and_is_idempotent_in_report(monkeypat
     rc_second = mod.main()
     assert rc_second == 0
     assert any("Status final: success_with_skips" in line for line in out)
+
+import gzip
+import subprocess
+import sys
+
+
+def _write_sql_gz(path: Path, blocks: dict[tuple[str, str], list[str]], extra_sql: str = "") -> Path:
+    lines: list[str] = []
+    if extra_sql:
+        lines.extend(extra_sql.strip().splitlines())
+    for (schema, table), rows in blocks.items():
+        lines.append(f"COPY {schema}.{table} (id) FROM stdin;")
+        lines.extend(rows)
+        lines.append("\\.")
+        lines.append("")
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
+def test_inspect_backup_dump_counts_copy_blocks(tmp_path):
+    mod = _load_module("inspect_backup_dump_counts", "scripts/backup_dump_utils.py")
+    backup = _write_sql_gz(
+        tmp_path / "healthy.sql.gz",
+        {
+            ("public", "users"): ["1"],
+            ("public", "wishlists"): ["10", "11"],
+            ("public", "wishlist_filters"): ["100"],
+            ("public", "source_configs"): ["200", "201", "202"],
+            ("public", "scrape_jobs"): ["300", "301", "302", "303"],
+            ("auth", "users"): ["do-not-count"],
+        },
+    )
+
+    report = mod.inspect_dump(backup)
+
+    assert report.counts["users"] == 1
+    assert report.counts["wishlists"] == 2
+    assert report.counts["wishlist_filters"] == 1
+    assert report.counts["source_configs"] == 3
+    assert report.counts["scrape_jobs"] == 4
+    assert report.present["users"]
+    assert report.ok
+
+
+def test_inspect_backup_dump_fails_when_users_zero(tmp_path):
+    mod = _load_module("inspect_backup_dump_users_zero", "scripts/backup_dump_utils.py")
+    backup = _write_sql_gz(
+        tmp_path / "no_users.sql.gz",
+        {
+            ("public", "users"): [],
+            ("public", "wishlists"): ["10"],
+            ("public", "source_configs"): ["200"],
+        },
+    )
+
+    report = mod.inspect_dump(backup)
+
+    assert not report.ok
+    assert "users=0" in report.failed_requirements()
+
+
+def test_inspect_backup_dump_fails_when_wishlists_zero(tmp_path):
+    mod = _load_module("inspect_backup_dump_wishlists_zero", "scripts/backup_dump_utils.py")
+    backup = _write_sql_gz(
+        tmp_path / "no_wishlists.sql.gz",
+        {
+            ("public", "users"): ["1"],
+            ("public", "wishlists"): [],
+            ("public", "source_configs"): ["200"],
+        },
+    )
+
+    report = mod.inspect_dump(backup)
+
+    assert not report.ok
+    assert "wishlists=0" in report.failed_requirements()
+
+
+def test_inspect_backup_dump_fails_for_invalid_gzip(tmp_path):
+    backup = tmp_path / "invalid.sql.gz"
+    backup.write_text("not really gzip", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/inspect_backup_dump.py"), str(backup)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "invalid backup dump" in result.stderr or "unable to read backup" in result.stderr
+
+
+def test_extract_core_restore_sql_only_allowed_tables(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    mod = _load_module("extract_core_restore_only_allowed", "scripts/extract_core_restore_sql.py")
+    backup = _write_sql_gz(
+        tmp_path / "mixed.sql.gz",
+        {
+            ("public", "source_configs"): ["source-config-should-not-restore"],
+            ("public", "users"): ["1"],
+            ("public", "wishlists"): ["10"],
+            ("public", "wishlist_filters"): ["100"],
+            ("public", "notifications"): ["900"],
+            ("auth", "users"): ["auth-user"],
+            ("storage", "objects"): ["object"],
+            ("extensions", "pg_stat_statements"): ["extension"],
+        },
+        extra_sql="""
+        CREATE TABLE public.users (id integer);
+        CREATE INDEX idx_users_id ON public.users (id);
+        ALTER TABLE public.users ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+        DROP TABLE public.old_table;
+        TRUNCATE public.users;
+        """,
+    )
+
+    sql = mod.render_restore_sql(backup)
+
+    assert "COPY public.users" in sql
+    assert "COPY public.wishlists" in sql
+    assert "COPY public.wishlist_filters" in sql
+    assert "COPY public.notifications" in sql
+    assert "source-config-should-not-restore" not in sql
+    assert "COPY auth." not in sql
+    assert "COPY storage." not in sql
+    assert "COPY extensions." not in sql
+
+
+def test_extract_core_restore_sql_preserves_safe_order(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    mod = _load_module("extract_core_restore_order", "scripts/extract_core_restore_sql.py")
+    backup = _write_sql_gz(
+        tmp_path / "unordered.sql.gz",
+        {
+            ("public", "notifications"): ["900"],
+            ("public", "wishlist_filters"): ["100"],
+            ("public", "wishlists"): ["10"],
+            ("public", "users"): ["1"],
+            ("public", "account_members"): ["2"],
+            ("public", "wishlist_tokens"): ["101"],
+            ("public", "wishlist_tracked_listings"): ["102"],
+            ("public", "wishlist_listing_activity"): ["103"],
+            ("public", "user_digest_preferences"): ["104"],
+        },
+    )
+
+    sql = mod.render_restore_sql(backup)
+
+    positions = [sql.index(f"COPY public.{table}") for table in mod.CORE_RESTORE_TABLES]
+    assert positions == sorted(positions)
+
+
+def test_extract_core_restore_sql_excludes_ddl_and_destructive_statements(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    mod = _load_module("extract_core_restore_no_ddl", "scripts/extract_core_restore_sql.py")
+    backup = _write_sql_gz(
+        tmp_path / "ddl.sql.gz",
+        {("public", "users"): ["1"], ("public", "wishlists"): ["10"]},
+        extra_sql="""
+        CREATE TABLE public.users (id integer);
+        CREATE INDEX idx_users_id ON public.users (id);
+        ALTER TABLE public.users ADD COLUMN name text;
+        DROP TABLE public.anything;
+        TRUNCATE public.users;
+        """,
+    )
+
+    sql = mod.render_restore_sql(backup).upper()
+
+    assert "CREATE TABLE" not in sql
+    assert "CREATE INDEX" not in sql
+    assert "ALTER TABLE" not in sql
+    assert "DROP " not in sql
+    assert "TRUNCATE" not in sql
+
+
+def test_backup_dump_scripts_do_not_require_database_url(monkeypatch, tmp_path):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    backup = _write_sql_gz(
+        tmp_path / "healthy.sql.gz",
+        {
+            ("public", "users"): ["1"],
+            ("public", "wishlists"): ["10"],
+            ("public", "source_configs"): ["200"],
+        },
+    )
+
+    inspect_result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/inspect_backup_dump.py"), str(backup)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = tmp_path / "core_restore.sql"
+    extract_result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/extract_core_restore_sql.py"), str(backup), "--output", str(output)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert inspect_result.returncode == 0
+    assert extract_result.returncode == 0
+    assert output.exists()
+    assert "DATABASE_URL" not in inspect_result.stdout
+    assert "DATABASE_URL" not in inspect_result.stderr
+    assert "DATABASE_URL" not in extract_result.stdout
+    assert "DATABASE_URL" not in extract_result.stderr

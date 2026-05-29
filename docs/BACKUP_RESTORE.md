@@ -9,8 +9,31 @@ Fechar a lacuna operacional de backup diário real do banco com `pg_dump`, mante
 ## Resumo rápido
 - Backup diário em cron: `scripts/backup_db.sh` (dump completo `.sql.gz`).
 - Verificação opcional de frescor: `scripts/check_latest_backup.sh`.
+- Inspeção segura de dump SQL: `scripts/inspect_backup_dump.py`.
+- Geração de restore seletivo core: `scripts/extract_core_restore_sql.py`.
 - Restore permanece **manual** e **potencialmente destrutivo**.
 - Backup core em JSON continua disponível para drill/table-level (`scripts/backup_core_data.py`).
+
+## Regra de ouro para Supabase existente
+
+> **Nunca aplique um dump completo `.sql.gz` diretamente em uma base Supabase existente.**
+>
+> O comando abaixo é inseguro contra produção/staging já provisionados e não deve ser usado para recuperar tabelas core dentro de uma base existente:
+>
+> ```bash
+> gunzip -c /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz | psql "$DATABASE_URL"
+> ```
+
+Motivo: o dump completo de `pg_dump` contém DDL e dados de vários schemas. Em uma base Supabase existente, ele pode tentar recriar schemas/tabelas/índices já existentes, tocar schemas gerenciados (`auth`, `storage`, `extensions` etc.), gerar erros de permissão, duplicar PK/unique, falhar em FKs e ainda assim inserir parte dos dados antes de parar ou continuar com ruído.
+
+Regras operacionais:
+
+- Restore completo de `.sql.gz` só deve ser feito em banco vazio/staging criado para esse fim.
+- Em produção existente, use restore seletivo de tabelas críticas com SQL gerado por `scripts/extract_core_restore_sql.py`.
+- Antes de qualquer restore, pare `autohunter-bot` e `autohunter-scheduler` e mantenha-os parados até a validação final.
+- Antes de qualquer restore, gere um dump do estado atual da base alvo.
+- Antes de aplicar, valide o conteúdo do backup com `scripts/inspect_backup_dump.py`.
+- Depois de aplicar, valide contagens, FKs órfãs, notificações antigas em fila, índice operacional de `scrape_jobs` e `alembic_version`.
 
 ## Classificação de dados (prioridade operacional)
 
@@ -124,24 +147,225 @@ Exit codes:
 - `1`: não existe backup (ou diretório ausente)
 - `2`: existe backup, mas velho demais
 
-## Restore manual (dump SQL)
+## Inspecionar backup SQL sem extrair e sem banco
 
-> **Atenção crítica:** restore é destrutivo se aplicado em base errada. Não executar em produção sem snapshot/backup prévio e janela operacional.
+Use a ferramenta de inspeção antes de qualquer restore. Ela lê o `.sql.gz` em streaming, não extrai permanentemente, não conecta no banco, não lê `.env` e não imprime `DATABASE_URL`.
+
+```bash
+python scripts/inspect_backup_dump.py /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz
+```
+
+Ela reporta tamanho e contagens dos blocos `COPY public.<tabela>` para:
+
+- `users`
+- `accounts`
+- `account_members`
+- `wishlists`
+- `wishlist_filters`
+- `wishlist_tokens`
+- `wishlist_tracked_listings`
+- `wishlist_listing_activity`
+- `notifications`
+- `source_configs`
+- `source_states`
+- `scrape_jobs`
+- `source_runs`
+
+Exit codes:
+
+- `0`: dump legível e `users`, `wishlists`, `source_configs` não vazios.
+- `1`: dump legível, mas algum gate crítico falhou (`users=0`, `wishlists=0` ou `source_configs=0`).
+- `2`: arquivo ausente/ilegível/gzip inválido/dump truncado.
+
+## Restore completo de dump SQL: somente banco vazio/staging
+
+> **Atenção crítica:** restore completo é destrutivo e só é aceitável em banco vazio/staging. Não use contra produção existente.
 
 1) Criar banco de destino vazio (preferencialmente staging primeiro).  
-2) Validar conexão alvo em `DATABASE_URL`.  
-3) Restaurar:
+2) Validar conexão alvo com uma URL explicitamente redigida/conferida, nunca colada de logs.
+3) Restaurar no banco vazio:
 ```bash
 gunzip -c /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz \
   | psql 'postgresql://user:<redacted>@host:5432/autohunter_restore'
 ```
-4) Verificar tabelas críticas pós-restore (exemplo):
+4) Verificar contagens e migrations no banco restaurado.
+
+## Restore seletivo core em produção existente
+
+Use este caminho para recuperar `users`/`wishlists` e tabelas dependentes em uma base Supabase já existente.
+
+### Antes
+
+1. Declarar janela operacional e responsável pela execução.
+2. Parar serviços e confirmar que permanecem parados:
+   ```bash
+   sudo systemctl stop autohunter-bot autohunter-scheduler
+   sudo systemctl is-active autohunter-bot autohunter-scheduler
+   ```
+3. Gerar dump do estado atual da base alvo antes de qualquer limpeza/restore:
+   ```bash
+   AUTOHUNTER_BACKUP_DIR=/var/backups/autohunter/pre_restore_$(date -u +%Y%m%d_%H%M%S) \
+     bash scripts/backup_db.sh
+   ```
+4. Inspecionar o backup candidato:
+   ```bash
+   python scripts/inspect_backup_dump.py /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz
+   ```
+5. Gerar SQL seletivo e revisar antes de aplicar:
+   ```bash
+   python scripts/extract_core_restore_sql.py \
+     /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz \
+     --output /tmp/autohunter_core_restore.sql
+   sed -n '1,120p' /tmp/autohunter_core_restore.sql
+   ```
+
+O SQL gerado contém apenas `COPY public.<tabela>` das tabelas permitidas, em ordem segura:
+
+1. `users`
+2. `account_members`
+3. `user_digest_preferences`
+4. `wishlists`
+5. `wishlist_filters`
+6. `wishlist_tokens`
+7. `wishlist_tracked_listings`
+8. `wishlist_listing_activity`
+9. `notifications`
+
+### Limpeza controlada antes do restore seletivo
+
+Não existe script que apague dados de produção automaticamente. Se for necessário substituir o core atual pelo core do backup, execute manualmente, dentro de transação, somente depois de backup pré-restore e revisão por operador.
+
+Ordem segura de limpeza:
+
+```sql
+BEGIN;
+DELETE FROM account_members;
+DELETE FROM user_digest_preferences;
+DELETE FROM notifications;
+DELETE FROM wishlist_tracked_listings;
+DELETE FROM wishlist_tokens;
+DELETE FROM wishlist_listing_activity;
+DELETE FROM wishlist_filters;
+DELETE FROM wishlists;
+DELETE FROM users;
+-- COMMIT somente após revisar o impacto nesta sessão.
+-- ROLLBACK se qualquer contagem/escopo estiver errado.
+COMMIT;
+```
+
+Não limpar neste procedimento:
+
+- `source_configs`
+- `source_states`
+- `scrape_jobs`
+- `source_runs`
+- `car_listings`
+- `telemetry_events`
+- `system_logs`
+- `app_kv`
+- `alembic_version`
+
+### Durante
+
+1. Confirmar novamente que serviços continuam parados.
+2. Aplicar somente o SQL seletivo revisado:
+   ```bash
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/autohunter_core_restore.sql
+   ```
+3. Se ocorrer qualquer erro, pare, preserve logs, não religue serviços e avalie rollback/novo restore a partir do dump pré-restore.
+
+### Depois: validação pós-restore obrigatória
+
+Serviços ainda devem estar parados durante estas validações.
+
+Contagens core:
+
+```sql
+SELECT 'users' AS table_name, COUNT(*) FROM users
+UNION ALL SELECT 'wishlists', COUNT(*) FROM wishlists
+UNION ALL SELECT 'wishlist_filters', COUNT(*) FROM wishlist_filters
+UNION ALL SELECT 'wishlist_tokens', COUNT(*) FROM wishlist_tokens
+UNION ALL SELECT 'wishlist_tracked_listings', COUNT(*) FROM wishlist_tracked_listings
+UNION ALL SELECT 'wishlist_listing_activity', COUNT(*) FROM wishlist_listing_activity
+UNION ALL SELECT 'notifications', COUNT(*) FROM notifications
+ORDER BY table_name;
+```
+
+Checks de FKs órfãs:
+
+```sql
+SELECT 'wishlists_without_user' AS check_name, COUNT(*)
+FROM wishlists w
+LEFT JOIN users u ON u.id = w.user_id
+WHERE u.id IS NULL
+UNION ALL
+SELECT 'filters_without_wishlist', COUNT(*)
+FROM wishlist_filters f
+LEFT JOIN wishlists w ON w.id = f.wishlist_id
+WHERE w.id IS NULL
+UNION ALL
+SELECT 'tokens_without_wishlist', COUNT(*)
+FROM wishlist_tokens t
+LEFT JOIN wishlists w ON w.id = t.wishlist_id
+WHERE w.id IS NULL
+UNION ALL
+SELECT 'tracked_without_wishlist', COUNT(*)
+FROM wishlist_tracked_listings tr
+LEFT JOIN wishlists w ON w.id = tr.wishlist_id
+WHERE w.id IS NULL
+UNION ALL
+SELECT 'activity_without_wishlist', COUNT(*)
+FROM wishlist_listing_activity a
+LEFT JOIN wishlists w ON w.id = a.wishlist_id
+WHERE w.id IS NULL
+UNION ALL
+SELECT 'notifications_without_user', COUNT(*)
+FROM notifications n
+LEFT JOIN users u ON u.id = n.user_id
+WHERE n.user_id IS NOT NULL AND u.id IS NULL
+UNION ALL
+SELECT 'notifications_without_wishlist', COUNT(*)
+FROM notifications n
+LEFT JOIN wishlists w ON w.id = n.wishlist_id
+WHERE n.wishlist_id IS NOT NULL AND w.id IS NULL;
+```
+
+Notificações pendentes/queued antigas:
+
+```sql
+SELECT status, COUNT(*) AS total, MIN(created_at) AS oldest_created_at, MAX(created_at) AS newest_created_at
+FROM notifications
+WHERE status IN ('pending', 'queued')
+GROUP BY status
+ORDER BY status;
+```
+
+Migrations e índice operacional:
+
+```sql
+SELECT * FROM alembic_version ORDER BY version_num;
+
+SELECT schemaname, tablename, indexname, indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename = 'scrape_jobs'
+ORDER BY indexname;
+```
+
+Critérios mínimos antes de religar:
+
+- Contagens batem com o backup escolhido ou com a expectativa documentada do incidente.
+- Todos os checks de órfãos retornam `0`.
+- `alembic_version` tem exatamente uma linha esperada para o código em produção.
+- O índice `uq_scrape_jobs_active_source_queue` aparece em `pg_indexes`.
+- Não há volume inesperado de notificações `pending`/`queued` antigas que possa causar reenvio indevido.
+- `autohunter-bot` e `autohunter-scheduler` ainda estão parados antes da decisão final de religar.
+
+Só depois disso:
+
 ```bash
-psql 'postgresql://user:<redacted>@host:5432/autohunter_restore' -c "SELECT COUNT(*) FROM users;"
-psql 'postgresql://user:<redacted>@host:5432/autohunter_restore' -c "SELECT COUNT(*) FROM wishlists;"
-psql 'postgresql://user:<redacted>@host:5432/autohunter_restore' -c "SELECT COUNT(*) FROM wishlist_filters;"
-psql 'postgresql://user:<redacted>@host:5432/autohunter_restore' -c "SELECT COUNT(*) FROM notifications;"
-psql 'postgresql://user:<redacted>@host:5432/autohunter_restore' -c "SELECT COUNT(*) FROM car_listings;"
+sudo systemctl start autohunter-scheduler autohunter-bot
+sudo systemctl status autohunter-scheduler autohunter-bot --no-pager
 ```
 
 ## Raspberry Pi 4 / cron
@@ -205,9 +429,43 @@ Próximos passos quando não estiver `OK`:
 
 1. Verificar a seção `🗄 Backup` em `/admin health` e ler o motivo exato de `FAIL`/`WARNING`.
 2. Rodar `bash scripts/check_latest_backup.sh` para diagnóstico rápido de frescor.
-3. Validar o conteúdo do dump com `gunzip -c /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz | less` ou restaurar em staging para conferir contagens reais.
+3. Validar o conteúdo do dump com `python scripts/inspect_backup_dump.py /var/backups/autohunter/autohunter_YYYYmmdd_HHMMSS.sql.gz` ou restaurar em staging para conferir contagens reais.
 4. Verificar se o cron diário de backup está ativo.
 5. Verificar `DATABASE_URL` do ambiente operacional usado pelo cron/script.
 6. Verificar permissões e existência de `/var/backups/autohunter` (ou `AUTOHUNTER_BACKUP_DIR` configurado).
 
 > Esta checagem é somente de observabilidade no admin/Telegram; não executa backup e não executa restore. As contagens são estimadas a partir dos blocos `COPY` do `pg_dump`; para confirmação definitiva, restaure em staging e rode `COUNT(*)`.
+
+
+### Detalhe operacional da recuperação
+
+O caminho inseguro tentado durante o incidente foi aplicar o dump completo saudável de 2026-05-27 diretamente na base Supabase existente. Isso gerou erros de schema já existente, permissões em schemas gerenciados, duplicidade de PK/unique, falhas de FK, inserções parciais e `alembic_version` temporariamente com duas linhas (`c0f1e2d3a4b5` e `e7a1c9f2b4d3`).
+
+O caminho correto foi extrair apenas blocos `COPY public.<tabela>` críticos do backup saudável e aplicá-los em ordem de dependência, após limpeza controlada do core afetado. A partir deste runbook, o operador deve usar `scripts/inspect_backup_dump.py` e `scripts/extract_core_restore_sql.py`; não deve montar `awk`/`zcat` manualmente para recuperar `users`/`wishlists`.
+
+### Checklist do incidente: antes, durante e depois
+
+Antes:
+
+- [ ] Confirmar impacto e escolher backup candidato pelo conteúdo, não apenas por data.
+- [ ] Parar `autohunter-bot` e `autohunter-scheduler`.
+- [ ] Gerar dump do estado atual da base alvo.
+- [ ] Rodar `python scripts/inspect_backup_dump.py <backup.sql.gz>`.
+- [ ] Gerar `python scripts/extract_core_restore_sql.py <backup.sql.gz> --output /tmp/autohunter_core_restore.sql`.
+- [ ] Revisar que o SQL gerado contém apenas `COPY public.users`, dependentes de wishlist e `notifications`.
+
+Durante:
+
+- [ ] Manter serviços parados.
+- [ ] Se necessário, executar limpeza controlada somente das tabelas core documentadas.
+- [ ] Aplicar `/tmp/autohunter_core_restore.sql` com `psql -v ON_ERROR_STOP=1 -f`.
+- [ ] Parar imediatamente se houver erro; não continuar com tentativas de dump completo.
+
+Depois:
+
+- [ ] Validar contagens core.
+- [ ] Validar órfãos de FK.
+- [ ] Validar notificações `pending`/`queued` antigas.
+- [ ] Validar `SELECT * FROM alembic_version ORDER BY version_num;` com uma única linha.
+- [ ] Validar presença de `uq_scrape_jobs_active_source_queue` em `pg_indexes`.
+- [ ] Religação dos serviços só após aprovação explícita da validação.
