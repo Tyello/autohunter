@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.settings import settings
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
+from app.models.source_run import SourceRun
 from app.models.wishlist import Wishlist
 from app.scheduler.jobs import scrape_ingest_match_many
 from app.services.system_logs_service import log
@@ -20,6 +21,7 @@ from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import get_eligible_wishlists_for_source
 from app.services.source_execution_helpers import build_scrape_dispatch, build_run_payload
 from app.sources.registry import get_source
+from app.services.source_operational_policy import classify_source_operational_role
 from app.sources.flags import read_source_impl_flags
 from app.sources.media import derive_thumbnail_url
 from app.sources.normalize import (
@@ -142,6 +144,75 @@ def _get_cfg(db: Session, source: str) -> Optional[SourceConfig]:
 def _wishlist_eligibility_snapshot(db: Session, src: str) -> tuple[list[Wishlist], dict[str, int]]:
     return get_eligible_wishlists_for_source(db, src)
 
+
+
+
+def _latest_positive_found_baseline(db: Session, source: str, *, limit: int = 10) -> int | None:
+    """Return the most recent positive found count from recent successful source runs."""
+    rows = (
+        db.query(SourceRun)
+        .filter(SourceRun.source == source)
+        .filter(SourceRun.status == "success")
+        .order_by(SourceRun.created_at.desc())
+        .limit(max(1, int(limit or 10)))
+        .all()
+    )
+    for row in rows:
+        found = int(getattr(row, "items_found", 0) or 0)
+        if found > 0:
+            return found
+    return None
+
+
+def _zero_result_observability_payload(
+    *,
+    db: Session,
+    source: str,
+    plugin: Any,
+    cfg: SourceConfig,
+    total_found: int,
+    total_wishlists: int,
+    groups_count: int,
+    group_summaries: list[dict[str, Any]],
+    runtime_impl: str | None,
+) -> dict[str, Any]:
+    """Build bounded zero-result diagnostics without changing run status/backoff."""
+    zero_groups = [g for g in group_summaries if int(g.get("found") or 0) == 0]
+    out: dict[str, Any] = {
+        "groups_count": int(groups_count or 0),
+        "total_wishlists": int(total_wishlists or 0),
+        "zero_result_groups_count": len(zero_groups),
+        "sample_group_urls": [str(g.get("url") or "")[:240] for g in zero_groups[:3] if g.get("url")],
+        "source_group_summaries": group_summaries[:3],
+    }
+
+    op_class = classify_source_operational_role(plugin, cfg=cfg)
+    cfg_role = None
+    cfg_extra = getattr(cfg, "extra", None)
+    if isinstance(cfg_extra, dict) and isinstance(cfg_extra.get("operational_role"), str):
+        cfg_role = cfg_extra.get("operational_role").strip().lower()
+    monitored_role = (cfg_role or op_class.role) in {"primary", "fragile"} or source == "mercadolivre"
+    supports_wishlist = bool(getattr(plugin, "supports_wishlist_monitoring", True))
+    baseline_found = None
+    if (
+        int(total_found or 0) == 0
+        and int(total_wishlists or 0) > 0
+        and bool(getattr(cfg, "is_enabled", False))
+        and supports_wishlist
+        and monitored_role
+    ):
+        baseline_found = _latest_positive_found_baseline(db, source, limit=10)
+
+    if baseline_found is not None and baseline_found > 0:
+        out.update(
+            {
+                "suspicious_zero_results": True,
+                "zero_result_reason": "found_zero_with_recent_positive_baseline",
+                "zero_result_baseline_found": int(baseline_found),
+                "zero_result_runtime_impl": runtime_impl,
+            }
+        )
+    return out
 
 def run_source_for_all_wishlists(
     db: Session,
@@ -333,6 +404,7 @@ def run_source_for_all_wishlists(
     last_hybrid_blocked_status: int | None = None
     last_runtime_impl: str | None = None
     last_adapter_meta: dict[str, Any] | None = None
+    group_summaries: list[dict[str, Any]] = []
 
     for url, g in groups.items():
         job_name = f"scraper_{src}"
@@ -565,6 +637,16 @@ def run_source_for_all_wishlists(
             db.commit()
             return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
 
+        group_summaries.append(
+            {
+                "query": str(g.get("query") or "")[:120] if g.get("query") is not None else None,
+                "url": str(url or "")[:240],
+                "found": int(res.get("found") or 0),
+                "matched": int(res.get("matched") or 0),
+                "runtime_impl": str(res.get("runtime_impl") or last_runtime_impl or "") or None,
+            }
+        )
+
         total_found += int(res.get("found") or 0)
         total_inserted += int(res.get("inserted") or 0)
         total_matched += int(res.get("matched") or 0)
@@ -585,11 +667,28 @@ def run_source_for_all_wishlists(
         run_summary_ok["adapter_raw_count"] = last_adapter_meta.get("raw_count")
         run_summary_ok["adapter_normalized_count"] = last_adapter_meta.get("normalized_count")
 
+    zero_result_payload = _zero_result_observability_payload(
+        db=db,
+        source=src,
+        plugin=plugin,
+        cfg=cfg,
+        total_found=total_found,
+        total_wishlists=total_wishlists,
+        groups_count=groups_count,
+        group_summaries=group_summaries,
+        runtime_impl=last_runtime_impl,
+    )
+    run_summary_ok.update(zero_result_payload)
+    if zero_result_payload.get("suspicious_zero_results") is True:
+        notes = run_summary_ok.setdefault("notes", [])
+        if isinstance(notes, list):
+            notes.append("zero_result_suspect: found=0 com baseline recente positivo")
+
     mark_success(
         db,
         src,
         rate_limit_seconds=int(cfg.rate_limit_seconds or 0),
-        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "run_reason": reason},
+        payload={"groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "hybrid_browser_used": any_hybrid_browser, "hybrid_blocked": any_hybrid_blocked, "hybrid_blocked_status": last_hybrid_blocked_status, "run_reason": reason, **zero_result_payload},
     )
     run_row = record_run(
         db,
@@ -618,6 +717,7 @@ def run_source_for_all_wishlists(
             adapter_meta=last_adapter_meta,
         ),
     )
+    run_row.payload = {**(run_row.payload or {}), **zero_result_payload}
 
     activity_stats = reconcile_listing_activity_for_source_run(
         db,
@@ -648,4 +748,4 @@ def run_source_for_all_wishlists(
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, reason, "ok"])
 
     db.commit()
-    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason, "runtime_impl": last_runtime_impl, "adapter_meta": last_adapter_meta, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}
+    return {"ok": True, "status": "success", "duration_ms": duration_ms, "groups": len(groups), "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_summary": run_summary_ok, "run_reason": reason, "runtime_impl": last_runtime_impl, "adapter_meta": last_adapter_meta, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3), **zero_result_payload}

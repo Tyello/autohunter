@@ -77,3 +77,20 @@ def test_admin_render_blocked_wm_diag_realistic_blocked_reason_string():
     text = "\n".join(lines)
     assert "provider=perimeterx" in text
     assert "bloqueio anti-bot/fingerprint" in text
+
+
+def test_admin_render_includes_zero_result_suspect_warning():
+    summary = {
+        "status": "OK",
+        "found": 0,
+        "inserted": 0,
+        "matched": 0,
+        "queued": 0,
+        "suspicious_zero_results": True,
+        "zero_result_reason": "found_zero_with_recent_positive_baseline",
+        "zero_result_baseline_found": 3,
+    }
+    lines = _render_run_summary_lines(summary)
+    text = "\n".join(lines)
+    assert "zero_result_suspect" in text
+    assert "baseline_found=3" in text

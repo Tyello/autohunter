@@ -532,3 +532,9 @@ O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_suc
 - `SKIPPED:BACKOFF` não é evidência de scheduler morto; é backoff ativo e deve aparecer no máximo como warning operacional, com diagnóstico por `/admin sources canary mercadolivre report`.
 - O comando de status detalhado para source é `/admin sources show mercadolivre`; não usar o formato ambíguo `/admin sources mercadolivre` em mensagens operacionais.
 - Bloqueio durante canary não muda o gate de migração: aguardar soak, revisar relatório canary e só considerar rollback manual (`/admin sources canary mercadolivre off`) se bloqueios/erros persistirem e sucessos cessarem.
+
+### Guardrail de observabilidade para zero-result no V2 canary
+
+Durante migrações V1→V2, `runtime_impl=v2_canary` com `found=0` não deve ser considerado automaticamente saudável quando a source é primária, há wishlists elegíveis e existe baseline recente com resultados. O runner registra `suspicious_zero_results=true` no payload/run summary nesses casos, junto do baseline encontrado e de amostras limitadas por grupo de URL/query.
+
+Esse guardrail não altera parser, scraping, scheduler, backoff ou decisão de flip. Ele apenas torna a anomalia visível em `SourceRun` e `/admin sources`, permitindo comparar o comportamento do canary via `/admin sources canary mercadolivre report` antes de qualquer ação operacional.

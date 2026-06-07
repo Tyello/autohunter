@@ -531,3 +531,11 @@ O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_suc
 - Para status detalhado da source use `/admin sources show mercadolivre`; para saúde geral use `/admin health`.
 - Durante canary efetivo, alertas não devem sugerir habilitar `browser_fallback` quando ele já está ativo, nem `force_browser` como primeira ação sem evidência nova.
 - Rollback manual continua disponível por `/admin sources canary mercadolivre off`, apenas se bloqueios/erros forem recorrentes e os sucessos cessarem.
+
+### Observabilidade de `found=0` em source primária
+
+Execuções de sources monitoradas por wishlist que terminam com `status=success` e `items_found=0` não devem ser lidas automaticamente como sucesso limpo quando há baseline recente positivo. O runtime agora marca `suspicious_zero_results=true` no `SourceRun.payload` e no `run_summary` quando a source está habilitada, tem wishlists elegíveis, é primária/frágil (ou `mercadolivre`) e algum dos últimos 10 `SourceRun` de sucesso da mesma source teve `items_found > 0`.
+
+Essa sinalização é uma anomalia de qualidade/observabilidade: ela não transforma o run em `blocked`/`error`, não aplica backoff e não altera scraper, parser ou cadência do scheduler. O payload inclui `zero_result_reason=found_zero_with_recent_positive_baseline`, `zero_result_baseline_found`, `zero_result_runtime_impl` e um resumo limitado de grupos (`groups_count`, `total_wishlists`, `zero_result_groups_count`, `sample_group_urls` e `source_group_summaries`) para facilitar triagem sem poluir o health.
+
+No `/admin sources`, o último sucesso suspeito aparece com `⚠️ zero_result_suspect`. Para Mercado Livre canary, valide primeiro com `/admin sources canary mercadolivre report`; se precisar de uma validação manual consciente, rode `/admin runall mercadolivre`.

@@ -347,3 +347,9 @@ O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_suc
 - Status detalhado: `/admin sources show mercadolivre`.
 - Health geral: `/admin health`.
 - `SKIPPED:BACKOFF` é pausa operacional esperada; quando combinado com bloqueios recentes, o alerta deve consolidar/correlacionar o incidente em vez de emitir stale crítico independente.
+
+### Canary V2: sucesso com `found=0`
+
+Para o Mercado Livre, especialmente em `runtime_impl=v2_canary`, um run OK com `found=0` pode indicar regressão de captura, resposta vazia inesperada ou mudança operacional mesmo sem erro explícito. Quando há wishlists elegíveis e baseline recente positivo nos últimos runs de sucesso, o runtime marca o run com `suspicious_zero_results=true` e `zero_result_reason=found_zero_with_recent_positive_baseline`.
+
+Isso não é rollback automático nem bloqueio: o run continua registrado como `success`, sem backoff, mas deixa de ser tratado como sucesso limpo na leitura operacional. O próximo passo recomendado é consultar `/admin sources canary mercadolivre report` para ver o histórico do canary e, se necessário, usar `/admin runall mercadolivre` para uma validação manual controlada.
