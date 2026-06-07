@@ -2481,7 +2481,12 @@ def _render_run_summary_lines(run_summary: Optional[dict]) -> list[str]:
     inserted = int(run_summary.get("inserted") or 0)
     matched = int(run_summary.get("matched") or 0)
     queued = int(run_summary.get("queued") or 0)
-    lines.append(f"health status={status} found={found} inserted={inserted} matched={matched} queued={queued}")
+    suffix = " ⚠️ zero_result_suspect" if run_summary.get("suspicious_zero_results") is True else ""
+    lines.append(f"health status={status} found={found} inserted={inserted} matched={matched} queued={queued}{suffix}")
+    if run_summary.get("suspicious_zero_results") is True:
+        baseline = run_summary.get("zero_result_baseline_found")
+        reason = run_summary.get("zero_result_reason") or "found_zero_with_recent_positive_baseline"
+        lines.append(f"zero_result_suspect: reason={reason} baseline_found={baseline}")
 
     buckets = run_summary.get("reason_buckets") or {}
     top = top_buckets(buckets, k=3)
@@ -2763,8 +2768,18 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 action = "verificar scheduler/job"
             else:
                 if lr_cause.status == "success":
-                    kind = "OK"
-                    emoji = "✅"
+                    cause_payload = _payload_as_dict(getattr(lr_cause, "payload", None)) or {}
+                    if cause_payload.get("suspicious_zero_results") is True:
+                        kind = "OK"
+                        emoji = "⚠️"
+                        why = "found=0 com baseline recente positivo"
+                        if p.name == "mercadolivre":
+                            action = "validar /admin sources canary mercadolivre report; se necessário /admin runall mercadolivre"
+                        else:
+                            action = f"validar /admin runall {p.name}"
+                    else:
+                        kind = "OK"
+                        emoji = "✅"
                 elif lr_cause.status == "blocked":
                     kind = "BLOCKED"
                     emoji = "🟠"
@@ -2871,6 +2886,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
                         last_line += f" thumb={pct}%"
                     except Exception:
                         pass
+                if payload.get("suspicious_zero_results") is True:
+                    last_line += " ⚠️ zero_result_suspect"
                 if lr.status == "skipped":
                     skip_reason = payload.get("reason") or payload.get("skip_reason") or payload.get("status_reason")
                     if skip_reason:
@@ -2908,7 +2925,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 pass
 
         backoff_active = bool(enabled and st and st.next_allowed_at and st.next_allowed_at > now)
-        if kind != "OK" or backoff_active:
+        if kind != "OK" or backoff_active or (why and why != "-"):
             lines.append(f"   causa: {why}")
             lines.append(f"   ação: {action}")
         if stale_eval is not None and stale_eval.stale and not op_class.include_in_critical_stale:

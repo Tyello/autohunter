@@ -267,3 +267,58 @@ def test_admin_sources_experimental_stale_does_not_contaminate_critical_health(d
     assert "experimental_src" in out
     assert "note: role=experimental (stale não crítico em /admin health)" in out
     assert "Sources críticas stale:" not in out
+
+
+def test_admin_sources_renders_zero_result_suspect_for_mercadolivre_canary(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    payload = {
+        "runtime_impl": "v2_canary",
+        "suspicious_zero_results": True,
+        "zero_result_reason": "found_zero_with_recent_positive_baseline",
+        "zero_result_baseline_found": 3,
+        "run_summary": {
+            "status": "OK",
+            "found": 0,
+            "inserted": 0,
+            "matched": 0,
+            "queued": 0,
+            "suspicious_zero_results": True,
+            "zero_result_reason": "found_zero_with_recent_positive_baseline",
+            "zero_result_baseline_found": 3,
+        },
+    }
+    db.add(
+        SourceConfig(
+            source="mercadolivre",
+            is_enabled=True,
+            sched_minutes=60,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+            browser_fallback_enabled=True,
+            extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True},
+        )
+    )
+    db.add(SourceState(source="mercadolivre", last_run_at=now - timedelta(minutes=5), last_status="success", last_payload=payload))
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="success",
+            created_at=now - timedelta(minutes=5),
+            duration_ms=8715,
+            items_found=0,
+            items_matched=0,
+            payload=payload,
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("mercadolivre")])
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "zero_result_suspect" in out
+    assert "found=0 com baseline recente positivo" in out
+    assert "/admin sources canary mercadolivre report" in out
