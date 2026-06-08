@@ -353,3 +353,58 @@ O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_suc
 Para o Mercado Livre, especialmente em `runtime_impl=v2_canary`, um run OK com `found=0` pode indicar regressão de captura, resposta vazia inesperada ou mudança operacional mesmo sem erro explícito. Quando há wishlists elegíveis e baseline recente positivo nos últimos runs de sucesso, o runtime marca o run com `suspicious_zero_results=true` e `zero_result_reason=found_zero_with_recent_positive_baseline`.
 
 Isso não é rollback automático nem bloqueio: o run continua registrado como `success`, sem backoff, mas deixa de ser tratado como sucesso limpo na leitura operacional. O próximo passo recomendado é consultar `/admin sources canary mercadolivre report` para ver o histórico do canary e, se necessário, usar `/admin runall mercadolivre` para uma validação manual controlada.
+
+## Promoção manual V2 pós-canary validado (2026-06-08)
+
+Evidência operacional de produção registrada no último `/admin sources`:
+
+- `mercadolivre — OK`;
+- `runtime_impl=v2_canary`;
+- `last success at=2026-06-08 08:59:29Z`;
+- `dur=83057ms`;
+- `found=182`;
+- `match=8`;
+- `thumb=100%`;
+- últimas 24h efetivas: `ok=24`, `err=0`, `blk=0`, `total=24/24`, `ok_rate=100%`, `skips=0`.
+
+Interpretação obrigatória para novas tarefas:
+
+- Mercado Livre V2 canary está saudável e validado para promoção manual;
+- `configured_impl` pode ser promovido de `v1` para `v2` por comando admin guardado;
+- não existe promoção automática;
+- WebMotors e outras sources continuam fora desta decisão.
+
+Comando de promoção permitido:
+
+```text
+/admin sources promote mercadolivre v2
+```
+
+Critério mínimo do comando antes de alterar `source_configs.extra`:
+
+1. source precisa ser `mercadolivre`;
+2. source precisa existir;
+3. Playwright precisa estar habilitado;
+4. `browser_fallback_enabled=True`;
+5. canary efetivo ou `runtime_impl=v2_canary` recente;
+6. últimas 24h com `success >= 3`, `blocked == 0`, `error == 0` e pelo menos um sucesso com `found > 0`.
+
+A promoção faz merge não destrutivo em `extra` e aplica apenas:
+
+```json
+{"impl":"v2","mercadolivre_v2_canary_enabled":false}
+```
+
+Rollback manual disponível:
+
+```text
+/admin sources rollback mercadolivre v1
+```
+
+O rollback faz merge não destrutivo e aplica:
+
+```json
+{"impl":"v1","mercadolivre_v2_canary_enabled":false}
+```
+
+Leitura pós-promoção: `canary_effective=False` com `configured_impl=v2` não é falha; o motivo esperado é `not_needed_configured_impl_v2` porque o canary deixou de ser necessário.

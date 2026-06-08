@@ -85,6 +85,32 @@ def test_admin_sources_show_displays_impl_and_canary_from_extra(monkeypatch):
     assert "mercadolivre_v2_canary_enabled=True" in out
 
 
+def test_admin_sources_show_configured_v2_canary_not_needed(monkeypatch):
+    cfg = SimpleNamespace(
+        source="mercadolivre",
+        is_enabled=True,
+        sched_minutes=60,
+        cooldown_minutes=0,
+        rate_limit_seconds=0,
+        proxy_server=None,
+        browser_fallback_enabled=True,
+        force_browser=False,
+        extra={"impl": "v2", "mercadolivre_v2_canary_enabled": False},
+    )
+    monkeypatch.setattr(mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(mod, "ensure_source_configs", lambda _db: None)
+    monkeypatch.setattr(mod, "get_source_config", lambda _db, _source: cfg)
+
+    up = _Update()
+    asyncio.run(mod.admin_sources_show(up, "mercadolivre"))
+
+    out = up.message.texts[-1]
+    assert "configured_impl=v2" in out
+    assert "mercadolivre_v2_canary_enabled=False" in out
+    assert "canary_effective=False" in out
+    assert "canary_reason=not_needed_configured_impl_v2" in out
+
+
 def test_admin_sources_show_displays_last_runtime_impl(monkeypatch):
     cfg = SimpleNamespace(
         source="mercadolivre",
