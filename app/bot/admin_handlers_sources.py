@@ -47,6 +47,8 @@ def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24)
     success = 0
     blocked = 0
     error = 0
+    found_positive_success = False
+    max_success_found = 0
     last_runtime_impl = "v2_canary" if canary_runs else "-"
     last_success_at = "-"
     last_success_found = 0
@@ -63,9 +65,13 @@ def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24)
         created_iso = created_at.isoformat() if created_at else "-"
         if status == "success":
             success += 1
+            row_found = int(getattr(row, "items_found", 0) or 0)
+            max_success_found = max(max_success_found, row_found)
+            if row_found > 0:
+                found_positive_success = True
             if last_success_at == "-":
                 last_success_at = created_iso
-                last_success_found = int(getattr(row, "items_found", 0) or 0)
+                last_success_found = row_found
                 last_success_inserted = int(getattr(row, "items_ingested", 0) or 0)
                 last_success_matched = int(getattr(row, "items_matched", 0) or 0)
                 last_success_queued = int(getattr(row, "notifications_queued", 0) or 0)
@@ -84,6 +90,8 @@ def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24)
         "v2_canary_success": success,
         "v2_canary_blocked": blocked,
         "v2_canary_error": error,
+        "v2_canary_found_positive_success": found_positive_success,
+        "v2_canary_max_success_found": max_success_found,
         "last_runtime_impl": last_runtime_impl,
         "last_success_at": last_success_at,
         "last_success_found": last_success_found,
@@ -99,6 +107,8 @@ def _build_canary_recent_runs_report(db, source: str, *, window_hours: int = 24)
 def _canary_effective_for_cfg(cfg) -> tuple[bool, str | None, bool]:
     impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
     playwright_enabled = bool(getattr(settings, "enable_playwright", False))
+    if impl_flags.impl == "v2":
+        return False, "not_needed_configured_impl_v2", playwright_enabled
     if not bool(impl_flags.canary_v2_enabled):
         return False, "canary_flag_disabled", playwright_enabled
     if not playwright_enabled:
@@ -177,6 +187,14 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
             action = "off"
         await admin_sources_canary(update, args[1], action)
         return
+    if cmd in ("promote", "promotion") and len(args) >= 2:
+        target_impl = args[2].lower() if len(args) >= 3 else "v2"
+        await admin_sources_promote(update, args[1], target_impl)
+        return
+    if cmd in ("rollback", "demote") and len(args) >= 2:
+        target_impl = args[2].lower() if len(args) >= 3 else "v1"
+        await admin_sources_rollback(update, args[1], target_impl)
+        return
     if cmd in ("force", "force_browser") and len(args) >= 3:
         await admin_sources_set_simple_fn(update, args[1], "force_browser", args[2])
         return
@@ -200,6 +218,8 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
         "/admin sources proxy <source> <url|off>\n"
         "/admin sources fallback <source> on|off\n"
         "/admin sources canary mercadolivre status|report|on|off\n"
+        "/admin sources promote mercadolivre [v2]\n"
+        "/admin sources rollback mercadolivre v1\n"
         "/admin sources force <source> on|off\n"
         "/admin sources set <source> <field> <value>\n"
         "/admin sources reset <source>"
@@ -378,6 +398,112 @@ async def admin_sources_canary(update, source: str, action: str):
                 ]
             )
         await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
+
+
+def _promotion_blocked_message(reason: str) -> str:
+    return sanitize_for_telegram(
+        "⚠️ Promoção bloqueada.\n"
+        f"Motivo: {reason}.\n"
+        "Diagnóstico:\n"
+        " /admin sources canary mercadolivre report"
+    )
+
+
+def _validate_mercadolivre_v2_promotion(cfg, report: dict[str, object]) -> tuple[bool, str, bool]:
+    impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
+    playwright_enabled = bool(getattr(settings, "enable_playwright", False))
+    if not playwright_enabled:
+        return False, "Playwright desabilitado", playwright_enabled
+    if not bool(cfg.browser_fallback_enabled):
+        return False, "browser_fallback_enabled=False", playwright_enabled
+    if impl_flags.impl != "v2" and not (
+        bool(impl_flags.canary_v2_enabled) or report.get("last_runtime_impl") == "v2_canary"
+    ):
+        return False, "canary V2 não está efetivo nem há runtime_impl=v2_canary recente", playwright_enabled
+    if int(report.get("v2_canary_success") or 0) < 3:
+        return False, "soak insuficiente: success < 3 nas últimas 24h", playwright_enabled
+    if int(report.get("v2_canary_blocked") or 0) > 0:
+        return False, "blocked recente no canary", playwright_enabled
+    if int(report.get("v2_canary_error") or 0) > 0:
+        return False, "error recente no canary", playwright_enabled
+    if not bool(report.get("v2_canary_found_positive_success")):
+        return False, "canary sem sucesso recente com found > 0", playwright_enabled
+    return True, "ok", playwright_enabled
+
+
+async def admin_sources_promote(update, source: str, target_impl: str = "v2"):
+    src = str(source or "").strip().lower()
+    impl = str(target_impl or "v2").strip().lower()
+    if src != _MERCADOLIVRE:
+        await update.message.reply_text("⚠️ Promoção bloqueada. Apenas mercadolivre é suportado nesta etapa.")
+        return
+    if impl != "v2":
+        await update.message.reply_text("Use: /admin sources promote mercadolivre v2")
+        return
+
+    with SessionLocal() as db:
+        ensure_source_configs(db)
+        cfg = get_source_config(db, src)
+        if not cfg:
+            await update.message.reply_text("Source não encontrada.")
+            return
+        report = _build_canary_recent_runs_report(db, src, window_hours=24)
+        ok, reason, _playwright_enabled = _validate_mercadolivre_v2_promotion(cfg, report)
+        if not ok:
+            await update.message.reply_text(_promotion_blocked_message(reason))
+            return
+
+        patch = {"impl": "v2", "mercadolivre_v2_canary_enabled": False}
+        cfg = set_source_field(db, src, "extra", json.dumps(patch, ensure_ascii=False))
+        db.commit()
+        impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
+
+    lines = [
+        "✅ Mercado Livre promovido para V2 configurado.",
+        f"configured_impl={impl_flags.impl}",
+        f"mercadolivre_v2_canary_enabled={bool(impl_flags.canary_v2_enabled)}",
+        f"browser_fallback_enabled={bool(cfg.browser_fallback_enabled)}",
+        f"last_runtime_impl={report['last_runtime_impl']}",
+        (
+            "soak: "
+            f"success={report['v2_canary_success']} "
+            f"blocked={report['v2_canary_blocked']} "
+            f"error={report['v2_canary_error']} "
+            f"found_recent={report['v2_canary_max_success_found']}"
+        ),
+        "",
+        "Rollback:",
+        " /admin sources rollback mercadolivre v1",
+    ]
+    await update.message.reply_text(sanitize_for_telegram("\n".join(lines)))
+
+
+async def admin_sources_rollback(update, source: str, target_impl: str = "v1"):
+    src = str(source or "").strip().lower()
+    impl = str(target_impl or "v1").strip().lower()
+    if src != _MERCADOLIVRE:
+        await update.message.reply_text("⚠️ Rollback bloqueado. Apenas mercadolivre é suportado nesta etapa.")
+        return
+    if impl != "v1":
+        await update.message.reply_text("Use: /admin sources rollback mercadolivre v1")
+        return
+
+    with SessionLocal() as db:
+        ensure_source_configs(db)
+        cfg = get_source_config(db, src)
+        if not cfg:
+            await update.message.reply_text("Source não encontrada.")
+            return
+        patch = {"impl": "v1", "mercadolivre_v2_canary_enabled": False}
+        cfg = set_source_field(db, src, "extra", json.dumps(patch, ensure_ascii=False))
+        db.commit()
+
+    await update.message.reply_text(
+        sanitize_for_telegram(
+            "✅ Mercado Livre rollback para V1 configurado.\n"
+            "Próximo passo: /admin sources show mercadolivre"
+        )
+    )
 
 
 async def admin_sources_reset(update, source: str):

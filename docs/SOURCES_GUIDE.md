@@ -539,3 +539,61 @@ Execuções de sources monitoradas por wishlist que terminam com `status=success
 Essa sinalização é uma anomalia de qualidade/observabilidade: ela não transforma o run em `blocked`/`error`, não aplica backoff e não altera scraper, parser ou cadência do scheduler. O payload inclui `zero_result_reason=found_zero_with_recent_positive_baseline`, `zero_result_baseline_found`, `zero_result_runtime_impl` e um resumo limitado de grupos (`groups_count`, `total_wishlists`, `zero_result_groups_count`, `sample_group_urls` e `source_group_summaries`) para facilitar triagem sem poluir o health.
 
 No `/admin sources`, o último sucesso suspeito aparece com `⚠️ zero_result_suspect`. Para Mercado Livre canary, valide primeiro com `/admin sources canary mercadolivre report`; se precisar de uma validação manual consciente, rode `/admin runall mercadolivre`.
+
+---
+
+## Mercado Livre — promoção manual V2 pós-canary (2026-06-08)
+
+Registro operacional confirmado no `/admin sources` em 2026-06-08:
+
+- `runtime_impl=v2_canary` efetivo;
+- 24h efetivas com `ok=24`, `err=0`, `blk=0`, `total=24/24` e `ok_rate=100%`;
+- último sucesso às `2026-06-08 08:59:29Z`, `dur=83057ms`, `found=182`, `match=8` e `thumb=100%`;
+- interpretação: o canary V2 do Mercado Livre está saudável e validado para o próximo estágio manual.
+
+Próximo estágio permitido:
+
+```text
+/admin sources promote mercadolivre v2
+```
+
+Aliases aceitos:
+
+```text
+/admin sources promote mercadolivre
+```
+
+A promoção é **manual**, restrita a `mercadolivre` nesta etapa e exige soak saudável nas últimas 24h de `runtime_impl=v2_canary`:
+
+- `success >= 3`;
+- `blocked == 0`;
+- `error == 0`;
+- pelo menos um sucesso com `found > 0`;
+- Playwright habilitado;
+- `browser_fallback_enabled=True`.
+
+Efeito esperado em `source_configs.extra` com merge não destrutivo:
+
+```json
+{"impl":"v2","mercadolivre_v2_canary_enabled":false}
+```
+
+Rollback manual simples:
+
+```text
+/admin sources rollback mercadolivre v1
+```
+
+Alias aceito:
+
+```text
+/admin sources demote mercadolivre v1
+```
+
+Rollback também preserva outras chaves de `extra` e aplica:
+
+```json
+{"impl":"v1","mercadolivre_v2_canary_enabled":false}
+```
+
+Após promoção, `/admin sources show mercadolivre` deve ser lido como saudável quando mostrar `configured_impl=v2`, `mercadolivre_v2_canary_enabled=False` e `canary_effective=False`: o canary não é mais necessário porque o impl configurado já é V2.

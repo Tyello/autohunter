@@ -538,3 +538,51 @@ O status canary agora inclui resumo operacional das últimas 24h (`v2_canary_suc
 Durante migrações V1→V2, `runtime_impl=v2_canary` com `found=0` não deve ser considerado automaticamente saudável quando a source é primária, há wishlists elegíveis e existe baseline recente com resultados. O runner registra `suspicious_zero_results=true` no payload/run summary nesses casos, junto do baseline encontrado e de amostras limitadas por grupo de URL/query.
 
 Esse guardrail não altera parser, scraping, scheduler, backoff ou decisão de flip. Ele apenas torna a anomalia visível em `SourceRun` e `/admin sources`, permitindo comparar o comportamento do canary via `/admin sources canary mercadolivre report` antes de qualquer ação operacional.
+
+## Mercado Livre — comando guardado de promoção V2 (2026-06-08)
+
+O canary V2 do Mercado Livre foi validado em produção antes de qualquer flip configurado:
+
+- 24/24 execuções efetivas nas últimas 24h;
+- 0 erros;
+- 0 bloqueios;
+- 0 skips;
+- último sucesso em `2026-06-08 08:59:29Z` com `found=182`, `match=8`, `dur=83057ms` e `thumb=100%`;
+- runtime real observado: `runtime_impl=v2_canary`.
+
+A trilha V1→V2 agora possui um estágio explícito e reversível para Mercado Livre:
+
+```text
+/admin sources promote mercadolivre v2
+/admin sources rollback mercadolivre v1
+```
+
+Regras da migração neste estágio:
+
+- promoção somente manual/admin;
+- somente `mercadolivre` é suportado nesta PR;
+- nenhuma alteração de scraping, parser ou cadence de scheduler;
+- nenhuma migration;
+- nenhuma promoção automática;
+- nenhuma alteração em WebMotors ou outras sources.
+
+Gate operacional aplicado pelo comando de promoção:
+
+- Playwright habilitado;
+- `browser_fallback_enabled=True`;
+- canary efetivo ou execução recente com `runtime_impl=v2_canary`;
+- janela de 24h de `SourceRun` canary com `success >= 3`, `blocked == 0`, `error == 0` e pelo menos um sucesso com `found > 0`.
+
+A promoção altera apenas `source_configs.extra` de forma não destrutiva:
+
+```json
+{"impl":"v2","mercadolivre_v2_canary_enabled":false}
+```
+
+O rollback manual altera apenas:
+
+```json
+{"impl":"v1","mercadolivre_v2_canary_enabled":false}
+```
+
+Chaves operacionais existentes no `extra`, como timeouts, `browser_wait_until`, `operational_role` e parâmetros HTTP/browser, devem ser preservadas durante promoção e rollback.
