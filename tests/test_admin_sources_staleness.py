@@ -322,3 +322,66 @@ def test_admin_sources_renders_zero_result_suspect_for_mercadolivre_canary(db, m
     assert "zero_result_suspect" in out
     assert "found=0 com baseline recente positivo" in out
     assert "/admin sources canary mercadolivre report" in out
+
+
+def test_admin_sources_lists_impl_warning_for_real_drift(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    payload = {"runtime_impl": "v1"}
+    db.add(
+        SourceConfig(
+            source="mercadolivre",
+            is_enabled=True,
+            sched_minutes=60,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+            extra={"impl": "v2"},
+        )
+    )
+    db.add(SourceState(source="mercadolivre", last_run_at=now - timedelta(minutes=5), last_status="success", last_payload=payload))
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="success",
+            created_at=now - timedelta(minutes=5),
+            payload=payload,
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("mercadolivre")])
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "impl⚠️" in out
+    assert "runtime_impl=v1" in out
+    assert "causa: configured_impl=v2 mas runtime_impl=v1" in out
+    assert "ação: validar /admin sources show mercadolivre; se necessário rollback" in out
+
+
+def test_admin_sources_does_not_pollute_when_impl_alignment_ok(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    payload = {"runtime_impl": "v2"}
+    db.add(
+        SourceConfig(
+            source="olx",
+            is_enabled=True,
+            sched_minutes=60,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+            extra={"impl": "v2"},
+        )
+    )
+    db.add(SourceState(source="olx", last_run_at=now - timedelta(minutes=5), last_status="success", last_payload=payload))
+    db.add(SourceRun(source="olx", kind="scheduler", status="success", created_at=now - timedelta(minutes=5), payload=payload))
+    db.commit()
+    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("olx")])
+
+    update = _Update()
+    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    out = "\n".join(update.message.sent)
+
+    assert "impl⚠️" not in out
+    assert "configured_impl=v2 mas runtime_impl=v2" not in out
+    assert "✅ OK" in out

@@ -408,3 +408,16 @@ O rollback faz merge não destrutivo e aplica:
 ```
 
 Leitura pós-promoção: `canary_effective=False` com `configured_impl=v2` não é falha; o motivo esperado é `not_needed_configured_impl_v2` porque o canary deixou de ser necessário.
+
+## V2 Promotion Alignment Guardrail
+
+Após promoção manual, o estado saudável do Mercado Livre é `configured_impl=v2`, `expected_runtime_impl=v2`, `last_runtime_impl=v2` e `impl_alignment=ok`.
+
+Estados que exigem atenção operacional:
+
+- `configured_impl=v2` + `last_runtime_impl=v2_canary`: drift transitório pós-promoção; aguardar/forçar execução real e validar `/admin sources show mercadolivre`.
+- `configured_impl=v2` + `last_runtime_impl=v1`: drift real; validar `/admin sources show mercadolivre`, `/admin runall mercadolivre` e, se necessário, rollback manual.
+- `configured_impl=v1` + canary efetivo espera `last_runtime_impl=v2_canary`.
+- ausência de `runtime_impl` é `unknown`, não crítico.
+
+Não fazer promoção automática nem rollback automático. Os comandos manuais continuam restritos a Mercado Livre nesta etapa.

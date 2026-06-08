@@ -586,3 +586,30 @@ O rollback manual altera apenas:
 ```
 
 Chaves operacionais existentes no `extra`, como timeouts, `browser_wait_until`, `operational_role` e parâmetros HTTP/browser, devem ser preservadas durante promoção e rollback.
+
+## Guardrail genérico de alinhamento configured/runtime
+
+A migração V1→V2 agora possui uma camada genérica de observabilidade para comparar a configuração desejada da source com o runtime realmente observado:
+
+```text
+configured_impl -> expected_runtime_impl -> last_runtime_impl -> impl_alignment
+```
+
+Esse guardrail é válido para qualquer source que registre `runtime_impl` em `SourceRun`/`SourceState`. Ele não altera scraper, parser, scheduler, cadence, backoff ou ingestion, e não executa promoção/rollback automático.
+
+Interpretação:
+
+- `configured_impl=v2` deve convergir para `last_runtime_impl=v2`.
+- `configured_impl=v2` com `last_runtime_impl=v2_canary` é drift transitório pós-promoção, não estado final saudável.
+- `configured_impl=v1` com canary efetivo deve observar `last_runtime_impl=v2_canary`.
+- `configured_impl=v1` sem canary efetivo deve observar `last_runtime_impl=v1`.
+- Sem `runtime_impl`, o alinhamento fica `unknown` e não deve ser tratado como crítico.
+
+Alertas operacionais só são emitidos para sources habilitadas quando existe `last_runtime_impl` e `impl_alignment=warning`. Para Mercado Livre o alerta pode sugerir rollback manual (`/admin sources rollback mercadolivre v1`); para demais sources ele deve sugerir show/runall/revisão de configuração V1/V2, sem comandos de rollback restritos ao Mercado Livre.
+
+Comandos de promoção e rollback continuam restritos nesta etapa:
+
+```text
+/admin sources promote mercadolivre v2
+/admin sources rollback mercadolivre v1
+```

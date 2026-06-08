@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
+from app.services.source_impl_alignment import evaluate_source_impl_alignment
 from app.sources.flags import read_source_impl_flags
 
 _SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
@@ -257,8 +258,19 @@ async def admin_sources_show(update, source: str):
                 last_runtime_impl = run_summary.get("runtime_impl")
             if not last_runtime_impl:
                 last_runtime_impl = st.last_payload.get("runtime_impl")
-        if last_runtime_impl:
-            lines.append(f"last_runtime_impl={last_runtime_impl}")
+        alignment = evaluate_source_impl_alignment(
+            source=cfg.source,
+            configured_impl=impl_flags.impl,
+            last_runtime_impl=str(last_runtime_impl) if last_runtime_impl else None,
+            canary_enabled=bool(impl_flags.canary_v2_enabled),
+            canary_effective=bool(canary_effective),
+        )
+        lines.extend([
+            f"last_runtime_impl={alignment['last_runtime_impl']}",
+            f"expected_runtime_impl={alignment['expected_runtime_impl']}",
+            f"impl_alignment={alignment['impl_alignment']}",
+            f"impl_alignment_reason={alignment['impl_alignment_reason']}",
+        ])
         if not canary_effective:
             lines.append(f"canary_reason={canary_reason}")
         role = None
