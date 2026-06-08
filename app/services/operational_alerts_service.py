@@ -19,6 +19,7 @@ from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.models.system_log import SystemLog
 from app.services.app_kv_service import get_kv, set_kv
+from app.services.source_impl_alignment import evaluate_source_impl_alignment
 from app.services.source_operational_policy import (
     classify_source_operational_role,
     should_include_in_critical_stale,
@@ -231,6 +232,23 @@ def _add_once(
     emitted_keys.add(logical_key)
     alerts.append(alert)
 
+
+def _impl_drift_alert_message(src: str, alignment: dict[str, Any]) -> str:
+    lines = [
+        f"⚠️ Source {src} impl drift",
+        f"configured_impl={alignment['configured_impl']}",
+        f"expected_runtime_impl={alignment['expected_runtime_impl']}",
+        f"last_runtime_impl={alignment['last_runtime_impl']}",
+        "Ações:",
+        f"- /admin sources show {src}",
+        f"- /admin runall {src}",
+    ]
+    if src == _MERCADOLIVRE:
+        lines.append("- rollback: /admin sources rollback mercadolivre v1")
+    else:
+        lines.append("- revisar configuração V1/V2")
+    return "\n".join(lines)
+
 def collect_operational_alerts(
     db: Session,
     now: Optional[datetime] = None,
@@ -250,11 +268,29 @@ def collect_operational_alerts(
     states = {s.source: s for s in db.query(SourceState).all()}
     for src, cfg in configs.items():
         plugin = get_source(src)
+        st = states.get(src)
+        ctx = _source_ops_context(db, src, cfg, st, now)
+        alignment = evaluate_source_impl_alignment(
+            source=src,
+            configured_impl=ctx.get("configured_impl"),
+            last_runtime_impl=ctx.get("runtime_impl"),
+            canary_enabled=bool(ctx.get("mercadolivre_v2_canary_enabled")),
+            canary_effective=bool(ctx.get("canary_effective")),
+        )
+        if alignment.get("last_runtime_impl") != "-" and alignment.get("impl_alignment") == "warning":
+            _add_once(
+                alerts,
+                emitted_source_alerts,
+                f"source_impl_drift:{src}",
+                OperationalAlert(
+                    f"source_impl_drift:{src}",
+                    _impl_drift_alert_message(src, alignment),
+                    60,
+                ),
+            )
         if not should_include_in_critical_stale(plugin, cfg):
             continue
-        st = states.get(src)
         eval_ = evaluate_source_staleness(now=now, last_run_at=getattr(st, "last_effective_run_at", None) or getattr(st, "last_run_at", None), sched_minutes=int(cfg.sched_minutes or 0), factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0), min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180))
-        ctx = _source_ops_context(db, src, cfg, st, now)
         backoff_until_dt = _as_utc(getattr(st, "next_allowed_at", None) if st else None)
         backoff_active = bool(backoff_until_dt and backoff_until_dt > _as_utc(now))
         status_backoff = _status_is_backoff(getattr(st, "last_status", None) if st else None)

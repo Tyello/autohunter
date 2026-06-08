@@ -597,3 +597,29 @@ Rollback também preserva outras chaves de `extra` e aplica:
 ```
 
 Após promoção, `/admin sources show mercadolivre` deve ser lido como saudável quando mostrar `configured_impl=v2`, `mercadolivre_v2_canary_enabled=False` e `canary_effective=False`: o canary não é mais necessário porque o impl configurado já é V2.
+
+### Guardrail genérico de alinhamento V1/V2
+
+O admin agora avalia, para qualquer source com runtime observável, o alinhamento entre `configured_impl`, `expected_runtime_impl` e `last_runtime_impl`. O helper é genérico e não promove nem reverte nenhuma source automaticamente.
+
+Regras operacionais:
+
+- `configured_impl=v2` espera `runtime_impl=v2`.
+- `configured_impl=v2` com `runtime_impl=v2_canary` é drift/transitório, não estado final saudável.
+- `configured_impl=v1` sem canary efetivo espera `runtime_impl=v1`.
+- `configured_impl=v1` com canary efetivo espera `runtime_impl=v2_canary`.
+- Ausência de `runtime_impl` gera `impl_alignment=unknown` e não é crítica para sources antigas que ainda não registram runtime.
+- Promoção automática e rollback automático continuam proibidos.
+
+`/admin sources show <source>` exibe `configured_impl`, `last_runtime_impl`, `expected_runtime_impl`, `impl_alignment` e `impl_alignment_reason`. O resumo de `/admin sources` só adiciona `impl⚠️` quando há drift real (`impl_alignment=warning`) para evitar ruído em sources sem runtime observado.
+
+Para Mercado Livre, o pós-promoção saudável é:
+
+```text
+configured_impl=v2
+expected_runtime_impl=v2
+last_runtime_impl=v2
+impl_alignment=ok
+```
+
+Se após `/admin sources promote mercadolivre v2` ainda aparecer `last_runtime_impl=v2_canary`, trate como drift até uma execução real configurada em V2 registrar `runtime_impl=v2`.

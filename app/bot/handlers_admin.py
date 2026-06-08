@@ -43,6 +43,7 @@ from app.models.fb_session import FBSession
 from app.models.auction_lot import AuctionLot
 from app.sources.registry import list_sources
 from app.sources.flags import read_source_impl_flags
+from app.services.source_impl_alignment import evaluate_source_impl_alignment
 from app.services.source_staleness_service import evaluate_source_staleness, heartbeat_is_stale
 from app.services.plan_capabilities import normalize_plan_code
 from app.services.operational_alerts_service import collect_operational_alerts
@@ -2558,6 +2559,27 @@ def _render_webmotors_blocked_diag_lines(payload: Any) -> list[str]:
     return lines
 
 
+def _extract_runtime_impl_from_payload(payload: dict | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    runtime_impl = payload.get("runtime_impl")
+    if runtime_impl:
+        return str(runtime_impl)
+    run_summary = payload.get("run_summary")
+    if isinstance(run_summary, dict) and run_summary.get("runtime_impl"):
+        return str(run_summary.get("runtime_impl"))
+    return None
+
+
+def _source_canary_effective(source: str, cfg, impl_flags) -> bool:
+    return (
+        str(source or "").strip().lower() == "mercadolivre"
+        and bool(getattr(impl_flags, "canary_v2_enabled", False))
+        and bool(getattr(settings, "enable_playwright", False))
+        and bool(getattr(cfg, "browser_fallback_enabled", False))
+    )
+
+
 async def _reply_chunked(update: Update, text: str, max_len: int = 3600):
     # Telegram costuma falhar acima de ~4096; 3600 é safe.
     chunks = _chunk_lines(text, max_len=max_len)
@@ -2697,6 +2719,18 @@ async def _admin_sources(update: Update, verbose: bool = False):
         lr = last_runs.get(p.name)
         le = last_effective.get(p.name)
         a = aggs.get(p.name, _Agg24h())
+        last_runtime_impl = None
+        if lr is not None:
+            last_runtime_impl = _extract_runtime_impl_from_payload(getattr(lr, "payload", None))
+        if not last_runtime_impl and st is not None:
+            last_runtime_impl = _extract_runtime_impl_from_payload(getattr(st, "last_payload", None))
+        impl_alignment = evaluate_source_impl_alignment(
+            source=p.name,
+            configured_impl=impl_flags.impl,
+            last_runtime_impl=last_runtime_impl,
+            canary_enabled=bool(impl_flags.canary_v2_enabled),
+            canary_effective=_source_canary_effective(p.name, cfg, impl_flags) if cfg is not None else False,
+        )
 
         # estado de execução (enabled/backoff)
         if not enabled:
@@ -2713,6 +2747,8 @@ async def _admin_sources(update: Update, verbose: bool = False):
 
         flags: list[str] = []
         flags.append("impl✅" if implemented else "impl❌")
+        if enabled and impl_alignment.get("impl_alignment") == "warning":
+            flags.append("impl⚠️")
         if sched_m is not None:
             flags.append(f"sched={sched_m}m")
         if cooldown_m:
@@ -2863,7 +2899,7 @@ async def _admin_sources(update: Update, verbose: bool = False):
                 last_line += f" http={lr.http_status}"
             payload = lr.payload or {}
             if isinstance(payload, dict):
-                runtime_impl = payload.get("runtime_impl")
+                runtime_impl = _extract_runtime_impl_from_payload(payload)
                 if runtime_impl:
                     last_line += f" runtime_impl={runtime_impl}"
                 if payload.get("hybrid_browser_used") is True:
@@ -2923,6 +2959,15 @@ async def _admin_sources(update: Update, verbose: bool = False):
                     lines.append(f"   diag: {_fmt_diag(d)}")
             except Exception:
                 pass
+
+        if enabled and impl_alignment.get("impl_alignment") == "warning":
+            lines.append(
+                f"   causa: configured_impl={impl_alignment['configured_impl']} mas runtime_impl={impl_alignment['last_runtime_impl']}"
+            )
+            if p.name == "mercadolivre":
+                lines.append(f"   ação: validar /admin sources show {p.name}; se necessário rollback")
+            else:
+                lines.append(f"   ação: validar /admin sources show {p.name}; revisar configuração V1/V2")
 
         backoff_active = bool(enabled and st and st.next_allowed_at and st.next_allowed_at > now)
         if kind != "OK" or backoff_active or (why and why != "-"):

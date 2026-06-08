@@ -241,3 +241,109 @@ def test_backoff_correlation_suppresses_redundant_stale_backoff_blocked_alerts(d
     alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
     ml_keys = [a.key for a in alerts if "mercadolivre" in a.key]
     assert ml_keys == ["source_blocked_backoff:mercadolivre"]
+
+
+def test_impl_drift_alert_for_enabled_source_with_runtime(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(
+        SourceConfig(
+            source="olx",
+            is_enabled=True,
+            sched_minutes=60,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+            extra={"impl": "v2"},
+        )
+    )
+    db.add(
+        SourceState(
+            source="olx",
+            last_run_at=now - timedelta(minutes=5),
+            last_effective_run_at=now - timedelta(minutes=5),
+            last_status="success",
+            last_payload={"runtime_impl": "v1"},
+        )
+    )
+    db.commit()
+
+    alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
+    alert = next(a for a in alerts if a.key == "source_impl_drift:olx")
+
+    assert "Source olx impl drift" in alert.message
+    assert "configured_impl=v2" in alert.message
+    assert "expected_runtime_impl=v2" in alert.message
+    assert "last_runtime_impl=v1" in alert.message
+    assert "/admin sources show olx" in alert.message
+    assert "/admin runall olx" in alert.message
+    assert "/admin sources rollback mercadolivre v1" not in alert.message
+    assert "revisar configuração V1/V2" in alert.message
+
+
+def test_impl_drift_alert_not_emitted_when_alignment_ok(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(SourceConfig(source="olx", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0, extra={"impl": "v2"}))
+    db.add(
+        SourceState(
+            source="olx",
+            last_run_at=now - timedelta(minutes=5),
+            last_effective_run_at=now - timedelta(minutes=5),
+            last_status="success",
+            last_payload={"runtime_impl": "v2"},
+        )
+    )
+    db.commit()
+
+    keys = {a.key for a in collect_operational_alerts(db, now=now, consume_cooldown=False)}
+
+    assert "source_impl_drift:olx" not in keys
+
+
+def test_impl_drift_alert_not_emitted_when_alignment_unknown(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(SourceConfig(source="olx", is_enabled=True, sched_minutes=60, cooldown_minutes=0, rate_limit_seconds=0, extra={"impl": "v2"}))
+    db.add(
+        SourceState(
+            source="olx",
+            last_run_at=now - timedelta(minutes=5),
+            last_effective_run_at=now - timedelta(minutes=5),
+            last_status="success",
+            last_payload={},
+        )
+    )
+    db.commit()
+
+    keys = {a.key for a in collect_operational_alerts(db, now=now, consume_cooldown=False)}
+
+    assert "source_impl_drift:olx" not in keys
+
+
+def test_impl_drift_alert_for_mercadolivre_mentions_rollback(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(
+        SourceConfig(
+            source="mercadolivre",
+            is_enabled=True,
+            sched_minutes=60,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+            extra={"impl": "v2"},
+        )
+    )
+    db.add(
+        SourceState(
+            source="mercadolivre",
+            last_run_at=now - timedelta(minutes=5),
+            last_effective_run_at=now - timedelta(minutes=5),
+            last_status="success",
+            last_payload={"runtime_impl": "v1"},
+        )
+    )
+    db.commit()
+
+    alert = next(a for a in collect_operational_alerts(db, now=now, consume_cooldown=False) if a.key == "source_impl_drift:mercadolivre")
+
+    assert "/admin sources rollback mercadolivre v1" in alert.message
