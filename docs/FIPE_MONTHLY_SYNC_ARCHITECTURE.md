@@ -1,79 +1,176 @@
 # FIPE Monthly Sync Architecture
 
-## Decisão
-Adotamos **base FIPE local mensal** (opção 2). O runtime AutoHunter continua consumindo apenas dados locais de banco. Não haverá chamada de API FIPE no fluxo principal (wishlist, matching, notification e score).
+## Decisão operacional
 
-## Motivo
-- previsibilidade operacional e custo controlado;
-- menor risco de latência/rate-limit no caminho crítico;
-- manter `score_v2` estável e desacoplado de integrações online.
+AutoHunter usa **base FIPE local mensal**. O runtime principal continua consumindo somente tabelas locais do banco; não há chamada de API FIPE externa no caminho de wishlist, matching, score ou notificação.
 
-## Papel do pipeline externo
-`caiopizzol/fipe-data-pipeline` passa a ser referência/fonte potencial de dados de catálogo bruto. Nesta fase não há acoplamento com Bun/TypeScript dentro do AutoHunter.
+O pipeline externo (ex.: modelo `caiopizzol/cnpj-data-pipeline` aplicado ao domínio FIPE, ou export compatível com `caiopizzol/fipe-data-pipeline`) é tratado como **produtor de arquivo**. O AutoHunter não incorpora Bun/TypeScript nem cliente online FIPE no runtime.
 
-## Contrato de ingestão mensal
-Fluxo alvo:
+## Estado atual confirmado no código
 
-`pipeline externo -> import/staging mensal AutoHunter -> tabelas locais -> resolver AutoHunter->FIPE -> fipe_prices -> score_v2`
+Tabelas já existentes:
+
+- `fipe_catalog_entries`: staging/catalog mensal normalizado e idempotente por (`reference_month`, `vehicle_type`, `source`, `identity_key`).
+- `fipe_sync_runs`: trilha de runs aplicados do import mensal de catálogo.
+- `fipe_prices`: tabela local final consumida por score/inteligência de preço.
+- `system_logs`: auditoria operacional dos applies e do comando mensal.
+
+Componentes já existentes antes do comando mensal único:
+
+- `scripts/import_fipe_catalog_entries.py`: import isolado de catálogo, com `--format external-pipeline` e `--apply`.
+- `scripts/import_fipe_prices.py`: import direto de `fipe_prices` por CSV/JSON operacional.
+- `app/services/fipe_external_pipeline_adapter.py`: adapter de aliases do output externo para o contrato local.
+- `app/services/fipe_catalog_resolver_service.py`: resolver diagnóstico AutoHunter → FIPE, sem escrita em `fipe_prices`.
+- `app/services/fipe_prices_planning_service.py`: plano e apply controlado para inserir `fipe_prices` apenas em matches high, não ambíguos, deduplicados.
+- Comandos Telegram admin `/admin fipe catalog`, `coverage`, `resolve`, `resolver_status`, `plan`, `apply_plan`, `apply_history`/`audit` e `apply_status`.
+
+## O que ainda era manual
+
+Antes de `scripts/run_monthly_fipe_sync.py`, a operação mensal exigia encadear manualmente:
+
+1. validar o arquivo exportado pelo pipeline externo;
+2. rodar import de catálogo;
+3. consultar relatório/cobertura;
+4. rodar plano de `fipe_prices`;
+5. aplicar o plano live explicitamente;
+6. correlacionar logs em `fipe_sync_runs` e `system_logs`.
+
+O comando único implementado reduz essa sequência para uma execução auditável, mantendo o scheduler mensal **fora do escopo**.
+
+## Fluxo alvo mensal
+
+```text
+pipeline externo FIPE
+  -> arquivo JSON/CSV local
+  -> scripts/run_monthly_fipe_sync.py
+  -> adapter external-pipeline
+  -> upsert fipe_catalog_entries
+  -> relatório de catálogo/staging
+  -> resolver coverage AutoHunter→FIPE
+  -> plano fipe_prices
+  -> apply controlado apenas com --apply
+  -> system_logs + fipe_sync_runs
+  -> fipe_prices local para runtime
+```
 
 Separação explícita:
-1. **Catálogo bruto**: `fipe_catalog_entries`.
-2. **Mapeamento AutoHunter -> FIPE**: fase futura (fora desta PR).
-3. **Tabela final de consumo**: `fipe_prices` (sem alteração nesta PR).
 
-## Riscos
-- volume de linhas e tempo de upsert;
-- ambiguidade de versões/modelos/ano;
-- rate-limit e disponibilidade da fonte externa (fora do runtime principal);
-- qualidade do match entre catálogo e veículos AutoHunter;
-- operação em Raspberry (I/O e memória em carga mensal).
+1. **Catálogo bruto/staging:** `fipe_catalog_entries`.
+2. **Mapeamento AutoHunter → FIPE:** resolver local baseado em `CarListing` + catálogo mensal.
+3. **Tabela final de consumo:** `fipe_prices`.
+4. **Runtime:** somente lê dados locais; não chama API FIPE externa.
 
-## Fases
-1. ✅ Contrato de staging mensal implementado.
-2. ✅ Adapter para output do pipeline externo implementado.
-3. 🔜 Resolver AutoHunter→FIPE para produzir/atualizar `fipe_prices` (pendente).
-4. Operação mensal com observabilidade e rollback seguro.
+## Comando operacional único
 
-## Ajustes de segurança (PR 356)
-- `fipe_catalog_entries` usa `identity_key` para upsert estável por (`reference_month`,`vehicle_type`,`source`,`identity_key`).
-- Ordem de identidade: `fipe_code` -> `codes` -> fallback textual com diferenciador.
-- `model_year` inválido não aborta carga: linha é `skipped_invalid`.
-- Dry-run do importador **não** grava `fipe_sync_runs`; run é criado apenas em `--apply`.
+Dry-run obrigatório antes do live:
 
+```bash
+python scripts/run_monthly_fipe_sync.py \
+  --reference-month 2026-05 \
+  --input /path/to/fipe_pipeline_output.json \
+  --format external-pipeline \
+  --dry-run
+```
 
-## Fase 3 (parcial)
-- Resolver diagnóstico AutoHunter → FIPE implementado (cálculo de candidatos + confiança).
-- Atualização automática de `fipe_prices` permanece pendente e fora do escopo desta fase.
+Apply explícito:
 
-## Update 2026-05-26
-- Resolver diagnóstico FIPE refinado para busca por tokens, melhor recall (ex.: Civic Si, Golf GTI), e scoring com explicabilidade ampliada.
-- Critério de ambiguidade atualizado: high+high próximo (<15) => ambiguous; high com folga >=15 => matched; medium => ambiguous.
-- Fluxo segue read-only nesta fase: sem escrita em fipe_prices, sem score_v2, sem chamadas externas.
-- Próximo passo planejado: etapa dry-run/apply para persistir somente matches high não ambíguos.
+```bash
+python scripts/run_monthly_fipe_sync.py \
+  --reference-month 2026-05 \
+  --input /path/to/fipe_pipeline_output.json \
+  --format external-pipeline \
+  --apply
+```
 
+Parâmetros opcionais:
 
+- `--source external_pipeline`: fonte gravada em `fipe_catalog_entries.source`.
+- `--limit 100`: amostra operacional para coverage/plan.
+- `--min-confidence 80`: confiança mínima para inserir em `fipe_prices`.
 
-## Status atualizado
+## Semântica de dry-run e apply
 
-- ✅ Planejamento dry-run AutoHunter→FIPE implementado via `/admin fipe plan`.
-- ✅ Etapa continua read-only (sem escrita em `fipe_prices`).
-- 🔜 Apply controlado (com confirmação explícita) permanece pendente em PR separada.
+### `--dry-run`
 
+- valida mês e arquivo;
+- normaliza input pelo adapter externo;
+- executa upsert de catálogo em modo preview (`dry_run=True`), sem persistir `fipe_catalog_entries`;
+- gera relatório do catálogo atualmente persistido para o mês/source;
+- calcula coverage/plan contra o catálogo já persistido no banco;
+- não cria `fipe_sync_runs`;
+- grava auditoria em `system_logs` com `component="fipe_monthly_sync"`;
+- quando não existe catálogo persistido no mês/source, retorna `warnings[]` e imprime alerta operacional avisando que o dry-run não representa o apply final de `fipe_prices`.
 
-## Status do apply controlado
+Observação: se o mês ainda não foi aplicado, o dry-run mostra quantas linhas seriam inseridas/atualizadas, mas coverage/plan não usa linhas não persistidas. A saída do CLI explicita que `catalog_import` é simulação do arquivo novo e que `resolver_coverage`/`price_plan` usam apenas catálogo já persistido. Isso preserva segurança operacional e evita staging temporário invisível/ambíguo.
 
-- ✅ Apply controlado implementado via `/admin fipe apply_plan`.
-- ✅ Fluxo dry-run default com live explícito.
-- ⏳ Scheduler mensal automático permanece pendente.
-- ⏳ Updates de preços existentes permanecem desabilitados por padrão (guardados para flag futura).
+### `--apply`
 
-- O apply controlado de FIPE agora possui trilha de auditoria persistente em `system_logs`, inclusive em dry-run.
-- A trilha pode ser consultada via Telegram/admin com `/admin fipe apply_history [1-20]` (alias: `/admin fipe audit [1-20]`), somente leitura.
-- Scheduler mensal continua pendente e fora deste escopo.
+- valida e normaliza input;
+- faz upsert idempotente em `fipe_catalog_entries`;
+- cria e conclui uma linha em `fipe_sync_runs`;
+- gera relatório de catálogo já aplicado;
+- calcula resolver coverage;
+- aplica o plano de `fipe_prices` com `dry_run=False` e `allow_updates=False`;
+- grava auditoria em `system_logs` com `component="fipe_monthly_sync"`;
+- não atualiza preços existentes automaticamente.
 
+## Idempotência
 
-## Update — status operacional pós-apply
+- `fipe_catalog_entries` usa chave única por (`reference_month`, `vehicle_type`, `source`, `identity_key`). Reprocessar o mesmo arquivo/mês atualiza a linha existente em vez de duplicar.
+- `fipe_prices` usa chave única por (`vehicle_key`, `reference_month`). O plano pula itens já existentes com reason `already_exists`.
+- `fipe_sync_runs` e `system_logs` podem ter múltiplas linhas por reexecução: isso é trilha de auditoria, não duplicação de dados de negócio.
 
-- ✅ Implementado status operacional pós-apply via `/admin fipe apply_status` (histórico dry/live/error + métricas agregadas + próximo passo).
-- ✅ Leitura baseada em `system_logs` (`component=fipe_apply_plan`) e `fipe_prices` por competência.
-- ✅ Fluxo continua sem scheduler mensal nesta etapa (fora do escopo).
+## Saída esperada para operação
+
+O comando imprime resumo compacto:
+
+- modo (`dry-run` ou `apply`);
+- referência mensal;
+- contadores do adapter;
+- contadores do import de catálogo;
+- tamanho atual do catálogo no mês/source;
+- coverage do resolver;
+- plano/apply de `fipe_prices`;
+- total atual de `fipe_prices` na competência;
+- próximo passo recomendado.
+
+## Ordem operacional recomendada
+
+1. Gerar arquivo mensal fora do AutoHunter.
+2. Copiar o arquivo para o host do AutoHunter.
+3. Rodar `--dry-run` e revisar contadores:
+   - `normalized > 0`;
+   - `skipped_missing_price` e `skipped_missing_model` aceitáveis;
+   - `inserted/updated` compatíveis com uma competência mensal;
+   - coverage e plano sem anomalias.
+4. Rodar `--apply` uma única vez.
+5. Consultar `/admin fipe apply_status YYYY-MM` e `/admin fipe coverage YYYY-MM`.
+6. Se necessário, reexecutar `--apply` com o mesmo arquivo: a operação é idempotente para dados de negócio.
+
+## Preparação para cron/systemd mensal
+
+Ainda não há scheduler automático. Para automação futura, criar um timer que execute o comando após o arquivo mensal já estar presente.
+
+Exemplo conceitual de cron (não ativado no repo):
+
+```cron
+# 05:20 UTC no dia 5 de cada mês, depois da geração externa do arquivo
+20 5 5 * * cd /workspace/autohunter && . .venv/bin/activate && python scripts/run_monthly_fipe_sync.py --reference-month $(date -u +\%Y-\%m) --input /var/lib/autohunter/fipe/fipe_$(date -u +\%Y_\%m).json --format external-pipeline --apply >> /var/log/autohunter/fipe_monthly_sync.log 2>&1
+```
+
+Antes de ativar cron/systemd, decidir:
+
+- caminho oficial do arquivo mensal;
+- usuário do sistema e permissões;
+- política de retenção dos arquivos brutos;
+- alerta quando o comando retornar exit code não-zero;
+- janela operacional e rollback;
+- se o mês de referência deve ser mês corrente ou mês FIPE recém-publicado.
+
+## Guardrails
+
+- Não alterar `score_v2`, matching de anúncios, notificações ou comportamento runtime durante a operação mensal.
+- Não chamar API FIPE externa a partir do runtime.
+- Não liberar scheduler automático sem revisão operacional explícita.
+- Não aplicar updates de preços existentes sem uma flag/revisão separada.
+- Sempre tratar `.env` como fallback/kill switch, não como superfície única de configuração de produto.
