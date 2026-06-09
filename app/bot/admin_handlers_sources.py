@@ -10,6 +10,7 @@ from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.services.source_configs_service import ensure_source_configs, get_source_config, set_source_field, reset_source_config
 from app.services.source_impl_alignment import evaluate_source_impl_alignment
+from app.services.source_v2_readiness import build_source_v2_readiness_report, render_source_v2_readiness_telegram
 from app.sources.flags import read_source_impl_flags
 
 _SENSITIVE_EXTRA_KEY_PARTS = ("token", "secret", "password", "key", "cookie", "session")
@@ -151,6 +152,13 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
     if cmd in ("list",):
         await admin_sources_fn(update, verbose=False)
         return
+    if cmd in ("migration",):
+        await admin_sources_v2_readiness(update)
+        return
+    if cmd == "v2":
+        if len(args) == 1 or (len(args) >= 2 and args[1].lower() in ("readiness", "migration", "report")):
+            await admin_sources_v2_readiness(update)
+            return
     if cmd in ("show", "get") and len(args) >= 2:
         await admin_sources_show_fn(update, args[1])
         return
@@ -218,6 +226,7 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
         "/admin sources rate <source> <seconds>\n"
         "/admin sources proxy <source> <url|off>\n"
         "/admin sources fallback <source> on|off\n"
+        "/admin sources v2 readiness\n"
         "/admin sources canary mercadolivre status|report|on|off\n"
         "/admin sources promote mercadolivre [v2]\n"
         "/admin sources rollback mercadolivre v1\n"
@@ -225,6 +234,15 @@ async def admin_sources_dispatch(update, raw_args, *, admin_sources_fn, admin_so
         "/admin sources set <source> <field> <value>\n"
         "/admin sources reset <source>"
     )
+
+
+async def admin_sources_v2_readiness(update):
+    """Render a read-only V1→V2 migration readiness report for all sources."""
+    with SessionLocal() as db:
+        ensure_source_configs(db)
+        rows = build_source_v2_readiness_report(db)
+
+    await update.message.reply_text(sanitize_for_telegram(render_source_v2_readiness_telegram(rows)))
 
 
 async def admin_sources_show(update, source: str):

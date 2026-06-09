@@ -613,3 +613,36 @@ Comandos de promoção e rollback continuam restritos nesta etapa:
 /admin sources promote mercadolivre v2
 /admin sources rollback mercadolivre v1
 ```
+
+## Readiness report para escolher a próxima source pós-Mercado Livre
+
+Após o ciclo do Mercado Livre (canary manual, soak, detecção de `zero_result_suspect`, promoção manual para `impl=v2` e guardrail genérico de alinhamento), a próxima migração V1→V2 não deve ser escolhida por chute.
+
+Use:
+
+```text
+/admin sources v2 readiness
+```
+
+Aliases:
+
+```text
+/admin sources v2
+/admin sources migration
+```
+
+O comando consolida, para todas as sources registradas, inventário V1/V2, `SourceConfig`, `SourceState`, `SourceRun`, `runtime_impl`, alinhamento de implementação e papel operacional. O resultado classifica cada source como:
+
+- `done`: `configured_impl=v2`, `last_runtime_impl=v2`, alinhamento OK e sucesso recente;
+- `candidate`: V2 registrado, dual suportado, source habilitada, estável nas últimas 24h, sem bloqueios/erros relevantes e ainda em `impl=v1`;
+- `needs_dual_run`: V2/dual existem, mas falta evidência suficiente para canary seguro;
+- `blocked_or_unstable`: bloqueios, erros ou `ok_rate` baixo tornam migração prematura;
+- `disabled`: source desabilitada por configuração;
+- `no_v2`: não há scraper V2 registrado;
+- `deprioritized`: papel operacional indica que a source não deve entrar na fila normal de migração.
+
+Readiness é observabilidade, não automação de rollout. O comando **não** roda dual-run, **não** executa scraping adicional, **não** promove `impl=v2`, **não** liga canary e **não** altera configuração. Para uma nova source, rode dual-run controlado antes de considerar canary. Em sources browser-heavy, valide custo e estabilidade no Raspberry antes de aumentar exposição.
+
+### Zero-result suspect bloqueia readiness `done`
+
+O readiness report trata `suspicious_zero_results=true` no último sucesso como bloqueio de migração: a source não aparece como `done` ou `candidate` enquanto o zero-result não for explicado. Para Mercado Livre já promovido para `configured_impl=v2`, a recomendação operacional é `rollback_to_canary_then_validate`; para outras sources, a recomendação é `investigate_zero_result_suspect`.
