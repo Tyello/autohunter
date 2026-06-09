@@ -37,6 +37,36 @@ A API/FastAPI é superfície **auxiliar** (health/admin/integrativa). A jornada 
 4. `.env` deve ser tratado como fallback/kill switch/bootstrapping, não como única superfície operacional de produto.
 5. Sempre diferencie: fato confirmado no runtime vs hipótese.
 
+## AI Skills obrigatórias para agentes
+
+Antes de executar qualquer tarefa, o agente deve:
+
+1. Ler este `AGENTS.md`.
+2. Ler `ai/skills/README.md`.
+3. Classificar a tarefa.
+4. Carregar a skill adequada em `ai/skills/`.
+5. Seguir a skill durante a execução.
+6. Reportar validação local no final.
+
+Mapa rápido:
+
+| Pedido | Skill |
+|---|---|
+| Bug, regressão, falha operacional | `ai/skills/diagnose.md` |
+| Implementação segura | `ai/skills/tdd.md` |
+| Refactor, arquitetura, v2 | `ai/skills/improve-codebase-architecture.md` |
+| Roadmap/docs para tarefas | `ai/skills/to-issues.md` |
+| Classificar ideia, bug ou dívida | `ai/skills/triage.md` |
+| Entender fluxo antes de alterar | `ai/skills/zoom-out.md` |
+| Revisar plano contra docs | `ai/skills/grill-with-docs.md` |
+| Feature grande ou nova frente | `ai/skills/to-prd.md` |
+| Transferir contexto para novo chat | `ai/skills/handoff.md` |
+| Experimento isolado | `ai/skills/prototype.md` |
+| Segurança Git para agentes | `ai/skills/git-guardrails-claude-code.md` |
+| Hooks/checks locais | `ai/skills/setup-pre-commit.md` |
+
+Se a tarefa envolver código, prefira também `tdd.md` como skill de apoio, salvo quando for apenas diagnóstico/documentação.
+
 ## Estado atual de produto
 
 Já existem:
@@ -110,11 +140,13 @@ Lacunas principais para lançamento público:
 
 1. `README.md`
 2. `docs/README.md`
-3. `docs/USER_FLOWS.md`
-4. `docs/LLM_CONTEXT.md`
-5. `docs/ARCHITECTURE.md`
-6. `docs/PROJECT_GUIDELINE.md`
-7. `docs/AUCTION_RUNTIME.md`
-8. `docs/OPERATIONS_RUNBOOK.md`
-9. `docs/LEGACY_INVENTORY.md`
-10. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`
+3. `ai/skills/README.md`
+4. Skill aplicável em `ai/skills/`
+5. `docs/USER_FLOWS.md`
+6. `docs/LLM_CONTEXT.md`
+7. `docs/ARCHITECTURE.md`
+8. `docs/PROJECT_GUIDELINE.md`
+9. `docs/AUCTION_RUNTIME.md`
+10. `docs/OPERATIONS_RUNBOOK.md`
+11. `docs/LEGACY_INVENTORY.md`
+12. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`
