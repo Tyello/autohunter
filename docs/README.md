@@ -11,7 +11,8 @@ Este diretório mantém documentação viva do runtime AutoHunter, produto públ
 | `../README.md` | Entrada do repositório e estado do produto. |
 | `../AGENTS.md` | Mapa mental curto para agentes/LLMs. |
 | `LLM_CONTEXT.md` | Contexto completo para novas sessões técnicas. |
-| `AI_SKILLS.md` | Skills recomendadas para orientar Codex/Claude/ChatGPT em diagnóstico, TDD, triage, PRD, issues, arquitetura e handoff. |
+| `../ai/skills/README.md` | Skills operacionais carregáveis por agentes antes de diagnosticar, implementar, criar issues, PRDs ou handoffs. |
+| `AI_SKILLS.md` | Visão consolidada das skills recomendadas. |
 | `USER_FLOWS.md` | Fluxos atuais de usuário, admin e operação no Telegram. |
 | `ARCHITECTURE.md` | Arquitetura, camadas e contratos operacionais. |
 | `PROJECT_GUIDELINE.md` | Diretrizes vivas de produto/runtime. |
