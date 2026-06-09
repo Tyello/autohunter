@@ -623,3 +623,34 @@ impl_alignment=ok
 ```
 
 Se após `/admin sources promote mercadolivre v2` ainda aparecer `last_runtime_impl=v2_canary`, trate como drift até uma execução real configurada em V2 registrar `runtime_impl=v2`.
+
+## Readiness V1→V2 por source
+
+O relatório administrativo para escolher a próxima migração V1→V2 é:
+
+```text
+/admin sources v2 readiness
+```
+
+Aliases aceitos:
+
+```text
+/admin sources v2
+/admin sources migration
+```
+
+O relatório é **somente leitura**: não executa scraping extra, não altera cadence do scheduler, não habilita canary, não promove source e não muda `source_configs`. Ele agrega inventário V1/V2, configuração DB-driven, último `runtime_impl`, alinhamento entre implementação configurada e runtime observado, métricas de `SourceRun` nas últimas 24h e papel operacional da source.
+
+Campos principais por source:
+
+- `enabled`, `default_enabled` e `configured_enabled`;
+- `operational_role` e `fetch_mode`;
+- `has_v1`, `has_v2`, `supports_dual`;
+- `configured_impl`, `last_runtime_impl`, `expected_runtime_impl`, `impl_alignment`;
+- `last_success_at`, `last_found`, `last_matched`, `last_thumb_rate`;
+- contadores 24h: `success_count`, `blocked_count`, `error_count`, `skip_count`, `ok_rate`;
+- `v2_readiness_status` e `recommendation`.
+
+A ordenação prioriza `candidate`, depois `needs_dual_run`, `blocked_or_unstable`, `done`, `disabled`, `no_v2` e `deprioritized`. Dentro de candidatos, sources primárias e estáveis aparecem antes de sources mais lentas/custosas.
+
+Use esse relatório como triagem antes de qualquer canary novo. Sources browser-heavy (`chavesnamao`, `gogarage`, `icarros`, `mobiauto` e similares) devem passar por dual-run explícito antes de canary, especialmente em Raspberry, porque o custo operacional é maior que o de sources HTTP.
