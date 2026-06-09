@@ -1,6 +1,6 @@
 # Documentação — Garagem Alvo / AutoHunter
 
-Atualizado em: 2026-05-28.
+Atualizado em: 2026-06-09.
 
 Este diretório mantém documentação viva do runtime AutoHunter, produto público Garagem Alvo. A fonte de verdade continua sendo o código atual e o estado operacional em banco (`source_configs`, `source_states`, `AppKV`).
 
@@ -11,6 +11,7 @@ Este diretório mantém documentação viva do runtime AutoHunter, produto públ
 | `../README.md` | Entrada do repositório e estado do produto. |
 | `../AGENTS.md` | Mapa mental curto para agentes/LLMs. |
 | `LLM_CONTEXT.md` | Contexto completo para novas sessões técnicas. |
+| `AI_SKILLS.md` | Skills recomendadas para orientar Codex/Claude/ChatGPT em diagnóstico, TDD, triage, PRD, issues, arquitetura e handoff. |
 | `USER_FLOWS.md` | Fluxos atuais de usuário, admin e operação no Telegram. |
 | `ARCHITECTURE.md` | Arquitetura, camadas e contratos operacionais. |
 | `PROJECT_GUIDELINE.md` | Diretrizes vivas de produto/runtime. |
