@@ -654,3 +654,7 @@ Campos principais por source:
 A ordenação prioriza `candidate`, depois `needs_dual_run`, `blocked_or_unstable`, `done`, `disabled`, `no_v2` e `deprioritized`. Dentro de candidatos, sources primárias e estáveis aparecem antes de sources mais lentas/custosas.
 
 Use esse relatório como triagem antes de qualquer canary novo. Sources browser-heavy (`chavesnamao`, `gogarage`, `icarros`, `mobiauto` e similares) devem passar por dual-run explícito antes de canary, especialmente em Raspberry, porque o custo operacional é maior que o de sources HTTP.
+
+### Zero-result suspect no readiness
+
+Se o último sucesso de uma source vier com `suspicious_zero_results=true` (incluindo o caso em que o payload registra baseline positivo recente), o readiness não deve considerar a source `done` nem `candidate`, mesmo que `configured_impl` e `runtime_impl` estejam alinhados. O relatório mostra `zero_result_suspect=True`, baseline e motivo, e classifica a source como instável para investigação antes de qualquer avanço de rollout.

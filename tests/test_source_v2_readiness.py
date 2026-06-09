@@ -148,3 +148,141 @@ def test_build_report_covers_all_registered_sources_and_uses_recent_runs(db):
     assert by_source["mercadolivre"]["v2_readiness_status"] == "done"
     assert by_source["mercadolivre"]["last_found"] == 12
     assert by_source["mercadolivre"]["last_matched"] == 3
+
+
+def test_v2_zero_result_suspect_is_not_done_and_recommends_rollback_for_mercadolivre():
+    status, recommendation = classify_v2_readiness(
+        _row(
+            source="mercadolivre",
+            configured_impl="v2",
+            last_runtime_impl="v2",
+            expected_runtime_impl="v2",
+            suspicious_zero_results=True,
+            zero_result_reason="found_zero_with_recent_positive_baseline",
+            zero_result_baseline_found=185,
+        )
+    )
+
+    assert status != "done"
+    assert status == "blocked_or_unstable"
+    assert recommendation == "rollback_to_canary_then_validate"
+
+
+def test_v2_without_zero_result_suspect_is_done():
+    status, recommendation = classify_v2_readiness(
+        _row(
+            source="mercadolivre",
+            configured_impl="v2",
+            last_runtime_impl="v2",
+            expected_runtime_impl="v2",
+            suspicious_zero_results=False,
+        )
+    )
+
+    assert status == "done"
+    assert recommendation == "done_monitor_24h"
+
+
+def test_mercadolivre_canary_effective_alignment_is_ok_in_readiness(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    ensure_source_configs(db)
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "mercadolivre").one()
+    cfg.extra = {**(cfg.extra or {}), "impl": "v1", "mercadolivre_v2_canary_enabled": True}
+    cfg.browser_fallback_enabled = True
+    monkeypatch.setattr("app.services.source_v2_readiness.settings.enable_playwright", True)
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="success",
+            created_at=now - timedelta(minutes=5),
+            duration_ms=700,
+            items_found=12,
+            items_matched=3,
+            payload={"runtime_impl": "v2_canary"},
+        )
+    )
+    db.commit()
+
+    rows = build_source_v2_readiness_report(db, now=now)
+    mercadolivre = {row["source"]: row for row in rows}["mercadolivre"]
+
+    assert mercadolivre["configured_impl"] == "v1"
+    assert mercadolivre["last_runtime_impl"] == "v2_canary"
+    assert mercadolivre["expected_runtime_impl"] == "v2_canary"
+    assert mercadolivre["impl_alignment"] == "ok"
+
+
+def test_renderer_shows_zero_result_suspect_baseline_and_reason():
+    row = {
+        **_row(
+            source="mercadolivre",
+            configured_impl="v2",
+            last_runtime_impl="v2",
+            suspicious_zero_results=True,
+            zero_result_reason="found_zero_with_recent_positive_baseline",
+            zero_result_baseline_found=185,
+        ),
+        "v2_readiness_status": "blocked_or_unstable",
+        "recommendation": "rollback_to_canary_then_validate",
+    }
+
+    out = render_source_v2_readiness_telegram([row])
+
+    assert "zero_result⚠️ baseline=185" in out
+    assert "zero_result_suspect=True" in out
+    assert "zero_result_baseline_found=185" in out
+    assert "zero_result_reason=found_zero_with_recent_positive_baseline" in out
+
+
+def test_non_mercadolivre_zero_result_suspect_uses_investigation_recommendation():
+    status, recommendation = classify_v2_readiness(
+        _row(
+            source="olx",
+            configured_impl="v2",
+            last_runtime_impl="v2",
+            suspicious_zero_results=True,
+            zero_result_baseline_found=100,
+        )
+    )
+
+    assert status == "blocked_or_unstable"
+    assert recommendation == "investigate_zero_result_suspect"
+
+
+def test_build_report_extracts_zero_result_suspect_from_run_summary(db):
+    now = datetime.now(timezone.utc)
+    ensure_source_configs(db)
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "mercadolivre").one()
+    cfg.extra = {**(cfg.extra or {}), "impl": "v2"}
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="success",
+            created_at=now - timedelta(minutes=5),
+            duration_ms=700,
+            items_found=0,
+            items_matched=0,
+            payload={
+                "runtime_impl": "v2",
+                "run_summary": {
+                    "suspicious_zero_results": True,
+                    "zero_result_reason": "found_zero_with_recent_positive_baseline",
+                    "zero_result_baseline_found": 185,
+                    "zero_result_runtime_impl": "v2",
+                },
+            },
+        )
+    )
+    db.commit()
+
+    rows = build_source_v2_readiness_report(db, now=now)
+    mercadolivre = {row["source"]: row for row in rows}["mercadolivre"]
+
+    assert mercadolivre["suspicious_zero_results"] is True
+    assert mercadolivre["zero_result_baseline_found"] == 185
+    assert mercadolivre["zero_result_reason"] == "found_zero_with_recent_positive_baseline"
+    assert mercadolivre["zero_result_runtime_impl"] == "v2"
+    assert mercadolivre["v2_readiness_status"] == "blocked_or_unstable"
+    assert mercadolivre["recommendation"] == "rollback_to_canary_then_validate"

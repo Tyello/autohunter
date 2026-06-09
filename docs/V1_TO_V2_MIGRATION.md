@@ -642,3 +642,7 @@ O comando consolida, para todas as sources registradas, inventário V1/V2, `Sour
 - `deprioritized`: papel operacional indica que a source não deve entrar na fila normal de migração.
 
 Readiness é observabilidade, não automação de rollout. O comando **não** roda dual-run, **não** executa scraping adicional, **não** promove `impl=v2`, **não** liga canary e **não** altera configuração. Para uma nova source, rode dual-run controlado antes de considerar canary. Em sources browser-heavy, valide custo e estabilidade no Raspberry antes de aumentar exposição.
+
+### Zero-result suspect bloqueia readiness `done`
+
+O readiness report trata `suspicious_zero_results=true` no último sucesso como bloqueio de migração: a source não aparece como `done` ou `candidate` enquanto o zero-result não for explicado. Para Mercado Livre já promovido para `configured_impl=v2`, a recomendação operacional é `rollback_to_canary_then_validate`; para outras sources, a recomendação é `investigate_zero_result_suspect`.

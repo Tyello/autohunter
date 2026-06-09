@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core.settings import settings
+from app.models.source_config import SourceConfig
 from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
 from app.services.source_impl_alignment import evaluate_source_impl_alignment
 from app.services.source_v2_inventory import build_source_v2_inventory
+from app.sources.flags import read_source_impl_flags
 
 
 READINESS_PRIORITY = {
@@ -38,6 +41,10 @@ class SourceV2RunStats:
     last_thumb_rate: float | None = None
     last_runtime_impl: str | None = None
     has_recent_v2_runtime: bool = False
+    suspicious_zero_results: bool = False
+    zero_result_reason: str | None = None
+    zero_result_baseline_found: int | None = None
+    zero_result_runtime_impl: str | None = None
 
     @property
     def effective_count(self) -> int:
@@ -57,6 +64,43 @@ def extract_runtime_impl(payload: Any) -> str | None:
     if isinstance(run_summary, dict) and run_summary.get("runtime_impl"):
         return str(run_summary.get("runtime_impl")).strip().lower()
     return None
+
+
+def _extract_first_payload_value(payload: Any, key: str) -> Any:
+    data = _payload_as_dict(payload)
+    if key in data:
+        return data.get(key)
+    run_summary = data.get("run_summary")
+    if isinstance(run_summary, dict) and key in run_summary:
+        return run_summary.get(key)
+    return None
+
+
+def _extract_bool_payload_value(payload: Any, key: str) -> bool:
+    value = _extract_first_payload_value(payload, key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _extract_int_payload_value(payload: Any, key: str) -> int | None:
+    value = _extract_first_payload_value(payload, key)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _extract_str_payload_value(payload: Any, key: str) -> str | None:
+    value = _extract_first_payload_value(payload, key)
+    if value is None:
+        return None
+    rendered = str(value).strip()
+    return rendered or None
 
 
 def _extract_thumb_rate(payload: Any) -> float | None:
@@ -93,6 +137,10 @@ def _build_run_stats(db: Any, source: str, *, now: datetime, window_hours: int =
     last_thumb_rate = None
     last_runtime_impl = None
     has_recent_v2_runtime = False
+    suspicious_zero_results = False
+    zero_result_reason = None
+    zero_result_baseline_found = None
+    zero_result_runtime_impl = None
 
     for row in rows:
         status = str(getattr(row, "status", "") or "").strip().lower()
@@ -108,7 +156,12 @@ def _build_run_stats(db: Any, source: str, *, now: datetime, window_hours: int =
                 last_success_at = getattr(row, "created_at", None)
                 last_found = int(getattr(row, "items_found", 0) or 0)
                 last_matched = int(getattr(row, "items_matched", 0) or 0)
-                last_thumb_rate = _extract_thumb_rate(getattr(row, "payload", None))
+                payload = getattr(row, "payload", None)
+                last_thumb_rate = _extract_thumb_rate(payload)
+                suspicious_zero_results = _extract_bool_payload_value(payload, "suspicious_zero_results")
+                zero_result_reason = _extract_str_payload_value(payload, "zero_result_reason")
+                zero_result_baseline_found = _extract_int_payload_value(payload, "zero_result_baseline_found")
+                zero_result_runtime_impl = _extract_str_payload_value(payload, "zero_result_runtime_impl")
         elif status == "blocked":
             blocked += 1
         elif status == "error":
@@ -135,6 +188,10 @@ def _build_run_stats(db: Any, source: str, *, now: datetime, window_hours: int =
         last_thumb_rate=last_thumb_rate,
         last_runtime_impl=last_runtime_impl,
         has_recent_v2_runtime=has_recent_v2_runtime,
+        suspicious_zero_results=suspicious_zero_results,
+        zero_result_reason=zero_result_reason,
+        zero_result_baseline_found=zero_result_baseline_found,
+        zero_result_runtime_impl=zero_result_runtime_impl,
     )
 
 
@@ -145,10 +202,24 @@ def _configured_enabled(row: dict[str, Any]) -> bool:
     return bool(value)
 
 
-def _recommendation(*, source: str, status: str, fetch_mode: str, role: str) -> str:
+def _recommendation(
+    *,
+    source: str,
+    status: str,
+    fetch_mode: str,
+    role: str,
+    configured_impl: str = "-",
+    zero_result_suspect: bool = False,
+) -> str:
     source = str(source or "").strip().lower()
     fetch_mode = str(fetch_mode or "").strip().lower()
     role = str(role or "").strip().lower()
+    configured_impl = str(configured_impl or "").strip().lower()
+
+    if zero_result_suspect:
+        if source == "mercadolivre" and configured_impl == "v2":
+            return "rollback_to_canary_then_validate"
+        return "investigate_zero_result_suspect"
 
     if status == "done":
         return "done_monitor_24h"
@@ -188,6 +259,7 @@ def classify_v2_readiness(row: dict[str, Any]) -> tuple[str, str]:
     error_count = int(row.get("error_count") or 0)
     ok_rate = int(row.get("ok_rate") or 0)
     has_recent_v2_runtime = bool(row.get("has_recent_v2_runtime")) or last_runtime_impl in {"v2", "v2_canary"}
+    zero_result_suspect = bool(row.get("suspicious_zero_results"))
 
     if role == "deprioritized":
         status = "deprioritized"
@@ -195,6 +267,8 @@ def classify_v2_readiness(row: dict[str, Any]) -> tuple[str, str]:
         status = "disabled"
     elif not has_v2:
         status = "no_v2"
+    elif zero_result_suspect:
+        status = "blocked_or_unstable"
     elif blocked_count > 0 or error_count > 0 or (success_count > 0 and ok_rate < _STABLE_OK_RATE_MIN):
         status = "blocked_or_unstable"
     elif configured_impl == "v2" and last_runtime_impl == "v2" and alignment == "ok" and success_count > 0:
@@ -211,13 +285,21 @@ def classify_v2_readiness(row: dict[str, Any]) -> tuple[str, str]:
     else:
         status = "blocked_or_unstable"
 
-    return status, _recommendation(source=source, status=status, fetch_mode=fetch_mode, role=role)
+    return status, _recommendation(
+        source=source,
+        status=status,
+        fetch_mode=fetch_mode,
+        role=role,
+        configured_impl=configured_impl,
+        zero_result_suspect=zero_result_suspect,
+    )
 
 
 def build_source_v2_readiness_report(db: Any, *, now: datetime | None = None, window_hours: int = 24) -> list[dict[str, Any]]:
     now = now or datetime.now(timezone.utc)
     inventory = build_source_v2_inventory(db=db)
     states = {s.source: s for s in db.query(SourceState).all()}
+    configs = {c.source: c for c in db.query(SourceConfig).all()}
 
     rows: list[dict[str, Any]] = []
     for item in inventory:
@@ -230,12 +312,23 @@ def build_source_v2_readiness_report(db: Any, *, now: datetime | None = None, wi
             last_runtime_impl = extract_runtime_impl(getattr(state, "last_payload", None))
 
         configured_impl = str(item.get("current_impl") or "v1")
+        cfg = configs.get(source)
+        canary_enabled = False
+        canary_effective = False
+        if source == "mercadolivre" and cfg is not None:
+            impl_flags = read_source_impl_flags(cfg.extra if isinstance(cfg.extra, dict) else None)
+            canary_enabled = bool(impl_flags.canary_v2_enabled)
+            canary_effective = (
+                canary_enabled
+                and bool(getattr(settings, "enable_playwright", False))
+                and bool(getattr(cfg, "browser_fallback_enabled", False))
+            )
         alignment = evaluate_source_impl_alignment(
             source=source,
             configured_impl=configured_impl,
             last_runtime_impl=last_runtime_impl,
-            canary_enabled=False,
-            canary_effective=False,
+            canary_enabled=canary_enabled,
+            canary_effective=canary_effective,
         )
         enabled = _configured_enabled(item)
 
@@ -258,6 +351,10 @@ def build_source_v2_readiness_report(db: Any, *, now: datetime | None = None, wi
             "ok_rate": stats.ok_rate,
             "avg_duration_ms": stats.avg_duration_ms,
             "has_recent_v2_runtime": stats.has_recent_v2_runtime,
+            "suspicious_zero_results": stats.suspicious_zero_results,
+            "zero_result_reason": stats.zero_result_reason,
+            "zero_result_baseline_found": stats.zero_result_baseline_found,
+            "zero_result_runtime_impl": stats.zero_result_runtime_impl,
         }
         status, recommendation = classify_v2_readiness(row)
         row["v2_readiness_status"] = status
@@ -309,14 +406,21 @@ def render_source_v2_readiness_telegram(rows: list[dict[str, Any]]) -> str:
         source = row.get("source")
         status = row.get("v2_readiness_status")
         lines.append(f"[{idx}] {source} — {status}")
-        lines.append(
-            "impl={impl} runtime={runtime} expected={expected} alignment={alignment}".format(
-                impl=row.get("configured_impl") or "-",
-                runtime=row.get("last_runtime_impl") or "-",
-                expected=row.get("expected_runtime_impl") or "-",
-                alignment=row.get("impl_alignment") or "-",
-            )
+        impl_line = "impl={impl} runtime={runtime} expected={expected} alignment={alignment}".format(
+            impl=row.get("configured_impl") or "-",
+            runtime=row.get("last_runtime_impl") or "-",
+            expected=row.get("expected_runtime_impl") or "-",
+            alignment=row.get("impl_alignment") or "-",
         )
+        if row.get("suspicious_zero_results"):
+            impl_line += " zero_result⚠️ baseline={baseline}".format(
+                baseline=(
+                    "-"
+                    if row.get("zero_result_baseline_found") is None
+                    else row.get("zero_result_baseline_found")
+                )
+            )
+        lines.append(impl_line)
         lines.append(
             "enabled={enabled} has_v1{has_v1} has_v2{has_v2} dual{dual} role={role} fetch={fetch}".format(
                 enabled=bool(row.get("enabled")),
@@ -345,6 +449,19 @@ def render_source_v2_readiness_telegram(rows: list[dict[str, Any]]) -> str:
                 thumb=_fmt_thumb(row.get("last_thumb_rate")),
             )
         )
+        if row.get("suspicious_zero_results"):
+            lines.append(
+                "zero_result_suspect=True "
+                "zero_result_baseline_found={baseline} "
+                "zero_result_reason={reason}".format(
+                    baseline=(
+                        "-"
+                        if row.get("zero_result_baseline_found") is None
+                        else row.get("zero_result_baseline_found")
+                    ),
+                    reason=row.get("zero_result_reason") or "-",
+                )
+            )
         lines.append(f"ação: {row.get('recommendation')}")
         lines.append("")
     return "\n".join(lines).rstrip()

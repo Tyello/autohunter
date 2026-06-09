@@ -433,3 +433,7 @@ Com o ciclo de Mercado Livre tratado como referência operacional, a próxima so
 Esse relatório compara todas as sources conhecidas e destaca status/recomendação por source (`candidate`, `needs_dual_run`, `blocked_or_unstable`, `done`, `disabled`, `no_v2`, `deprioritized`). Ele é somente leitura e não faz scraping, dual-run, canary ou promoção automática.
 
 Regra operacional pós-Mercado Livre: toda nova source candidata deve passar por dual-run controlado antes de canary. Sources browser-heavy precisam de avaliação extra de custo/estabilidade no Raspberry antes de rollout.
+
+### Mercado Livre V2 com zero_result_suspect
+
+Mesmo após promoção para `configured_impl=v2`, um run `runtime_impl=v2` com `found=0` e `suspicious_zero_results=true` não é estado `done`. No readiness report, esse caso deve aparecer como `blocked_or_unstable` com `zero_result_suspect=True`, baseline e motivo, recomendando `rollback_to_canary_then_validate` para validar novamente antes de considerar a migração saudável.
