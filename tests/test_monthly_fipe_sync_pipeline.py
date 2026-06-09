@@ -67,12 +67,17 @@ def test_monthly_fipe_sync_dry_run_does_not_persist_catalog_or_prices(db, tmp_pa
     assert result["catalog_import"]["valid"] == 1
     assert result["catalog_import"]["inserted"] == 1
     assert result["catalog_import"]["dry_run"] is True
+    assert result["warnings"] == [
+        "dry-run sem catálogo FIPE persistido para o mês; "
+        "resolver_coverage e price_plan não representam o apply final de fipe_prices"
+    ]
     assert db.query(FipeCatalogEntry).count() == 0
     assert db.query(FipePrice).count() == 0
     assert db.query(FipeSyncRun).count() == 0
     log = db.query(SystemLog).filter(SystemLog.component == "fipe_monthly_sync").first()
     assert log is not None
     assert log.payload["mode"] == "dry-run"
+    assert log.payload["warnings"] == result["warnings"]
 
 
 def test_monthly_fipe_sync_apply_imports_catalog_and_applies_price_plan(db, tmp_path):
@@ -167,3 +172,6 @@ def test_monthly_fipe_sync_cli_dry_run_command(db, tmp_path, capsys):
     assert exit_code == 0
     assert "FIPE monthly sync concluído" in captured.out
     assert "modo: dry-run" in captured.out
+    assert "catalog_import é simulação do arquivo novo" in captured.out
+    assert "resolver_coverage e price_plan foram calculados somente sobre o catálogo já persistido" in captured.out
+    assert "warning operacional: dry-run sem catálogo FIPE persistido para o mês" in captured.out

@@ -34,6 +34,15 @@ def _print_summary(result: dict) -> None:
         f"inserted={catalog_import.get('inserted', 0)} updated={catalog_import.get('updated', 0)} "
         f"skipped_invalid={catalog_import.get('skipped_invalid', 0)} dry_run={catalog_import.get('dry_run')}"
     )
+    if result.get("mode") == "dry-run":
+        print(
+            "  observação: catalog_import é simulação do arquivo novo; "
+            "nenhuma linha nova de catálogo foi persistida."
+        )
+        print(
+            "  observação: resolver_coverage e price_plan foram calculados "
+            "somente sobre o catálogo já persistido no banco."
+        )
     print(
         "- catalog atual: "
         f"entries={catalog_report.get('catalog_entries_count', 0)} "
@@ -52,6 +61,9 @@ def _print_summary(result: dict) -> None:
         f"dry_run={plan.get('dry_run', result.get('mode') == 'dry-run')}"
     )
     print(f"- fipe_prices atuais no mês: {result.get('fipe_prices_count', 0)}")
+    warnings = result.get("warnings") or []
+    for warning in warnings:
+        print(f"⚠️ warning operacional: {warning}")
     print(
         "Próximo passo: revisar os contadores acima e executar com --apply "
         "apenas se o dry-run estiver consistente."

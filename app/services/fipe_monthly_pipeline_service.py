@@ -148,6 +148,13 @@ def run_monthly_fipe_sync(
             )
 
         fipe_prices_count = db.query(FipePrice).filter(FipePrice.reference_month == month).count()
+        warnings = []
+        if not apply and int(catalog_report.get("catalog_entries_count") or 0) == 0:
+            warnings.append(
+                "dry-run sem catálogo FIPE persistido para o mês; "
+                "resolver_coverage e price_plan não representam o apply final de fipe_prices"
+            )
+
         result = {
             "ok": True,
             "mode": mode,
@@ -162,6 +169,7 @@ def run_monthly_fipe_sync(
             "price_plan": price_plan_result,
             "fipe_prices_count": int(fipe_prices_count),
             "sync_run_id": str(sync_run.id) if sync_run is not None else None,
+            "warnings": warnings,
         }
         _log_monthly_sync(
             db,

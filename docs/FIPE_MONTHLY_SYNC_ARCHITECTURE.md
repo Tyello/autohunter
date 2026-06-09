@@ -98,9 +98,10 @@ Parâmetros opcionais:
 - gera relatório do catálogo atualmente persistido para o mês/source;
 - calcula coverage/plan contra o catálogo já persistido no banco;
 - não cria `fipe_sync_runs`;
-- grava auditoria em `system_logs` com `component="fipe_monthly_sync"`.
+- grava auditoria em `system_logs` com `component="fipe_monthly_sync"`;
+- quando não existe catálogo persistido no mês/source, retorna `warnings[]` e imprime alerta operacional avisando que o dry-run não representa o apply final de `fipe_prices`.
 
-Observação: se o mês ainda não foi aplicado, o dry-run mostra quantas linhas seriam inseridas/atualizadas, mas coverage/plan não usa linhas não persistidas. Isso preserva segurança operacional e evita staging temporário invisível/ambíguo.
+Observação: se o mês ainda não foi aplicado, o dry-run mostra quantas linhas seriam inseridas/atualizadas, mas coverage/plan não usa linhas não persistidas. A saída do CLI explicita que `catalog_import` é simulação do arquivo novo e que `resolver_coverage`/`price_plan` usam apenas catálogo já persistido. Isso preserva segurança operacional e evita staging temporário invisível/ambíguo.
 
 ### `--apply`
 
