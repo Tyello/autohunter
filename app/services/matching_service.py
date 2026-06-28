@@ -206,6 +206,7 @@ def _semantic_key(wishlist: Wishlist) -> str:
 def match_listings_for_wishlists(
     wishlists: Sequence[Wishlist],
     listings: Sequence[CarListing],
+    cand_map: dict | None = None,
 ) -> dict:
     """Batch matching: avalia vários anúncios contra várias wishlists.
 
@@ -213,6 +214,12 @@ def match_listings_for_wishlists(
     - listings já vêm carregados (1 query na camada de job)
     - tokenização e extração de ano são precomputadas por listing
     - evita N queries (uma por wishlist) no fluxo do scheduler
+
+    Args:
+        cand_map: quando fornecido (dict listing_id -> iterável de wishlist_ids),
+            pares (w, l) onde w.id não está em cand_map.get(l.id, ()) são pulados.
+            Usado pelo caminho escalável para restringir avaliação aos candidatos do
+            índice invertido sem mudar resultado.  None = comportamento original.
     """
     if not wishlists or not listings:
         return {}
@@ -244,10 +251,20 @@ def match_listings_for_wishlists(
 
         prepared.append((w, terms, filters, sem))
 
+    # Pre-build per-listing candidate sets when cand_map is provided (O(1) lookup).
+    if cand_map is not None:
+        listing_cand_sets: dict = {lid: set(wids) for lid, wids in cand_map.items()}
+    else:
+        listing_cand_sets = {}
+
     out = defaultdict(list)
 
     for (w, terms, filters, sem) in prepared:
         for l in listings:
+            # When candidate map is active, skip pairs not selected by the inverted index.
+            if cand_map is not None and w.id not in listing_cand_sets.get(l.id, set()):
+                continue
+
             # Never notify sold items (vendidos feed can backfill sold state).
             if bool(getattr(l, "is_sold", False)):
                 continue
@@ -842,7 +859,9 @@ def match_listings_for_active_wishlists(
 
     Keeps Wishlist source-agnostic but avoids scanning all wishlists:
     - candidate selection via WishlistToken inverted index
-    - then apply existing match logic on candidates only
+    - then delegates to match_listings_for_wishlists with the candidate map so
+      each listing is tokenised once and each wishlist query is parsed once,
+      while still evaluating only index-selected (listing, wishlist) pairs.
 
     Returns:
       matches_by_wishlist: {wishlist_id: [CarListing, ...]}
@@ -879,17 +898,8 @@ def match_listings_for_active_wishlists(
         .filter(Wishlist.id.in_(list(all_cand_ids)))
         .all()
     )
-    wl_by_id = {w.id: w for w in wishlists}
 
-    out = defaultdict(list)
-    for l in listings:
-        cids = cand_map.get(l.id) or []
-        for wid in cids:
-            w = wl_by_id.get(wid)
-            if not w:
-                continue
-            if match_listing_to_wishlist(db, w, l):
-                out[w.id].append(l)
+    out = match_listings_for_wishlists(wishlists, listings, cand_map=cand_map)
 
     stats = {
         "candidates_p50": cstats.candidates_p50,
@@ -899,4 +909,4 @@ def match_listings_for_active_wishlists(
         "unique_tokens": cstats.unique_tokens,
         "candidate_wishlists": len(all_cand_ids),
     }
-    return dict(out), stats
+    return out, stats
