@@ -442,6 +442,20 @@ Antes de abrir para 30–50 beta users:
 
 Critério: fila drena, sender não atrasa de forma crescente, RAM estabiliza e browser não acumula zumbis.
 
+### Probe de RAM/I/O durante load test
+
+Rodar `scripts/pi_load_probe.sh` em paralelo ao load test para amostrar RAM disponível, pressão de I/O e processos Chromium:
+
+```bash
+./scripts/pi_load_probe.sh 15 load_test_$(date +%Y%m%d).csv
+```
+
+Interpretar o CSV resultante:
+
+- Se `mem_avail_mb` cair próximo de 0 ou `swap_used_mb` subir continuamente: o gargalo é **browser (Chromium)**, não banco. Reduzir `scheduler_browser_workers` para `1` (já é o default) ou limitar `playwright_queue_max_jobs` antes de qualquer tuning de SQL.
+- Se RAM permanecer estável e `chromium_procs` for baixo mas a fila de notificações atrasar: o gargalo pode ser I/O de banco ou índice — investigar via `EXPLAIN ANALYZE` na query de claim.
+- Se `load1` subir muito sem correlação com Chromium: investigar scheduler, scraping HTTP ou autovacuum.
+
 ## 15) Quando escalar investigação
 
 Escalar quando houver:
