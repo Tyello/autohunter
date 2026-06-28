@@ -15,7 +15,7 @@ down_revision deve apontar para o head atual da sua linha de migração
 from alembic import op
 
 revision = "p1_notif_dq_partial"
-down_revision = "e8d0d6f4a21b"  # ajuste para o head correto / faça alembic merge
+down_revision = "5c8f1a2b3d4e"
 branch_labels = None
 depends_on = None
 
