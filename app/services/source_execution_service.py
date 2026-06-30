@@ -12,7 +12,8 @@ from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.models.source_run import SourceRun
 from app.models.wishlist import Wishlist
-from app.scheduler.jobs import scrape_ingest_match_many
+from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
+from app.services.search_deduplication_service import canonical_search_key
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context
@@ -353,7 +354,7 @@ def run_source_for_all_wishlists(
 
         groups = {}
         for w in wishlists:
-            url = plugin.build_url(w.query)
+            url = canonical_search_key(w, plugin)
             g = groups.get(url)
             if g is None:
                 groups[url] = {"query": w.query, "wishlists": [w]}
@@ -408,13 +409,13 @@ def run_source_for_all_wishlists(
 
     for url, g in groups.items():
         job_name = f"scraper_{src}"
-        res = scrape_ingest_match_many(
+        res = scrape_ingest_match(
             db,
             job_name,
             _scrape_dispatch,
             url,
             ctx=ctx,
-            wishlists=g["wishlists"],
+            wishlist=None,
             health=health,
         )
 

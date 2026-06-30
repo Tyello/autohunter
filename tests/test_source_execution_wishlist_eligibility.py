@@ -46,7 +46,7 @@ def _patch_runtime(monkeypatch, *, source_name: str = "olx"):
     monkeypatch.setattr("app.services.source_execution_service.log", lambda *args, **kwargs: None)
     monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        "app.services.source_execution_service.scrape_ingest_match_many",
+        "app.services.source_execution_service.scrape_ingest_match",
         lambda *args, **kwargs: {
             "ok": True,
             "found": 0,

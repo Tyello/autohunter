@@ -47,7 +47,7 @@ def _setup_run(monkeypatch, *, source="mercadolivre", plugin=None, wishlists=Non
     monkeypatch.setattr(svc, "ensure_source_configs", lambda _db: None)
     monkeypatch.setattr(svc, "get_source", lambda _src: plugin if _src == source else None)
     monkeypatch.setattr(svc, "_wishlist_eligibility_snapshot", lambda _db, _src: (wishlists, {"active_wishlists": len(wishlists)}))
-    monkeypatch.setattr(svc, "scrape_ingest_match_many", lambda *_args, **_kwargs: dict(scrape_result))
+    monkeypatch.setattr(svc, "scrape_ingest_match", lambda *_args, **_kwargs: dict(scrape_result))
     monkeypatch.setattr(svc, "reconcile_listing_activity_for_source_run", lambda *_args, **_kwargs: _ActivityStats())
     monkeypatch.setattr(svc, "log", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(svc, "emit_event", lambda *_args, **_kwargs: None)
