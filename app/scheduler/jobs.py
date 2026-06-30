@@ -304,6 +304,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     queued = 0
     already_notified = 0
     reason_buckets = {"queued": 0, "already_notified": 0, "cap_skipped": 0, "invalid_listing": 0}
+    seen_identities_by_wishlist: dict[str, list] = {}
     # Match against the current scrape set (existing + new), then queue only if not notified yet.
     if wishlist is not None:
         candidates = _candidate_listings_for_run(
@@ -382,6 +383,10 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                         health.count("missing_fields_other", invalid_listing)
                 for k, v in (diag.get("buckets") or {}).items():
                     reason_buckets[k] = int(reason_buckets.get(k, 0)) + int(v or 0)
+                for ml in items:
+                    ident = build_seen_identity(ml)
+                    if ident is not None:
+                        seen_identities_by_wishlist.setdefault(str(wid), []).append(ident)
             # expose matching scalability stats for admin/telemetry
             object.__setattr__(ctx, "_matching_stats", mstats)
 
@@ -431,7 +436,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     db.commit()
 
     return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": matched,
-        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), **_ctx_fetch_diag(ctx)}
+        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "seen_identities_by_wishlist": seen_identities_by_wishlist, **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist], health: HealthCollector | None = None) -> dict:

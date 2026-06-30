@@ -328,7 +328,7 @@ def test_blocked_run_includes_duration_ms(db, monkeypatch):
     monkeypatch.setattr("app.services.source_execution_service.log", lambda *args, **kwargs: None)
     monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        "app.services.source_execution_service.scrape_ingest_match_many",
+        "app.services.source_execution_service.scrape_ingest_match",
         lambda *args, **kwargs: {"ok": False, "reason": "blocked", "status_code": 200, "url": "https://www.webmotors.com.br/carros/estoque", "error": "WM_DIAG::{}"},
     )
 
