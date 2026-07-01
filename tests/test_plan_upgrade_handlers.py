@@ -74,7 +74,7 @@ def test_upgrade_callback_monthly_notifies_admin_and_sends_real_link(monkeypatch
     assert q.answered == 1
     assert "Interesse em Garagem Alvo Premium" in notified[0]
     assert "Plano: Mensal" in notified[0]
-    assert q.messages[-1]["reply_markup"].inline_keyboard[0][0].url == "https://mp/monthly"
+    assert q.messages[-1]["reply_markup"].inline_keyboard[0][0].url == "https://mp/monthly?external_reference=123%3Amonthly"
 
 
 def test_upgrade_callback_annual_fallback_when_link_missing(monkeypatch):

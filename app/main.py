@@ -18,6 +18,7 @@ from app.services.db_runtime_safety_service import check_database_runtime_role
 from app.db.deps import get_db
 from app.web.routes_auth_facebook import router as facebook_auth_router
 from app.web.routes_fb_agent import router as facebook_agent_router
+from app.web.routes_mercadopago_webhook import router as mercadopago_webhook_router
 from app.integrations.facebook.agent_ws import handle_fb_agent_ws
 
 @asynccontextmanager
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AutoHunter", version="0.1.0", lifespan=lifespan)
 app.include_router(facebook_auth_router)
 app.include_router(facebook_agent_router)
+app.include_router(mercadopago_webhook_router)
 
 
 @app.websocket("/ws/fb/agent")
