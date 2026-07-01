@@ -18,6 +18,7 @@ from app.bot.renderers import (
 )
 from app.db.session import SessionLocal
 from app.core.settings import settings
+from app.services.mercadopago_webhook_service import build_checkout_url_with_reference
 from app.services.search_service import manual_search
 from app.services.users_service import get_or_create_user_by_chat
 from app.sources import list_sources
@@ -602,6 +603,7 @@ async def cb_upgrade_plan_choice(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     chat_id = update.effective_chat.id
+    payment_link = build_checkout_url_with_reference(payment_link, chat_id=chat_id, plan_period=plan_period)
     user = update.effective_user
     username = getattr(user, "username", None) or "-"
     first_name = getattr(user, "first_name", None) or "-"

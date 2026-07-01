@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     public_base_url: str | None = None
     mercado_pago_monthly_payment_link: str | None = None
     mercado_pago_annual_payment_link: str | None = None
+    mercadopago_access_token: str | None = None
+    mercadopago_webhook_secret: str | None = None
 
     autohunter_admin_user_ids: str | None = None
     autohunter_admin_chat_ids: str | None = None
