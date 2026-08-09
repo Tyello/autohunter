@@ -312,6 +312,12 @@ class Settings(BaseSettings):
     operational_retention_source_runs_days: int = 30
     operational_retention_notifications_days: int = 90
     operational_retention_wishlist_activity_days: int = 90
+    olx_detail_thumbnail_enrich_limit: int = 3
+    fipe_monthly_update_enabled: bool = False
+    fipe_monthly_update_input_path: str | None = None
+    fipe_monthly_update_day: int = 5
+    fipe_monthly_update_hour_utc: int = 5
+    fipe_monthly_update_min_interval_days: int = 25
 
     # Filesystem cleanup (runtime temp/cache/debug only; safe defaults)
     filesystem_cleanup_enabled: bool = Field(

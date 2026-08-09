@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable, Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -183,6 +183,119 @@ def _walk(obj: Any) -> Iterable[Any]:
             yield from _walk(x)
 
 
+_PLACEHOLDER_RE = re.compile(r"(placeholder|no[-_]?image|sem[-_]?foto|logo|sprite|avatar|blank|transparent|1x1)", re.I)
+_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|webp)(?:[?#].*)?$", re.I)
+
+
+def _first_srcset_url(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.split(",", 1)[0].strip().split(" ", 1)[0].strip() or None
+
+
+def _normalize_olx_image_url(value: Any, base_url: str = "https://www.olx.com.br/") -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw or raw.startswith(("data:", "blob:", "javascript:")):
+        return None
+    if "," in raw and " " in raw:
+        raw = _first_srcset_url(raw) or raw
+    url = urljoin(base_url, raw)
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    low = url.lower()
+    if _PLACEHOLDER_RE.search(low):
+        return None
+    host = parsed.netloc.lower()
+    if not (_IMAGE_EXT_RE.search(low) or any(token in host for token in ("olxcdn", "img", "image", "cloudfront"))):
+        return None
+    return url
+
+
+def _pick_olx_image_from_obj(obj: Any, base_url: str = "https://www.olx.com.br/") -> str | None:
+    if isinstance(obj, dict):
+        for key in ("originalWebp", "original", "thumbnail", "imageUrl", "image_url", "src"):
+            img = _normalize_olx_image_url(obj.get(key), base_url)
+            if img:
+                return img
+        if any(k in obj for k in ("width", "height", "mime", "type", "originalWebp", "original", "thumbnail")):
+            img = _normalize_olx_image_url(obj.get("url"), base_url)
+            if img:
+                return img
+        for key, value in obj.items():
+            if key in {"subject", "title", "price", "priceValue", "description", "friendlyUrl", "url"}:
+                continue
+            img = _pick_olx_image_from_obj(value, base_url)
+            if img:
+                return img
+    elif isinstance(obj, list):
+        for value in obj:
+            img = _pick_olx_image_from_obj(value, base_url)
+            if img:
+                return img
+    elif isinstance(obj, str):
+        return _normalize_olx_image_url(obj, base_url)
+    return None
+
+
+def _image_from_tag(tag: Any, base_url: str) -> str | None:
+    for attr in ("src", "data-src", "data-original", "data-lazy"):
+        img = _normalize_olx_image_url(tag.get(attr), base_url)
+        if img:
+            return img
+    return _normalize_olx_image_url(_first_srcset_url(tag.get("srcset")), base_url)
+
+
+def _extract_olx_detail_thumbnail(html: str, detail_url: str) -> str | None:
+    soup = BeautifulSoup(html or "", "html.parser")
+    for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]', 'meta[property="twitter:image"]'):
+        tag = soup.select_one(selector)
+        if tag:
+            img = _normalize_olx_image_url(tag.get("content"), detail_url)
+            if img:
+                return img
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or script.get_text() or "{}")
+        except Exception:
+            continue
+        payload = data.get("image") if isinstance(data, dict) else data
+        img = _pick_olx_image_from_obj(payload, detail_url)
+        if img:
+            return img
+    for tag in soup.select("picture source, picture img, [data-testid*=gallery] source, [data-testid*=gallery] img, .gallery source, .gallery img, img"):
+        img = _image_from_tag(tag, detail_url)
+        if img:
+            return img
+    for tag in soup.select('[style*="background"]'):
+        m = re.search(r"url\(['\"]?([^)'\"]+)", tag.get("style") or "", flags=re.I)
+        if m:
+            img = _normalize_olx_image_url(m.group(1), detail_url)
+            if img:
+                return img
+    return None
+
+
+def _enrich_missing_olx_thumbnails(items: list[OlxItem], ctx: ScrapeContext, *, limit: int | None = None) -> list[OlxItem]:
+    cap = max(0, int(limit if limit is not None else getattr(settings, "olx_detail_thumbnail_enrich_limit", 3) or 0))
+    enriched = 0
+    for item in items:
+        if enriched >= cap:
+            break
+        if item.thumbnail_url or not item.url:
+            continue
+        try:
+            html = fetch_html(item.url, ctx=ctx, referer="https://www.olx.com.br/", proxy=ctx.proxy_server, min_delay_ms=0, max_delay_ms=0)
+            thumb = _extract_olx_detail_thumbnail(html, item.url)
+        except Exception:
+            thumb = None
+        if thumb:
+            item.thumbnail_url = thumb
+        enriched += 1
+    return items
+
 def _extract_next_data_json(html: str) -> Optional[dict]:
     """
     Tenta extrair o JSON do <script id="__NEXT_DATA__" type="application/json">...</script>
@@ -231,15 +344,8 @@ def _extract_items_from_next_data(next_data: dict) -> list[OlxItem]:
             if not list_id or not url:
                 continue
 
-            # thumbnail
-            thumb = None
-            imgs = node.get("images")
-            if isinstance(imgs, list) and imgs:
-                first = imgs[0]
-                if isinstance(first, dict):
-                    thumb = first.get("originalWebp") or first.get("original")
-                elif isinstance(first, str):
-                    thumb = first
+            # thumbnail: OLX can expose images under several nested keys.
+            thumb = _pick_olx_image_from_obj(node, str(url))
 
             # preço (pode vir em priceValue ou price)
             price_text = node.get("priceValue") or node.get("price") or ""
@@ -454,7 +560,7 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 raise RuntimeError("Captured JSON did not include OLX listings")
 
             items = _extract_items_from_next_data(j)
-            return _items_to_dicts(items)
+            return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
         except Exception:
             html = _fetch_browser_html()
 
@@ -463,10 +569,10 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
             items = _fallback_parse_from_cards(html)
             if not items:
                 raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
-            return _items_to_dicts(items)
+            return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
         items = _extract_items_from_next_data(next_data)
-        return _items_to_dicts(items)
+        return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
     # 2) Preferred: HTTP hybrid
     try:
@@ -497,10 +603,10 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
         items = _fallback_parse_from_cards(html)
         if not items:
             raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
-        return _items_to_dicts(items)
+        return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
     items = _extract_items_from_next_data(next_data)
-    return _items_to_dicts(items)
+    return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
 
 def _fallback_parse_from_cards(html: str) -> list[OlxItem]:
@@ -526,9 +632,17 @@ def _fallback_parse_from_cards(html: str) -> list[OlxItem]:
 
         img = None
         if container:
-            img_el = container.select_one("img")
-            if img_el:
-                img = img_el.get("src")
+            for media_el in container.select("picture source, picture img, img, source"):
+                img = _image_from_tag(media_el, href)
+                if img:
+                    break
+            if not img:
+                for styled in container.select('[style*="background"]'):
+                    m_bg = re.search(r"url\(['\"]?([^)'\"]+)", styled.get("style") or "", flags=re.I)
+                    if m_bg:
+                        img = _normalize_olx_image_url(m_bg.group(1), href)
+                    if img:
+                        break
 
         m = re.search(r"(\d{6,})", href)
         external_id = m.group(1) if m else href

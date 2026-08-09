@@ -472,6 +472,19 @@ def start_scheduler() -> BackgroundScheduler:
         id="filesystem_cleanup_daily",
         replace_existing=True,
     )
+    from app.scheduler.fipe_update_job import job_monthly_fipe_update
+    sched.add_job(
+        job_monthly_fipe_update,
+        "cron",
+        day=max(1, min(28, int(getattr(settings, "fipe_monthly_update_day", 5) or 5))),
+        hour=max(0, min(23, int(getattr(settings, "fipe_monthly_update_hour_utc", 5) or 5))),
+        minute=0,
+        id="monthly_fipe_update",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     from app.scheduler.premium_expiration_job import job_expire_premium_subscriptions
     sched.add_job(
         job_expire_premium_subscriptions,

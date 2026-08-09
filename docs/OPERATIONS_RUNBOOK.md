@@ -691,3 +691,31 @@ Cobertura no admin Telegram:
 Interpretação: cobertura baixa indica necessidade de incluir chaves ausentes (top missing) no CSV antes de novo apply.
 
 Cuidados: valide `vehicle_key` normalizada, `fipe_price` > 0 e competência `YYYY-MM`; não importar fontes não confiáveis.
+
+## Supabase Disk IO diagnostics
+
+Use `/admin db io` para uma leitura operacional rápida de sender backlog, idade do backlog de `notifications`, idade do backlog de `scrape_jobs`, `notifications` pendentes, `scrape_jobs` por status, `source_runs` das últimas 24h, top tabelas quentes e estimativa aproximada de churn.
+
+Queries diretas para Supabase:
+
+```sql
+select schemaname, relname, n_tup_ins, n_tup_upd, n_tup_del, n_dead_tup
+from pg_stat_user_tables
+order by (n_tup_ins + n_tup_upd + n_tup_del) desc
+limit 20;
+
+select query, calls, total_exec_time, rows, shared_blks_hit, shared_blks_read, shared_blks_dirtied
+from pg_stat_statements
+order by shared_blks_read + shared_blks_dirtied desc
+limit 20;
+
+select status, count(*), min(created_at), max(created_at)
+from scrape_jobs
+group by status;
+
+select status, count(*), min(created_at), max(created_at)
+from notifications
+group by status;
+```
+
+Retenção recomendada para beta: `system_logs`/`telemetry_events` 7 dias, `scrape_jobs` concluídos 48h, `source_runs` 30 dias, `notifications` 90 dias e `wishlist_listing_activity` 90 dias. Critério de aceite: queda estimada de IO por uso de índices nas rotas quentes e visibilidade diária via `/admin db io`. Rollback: reverter a migration de índices; o comando admin é somente leitura.

@@ -59,3 +59,5 @@ __all__ = [
     "AuctionLot",
     "UserDigestPreference",
 ]
+
+from .fipe_update_run import FipeUpdateRun

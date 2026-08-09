@@ -174,3 +174,9 @@ Antes de ativar cron/systemd, decidir:
 - Não liberar scheduler automático sem revisão operacional explícita.
 - Não aplicar updates de preços existentes sem uma flag/revisão separada.
 - Sempre tratar `.env` como fallback/kill switch, não como superfície única de configuração de produto.
+
+## Scheduler mensal auditável — P0
+
+O scheduler principal registra `monthly_fipe_update` como cron mensal. O job chama `run_audited_monthly_fipe_update`, que cria `fipe_update_runs` antes de executar IO, aplica lock lógico por `lock_key='monthly_fipe_update'`, respeita kill switch e só roda automaticamente quando o último sucesso é mais antigo que `FIPE_MONTHLY_UPDATE_MIN_INTERVAL_DAYS`.
+
+O comando `/admin fipe update_status` mostra última execução, status, linhas atualizadas, duração, próximo agendamento e se o job está due pelo último sucesso. Rollback seguro: desligar `FIPE_MONTHLY_UPDATE_ENABLED` e reverter model/migration/service.
