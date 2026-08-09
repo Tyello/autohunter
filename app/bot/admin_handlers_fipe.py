@@ -7,6 +7,7 @@ from telegram import Update
 from app.db.session import SessionLocal
 from app.models.fipe_catalog_entry import FipeCatalogEntry
 from app.models.fipe_sync_run import FipeSyncRun
+from app.services.fipe_update_job_service import get_fipe_update_status
 from app.models.car_listing import CarListing
 from app.models.system_log import SystemLog
 from app.services.fipe_prices_import_service import build_fipe_coverage_report
@@ -244,6 +245,29 @@ def render_admin_fipe_apply_status(report: dict) -> str:
     else:
         lines.append(rec or "-")
     return "\n".join(lines)
+
+def render_admin_fipe_update_status(report: dict) -> str:
+    run = report.get("last")
+    lines = [
+        "🗓️ FIPE atualização mensal",
+        f"Enabled: {bool(report.get('enabled'))}",
+        f"Próximo agendamento: {report.get('next_schedule')}",
+        f"Due pelo último sucesso: {bool(report.get('due_by_last_success'))}",
+    ]
+    if not run:
+        lines.append("Última execução: nenhuma")
+        return "\n".join(lines)
+    lines.extend([
+        f"Última execução: {run.started_at}",
+        f"Status: {run.status}",
+        f"Competência: {run.reference_month or '-'}",
+        f"Linhas atualizadas: {run.updated_rows}",
+        f"Duração: {run.duration_ms if run.duration_ms is not None else '-'} ms",
+    ])
+    if run.error_message:
+        lines.append(f"Erro/observação: {run.error_message}")
+    return "\n".join(lines)
+
 def render_admin_fipe_apply_history(logs: list[SystemLog]) -> str:
     if not logs:
         return "Ainda não há histórico persistente de apply_plan."
@@ -277,6 +301,12 @@ def render_admin_fipe_apply_history(logs: list[SystemLog]) -> str:
 
 async def admin_fipe(update: Update, raw_args: list[str]) -> None:
     args = [a.strip() for a in (raw_args or []) if a.strip()]
+    if args and args[0].lower() == "update_status":
+        with SessionLocal() as db:
+            report = get_fipe_update_status(db)
+        await update.message.reply_text(render_admin_fipe_update_status(report))
+        return
+
     if args and args[0].lower() == "catalog":
         month = args[1] if len(args) >= 2 else None
         try:
@@ -480,4 +510,4 @@ async def admin_fipe(update: Update, raw_args: list[str]) -> None:
         await update.message.reply_text(render_admin_fipe_coverage(report))
         return
 
-    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500] | /admin fipe apply_plan [YYYY-MM] [dry|live] [1-500] | /admin fipe apply_history [1-20] | /admin fipe audit [1-20] | /admin fipe apply_status [YYYY-MM] [1-50]")
+    await update.message.reply_text("Use: /admin fipe | /admin fipe coverage [YYYY-MM] [1-50] | /admin fipe catalog [YYYY-MM] | /admin fipe resolve <listing_id> [YYYY-MM] | /admin fipe resolver_status [YYYY-MM] [1-200] | /admin fipe plan [YYYY-MM] [1-500] | /admin fipe apply_plan [YYYY-MM] [dry|live] [1-500] | /admin fipe apply_history [1-20] | /admin fipe audit [1-20] | /admin fipe update_status | /admin fipe apply_status [YYYY-MM] [1-50]")

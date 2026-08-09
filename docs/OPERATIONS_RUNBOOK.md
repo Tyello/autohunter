@@ -694,7 +694,7 @@ Cuidados: valide `vehicle_key` normalizada, `fipe_price` > 0 e competência `YYY
 
 ## Supabase Disk IO diagnostics
 
-Use `/admin db io` para uma leitura operacional rápida de sender backlog, `notifications` pendentes, `scrape_jobs` por status, `source_runs` das últimas 24h, top tabelas quentes e estimativa aproximada de churn.
+Use `/admin db io` para uma leitura operacional rápida de sender backlog, idade do backlog de `notifications`, idade do backlog de `scrape_jobs`, `notifications` pendentes, `scrape_jobs` por status, `source_runs` das últimas 24h, top tabelas quentes e estimativa aproximada de churn.
 
 Queries diretas para Supabase:
 
