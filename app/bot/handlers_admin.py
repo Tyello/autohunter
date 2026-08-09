@@ -71,6 +71,7 @@ from app.bot import admin_handlers_health as _admin_health_module
 from app.bot.admin_handlers_health import admin_health, admin_audit, admin_errors
 from app.bot.admin_handlers_diagnostics import admin_dedupe, admin_tracking
 from app.bot.admin_handlers_metrics import admin_metrics
+from app.services.db_io_observability_service import collect_db_io_metrics, render_db_io_metrics
 from app.bot.admin_handlers_digest import admin_digest
 from app.bot.admin_handlers_fipe import admin_fipe
 from app.services.premium_subscription_service import activate_manual_premium
@@ -400,7 +401,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = [a.strip() for a in (context.args or []) if a.strip()]
     if not args:
-        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin cleanup | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
+        await update.message.reply_text("Use: /admin sources | /admin auctions | /admin cleanup | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics | /admin db io")
         return
 
     action = args[0].lower()
@@ -455,6 +456,11 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "metrics":
         await admin_metrics(update, args[1:])
         return
+
+    if action == "db" and len(args) >= 2 and args[1].lower() == "io":
+        with SessionLocal() as db:
+            await update.message.reply_text(render_db_io_metrics(collect_db_io_metrics(db)))
+        return
     if action == "cleanup":
         await _admin_cleanup(update, args[1:])
         return
@@ -476,7 +482,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_tokens_dispatch(update, args[1:])
         return
 
-    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin cleanup | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics")
+    await update.message.reply_text("Ação inválida. Use: /admin sources | /admin warmup | /admin auctions | /admin cleanup | /admin runall | /admin matchdebug | /admin requeue | /admin reindex_wishlists | /admin tokens | /admin health | /admin audit | /admin users | /admin errors | /admin deploy | /admin fb_sessions | /admin premium | /admin dedupe | /admin tracking | /admin digest | /admin fipe | /admin metrics | /admin db io")
 
 
 
