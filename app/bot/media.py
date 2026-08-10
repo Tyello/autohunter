@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 from app.services.http_session import get_shared_session
+
+logger = logging.getLogger(__name__)
 
 # RPi-friendly guardrails
 MAX_IMAGE_BYTES = 3_500_000  # ~3.5MB
@@ -100,6 +103,7 @@ def download_image_bytes(
             allow_redirects=True,
         ) as r:
             if r.status_code != 200:
+                logger.warning("download_image_bytes: HTTP %s for %s", r.status_code, url)
                 return None
             header_ctype = (r.headers.get("Content-Type") or "")
 
@@ -113,19 +117,27 @@ def download_image_bytes(
                     # Quick reject for HTML error pages
                     h = head.lstrip()[:20].lower()
                     if h.startswith(b"<!") or h.startswith(b"<html") or h.startswith(b"<script"):
+                        logger.warning("download_image_bytes: HTML content instead of image for %s", url)
                         return None
 
                 buf.extend(chunk)
                 if len(buf) > MAX_IMAGE_BYTES:
+                    logger.warning("download_image_bytes: image exceeds %s bytes for %s", MAX_IMAGE_BYTES, url)
                     return None
 
             if not buf:
+                logger.warning("download_image_bytes: empty body for %s", url)
                 return None
 
             ctype = _infer_image_ctype(url, header_ctype, head or bytes(buf[:512]))
             if not ctype:
+                logger.warning(
+                    "download_image_bytes: could not infer image content-type (header=%r) for %s",
+                    header_ctype, url,
+                )
                 return None
 
             return bytes(buf), ctype
-    except Exception:
+    except Exception as exc:
+        logger.warning("download_image_bytes: request failed for %s: %s", url, exc)
         return None

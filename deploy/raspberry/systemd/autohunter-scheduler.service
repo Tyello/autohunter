@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=autohunter
 WorkingDirectory=/opt/autohunter
+# FIPE_MONTHLY_UPDATE_ENABLED vem false por padrão (settings.py) — defina =true em /opt/autohunter/.env para ligar o job mensal FIPE
 EnvironmentFile=/opt/autohunter/.env
 ExecStart=/opt/autohunter/deploy/raspberry/scripts/run_scheduler.sh
 Restart=always

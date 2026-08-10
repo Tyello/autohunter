@@ -1,5 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from zoneinfo import ZoneInfo
 
 import threading
@@ -215,11 +216,13 @@ def start_scheduler() -> BackgroundScheduler:
     _bootstrap_source_configs_once()
     sched = BackgroundScheduler(
         timezone="UTC",
+        jobstores={"default": SQLAlchemyJobStore(url=settings.database_url)},
         executors={
             "default": ThreadPoolExecutor(int(getattr(settings, "scheduler_workers", 2) or 2)),
             "http": ThreadPoolExecutor(int(getattr(settings, "scheduler_http_workers", 3) or 3)),
             "browser": ThreadPoolExecutor(int(getattr(settings, "scheduler_browser_workers", 1) or 1)),
             "sender": ThreadPoolExecutor(int(getattr(settings, "scheduler_sender_workers", 1) or 1)),
+            "fipe": ThreadPoolExecutor(1),
         },
         job_defaults={
             "coalesce": True,
@@ -472,6 +475,18 @@ def start_scheduler() -> BackgroundScheduler:
         id="filesystem_cleanup_daily",
         replace_existing=True,
     )
+    # Limpeza de tabelas operacionais não-protegidas (system_logs, telemetry_events,
+    # source_runs, scrape_jobs done/failed). notifications/wishlist_listing_activity
+    # NUNCA entram aqui — são protegidas pelo guardrail e só podem ser apagadas via
+    # scripts/cleanup_operational_data.py (break-glass explícito).
+    from app.scheduler.operational_data_cleanup_job import job_operational_data_cleanup
+    sched.add_job(
+        job_operational_data_cleanup,
+        "interval",
+        hours=6,
+        id="operational_data_cleanup",
+        replace_existing=True,
+    )
     from app.scheduler.fipe_update_job import job_monthly_fipe_update
     sched.add_job(
         job_monthly_fipe_update,
@@ -483,6 +498,7 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        executor="fipe",
     )
 
     from app.scheduler.premium_expiration_job import job_expire_premium_subscriptions

@@ -8,8 +8,16 @@ from sqlalchemy import text
 
 from app.core.settings import settings
 from app.db.session import SessionLocal
+from app.services.operational_data_cleanup_service import (
+    BATCH_SIZE,
+    unprotected_cleanup_rules,
+)
 
-BATCH_SIZE = 1000
+# Tables guarded by the core-data-delete trigger (5c8f1a2b3d4e_core_data_delete_guardrails).
+# A physical DELETE against them requires SET LOCAL app.allow_core_data_delete='on'
+# inside the same transaction, set explicitly below — never from the in-process
+# APScheduler job (see app/services/notifications_cleanup_service.py).
+_PROTECTED_TABLES = ("notifications", "wishlist_listing_activity")
 
 
 def _utcnow() -> datetime:
@@ -28,9 +36,11 @@ def _count_candidates(db, sql: str, params: dict) -> int:
     return int(db.execute(text(sql), params).scalar_one())
 
 
-def _delete_candidates_in_batches(db, sql: str, params: dict) -> int:
+def _delete_candidates_in_batches(db, sql: str, params: dict, *, protected: bool = False) -> int:
     total = 0
     while True:
+        if protected and not settings.database_url.startswith("sqlite"):
+            db.execute(text("SET LOCAL app.allow_core_data_delete = 'on'"))
         n = int(db.execute(text(sql), params).rowcount or 0)
         if n <= 0:
             break
@@ -63,54 +73,38 @@ def main() -> int:
     if settings.database_url.startswith('sqlite') and apply:
         raise SystemExit('Refusing destructive cleanup on SQLite. Use dry-run only.')
 
-    done_cut = _cut_hours(settings.operational_retention_scrape_jobs_done_hours)
-    failed_cut = _cut(settings.operational_retention_scrape_jobs_failed_days)
     queued_old_cut = _cut_hours(2)
 
+    # count_sql mirrors the delete_sql WHERE clause from operational_data_cleanup_service,
+    # kept local only for dry-run reporting (no writes).
+    _count_sql_by_table = {
+        'system_logs': 'SELECT count(*) FROM system_logs WHERE created_at < :cut',
+        'telemetry_events': 'SELECT count(*) FROM telemetry_events WHERE created_at < :cut',
+        'scrape_jobs_done': "SELECT count(*) FROM scrape_jobs WHERE created_at < :cut AND status = 'done'",
+        'scrape_jobs_failed': "SELECT count(*) FROM scrape_jobs WHERE created_at < :cut AND status = 'failed'",
+        'source_runs': 'SELECT count(*) FROM source_runs WHERE created_at < :cut',
+    }
     rules = [
-        (
-            'system_logs',
-            'SELECT count(*) FROM system_logs WHERE created_at < :cut',
-            'DELETE FROM system_logs WHERE id IN (SELECT id FROM system_logs WHERE created_at < :cut LIMIT :batch)',
-            {'cut': _cut(settings.operational_retention_system_logs_days), 'batch': BATCH_SIZE},
-        ),
-        (
-            'telemetry_events',
-            'SELECT count(*) FROM telemetry_events WHERE created_at < :cut',
-            'DELETE FROM telemetry_events WHERE id IN (SELECT id FROM telemetry_events WHERE created_at < :cut LIMIT :batch)',
-            {'cut': _cut(settings.operational_retention_telemetry_events_days), 'batch': BATCH_SIZE},
-        ),
-        (
-            'scrape_jobs_done',
-            "SELECT count(*) FROM scrape_jobs WHERE created_at < :cut AND status = 'done'",
-            "DELETE FROM scrape_jobs WHERE id IN (SELECT id FROM scrape_jobs WHERE created_at < :cut AND status = 'done' LIMIT :batch)",
-            {'cut': done_cut, 'batch': BATCH_SIZE},
-        ),
-        (
-            'scrape_jobs_failed',
-            "SELECT count(*) FROM scrape_jobs WHERE created_at < :cut AND status = 'failed'",
-            "DELETE FROM scrape_jobs WHERE id IN (SELECT id FROM scrape_jobs WHERE created_at < :cut AND status = 'failed' LIMIT :batch)",
-            {'cut': failed_cut, 'batch': BATCH_SIZE},
-        ),
-        (
-            'source_runs',
-            'SELECT count(*) FROM source_runs WHERE created_at < :cut',
-            'DELETE FROM source_runs WHERE id IN (SELECT id FROM source_runs WHERE created_at < :cut LIMIT :batch)',
-            {'cut': _cut(settings.operational_retention_source_runs_days), 'batch': BATCH_SIZE},
-        ),
+        (name, _count_sql_by_table[name], delete_sql, params, False)
+        for name, delete_sql, params in unprotected_cleanup_rules()
+    ]
+    rules += [
         (
             'notifications',
             "SELECT count(*) FROM notifications WHERE created_at < :cut AND status IN ('sent','failed','suppressed','discarded')",
             "DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE created_at < :cut AND status IN ('sent','failed','suppressed','discarded') LIMIT :batch)",
             {'cut': _cut(settings.operational_retention_notifications_days), 'batch': BATCH_SIZE},
+            True,
         ),
         (
             'wishlist_listing_activity',
             'SELECT count(*) FROM wishlist_listing_activity WHERE created_at < :cut',
             'DELETE FROM wishlist_listing_activity WHERE id IN (SELECT id FROM wishlist_listing_activity WHERE created_at < :cut LIMIT :batch)',
             {'cut': _cut(settings.operational_retention_wishlist_activity_days), 'batch': BATCH_SIZE},
+            True,
         ),
     ]
+    assert all(name in _PROTECTED_TABLES for name, _, _, _, protected in rules if protected)
 
     with SessionLocal() as db:
         queued_old = _count_candidates(
@@ -127,9 +121,20 @@ def main() -> int:
         mode = 'apply' if apply else 'dry-run'
         print(f'[{mode}] scrape_jobs_queued_old_2h: {queued_old}')
 
-        for name, count_sql, delete_sql, params in rules:
-            count = _count_candidates(db, count_sql, params) if not apply else _delete_candidates_in_batches(db, delete_sql, params)
-            print(f'[{mode}] {name}: {count}')
+        for name, count_sql, delete_sql, params, protected in rules:
+            try:
+                if apply:
+                    result = _delete_candidates_in_batches(db, delete_sql, params, protected=protected)
+                else:
+                    result = _count_candidates(db, count_sql, params)
+                print(f'[{mode}] {name}: {result}')
+            except Exception as e:
+                db.rollback()
+                print(f'[{mode}] {name}: error: {e}')
+                try:
+                    _log_warning(db, f'cleanup rule failed: {name}', {'error': str(e)})
+                except Exception:
+                    db.rollback()
 
     return 0
 

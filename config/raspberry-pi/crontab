@@ -1,7 +1,15 @@
 # /etc/cron.d/autohunter
 # Cron jobs para manutenção do AutoHunter
 
-# Limpeza operacional (logs/eventos/jobs/runs/notificações) a cada 6 horas
+# Limpeza operacional a cada 6 horas. Desde 2026-08-10 o scheduler (APScheduler,
+# job "operational_data_cleanup") ja cobre system_logs/telemetry_events/source_runs/
+# scrape_jobs no proprio processo, entao este cron so e estritamente necessario para
+# notifications e wishlist_listing_activity (tabelas protegidas pelo guardrail de
+# core-data-delete; so podem ser apagadas aqui, via break-glass explicito). Rodar as
+# outras tabelas de novo aqui e redundante mas barato (nada a apagar na maioria das
+# execucoes). Ate 2026-08-10 este cron falhava silenciosamente nas duas tabelas
+# protegidas porque o script nao setava app.allow_core_data_delete - corrigido junto
+# com este comentario.
 0 */6 * * * autohunter /home/autohunter/autohunter/venv/bin/python /home/autohunter/autohunter/scripts/cleanup_operational_data.py --apply
 
 ## Backup database daily at 2am (script: scripts/backup_db.sh; output via cron/journald)

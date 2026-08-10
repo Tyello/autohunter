@@ -304,20 +304,27 @@ class Settings(BaseSettings):
     telegram_text_max: int = 4000
     safe_chunk: int = 3800
     source_config_cache_ttl_seconds: int = 60
-    operational_retention_system_logs_days: int = 7
-    operational_retention_telemetry_events_days: int = 7
+    operational_retention_system_logs_days: int = 10
+    operational_retention_telemetry_events_days: int = 10
     operational_retention_scrape_jobs_days: int = 7
     operational_retention_scrape_jobs_done_hours: int = 48
     operational_retention_scrape_jobs_failed_days: int = 7
-    operational_retention_source_runs_days: int = 30
+    operational_retention_source_runs_days: int = 10
     operational_retention_notifications_days: int = 90
     operational_retention_wishlist_activity_days: int = 90
-    olx_detail_thumbnail_enrich_limit: int = 3
+    # 3 era baixo demais: a extração da página de busca da OLX frequentemente
+    # não traz thumbnail para a maioria dos itens, então o cap fazia a maior
+    # parte dos anúncios ficar sem foto até vários ciclos de scrape depois.
+    olx_detail_thumbnail_enrich_limit: int = 12
     fipe_monthly_update_enabled: bool = False
     fipe_monthly_update_input_path: str | None = None
     fipe_monthly_update_day: int = 5
     fipe_monthly_update_hour_utc: int = 5
     fipe_monthly_update_min_interval_days: int = 25
+    fipe_api_rate_limit_ms: int = 800
+    fipe_api_max_throttle_ms: int = 5000
+    fipe_api_max_retries: int = 5
+    fipe_api_timeout_s: int = 20
 
     # Filesystem cleanup (runtime temp/cache/debug only; safe defaults)
     filesystem_cleanup_enabled: bool = Field(

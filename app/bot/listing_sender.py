@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from io import BytesIO
 
 from telegram import Update
 
 from app.bot.media import download_image_bytes
+
+logger = logging.getLogger(__name__)
 
 TELEGRAM_CAPTION_MAX = 1024
 TELEGRAM_TEXT_MAX = 4096
@@ -61,7 +64,11 @@ async def send_listing_message(
                 reply_markup=reply_markup,
             )
             sent_photo = True
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "send_listing_message: reply_photo(url) failed for thumbnail_url=%s: %s",
+                thumbnail_url, exc,
+            )
             sent_photo = False
 
     if thumbnail_url and not sent_photo and allow_local_image_download:
@@ -82,8 +89,25 @@ async def send_listing_message(
                     reply_markup=reply_markup,
                 )
                 sent_photo = True
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "send_listing_message: reply_photo(bytes) failed for thumbnail_url=%s: %s",
+                    thumbnail_url, exc,
+                )
                 sent_photo = False
+        else:
+            logger.warning(
+                "send_listing_message: could not download thumbnail_url=%s, falling back to text",
+                thumbnail_url,
+            )
+
+    if not sent_photo and not thumbnail_url:
+        logger.warning("send_listing_message: no thumbnail_url provided, sending text-only")
+    elif not sent_photo and thumbnail_url and not allow_local_image_download:
+        logger.warning(
+            "send_listing_message: thumbnail_url=%s present but local image download disabled, sending text-only",
+            thumbnail_url,
+        )
 
     if sent_photo:
         if remainder.strip():

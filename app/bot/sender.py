@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import json
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from app.bot.media import download_image_bytes
 from app.bot.text_sanitize import sanitize_for_telegram
 from app.notifications.telegram_formatter import format_ad_message, format_tracked_price_drop_message
 from app.services.http_session import get_shared_session
+
+logger = logging.getLogger(__name__)
 
 
 # Telegram limits
@@ -245,8 +248,10 @@ def telegram_sender(notification, listing, user):
 
     session = get_shared_session("telegram")
 
-    if getattr(listing, "thumbnail_url", None):
-        img = download_image_bytes(listing.thumbnail_url, referer=getattr(listing, "url", None))
+    listing_thumbnail_url = getattr(listing, "thumbnail_url", None)
+    listing_url = getattr(listing, "url", None)
+    if listing_thumbnail_url:
+        img = download_image_bytes(listing_thumbnail_url, referer=listing_url)
         if img:
             img_bytes, ctype = img
             url = f"https://api.telegram.org/bot{token}/sendPhoto"
@@ -259,6 +264,21 @@ def telegram_sender(notification, listing, user):
 
             if resp.status_code < 400:
                 sent_photo = True
+            else:
+                logger.warning(
+                    "telegram_sender: sendPhoto failed (status=%s) for listing_url=%s thumbnail_url=%s, falling back to text: %s",
+                    resp.status_code, listing_url, listing_thumbnail_url, resp.text,
+                )
+        else:
+            logger.warning(
+                "telegram_sender: could not download thumbnail for listing_url=%s thumbnail_url=%s, falling back to text",
+                listing_url, listing_thumbnail_url,
+            )
+    else:
+        logger.warning(
+            "telegram_sender: listing has no thumbnail_url (source=%s, listing_url=%s), sending text-only alert",
+            getattr(listing, "source", None), listing_url,
+        )
 
     if not sent_photo:
         url = f"https://api.telegram.org/bot{token}/sendMessage"

@@ -37,3 +37,23 @@ curl http://<IP_DO_PI>:8000/docs
 ```bash
 sudo journalctl -u autohunter-api -f
 ```
+
+## Scheduler (`autohunter-scheduler.service`)
+
+Roda como usuário `autohunter`, via `deploy/raspberry/scripts/run_scheduler.sh` (`python -m app.cli.run_scheduler`).
+
+### Job mensal FIPE
+
+O job `monthly_fipe_update` (crawler + sync FIPE) tem um kill switch que **vem desligado por padrão**:
+
+```bash
+FIPE_MONTHLY_UPDATE_ENABLED=false   # default em app/core/settings.py
+```
+
+Para ativar a atualização mensal automática da tabela FIPE em produção, defina `FIPE_MONTHLY_UPDATE_ENABLED=true` em `/opt/autohunter/.env` (ver `.env.example` para as demais variáveis `FIPE_MONTHLY_UPDATE_*` / `FIPE_API_*`) e reinicie o serviço:
+
+```bash
+sudo systemctl restart autohunter-scheduler
+```
+
+O agendamento do job é persistido no Postgres/Supabase (`SQLAlchemyJobStore` sobre o mesmo `DATABASE_URL` da aplicação), então sobrevive a restarts do systemd — não é necessário reagendar manualmente após um deploy ou reboot do Pi.

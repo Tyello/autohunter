@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import re
@@ -18,6 +19,8 @@ from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.parsing import parse_brl_price
 from app.scrapers.contract import finalize_listings
 from app.core.settings import settings
+
+logger = logging.getLogger(__name__)
 from app.core.runtime_paths import health_dir, playwright_storage_dir
 from app.services.browser_fetcher import fetch_html_browser, fetch_json_browser
 from app.sources.types import ScrapeContext
@@ -280,6 +283,12 @@ def _extract_olx_detail_thumbnail(html: str, detail_url: str) -> str | None:
 
 def _enrich_missing_olx_thumbnails(items: list[OlxItem], ctx: ScrapeContext, *, limit: int | None = None) -> list[OlxItem]:
     cap = max(0, int(limit if limit is not None else getattr(settings, "olx_detail_thumbnail_enrich_limit", 3) or 0))
+    missing = [it for it in items if not it.thumbnail_url and it.url]
+    if len(missing) > cap:
+        logger.warning(
+            "_enrich_missing_olx_thumbnails: %s items missing thumbnail but cap is %s, %s will stay without photo this run",
+            len(missing), cap, len(missing) - cap,
+        )
     enriched = 0
     for item in items:
         if enriched >= cap:
@@ -289,10 +298,13 @@ def _enrich_missing_olx_thumbnails(items: list[OlxItem], ctx: ScrapeContext, *, 
         try:
             html = fetch_html(item.url, ctx=ctx, referer="https://www.olx.com.br/", proxy=ctx.proxy_server, min_delay_ms=0, max_delay_ms=0)
             thumb = _extract_olx_detail_thumbnail(html, item.url)
-        except Exception:
+        except Exception as exc:
             thumb = None
+            logger.warning("_enrich_missing_olx_thumbnails: failed to fetch/parse detail page %s: %s", item.url, exc)
         if thumb:
             item.thumbnail_url = thumb
+        else:
+            logger.warning("_enrich_missing_olx_thumbnails: no thumbnail found on detail page %s", item.url)
         enriched += 1
     return items
 
