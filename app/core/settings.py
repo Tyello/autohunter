@@ -325,6 +325,16 @@ class Settings(BaseSettings):
     fipe_api_max_throttle_ms: int = 5000
     fipe_api_max_retries: int = 5
     fipe_api_timeout_s: int = 20
+    fipe_crawler_concurrency: int = 6
+    fipe_throttle_recovery_after_successes: int = 20
+    fipe_catalog_upsert_chunk_size: int = 1000
+    fipe_crawler_progress_log_every: int = 10
+    fipe_lookup_enabled: bool = True
+    fipe_lookup_freshness_days: int = 30
+    fipe_lookup_min_confidence: int = 80
+    fipe_lookup_poll_interval_s: int = 60
+    fipe_lookup_batch_size: int = 20
+    fipe_lookup_max_attempts: int = 3
 
     # Filesystem cleanup (runtime temp/cache/debug only; safe defaults)
     filesystem_cleanup_enabled: bool = Field(

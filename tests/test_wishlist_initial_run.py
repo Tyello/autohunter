@@ -414,3 +414,98 @@ def test_create_wishlist_with_filters_returns_success_when_initial_enqueue_fails
     assert ok is True
     assert wishlist_id is not None
     assert "sucesso" in msg.lower()
+
+
+def test_add_wishlist_fipe_lookup_enqueued_alongside_initial_run(db, monkeypatch):
+    user = _make_user(db)
+    calls = []
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda *_args, **_kwargs: {"triggered": 1, "failed": 0},
+    )
+    monkeypatch.setattr(
+        "app.services.wishlists_service.enqueue_fipe_lookup_for_wishlist",
+        lambda _db, w: calls.append(w.id),
+    )
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda *_: {})
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    ok, _msg = add_wishlist(db, user.id, "civic si")
+
+    assert ok is True
+    assert len(calls) == 1
+
+
+def test_create_wishlist_with_filters_fipe_lookup_enqueued(db, monkeypatch):
+    user = _make_user(db)
+    calls = []
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda *_args, **_kwargs: {"triggered": 1, "failed": 0},
+    )
+    monkeypatch.setattr(
+        "app.services.wishlists_service.enqueue_fipe_lookup_for_wishlist",
+        lambda _db, w: calls.append(w.id),
+    )
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda *_: {})
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    ok, _msg, wishlist_id = create_wishlist_with_filters(
+        db,
+        user.id,
+        "civic touring",
+        [{"field": "year", "operator": "gte", "value": "2018"}],
+    )
+
+    assert ok is True
+    assert len(calls) == 1
+    assert calls[0] == wishlist_id
+
+
+def test_add_wishlist_with_initial_summary_fipe_lookup_enqueued(db, monkeypatch):
+    from app.services.wishlists_service import add_wishlist_with_initial_summary
+
+    user = _make_user(db)
+    calls = []
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda *_args, **_kwargs: {"triggered": 1, "failed": 0},
+    )
+    monkeypatch.setattr(
+        "app.services.wishlists_service.enqueue_fipe_lookup_for_wishlist",
+        lambda _db, w: calls.append(w.id),
+    )
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda *_: {})
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    result = add_wishlist_with_initial_summary(db, user.id, "civic si")
+
+    assert result.ok is True
+    assert len(calls) == 1
+
+
+def test_create_wishlist_with_filters_and_initial_summary_fipe_lookup_enqueued(db, monkeypatch):
+    from app.services.wishlists_service import create_wishlist_with_filters_and_initial_summary
+
+    user = _make_user(db)
+    calls = []
+    monkeypatch.setattr(
+        "app.services.wishlists_service.trigger_initial_run_for_wishlist",
+        lambda *_args, **_kwargs: {"triggered": 1, "failed": 0},
+    )
+    monkeypatch.setattr(
+        "app.services.wishlists_service.enqueue_fipe_lookup_for_wishlist",
+        lambda _db, w: calls.append(w.id),
+    )
+    monkeypatch.setattr("app.services.wishlists_service.allowed_sources_for_wishlists", lambda *_: {})
+    monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
+
+    result = create_wishlist_with_filters_and_initial_summary(
+        db,
+        user.id,
+        "civic touring",
+        [{"field": "year", "operator": "gte", "value": "2018"}],
+    )
+
+    assert result.ok is True
+    assert len(calls) == 1

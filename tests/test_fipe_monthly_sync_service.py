@@ -83,3 +83,70 @@ def test_sync_run_start_finish(db):
     done = finish_fipe_sync_run(db, run.id, status="completed", counters={"total": 10, "inserted": 7, "updated": 3})
     assert done.status == "completed"
     assert done.rows_seen == 10
+
+
+def _make_rows(n):
+    return [
+        {"brand_name": "Honda", "model_name": f"Model{i}", "model_year": 2019, "price": "100000"}
+        for i in range(n)
+    ]
+
+
+def test_upsert_batches_select_instead_of_per_row(db, monkeypatch):
+    original_query = db.query
+    call_count = {"n": 0}
+
+    def counting_query(*args, **kwargs):
+        if args and args[0] is FipeCatalogEntry:
+            call_count["n"] += 1
+        return original_query(*args, **kwargs)
+
+    monkeypatch.setattr(db, "query", counting_query)
+
+    upsert_fipe_catalog_entries(db, _make_rows(50), reference_month="2026-05", chunk_size=10)
+
+    assert call_count["n"] == 5
+
+
+def test_upsert_commits_per_chunk_not_once_or_per_row(db, monkeypatch):
+    original_commit = db.commit
+    commit_count = {"n": 0}
+
+    def counting_commit():
+        commit_count["n"] += 1
+        return original_commit()
+
+    monkeypatch.setattr(db, "commit", counting_commit)
+
+    upsert_fipe_catalog_entries(db, _make_rows(50), reference_month="2026-05", chunk_size=10)
+
+    assert commit_count["n"] == 5
+    assert commit_count["n"] != 1
+    assert commit_count["n"] != 50
+
+
+def test_upsert_batched_result_matches_unbatched_baseline(db):
+    from app.db.session import SessionLocal
+
+    rows = _make_rows(23)
+
+    db_big_chunk = SessionLocal()
+    out_big = upsert_fipe_catalog_entries(db_big_chunk, rows, reference_month="2026-05", chunk_size=1000)
+    entries_big = sorted(
+        (e.model_name, str(e.price)) for e in db_big_chunk.query(FipeCatalogEntry).all()
+    )
+    db_big_chunk.query(FipeCatalogEntry).delete()
+    db_big_chunk.commit()
+    db_big_chunk.close()
+
+    db_small_chunk = SessionLocal()
+    out_small = upsert_fipe_catalog_entries(db_small_chunk, rows, reference_month="2026-05", chunk_size=5)
+    entries_small = sorted(
+        (e.model_name, str(e.price)) for e in db_small_chunk.query(FipeCatalogEntry).all()
+    )
+    db_small_chunk.close()
+
+    assert out_big["inserted"] == out_small["inserted"]
+    assert out_big["updated"] == out_small["updated"]
+    assert out_big["skipped_invalid"] == out_small["skipped_invalid"]
+    assert entries_big == entries_small

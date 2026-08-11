@@ -7,6 +7,7 @@ from app.db.session import SessionLocal
 from app.models.fipe_update_run import FipeUpdateRun
 from app.services.fipe_api_client import FipeApiClient
 from app.services.fipe_catalog_crawler import crawl_latest_fipe_prices
+from app.services.fipe_rate_limiter import FipeRateLimiter
 from app.services.fipe_update_job_service import run_audited_monthly_fipe_update
 
 
@@ -16,7 +17,16 @@ def run_monthly_fipe_update_once(*, limit_brands: int | None = None) -> FipeUpda
         with SessionLocal() as db:
             return run_audited_monthly_fipe_update(db)
 
-    rows = crawl_latest_fipe_prices(FipeApiClient(), limit_brands=limit_brands)
+    shared_rate_limiter = FipeRateLimiter(
+        rate_limit_ms=settings.fipe_api_rate_limit_ms,
+        max_throttle_ms=settings.fipe_api_max_throttle_ms,
+        recovery_after_successes=settings.fipe_throttle_recovery_after_successes,
+    )
+    rows = crawl_latest_fipe_prices(
+        client_factory=lambda: FipeApiClient(rate_limiter=shared_rate_limiter),
+        limit_brands=limit_brands,
+        concurrency=settings.fipe_crawler_concurrency,
+    )
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
         json.dump(rows, tmp)

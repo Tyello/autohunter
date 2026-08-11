@@ -223,6 +223,7 @@ def start_scheduler() -> BackgroundScheduler:
             "browser": ThreadPoolExecutor(int(getattr(settings, "scheduler_browser_workers", 1) or 1)),
             "sender": ThreadPoolExecutor(int(getattr(settings, "scheduler_sender_workers", 1) or 1)),
             "fipe": ThreadPoolExecutor(1),
+            "fipe_lookup": ThreadPoolExecutor(2),
         },
         job_defaults={
             "coalesce": True,
@@ -499,6 +500,18 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
         executor="fipe",
+    )
+
+    from app.scheduler.fipe_lookup_job import job_process_fipe_lookups
+    sched.add_job(
+        job_process_fipe_lookups,
+        "interval",
+        seconds=settings.fipe_lookup_poll_interval_s,
+        id="fipe_lookup_poll",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        executor="fipe_lookup",
     )
 
     from app.scheduler.premium_expiration_job import job_expire_premium_subscriptions

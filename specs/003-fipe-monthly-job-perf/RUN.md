@@ -1,0 +1,15 @@
+# RUN — 003-fipe-monthly-job-perf
+
+Loop contract: máx. 2 escalações/etapa, 3 reprovações/etapa, 20 iterações totais.
+
+| # | Evento |
+|---|---|
+| 1 | spec.md finalizado e revisado (análise de consistência OK) |
+| 2 | Nota: subagentes spec-kit (spec-executor etc.) indisponíveis neste harness — executando etapas mecanicamente conforme fallback da skill |
+| 3 | Etapa 1 (settings) — OK. app/core/settings.py + .env.example. Validação: `py -c "..."` → OK |
+| 7 | Etapa 5 [sensível] (upsert em lote) — OK. Pré-busca em chunks de `chunk_size` (WHERE reference_month+source+identity_key IN(...), vehicle_type filtrado em memória — decisão do executor, documentada). Commit por chunk. `pytest tests/test_fipe_monthly_sync_service.py -q` → 10/10 OK (7 regressão + 3 novos) |
+| 6 | Etapa 4 [sensível] (crawler com concorrência) — OK. `crawl_latest_fipe_prices` reescrito: assinatura muda `client:` → `client_factory:` (quebra intencional, documentada). 4 rodadas com ThreadPoolExecutor(workers), erro por task isolado (nunca propaga), progresso agregado com ETA a cada `fipe_crawler_progress_log_every`. Testes existentes adaptados + 3 novos (client_factory/concorrência, isolamento de erro genérico, progresso/ETA). `pytest tests/test_fipe_catalog_crawler.py -q` → 6/6 OK |
+| 5 | Etapa 3 (FipeApiClient usa rate limiter compartilhado) — OK. `_throttle`/`_increase_throttle`/`_current_throttle_ms`/`_last_request_time` removidos de FipeApiClient, delegados ao FipeRateLimiter. `pytest tests/test_fipe_api_client.py -q` → 8/8 OK (6 regressão + 2 novos) |
+| 4 | Etapa 2 (FipeRateLimiter) — OK. Ajuste de design vs. contrato: acquire() usa reserva de slot atômica (não "calcular sob lock, dormir fora, reatualizar depois") porque o desenho descrito na spec permitia race entre threads lendo o mesmo _last_request_time antes de qualquer uma atualizar — corrigido para reservar o próprio slot (`_last_request_time = max(now, _last_request_time + throttle)`) sob lock, só o sleep fica fora do lock. Testado empiricamente com 5 threads reais (teste 2) provando taxa agregada respeitada. `pytest tests/test_fipe_rate_limiter.py -q` → 4/4 OK |
+| 8 | Etapa 6 (integrar call sites) — OK. `app/scheduler/fipe_update_job.py`: cria `FipeRateLimiter` compartilhado e passa via `client_factory=lambda: FipeApiClient(rate_limiter=shared_rate_limiter)` + `concurrency=settings.fipe_crawler_concurrency` para `crawl_latest_fipe_prices`. `scripts/run_fipe_monthly_job.py` confirmado sem mudança necessária (só delega, grep não achou outro call site). Testes existentes adaptados à nova assinatura `client_factory=` + teste 14 novo (`test_job_passes_concurrency_setting_to_crawler`). `pytest tests/test_fipe_update_job.py -q` → 4/4 OK |
+| 9 | Etapa 7 (regressão completa) — OK. `pytest tests/test_fipe_api_client.py tests/test_fipe_catalog_crawler.py tests/test_fipe_monthly_sync_service.py tests/test_fipe_update_job.py tests/test_scheduler_fipe_registration.py tests/test_fipe_rate_limiter.py -q` → 34/34 OK. Spec 003 completa. |

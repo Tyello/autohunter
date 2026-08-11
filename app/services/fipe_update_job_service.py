@@ -64,6 +64,7 @@ def run_audited_monthly_fipe_update(db: Session, *, reference_month: str | None 
         db.commit(); db.refresh(run)
         log(db, "info" if status in {"completed", "skipped"} else "error", "fipe_update", f"monthly FIPE update {status}", {"run_id": str(run.id), "reference_month": month, "updated_rows": run.updated_rows, "duration_ms": run.duration_ms, "error": error}, source="fipe", event_type=f"fipe_update_{status}")
         db.commit()
+        db.refresh(run)
         return run
 
     if not bool(getattr(settings, "fipe_monthly_update_enabled", False)):

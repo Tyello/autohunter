@@ -60,4 +60,5 @@ __all__ = [
     "UserDigestPreference",
 ]
 
+from .fipe_lookup_request import FipeLookupRequest
 from .fipe_update_run import FipeUpdateRun

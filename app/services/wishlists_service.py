@@ -22,6 +22,7 @@ from app.models.wishlist_listing_activity import WishlistListingActivity
 from app.models.notification import Notification
 from app.models.wishlist_token import WishlistToken
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
+from app.services.fipe_on_demand_lookup_service import enqueue_fipe_lookup_for_wishlist
 from app.services.scrape_jobs_service import enqueue_job
 from app.services.source_operational_policy import (
     classify_source_operational_role,
@@ -708,6 +709,7 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
         )
 
     run_summary = trigger_initial_run_for_wishlist(db, w, run_reason="wishlist_created")
+    enqueue_fipe_lookup_for_wishlist(db, w)
     invalidate_wishlist_summaries_cache(user_id)
 
     if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
@@ -1166,6 +1168,7 @@ def create_wishlist_with_filters(
             return False, f_msg, None
 
     trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
+    enqueue_fipe_lookup_for_wishlist(db, wishlist)
     return True, "Wishlist e filtros criados com sucesso.", wishlist.id
 
 
@@ -1195,6 +1198,7 @@ def add_wishlist_with_initial_summary(
         return WishlistCreateResult(ok=False, message="Erro ao localizar wishlist criada.")
 
     summary = trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
+    enqueue_fipe_lookup_for_wishlist(db, wishlist)
     return WishlistCreateResult(
         ok=True,
         message="Wishlist criada com sucesso.",
@@ -1246,6 +1250,7 @@ def create_wishlist_with_filters_and_initial_summary(
             return WishlistCreateResult(ok=False, message=f_msg)
 
     summary = trigger_initial_run_for_wishlist(db, wishlist, run_reason="wishlist_created")
+    enqueue_fipe_lookup_for_wishlist(db, wishlist)
     return WishlistCreateResult(
         ok=True,
         message="Wishlist e filtros criados com sucesso.",

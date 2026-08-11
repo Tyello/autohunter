@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.fipe_api_client import FipeApiClient, FipeApiError
+from app.services.fipe_rate_limiter import FipeRateLimiter
 
 
 class _FakeResponse:
@@ -112,3 +113,42 @@ def test_timeout_passed_to_requests(monkeypatch):
     client._request("ConsultarMarcas", {})
 
     assert captured["timeout"] == 20
+
+
+class _SpyRateLimiter:
+    def __init__(self):
+        self.acquire_calls = 0
+        self.success_calls = 0
+        self.on_429_calls = 0
+
+    def acquire(self):
+        self.acquire_calls += 1
+
+    def on_success(self):
+        self.success_calls += 1
+
+    def on_429(self):
+        self.on_429_calls += 1
+
+
+def test_shared_rate_limiter_used_when_provided(monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+    spy = _SpyRateLimiter()
+    client = FipeApiClient(rate_limit_ms=0, max_throttle_ms=5000, max_retries=3, timeout_s=20, rate_limiter=spy)
+
+    def fake_post(url, json, timeout):
+        return _FakeResponse(status_code=200, json_body={"ok": True})
+
+    monkeypatch.setattr(client._session, "post", fake_post)
+
+    client._request("ConsultarMarcas", {})
+
+    assert spy.acquire_calls == 1
+    assert spy.success_calls == 1
+    assert spy.on_429_calls == 0
+    assert client._rate_limiter is spy
+
+
+def test_default_rate_limiter_created_when_none(monkeypatch):
+    client = _client(monkeypatch)
+    assert isinstance(client._rate_limiter, FipeRateLimiter)

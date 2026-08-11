@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
+from app.core.settings import settings
 from app.models.fipe_catalog_entry import FipeCatalogEntry
 from app.models.fipe_sync_run import FipeSyncRun
 
@@ -69,7 +70,8 @@ def _parse_model_year(value) -> int | None:
 def _build_identity_key(payload: dict) -> str | None:
     fipe_code = payload.get("fipe_code")
     if fipe_code:
-        return f"fipe_code:{fipe_code.lower()}"
+        model_year = payload.get("model_year")
+        return f"fipe_code:{fipe_code.lower()}|{model_year if model_year is not None else ''}"
 
     brand_code = payload.get("brand_code")
     model_code = payload.get("model_code")
@@ -89,11 +91,23 @@ def _build_identity_key(payload: dict) -> str | None:
     return f"text:{brand_name or ''}|{model_name}|{model_year or ''}|{fuel or ''}".lower()
 
 
-def upsert_fipe_catalog_entries(db: Session, rows: list[dict], *, reference_month: str, source: str = "external_pipeline", dry_run: bool = False) -> dict:
+def upsert_fipe_catalog_entries(
+    db: Session,
+    rows: list[dict],
+    *,
+    reference_month: str,
+    source: str = "external_pipeline",
+    dry_run: bool = False,
+    chunk_size: int | None = None,
+) -> dict:
     month = normalize_fipe_month(reference_month)
     source_norm = normalize_fipe_text(source) or "external_pipeline"
+    size = int(chunk_size if chunk_size is not None else settings.fipe_catalog_upsert_chunk_size)
+    if size < 1:
+        size = 1
     counters = {"total": len(rows or []), "valid": 0, "inserted": 0, "updated": 0, "skipped_invalid": 0, "dry_run": bool(dry_run)}
 
+    valid_payloads: list[dict] = []
     for row in rows or []:
         item = row or {}
         row_month = normalize_fipe_text(item.get("reference_month")) or month
@@ -131,22 +145,41 @@ def upsert_fipe_catalog_entries(db: Session, rows: list[dict], *, reference_mont
             continue
         payload["identity_key"] = identity_key
         counters["valid"] += 1
-        existing = db.query(FipeCatalogEntry).filter(
-            FipeCatalogEntry.reference_month == payload["reference_month"],
-            FipeCatalogEntry.vehicle_type == payload["vehicle_type"],
-            FipeCatalogEntry.source == payload["source"],
-            FipeCatalogEntry.identity_key == payload["identity_key"],
-        ).first()
-        if existing:
-            counters["updated"] += 1
-            if not dry_run:
-                for k, v in payload.items():
-                    setattr(existing, k, v)
-        else:
-            counters["inserted"] += 1
-            if not dry_run:
-                db.add(FipeCatalogEntry(**payload))
+        valid_payloads.append(payload)
 
-    if not dry_run:
-        db.commit()
+    for chunk_start in range(0, len(valid_payloads), size):
+        chunk = valid_payloads[chunk_start : chunk_start + size]
+        chunk_keys = list({payload["identity_key"] for payload in chunk})
+
+        existing_by_key: dict[tuple[str, str], FipeCatalogEntry] = {}
+        if chunk_keys:
+            existing_rows = (
+                db.query(FipeCatalogEntry)
+                .filter(
+                    FipeCatalogEntry.reference_month == month,
+                    FipeCatalogEntry.source == source_norm,
+                    FipeCatalogEntry.identity_key.in_(chunk_keys),
+                )
+                .all()
+            )
+            existing_by_key = {(entry.vehicle_type, entry.identity_key): entry for entry in existing_rows}
+
+        for payload in chunk:
+            key = (payload["vehicle_type"], payload["identity_key"])
+            existing = existing_by_key.get(key)
+            if existing:
+                counters["updated"] += 1
+                if not dry_run:
+                    for k, v in payload.items():
+                        setattr(existing, k, v)
+            else:
+                counters["inserted"] += 1
+                if not dry_run:
+                    new_entry = FipeCatalogEntry(**payload)
+                    db.add(new_entry)
+                    existing_by_key[key] = new_entry
+
+        if not dry_run:
+            db.commit()
+
     return counters

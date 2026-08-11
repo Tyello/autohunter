@@ -6,6 +6,7 @@ from typing import Any
 import requests
 
 from app.core.settings import settings
+from app.services.fipe_rate_limiter import FipeRateLimiter
 
 
 class FipeApiError(Exception):
@@ -23,14 +24,30 @@ class FipeApiClient:
         max_throttle_ms: int | None = None,
         max_retries: int | None = None,
         timeout_s: int | None = None,
+        rate_limiter: FipeRateLimiter | None = None,
     ) -> None:
         self._rate_limit_ms = int(rate_limit_ms if rate_limit_ms is not None else settings.fipe_api_rate_limit_ms)
         self._max_throttle_ms = int(max_throttle_ms if max_throttle_ms is not None else settings.fipe_api_max_throttle_ms)
         self._max_retries = int(max_retries if max_retries is not None else settings.fipe_api_max_retries)
         self._timeout_s = int(timeout_s if timeout_s is not None else settings.fipe_api_timeout_s)
-        self._current_throttle_ms = self._rate_limit_ms
-        self._last_request_time = 0.0
+        self._rate_limiter = rate_limiter or FipeRateLimiter(
+            rate_limit_ms=self._rate_limit_ms,
+            max_throttle_ms=self._max_throttle_ms,
+            recovery_after_successes=settings.fipe_throttle_recovery_after_successes,
+        )
         self._session = requests.Session()
+        self._session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://veiculos.fipe.org.br/",
+                "Origin": "https://veiculos.fipe.org.br",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+        )
 
     def get_reference_tables(self) -> list[dict]:
         return self._request("ConsultarTabelaDeReferencia", {})
@@ -94,19 +111,8 @@ class FipeApiClient:
             },
         )
 
-    def _throttle(self) -> None:
-        now = time.monotonic()
-        elapsed_ms = (now - self._last_request_time) * 1000
-        wait_ms = self._current_throttle_ms - elapsed_ms
-        if wait_ms > 0:
-            time.sleep(wait_ms / 1000)
-        self._last_request_time = time.monotonic()
-
-    def _increase_throttle(self) -> None:
-        self._current_throttle_ms = min(self._current_throttle_ms * 2, self._max_throttle_ms)
-
     def _request(self, endpoint: str, body: dict, *, attempt: int = 0) -> Any:
-        self._throttle()
+        self._rate_limiter.acquire()
 
         try:
             response = self._session.post(f"{self.BASE_URL}/{endpoint}", json=body, timeout=self._timeout_s)
@@ -117,7 +123,7 @@ class FipeApiClient:
             raise FipeApiError(f"erro de rede ao chamar {endpoint}: {exc}") from exc
 
         if response.status_code == 429:
-            self._increase_throttle()
+            self._rate_limiter.on_429()
             retry_after = response.headers.get("Retry-After")
             wait_s = float(retry_after) if retry_after else (5000 * (2**attempt)) / 1000
             if attempt < self._max_retries:
@@ -136,4 +142,5 @@ class FipeApiClient:
         if isinstance(data, dict) and "erro" in data:
             raise FipeApiError(str(data["erro"]))
 
+        self._rate_limiter.on_success()
         return data
