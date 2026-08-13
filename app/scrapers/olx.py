@@ -281,6 +281,48 @@ def _extract_olx_detail_thumbnail(html: str, detail_url: str) -> str | None:
     return None
 
 
+def _fetch_olx_detail_html(url: str, ctx: ScrapeContext) -> str:
+    """Busca a pagina de detalhe com o mesmo hardening (TLS impersonation + cookies) usado
+    na busca principal (_fetch_http_hybrid). Sem esse hardening, a OLX bloqueia o fetch de
+    detalhe a partir de IPs de datacenter e o parser roda sobre uma pagina de bloqueio."""
+    referer = "https://www.olx.com.br/"
+    if cf_requests is not None:
+        cookies = _load_playwright_cookies_for_olx(ctx)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Referer": referer,
+        }
+        proxies = None
+        if ctx.proxy_server:
+            proxies = {"http": ctx.proxy_server, "https": ctx.proxy_server}
+        r = cf_requests.get(
+            url,
+            headers=headers,
+            cookies=cookies or None,
+            proxies=proxies,
+            timeout=25,
+            allow_redirects=True,
+            impersonate=_OLX_IMPERSONATE,
+        )
+        status = int(getattr(r, "status_code", 0) or 0)
+        text = getattr(r, "text", "") or ""
+        if status in (403, 429):
+            raise FetchBlocked(status, url, reason="http_status")
+        if status == 200 and _looks_like_cf_or_bot(text):
+            raise FetchBlocked(200, url, reason="bot_challenge")
+        if status >= 400:
+            raise FetchBlocked(status, url, reason="http_status")
+        return text
+    return fetch_html(url, ctx=ctx, referer=referer, proxy=ctx.proxy_server, min_delay_ms=0, max_delay_ms=0)
+
+
 def _enrich_missing_olx_thumbnails(items: list[OlxItem], ctx: ScrapeContext, *, limit: int | None = None) -> list[OlxItem]:
     cap = max(0, int(limit if limit is not None else getattr(settings, "olx_detail_thumbnail_enrich_limit", 3) or 0))
     missing = [it for it in items if not it.thumbnail_url and it.url]
@@ -295,15 +337,23 @@ def _enrich_missing_olx_thumbnails(items: list[OlxItem], ctx: ScrapeContext, *, 
             break
         if item.thumbnail_url or not item.url:
             continue
+        was_blocked = False
         try:
-            html = fetch_html(item.url, ctx=ctx, referer="https://www.olx.com.br/", proxy=ctx.proxy_server, min_delay_ms=0, max_delay_ms=0)
+            html = _fetch_olx_detail_html(item.url, ctx=ctx)
             thumb = _extract_olx_detail_thumbnail(html, item.url)
+        except FetchBlocked as exc:
+            thumb = None
+            was_blocked = True
+            logger.warning(
+                "_enrich_missing_olx_thumbnails: detail page BLOCKED %s (status=%s reason=%s)",
+                item.url, exc.status_code, exc.reason
+            )
         except Exception as exc:
             thumb = None
             logger.warning("_enrich_missing_olx_thumbnails: failed to fetch/parse detail page %s: %s", item.url, exc)
         if thumb:
             item.thumbnail_url = thumb
-        else:
+        elif not was_blocked:
             logger.warning("_enrich_missing_olx_thumbnails: no thumbnail found on detail page %s", item.url)
         enriched += 1
     return items

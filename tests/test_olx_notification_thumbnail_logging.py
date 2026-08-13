@@ -159,6 +159,9 @@ def test_enrich_missing_olx_thumbnails_warns_when_cap_is_exceeded(monkeypatch, c
         OlxItem(external_id=str(i), title=f"item {i}", url=f"https://olx.com.br/item/{i}", thumbnail_url=None, price=None)
         for i in range(5)
     ]
+    # Force the fetch_html fallback path (no TLS-impersonation lib available) so this test
+    # exercises the same fake HTML it monkeypatches, instead of a real cf_requests network call.
+    monkeypatch.setattr(olx_module, "cf_requests", None)
     monkeypatch.setattr(
         olx_module, "fetch_html", lambda *_a, **_k: '<meta property="og:image" content="https://img.olx.com.br/x.jpg">'
     )
@@ -174,6 +177,9 @@ def test_enrich_missing_olx_thumbnails_warns_when_cap_is_exceeded(monkeypatch, c
 
 def test_enrich_missing_olx_thumbnails_warns_when_detail_page_has_no_image(monkeypatch, caplog):
     items = [OlxItem(external_id="1", title="item", url="https://olx.com.br/item/1", thumbnail_url=None, price=None)]
+    # Force the fetch_html fallback path (no TLS-impersonation lib available) so this test
+    # exercises the same fake HTML it monkeypatches, instead of a real cf_requests network call.
+    monkeypatch.setattr(olx_module, "cf_requests", None)
     monkeypatch.setattr(olx_module, "fetch_html", lambda *_a, **_k: "<html><body>no image here</body></html>")
 
     with caplog.at_level(logging.WARNING, logger=olx_module.__name__):
