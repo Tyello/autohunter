@@ -274,11 +274,12 @@ def start_scheduler() -> BackgroundScheduler:
             continue
         job_id = f"{plugin.name}_tick"
         sched.add_job(
-            lambda n=plugin.name: job_run_source_for_all_wishlists(n),
+            job_run_source_for_all_wishlists,
             "interval",
             seconds=tick_seconds,
             id=job_id,
             replace_existing=True,
+            args=(plugin.name,),
         )
 
     sched.add_job(job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
@@ -320,7 +321,7 @@ def start_scheduler() -> BackgroundScheduler:
         for i in range(workers):
             wid = f"http_queue_worker_{i+1}"
             sched.add_job(
-                lambda w=wid: job_http_queue_worker(w),
+                job_http_queue_worker,
                 "interval",
                 seconds=worker_s,
                 id=wid,
@@ -328,6 +329,7 @@ def start_scheduler() -> BackgroundScheduler:
                 max_instances=1,
                 coalesce=True,
                 executor="http",
+                args=(wid,),
             )
     except Exception as e:
         _log_suppressed_exception(
@@ -353,7 +355,7 @@ def start_scheduler() -> BackgroundScheduler:
         executor="sender",
     )
     sched.add_job(
-        lambda: job_scheduled_auction_notification(bot=telegram_sender),
+        job_scheduled_auction_notification,
         "interval",
         minutes=max(15, int(auction_cfg.get("scheduler_minutes", 60) or 60)),
         id="auction_notification_scheduler_job",
@@ -361,6 +363,7 @@ def start_scheduler() -> BackgroundScheduler:
         executor="sender",
         max_instances=1,
         coalesce=True,
+        kwargs={"bot": telegram_sender},
     )
 
     if bool(getattr(settings, "tracking_price_alerts_enabled", False)):

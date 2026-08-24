@@ -26,5 +26,15 @@
   Suíte completa (antiga+nova): 12/12 verde, sem chamadas de rede real (testes herméticos,
   cf_requests mockado).
 - [2026-08-13] Etapa 4 (regressão ampla): `pytest tests/ -k "olx or sender or media or thumbnail"`
-  verde. Suíte completa `pytest tests/` rodando em background para confirmar zero regressão
-  fora do escopo direto.
+  verde. Suíte completa `pytest tests/` (todo o repo): 12 falhas pré-existentes, todas em módulos
+  não relacionados (test_admin_deploy_commands.py, auctions, alembic head count, backup scripts,
+  delete-safety FK cascade audit, mercadopago webhook signature, plan_upgrade_handlers) — nenhuma
+  em arquivos tocados por esta spec (app/scrapers/olx.py, tests/test_olx_*). Confirmado: zero
+  regressão introduzida por esta mudança.
+- [2026-08-13] SPEC FECHADA. REQ-001..REQ-005 verificados com evidência: app/scrapers/olx.py
+  (_fetch_olx_detail_html linhas ~285-322, _enrich_missing_olx_thumbnails ajustada),
+  tests/test_olx_thumbnail_extraction.py (5 testes verdes), tests/test_olx_notification_thumbnail_logging.py
+  (7 testes verdes, 2 ajustados para forçar fallback determinístico). Fixtures reais em
+  tests/fixtures/olx/. Lição para SPEC-LESSONS.md: registrar que specs de scraper devem
+  antecipar explicitamente "o ambiente de teste pode ter as libs de hardening reais instaladas"
+  e exigir monkeypatch determinístico, não assumir ausência.
