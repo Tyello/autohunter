@@ -186,7 +186,10 @@ def _walk(obj: Any) -> Iterable[Any]:
             yield from _walk(x)
 
 
-_PLACEHOLDER_RE = re.compile(r"(placeholder|no[-_]?image|sem[-_]?foto|logo|sprite|avatar|blank|transparent|1x1)", re.I)
+_PLACEHOLDER_RE = re.compile(
+    r"(placeholder|no[-_]?image|sem[-_]?foto|logo|sprite|avatar|blank|transparent|1x1|olx-share)",
+    re.I,
+)
 _IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|webp)(?:[?#].*)?$", re.I)
 
 
@@ -466,13 +469,27 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
 
 
 def _looks_like_cf_or_bot(html: str) -> bool:
+    """Detects an actual Cloudflare/bot *challenge* interstitial page.
+
+    IMPORTANT: bare "cloudflare" is NOT a valid signal on its own. OLX
+    embeds Cloudflare's bot-management/insights beacon
+    (static.cloudflareinsights.com/beacon.min.js) and challenge-platform
+    scripts on ordinary, fully-rendered listing pages as standard
+    infrastructure -- confirmed by fetching real, successful detail pages
+    that contain the word "cloudflare" yet have full content (700KB-1.6MB)
+    and a correctly extractable og:image. A bare substring match on
+    "cloudflare" therefore false-positives on legitimate pages and was
+    discarding valid detail-page fetches before extraction ever ran.
+    """
     h = (html or "").lower()
     return (
         "captcha" in h
-        or "cloudflare" in h
         or "attention required" in h
         or "verify you are" in h
         or "access denied" in h
+        or "just a moment" in h
+        or "checking your browser" in h
+        or "cf-browser-verification" in h
     )
 
 

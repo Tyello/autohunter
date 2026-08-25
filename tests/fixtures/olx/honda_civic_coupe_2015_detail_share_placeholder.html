@@ -1,0 +1,22 @@
+<!--
+Real detail-page HTML as served TODAY by OLX for:
+https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/honda-civic-coupe-si-2-4-16v-206cv-mec-2p-2015-1525422289
+
+This is the SAME listing as tests/fixtures/olx/honda_civic_coupe_2015_detail.html,
+but that fixture no longer reflects live reality: as fetched today, OLX's own
+og:image meta tag now points at its generic sharing placeholder
+(static.olx.com.br/cd/vi/images/olx-share.jpg) instead of a real listing photo
+-- while the real photos are still present in the page's JSON-LD product data
+and gallery <img> tags. `_extract_olx_detail_thumbnail` trusted og:image
+unconditionally and returned the placeholder, so the listing was notified
+with a generic OLX logo instead of no photo (or a wrong photo).
+-->
+<html>
+<head>
+<meta property="og:image" content="https://static.olx.com.br/cd/vi/images/olx-share.jpg">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"Honda Civic Coupe SI","itemCondition":"https://schema.org/UsedCondition","image":["https://img.olx.com.br/images/25/251678911875003.jpg","https://img.olx.com.br/images/27/276687195906982.jpg"]}
+</script>
+</head>
+<body></body>
+</html>

@@ -1,0 +1,21 @@
+<!--
+Real detail-page HTML as served TODAY by OLX for the listing reported in the
+third "photo missing" bug report:
+https://sp.olx.com.br/sao-paulo-e-regiao/autos-e-pecas/carros-vans-e-utilitarios/honda-civic-hatch-lsi-1993-1528830068
+
+Trimmed to the elements that matter for the regression this fixture guards:
+the page is a normal, fully-rendered 200 response with a correct og:image,
+but it also embeds Cloudflare's bot-management/insights beacon script as
+standard OLX site infrastructure (present on essentially all OLX pages, not
+just challenge/interstitial pages). The old `_looks_like_cf_or_bot()` did a
+bare substring match on "cloudflare" and treated this normal page as a bot
+challenge, raising FetchBlocked before `_extract_olx_detail_thumbnail` ever
+ran -- discarding a perfectly good thumbnail.
+-->
+<html>
+<head>
+<meta property="og:image" content="https://img.olx.com.br/images/45/457640190569927.jpg">
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vcd6a3728a1584c99a0e9ba7cb3a0d1f81717689176015" integrity="sha512-..." crossorigin="anonymous" data-cf-beacon='{"rayId":"abc123","version":"..."}'></script>
+</head>
+<body></body>
+</html>

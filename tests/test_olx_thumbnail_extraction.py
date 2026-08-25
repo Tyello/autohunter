@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from app.scrapers import olx as olx_module
-from app.scrapers.olx import _enrich_missing_olx_thumbnails, _extract_olx_detail_thumbnail, OlxItem
+from app.scrapers.olx import (
+    _enrich_missing_olx_thumbnails,
+    _extract_olx_detail_thumbnail,
+    _looks_like_cf_or_bot,
+    OlxItem,
+)
 from app.sources.types import ScrapeContext
 
 
@@ -149,3 +154,62 @@ def test_enrich_logs_blocked_distinctly_from_no_image(monkeypatch, caplog):
         for r in caplog.records
     ), \
         f"Should not log 'no thumbnail found' when blocked, got: {[r.message for r in caplog.records]}"
+
+
+def test_normal_olx_page_with_cloudflare_beacon_is_not_flagged_as_blocked():
+    """Regression: OLX embeds Cloudflare's insights/bot-management beacon
+    script on ordinary, fully-rendered pages -- confirmed by fetching the
+    live detail page for the listing reported in the third "photo missing"
+    bug report (honda-civic-hatch-lsi-1993-1528830068). A bare substring
+    match on "cloudflare" flagged this normal 200 response as a bot
+    challenge, so `_fetch_olx_detail_html` raised FetchBlocked before
+    `_extract_olx_detail_thumbnail` ever ran, discarding a perfectly good
+    thumbnail.
+    """
+    fixture_path = Path(__file__).parent / "fixtures" / "olx" / "honda_civic_hatch_1993_detail.html"
+    html = fixture_path.read_text(encoding="utf-8")
+
+    assert not _looks_like_cf_or_bot(html), (
+        "A page containing OLX's normal cloudflareinsights.com beacon script "
+        "must not be treated as a bot-challenge interstitial"
+    )
+
+    url = (
+        "https://sp.olx.com.br/sao-paulo-e-regiao/autos-e-pecas/"
+        "carros-vans-e-utilitarios/honda-civic-hatch-lsi-1993-1528830068"
+    )
+    assert _extract_olx_detail_thumbnail(html, url) == "https://img.olx.com.br/images/45/457640190569927.jpg"
+
+
+def test_actual_bot_challenge_page_is_still_flagged_as_blocked():
+    """Sanity check for the narrowed heuristic: a real Cloudflare interstitial
+    (distinguishable by its "Just a moment..." / "Checking your browser"
+    copy) must still be detected as blocked."""
+    challenge_html = (
+        "<html><head><title>Just a moment...</title></head>"
+        "<body>Checking your browser before accessing olx.com.br. "
+        "This process is automatic. cloudflare ray id.</body></html>"
+    )
+    assert _looks_like_cf_or_bot(challenge_html)
+
+
+def test_olx_share_placeholder_og_image_is_rejected_in_favor_of_real_photo():
+    """Regression: OLX's own og:image meta tag can point at its generic
+    sharing placeholder (static.olx.com.br/cd/vi/images/olx-share.jpg)
+    instead of a real listing photo, while the real photos remain available
+    in the page's JSON-LD product data -- confirmed live for
+    honda-civic-coupe-si-2-4-16v-206cv-mec-2p-2015-1525422289.
+    `_extract_olx_detail_thumbnail` used to trust og:image unconditionally
+    and would notify users with OLX's generic share image instead of the
+    car's actual photo.
+    """
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "olx" / "honda_civic_coupe_2015_detail_share_placeholder.html"
+    )
+    html = fixture_path.read_text(encoding="utf-8")
+
+    url = "https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/honda-civic-coupe-si-2-4-16v-206cv-mec-2p-2015-1525422289"
+    thumb = _extract_olx_detail_thumbnail(html, url)
+
+    assert thumb == "https://img.olx.com.br/images/25/251678911875003.jpg"
+    assert thumb is not None and "olx-share" not in thumb
