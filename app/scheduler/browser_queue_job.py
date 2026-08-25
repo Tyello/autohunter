@@ -56,6 +56,24 @@ def _handle_hard_timeout(job_id: int, source: str, dur_ms: int, hard_timeout_s: 
         pass
 
 
+def _log_best_effort(db, level: str, component: str, message: str, payload: dict) -> None:
+    """Write a system_logs row on its own commit boundary.
+
+    A failure here (bad payload, transient DB error, whatever) must never
+    propagate: logging is never allowed to be a single point of failure that
+    blocks a job from being marked done/failed. If the insert or its commit
+    fails, roll back just this log attempt and move on.
+    """
+    try:
+        log(db, level, component, message, payload)
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def job_browser_queue_worker():
     """Worker serial para jobs Playwright.
 
@@ -69,6 +87,15 @@ def job_browser_queue_worker():
     max_instances=1) e força o job para failed/retry usando uma sessão nova.
     A thread filha pode continuar rodando em segundo plano (órfã) até
     terminar ou até o processo reiniciar; seu resultado é descartado.
+
+    Lifecycle da sessão: `db` é criada e fechada dentro desta única execução
+    (nunca reaproveitada entre chamadas). Se qualquer commit falhar no meio do
+    caminho (inclusive commits internos feitos por run_source_for_all_wishlists
+    dentro da thread filha), a sessão fica em estado "pending rollback" e
+    PRECISA de um db.rollback() explícito antes de ser reutilizada — do
+    contrário todo commit seguinte levanta PendingRollbackError, mascarando o
+    erro original e impedindo até o mark_failed() de ser persistido (o job
+    fica "running" pra sempre e trava o slot do APScheduler).
     """
     if not bool(getattr(settings, "enable_playwright", False)):
         return
@@ -79,13 +106,15 @@ def job_browser_queue_worker():
     db = SessionLocal()
     job = None
     try:
-        job = dequeue_next_job(db, queue="browser", lock_owner="browser_worker")
-        if not job:
-            db.commit()
-            db.close()
-            return
+        try:
+            job = dequeue_next_job(db, queue="browser", lock_owner="browser_worker")
+            db.commit()  # confirma lock + status=running (ou no-op se não há job)
+        except Exception:
+            db.rollback()
+            raise
 
-        db.commit()  # confirma lock + status=running
+        if not job:
+            return
 
         job_id = job.id
         job_source = job.source
@@ -121,6 +150,13 @@ def job_browser_queue_worker():
             return
 
         if "exc" in result_box:
+            # run_source_for_all_wishlists may have committed some steps and
+            # failed mid-way through a later one: the session can already be
+            # in "pending rollback" state. Clear it before touching `db` again.
+            try:
+                db.rollback()
+            except Exception:
+                pass
             raise result_box["exc"]
 
         res = result_box.get("res")
@@ -137,39 +173,53 @@ def job_browser_queue_worker():
             else:
                 mark_done(job, result_status=f"not_ok:{status}", payload=res, duration_ms=dur_ms)
 
-        log(
+        # Job status is committed on its own boundary first, so a logging
+        # failure below can never roll back or block the job's completion.
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        _log_best_effort(
             db,
             "info",
             "browser_queue_worker",
             "job_completed",
             {"job_id": job_id, "source": job_source, "dur_ms": dur_ms, "status": status, "ok": ok},
         )
-        db.commit()
-        db.close()
     except Exception as e:
         err_text = f"{type(e).__name__}: {e}"
         shutdown_exc = is_shutdown_requested() or "cannot schedule new futures after interpreter shutdown" in str(e).lower()
+
         try:
-            if job is not None and not shutdown_exc:
+            db.rollback()
+        except Exception:
+            pass
+
+        if job is not None and not shutdown_exc:
+            try:
                 mark_failed(job, error=err_text, retry_in_seconds=60)
                 db.commit()
-        except Exception as mark_exc:
-            log(db, "warn", "browser_queue_worker", "suppressed_exception", {"stage": "worker.mark_failed", "exc_type": type(mark_exc).__name__, "message": str(mark_exc)[:240], "impact": "job_status_may_stay_running", "fallback": "worker_continues"})
-            db.commit()
+            except Exception as mark_exc:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                _log_best_effort(
+                    db,
+                    "warn",
+                    "browser_queue_worker",
+                    "suppressed_exception",
+                    {"stage": "worker.mark_failed", "exc_type": type(mark_exc).__name__, "message": str(mark_exc)[:240], "impact": "job_status_may_stay_running", "fallback": "worker_continues"},
+                )
+
+        if shutdown_exc:
+            _log_best_effort(db, "info", "browser_queue_worker", "shutdown_suppressed", {"err": err_text})
+        else:
+            _log_best_effort(db, "error", "browser_queue_worker", "job_failed", {"err": err_text})
+    finally:
         try:
-            if shutdown_exc:
-                log(db, "info", "browser_queue_worker", "shutdown_suppressed", {"err": err_text})
-            else:
-                log(db, "error", "browser_queue_worker", "job_failed", {"err": err_text})
-            db.commit()
-        except Exception as log_exc:
-            try:
-                log(db, "warn", "browser_queue_worker", "suppressed_exception", {"stage": "worker.log_job_failed", "exc_type": type(log_exc).__name__, "message": str(log_exc)[:240], "impact": "error_log_drop", "fallback": "worker_continues"})
-                db.commit()
-            except Exception:
-                pass
-        finally:
-            try:
-                db.close()
-            except Exception:
-                pass
+            db.close()
+        except Exception:
+            pass
