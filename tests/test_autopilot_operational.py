@@ -107,3 +107,67 @@ def test_autopilot_no_alert_when_critical_scrape_jobs_index_exists(db, monkeypat
     )
     cands = autopilot_service.build_candidates(db, now=now)
     assert not any(c.kind == "scrape_jobs_missing_critical_index" for c in cands)
+
+
+def test_autopilot_detects_heartbeat_missing_when_process_down(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=20)))
+    db.commit()
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
+    cands = autopilot_service.build_candidates(db, now=now)
+    missing = [c for c in cands if c.kind == "scheduler_heartbeat_missing"]
+    assert missing
+    assert missing[0].severity == "error"
+    # com o processo caído, source_runs também está zerado, mas heartbeat_without_runs
+    # exige heartbeat *recente* — não deve disparar junto (evita duplo alerta pro mesmo problema).
+    assert not any(c.kind == "scheduler_heartbeat_without_runs" for c in cands)
+
+
+def test_autopilot_no_heartbeat_missing_alert_when_process_alive(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(seconds=10)))
+    db.add(SourceRun(source="vip_auctions", kind="scheduler", status="success", created_at=now - timedelta(minutes=2)))
+    db.commit()
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
+    cands = autopilot_service.build_candidates(db, now=now)
+    assert not any(c.kind == "scheduler_heartbeat_missing" for c in cands)
+
+
+def test_autopilot_operational_singleton_finding_auto_closes_then_reopens(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(autopilot_service, "get_active_source_queue_partial_index_details", lambda _db: {"ok": True, "index_name": "uq_scrape_jobs_active_source_queue", "index_name_ok": True})
+
+    # scan 1: blip with zero runs -> opens
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.commit()
+    cands1 = autopilot_service.build_candidates(db, now=now)
+    autopilot_service.resolve_stale_operational_findings(db, {c.kind for c in cands1}, now=now)
+    rows1 = autopilot_service.upsert_findings(db, cands1, now=now)
+    db.commit()
+    row = db.query(AutopilotFinding).filter_by(kind="scheduler_heartbeat_without_runs").one()
+    assert row.status == "open"
+
+    # scan 2: traffic resumes -> condition no longer true, auto-closes
+    now2 = now + timedelta(minutes=1)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now2))
+    db.add(SourceRun(source="olx", kind="scheduler", status="success", created_at=now2))
+    db.commit()
+    cands2 = autopilot_service.build_candidates(db, now=now2)
+    autopilot_service.resolve_stale_operational_findings(db, {c.kind for c in cands2}, now=now2)
+    db.commit()
+    db.refresh(row)
+    assert row.status == "closed"
+
+    # scan 3: goes quiet again -> reopens as a fresh episode (not stuck closed forever)
+    now3 = now2 + timedelta(minutes=60)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now3))
+    db.commit()
+    cands3 = autopilot_service.build_candidates(db, now=now3)
+    autopilot_service.resolve_stale_operational_findings(db, {c.kind for c in cands3}, now=now3)
+    rows3 = autopilot_service.upsert_findings(db, cands3, now=now3)
+    db.commit()
+    db.refresh(row)
+    assert row.status == "open"
+    assert row.hit_count == 1
+    reopened = [r for r in rows3 if r.kind == "scheduler_heartbeat_without_runs"][0]
+    assert reopened.id == row.id

@@ -575,7 +575,19 @@ def _candidate_operational(db: Session, now: datetime) -> List[FindingCandidate]
 
     hb = db.query(SystemLog).filter(SystemLog.component == "scheduler", SystemLog.message == "heartbeat").order_by(SystemLog.created_at.desc()).first()
     hb_at = _as_utc(hb.created_at) if hb else None
-    source_runs_window_m = int(getattr(settings, "autopilot_source_runs_zero_window_minutes", 30) or 30)
+
+    # heartbeat_missing: o processo do scheduler roda job_heartbeat a cada 10s
+    # (app/scheduler/run.py) de forma independente dos workers de scraping. Se esse
+    # log some por vários minutos, é o processo do scheduler que caiu/travou (ex.:
+    # crash loop), não só um worker específico — cenário que o check abaixo (heartbeat
+    # vivo + source_runs zerado) não cobre, pois ele exige heartbeat recente.
+    hb_missing_m = int(getattr(settings, "autopilot_scheduler_heartbeat_missing_minutes", 5) or 5)
+    hb_missing_cut = _as_utc(now - timedelta(minutes=hb_missing_m))
+    if not hb_at or hb_at < hb_missing_cut:
+        age_m = round((_as_utc(now) - hb_at).total_seconds() / 60.0, 1) if hb_at else None
+        out.append(FindingCandidate(kind="scheduler_heartbeat_missing", source=None, fingerprint=_sha1("scheduler_heartbeat_missing"), title=f"Scheduler sem heartbeat há {age_m if age_m is not None else 'nunca registrado'}min", severity="error", evidence={"last_heartbeat_at": hb_at.isoformat() if hb_at else None, "age_minutes": age_m, "threshold_minutes": hb_missing_m, "checked_at": _as_utc(now).isoformat()}, suggested_actions="Ações sugeridas: verificar se o processo autohunter-scheduler.service está de pé (crash loop) e reiniciar se necessário."))
+
+    source_runs_window_m = int(getattr(settings, "autopilot_source_runs_zero_window_minutes", 55) or 55)
     sr_cut = _as_utc(now - timedelta(minutes=source_runs_window_m))
     runs_recent = (
         db.query(func.count(SourceRun.id))
@@ -584,8 +596,28 @@ def _candidate_operational(db: Session, now: datetime) -> List[FindingCandidate]
         .scalar()
         or 0
     )
-    if hb_at and hb_at >= sr_cut and int(runs_recent) == 0:
-        out.append(FindingCandidate(kind="scheduler_heartbeat_without_runs", source=None, fingerprint=_sha1("scheduler_heartbeat_without_runs"), title="Scheduler heartbeat ativo, mas source_runs zerado na janela", severity="error", evidence={"last_heartbeat_at": hb_at.isoformat(), "source_runs_count_window": int(runs_recent), "window_minutes": source_runs_window_m, "checked_at": _as_utc(now).isoformat()}, suggested_actions="Ações sugeridas: revisar scheduler tick/enqueue e conectividade do worker com o banco."))
+    # heartbeat precisa estar "fresco" pelo padrão mais rígido (heartbeat_missing) para
+    # este check fazer sentido — senão um heartbeat só levemente atrasado dispara os dois
+    # alertas ao mesmo tempo pro mesmo problema subjacente.
+    if hb_at and hb_at >= hb_missing_cut and int(runs_recent) == 0:
+        last_ok = (
+            db.query(func.max(SourceRun.created_at))
+            .filter(SourceRun.status.in_(["success", "error"]))
+            .scalar()
+        )
+        last_ok = _as_utc(last_ok)
+        minutes_since_last_run = round((_as_utc(now) - last_ok).total_seconds() / 60.0, 1) if last_ok else None
+        expected_active_sources = db.query(func.count(SourceConfig.id)).filter(SourceConfig.is_enabled.is_(True)).scalar() or 0
+        recent_errors = (
+            db.query(SystemLog.created_at, SystemLog.component, SystemLog.message)
+            .filter(SystemLog.level.in_(["warn", "error"]))
+            .filter(SystemLog.created_at >= sr_cut)
+            .order_by(SystemLog.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        recent_errors_sample = [f"{_as_utc(r.created_at).isoformat()} {r.component}/{r.message}" for r in recent_errors]
+        out.append(FindingCandidate(kind="scheduler_heartbeat_without_runs", source=None, fingerprint=_sha1("scheduler_heartbeat_without_runs"), title="Scheduler heartbeat ativo, mas source_runs zerado na janela", severity="error", evidence={"last_heartbeat_at": hb_at.isoformat(), "source_runs_count_window": int(runs_recent), "window_minutes": source_runs_window_m, "minutes_since_last_run": minutes_since_last_run, "expected_active_sources": int(expected_active_sources), "recent_errors_sample": recent_errors_sample, "checked_at": _as_utc(now).isoformat()}, suggested_actions="Ações sugeridas: revisar scheduler tick/enqueue e conectividade do worker com o banco."))
 
     sent_cut = now - timedelta(minutes=sender_idle_minutes)
     sent_recent = db.query(func.count(Notification.id)).filter(Notification.sent_at.isnot(None), Notification.sent_at >= sent_cut).scalar() or 0
@@ -608,6 +640,37 @@ def build_candidates(db: Session, now: Optional[datetime] = None) -> List[Findin
     cands.extend(_candidate_system_log_errors(db, now))
     cands.extend(_candidate_operational(db, now))
     return cands
+
+
+# kinds emitidos por _candidate_operational: cada um usa um fingerprint fixo (não
+# time-bucketed), então "open" precisa ser fechado explicitamente quando a condição
+# deixa de ser verdadeira — senão um blip de 1-2 scans fica "aberto" indefinidamente.
+_OPERATIONAL_SINGLETON_KINDS = (
+    "scrape_jobs_stuck",
+    "scheduler_heartbeat_missing",
+    "scheduler_heartbeat_without_runs",
+    "sender_idle_with_backlog",
+    "scrape_jobs_missing_critical_index",
+)
+
+
+def resolve_stale_operational_findings(db: Session, active_kinds: set[str], now: Optional[datetime] = None) -> int:
+    """Fecha findings operacionais 'open' cuja condição não é mais verdadeira no scan atual."""
+    now = now or _utcnow()
+    stale_kinds = [k for k in _OPERATIONAL_SINGLETON_KINDS if k not in active_kinds]
+    if not stale_kinds:
+        return 0
+    rows = (
+        db.query(AutopilotFinding)
+        .filter(AutopilotFinding.status == "open")
+        .filter(AutopilotFinding.kind.in_(stale_kinds))
+        .all()
+    )
+    for row in rows:
+        row.status = "closed"
+        row.last_seen_at = now
+        db.add(row)
+    return len(rows)
 
 
 def upsert_findings(db: Session, candidates: List[FindingCandidate], now: Optional[datetime] = None) -> List[AutopilotFinding]:
@@ -634,8 +697,15 @@ def upsert_findings(db: Session, candidates: List[FindingCandidate], now: Option
             db.flush()
         else:
             if row.status != "open":
-                # Não reabre automaticamente: mantém histórico. Se quiser reabrir, admin fecha/abre manual.
-                pass
+                if c.kind in _OPERATIONAL_SINGLETON_KINDS:
+                    # Estes kinds são auto-fechados por resolve_stale_operational_findings
+                    # quando a condição para de ser verdadeira; reabrir automaticamente aqui
+                    # é o comportamento certo (é o mesmo alerta live, não um evento histórico).
+                    row.status = "open"
+                    row.first_seen_at = now
+                    row.hit_count = 0
+                # demais kinds: não reabrem automaticamente, mantém histórico.
+                # Se quiser reabrir, admin fecha/abre manual.
             row.last_seen_at = now
             row.hit_count = int(row.hit_count or 0) + 1
             row.title = c.title
@@ -687,6 +757,18 @@ def format_alert(row: AutopilotFinding) -> str:
             lines.append(f"canary_effective: {bool(ctx.get('canary_effective'))}")
     if ev.get("correlation_key"):
         lines.append(f"correlation_key: {ev.get('correlation_key')}")
+    if row.kind == "scheduler_heartbeat_without_runs":
+        lines.append(f"último heartbeat: {ev.get('last_heartbeat_at')}")
+        lines.append(f"source_runs na janela: {ev.get('source_runs_count_window')} (esperado > 0 com {ev.get('expected_active_sources')} fontes ativas)")
+        lines.append(f"janela: {ev.get('window_minutes')}min | sem execução há: {ev.get('minutes_since_last_run')}min")
+        errs = ev.get("recent_errors_sample") or []
+        if errs:
+            lines.append("erros/warns recentes:")
+            for e in errs[:5]:
+                lines.append(f"- {e}")
+    if row.kind == "scheduler_heartbeat_missing":
+        lines.append(f"último heartbeat: {ev.get('last_heartbeat_at') or 'nunca'}")
+        lines.append(f"idade: {ev.get('age_minutes')}min (limite: {ev.get('threshold_minutes')}min)")
     # sample urls
     sample_urls = ev.get("sample_urls") or []
     if isinstance(sample_urls, list) and sample_urls:

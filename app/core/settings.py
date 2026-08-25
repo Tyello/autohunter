@@ -303,6 +303,15 @@ class Settings(BaseSettings):
     autopilot_min_hits: int = 3
     # throttle por finding (segundos) para alertas no Telegram
     autopilot_alert_throttle_seconds: int = 1800  # 30 min
+    # janela (minutos) sem nenhum source_run success/error para considerar o worker parado.
+    # Calibrado a partir do padrão real de operação: com sched_minutes=60-90 e ~9 fontes
+    # habilitadas escalonadas, gaps naturais entre execuções chegam a ~40min (p99) sem
+    # nenhum problema real. Ver docs/autopilot-heartbeat-alert.md.
+    autopilot_source_runs_zero_window_minutes: int = 55
+    # heartbeat do scheduler roda a cada 10s (app/scheduler/run.py); se sumir por esse
+    # tempo, o processo do scheduler provavelmente caiu (crash loop) — cenário distinto
+    # de "processo vivo mas worker travado".
+    autopilot_scheduler_heartbeat_missing_minutes: int = 5
     # digest diário para admins (UTC hour, ex: 12 = 09:00 America/Sao_Paulo)
     autopilot_daily_digest_enabled: bool = True
     weekly_digest_job_enabled: bool = False

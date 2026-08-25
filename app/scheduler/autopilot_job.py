@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.core.settings import settings
 from app.models.autopilot_finding import AutopilotFinding
-from app.services.autopilot_service import build_candidates, upsert_findings, should_alert, mark_alerted, format_alert, format_daily_digest
+from app.services.autopilot_service import build_candidates, upsert_findings, should_alert, mark_alerted, format_alert, format_daily_digest, resolve_stale_operational_findings
 from app.services.admin_alerts_service import send_admin_text
 
 
@@ -21,6 +21,7 @@ def job_autopilot_scan() -> None:
     now = _utcnow()
     with SessionLocal() as db:
         cands = build_candidates(db, now)
+        resolve_stale_operational_findings(db, {c.kind for c in cands}, now)
         touched = upsert_findings(db, cands, now)
 
         # alert new / throttled findings
