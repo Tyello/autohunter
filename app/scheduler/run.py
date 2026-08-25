@@ -469,6 +469,7 @@ def start_scheduler() -> BackgroundScheduler:
         "interval",
         hours=24,
         id="cleanup_notifications",
+        replace_existing=True,
     )
     from app.scheduler.filesystem_cleanup_job import job_filesystem_cleanup_daily
     sched.add_job(
