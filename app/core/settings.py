@@ -139,6 +139,15 @@ class Settings(BaseSettings):
     # Warm up the Playwright worker thread at scheduler start (cheap; does not launch Chromium yet).
     playwright_warmup_on_start: bool = True
 
+    # Hard wall-clock budget for a single job_browser_queue_worker execution.
+    # If exceeded, the job is force-failed/requeued and the Playwright pool is reset
+    # so a wedged browser worker thread cannot permanently starve the scheduler's
+    # "browser" executor (max_instances=1, single worker thread).
+    # NOTE: legitimate multi-page runs for heavy sources (gogarage/mobiauto) have
+    # been observed taking ~9-10 minutes in production, so this must stay well
+    # above that and below scrape_job_running_ttl_seconds (900s default).
+    browser_queue_job_hard_timeout_seconds: int = 780
+
     # Smoke test no boot (scheduler/bot)
     playwright_smoke_on_boot: bool = True
 

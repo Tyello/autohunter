@@ -208,14 +208,19 @@ def fetch_html_browser(
             if diag is not None:
                 diag.inc("br_err")
                 diag.note("br_last_error", type(e).__name__)
-            if _is_target_closed_error(e) and hasattr(backend, 'reset'):
+            if (_is_target_closed_error(e) or _is_timeout_error(e)) and hasattr(backend, 'reset'):
+                # A timeout at this layer usually means the dedicated Playwright
+                # worker thread is wedged on a blocking browser call (e.g. a
+                # frozen/zombie Chromium process). Reset the pool so it spins up
+                # a fresh worker thread instead of every future call queueing
+                # behind the permanently stuck one.
                 try:
                     backend.reset()
                 except Exception:
                     pass
-                continue
-            if attempt == 0 and _is_timeout_error(e):
-                time.sleep(0.35 + random.random() * 0.65)
+            if attempt == 0 and (_is_target_closed_error(e) or _is_timeout_error(e)):
+                if _is_timeout_error(e):
+                    time.sleep(0.35 + random.random() * 0.65)
                 continue
             raise
 
@@ -322,14 +327,14 @@ def fetch_json_browser(
             if diag is not None:
                 diag.inc("br_err")
                 diag.note("br_last_error", type(e).__name__)
-            if _is_target_closed_error(e) and hasattr(backend, 'reset'):
+            if (_is_target_closed_error(e) or _is_timeout_error(e)) and hasattr(backend, 'reset'):
                 try:
                     backend.reset()
                 except Exception:
                     pass
-                continue
-            if attempt == 0 and _is_timeout_error(e):
-                time.sleep(0.35 + random.random() * 0.65)
+            if attempt == 0 and (_is_target_closed_error(e) or _is_timeout_error(e)):
+                if _is_timeout_error(e):
+                    time.sleep(0.35 + random.random() * 0.65)
                 continue
             raise
 
