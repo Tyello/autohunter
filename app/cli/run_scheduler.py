@@ -5,6 +5,7 @@ import time
 
 from app.core.shutdown import is_shutdown_requested, request_shutdown, shutdown_reason
 from app.scheduler.run import start_scheduler
+from app.scheduler.worker_threads import stop_worker_threads
 
 
 def _handle(signum, _frame):
@@ -25,6 +26,7 @@ def main() -> int:
             print("[scheduler_cli] shutdown_start reason=%s" % (shutdown_reason() or "unknown"))
             sched.pause()
             sched.shutdown(wait=True)
+            stop_worker_threads(timeout=10)
             print("[scheduler_cli] shutdown_complete")
         except Exception as e:
             print(f"[scheduler_cli] suppressed_exception stage=shutdown exc_type={type(e).__name__} impact=graceful_shutdown_failed fallback=systemd_timeout")

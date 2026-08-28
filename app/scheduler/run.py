@@ -3,6 +3,7 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from zoneinfo import ZoneInfo
 
+import functools
 import threading
 from datetime import datetime, timezone, timedelta
 
@@ -11,6 +12,7 @@ from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
 from app.sources import list_sources
 from app.scheduler.heartbeat import heartbeat
+from app.scheduler.worker_threads import start_worker_thread
 
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import mark_skipped
@@ -21,7 +23,7 @@ from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.services.source_execution_service import run_source_for_all_wishlists as _exec_source_for_all_wishlists
 from app.services.source_backoff_service import is_source_allowed
-from app.services.source_configs_service import ensure_source_configs
+from app.services.source_configs_service import ensure_source_configs, get_source_config_snapshot
 from app.services.scrape_jobs_service import enqueue_job, count_active_jobs
 from app.sources.registry import get_source
 
@@ -53,10 +55,6 @@ def _log_suppressed_exception(*, stage: str, exc: Exception, impact: str, fallba
             db.commit()
     except Exception:
         return
-
-
-def _get_cfg(db, source: str):
-    return db.execute(select(SourceConfig).where(SourceConfig.source == source)).scalar_one_or_none()
 
 
 def _get_state(db, source: str):
@@ -131,7 +129,7 @@ def job_run_source_for_all_wishlists(source_name: str):
 
     with SessionLocal() as db:
         try:
-            cfg = _get_cfg(db, src)
+            cfg = get_source_config_snapshot(db, src)
             if not cfg or not bool(cfg.is_enabled) or plugin.scrape is None:
                 db.commit()
                 return
@@ -283,62 +281,6 @@ def start_scheduler() -> BackgroundScheduler:
         )
 
     sched.add_job(job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
-
-    # Browser queue worker: executa jobs Playwright em ordem (FIFO)
-    try:
-        from app.scheduler.browser_queue_job import job_browser_queue_worker
-
-        worker_s = int(getattr(settings, "scheduler_browser_worker_seconds", 5) or 5)
-        worker_s = max(2, min(worker_s, 60))
-        sched.add_job(
-            job_browser_queue_worker,
-            "interval",
-            seconds=worker_s,
-            id="browser_queue_worker",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            executor="browser",
-        )
-    except Exception as e:
-        _log_suppressed_exception(
-            stage="bootstrap.browser_queue_worker",
-            exc=e,
-            impact="browser_queue_worker_not_registered",
-            fallback="scheduler_continues_without_browser_worker",
-            worker="boot",
-        )
-
-    # HTTP queue workers: executa jobs HTTP em paralelo controlado
-    try:
-        from app.scheduler.http_queue_job import job_http_queue_worker
-
-        worker_s = int(getattr(settings, "scheduler_http_worker_seconds", 2) or 2)
-        worker_s = max(1, min(worker_s, 60))
-        workers = int(getattr(settings, "scheduler_http_worker_count", 2) or 2)
-        workers = max(1, min(workers, 8))
-
-        for i in range(workers):
-            wid = f"http_queue_worker_{i+1}"
-            sched.add_job(
-                job_http_queue_worker,
-                "interval",
-                seconds=worker_s,
-                id=wid,
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-                executor="http",
-                args=(wid,),
-            )
-    except Exception as e:
-        _log_suppressed_exception(
-            stage="bootstrap.http_queue_worker",
-            exc=e,
-            impact="http_queue_workers_not_registered",
-            fallback="scheduler_continues_without_http_workers",
-            worker="boot",
-        )
 
     from app.scheduler.sender_job import job_send_notifications
     from app.scheduler.auction_notification_job import job_scheduled_auction_notification
@@ -543,4 +485,46 @@ def start_scheduler() -> BackgroundScheduler:
             )
 
     sched.start()
+
+    # Browser queue worker: moved to dedicated thread
+    try:
+        from app.scheduler.browser_queue_job import job_browser_queue_worker
+
+        worker_s = int(getattr(settings, "scheduler_browser_worker_seconds", 5) or 5)
+        worker_s = max(2, min(worker_s, 60))
+        start_worker_thread(job_browser_queue_worker, seconds=worker_s, name="browser_queue_worker")
+    except Exception as e:
+        _log_suppressed_exception(
+            stage="bootstrap.browser_queue_worker_thread",
+            exc=e,
+            impact="browser_queue_worker_thread_not_started",
+            fallback="scheduler_continues_without_browser_worker",
+            worker="boot",
+        )
+
+    # HTTP queue workers: moved to dedicated threads
+    try:
+        from app.scheduler.http_queue_job import job_http_queue_worker
+
+        worker_s = int(getattr(settings, "scheduler_http_worker_seconds", 2) or 2)
+        worker_s = max(1, min(worker_s, 60))
+        workers = int(getattr(settings, "scheduler_http_worker_count", 2) or 2)
+        workers = max(1, min(workers, 8))
+
+        for i in range(workers):
+            wid = f"http_queue_worker_{i+1}"
+            start_worker_thread(
+                functools.partial(job_http_queue_worker, worker_id=wid),
+                seconds=worker_s,
+                name=f"http_queue_worker_{i+1}",
+            )
+    except Exception as e:
+        _log_suppressed_exception(
+            stage="bootstrap.http_queue_worker_threads",
+            exc=e,
+            impact="http_queue_worker_threads_not_started",
+            fallback="scheduler_continues_without_http_workers",
+            worker="boot",
+        )
+
     return sched

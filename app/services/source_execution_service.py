@@ -16,7 +16,7 @@ from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
 from app.services.search_deduplication_service import canonical_search_key
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
-from app.services.source_configs_service import ensure_source_configs, build_scrape_context
+from app.services.source_configs_service import ensure_source_configs, build_scrape_context, get_source_config_snapshot
 from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import get_eligible_wishlists_for_source
@@ -138,10 +138,6 @@ def _get_state(db: Session, source: str) -> Optional[SourceState]:
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
 
 
-def _get_cfg(db: Session, source: str) -> Optional[SourceConfig]:
-    return db.execute(select(SourceConfig).where(SourceConfig.source == source)).scalar_one_or_none()
-
-
 def _wishlist_eligibility_snapshot(db: Session, src: str) -> tuple[list[Wishlist], dict[str, int]]:
     return get_eligible_wishlists_for_source(db, src)
 
@@ -243,7 +239,7 @@ def run_source_for_all_wishlists(
     # Ensure DB rows exist (seed defaults once)
     ensure_source_configs(db)
 
-    cfg = _get_cfg(db, src)
+    cfg = get_source_config_snapshot(db, src)
     if not cfg:
         return {"ok": False, "status": "error", "error": f"missing_source_config:{src}"}
 

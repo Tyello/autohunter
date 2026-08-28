@@ -172,3 +172,41 @@ def test_disabled_or_no_wishlists_does_not_flag_suspicious(db, monkeypatch):
         runtime_impl="v2_canary",
     )
     assert payload.get("suspicious_zero_results") is not True
+
+
+def test_run_source_for_all_wishlists_uses_config_snapshot_cache(db, monkeypatch):
+    """Verify that consecutive calls to run_source_for_all_wishlists reuse cached config within TTL."""
+    from app.services import source_configs_service as cfg_svc
+
+    source = "cache_test_source"
+    _add_cfg(db, source=source, enabled=True, extra={"impl": "v1"})
+    db.commit()
+
+    # Clear cache before test
+    cfg_svc.invalidate_source_config_cache()
+
+    # Track db.execute calls to count SELECT queries
+    original_execute = db.execute
+    execute_call_count = {"count": 0}
+
+    def tracked_execute(query, *args, **kwargs):
+        execute_call_count["count"] += 1
+        return original_execute(query, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", tracked_execute)
+    _setup_run(monkeypatch, source=source)
+
+    # First call - should execute 1 SELECT for get_source_config_snapshot
+    initial_count = execute_call_count["count"]
+    res1 = svc.run_source_for_all_wishlists(db, source, kind="scheduler", force=True, ignore_backoff=True)
+    first_call_count = execute_call_count["count"] - initial_count
+
+    # Second call within TTL - should reuse cache (0 additional SELECTs for config)
+    res2 = svc.run_source_for_all_wishlists(db, source, kind="scheduler", force=True, ignore_backoff=True)
+    second_call_count = execute_call_count["count"] - initial_count - first_call_count
+
+    assert res1["status"] == "success"
+    assert res2["status"] == "success"
+    # First call includes 1 SELECT for get_source_config_snapshot (plus others for state, runs, etc.)
+    # Second call should have fewer or equal execute calls due to cache hit
+    assert second_call_count < first_call_count

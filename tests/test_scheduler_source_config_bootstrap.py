@@ -52,7 +52,7 @@ def test_job_tick_does_not_call_ensure_source_configs_when_cfg_exists(monkeypatc
 
     monkeypatch.setattr(run_mod, "SessionLocal", lambda: _Ctx())
     monkeypatch.setattr(run_mod, "get_source", lambda _src: plugin)
-    monkeypatch.setattr(run_mod, "_get_cfg", lambda _db, _src: cfg)
+    monkeypatch.setattr(run_mod, "get_source_config_snapshot", lambda _db, _src: cfg)
     monkeypatch.setattr(run_mod, "_get_state", lambda _db, _src: None)
     monkeypatch.setattr(run_mod, "is_source_allowed", lambda *_a, **_k: allowed)
     monkeypatch.setattr(run_mod, "enqueue_job", lambda *_a, **_k: enqueued.__setitem__("count", enqueued["count"] + 1) or True)
@@ -84,7 +84,7 @@ def test_job_tick_with_missing_cfg_returns_without_crashing(monkeypatch):
 
     monkeypatch.setattr(run_mod, "SessionLocal", lambda: _Ctx())
     monkeypatch.setattr(run_mod, "get_source", lambda _src: plugin)
-    monkeypatch.setattr(run_mod, "_get_cfg", lambda _db, _src: None)
+    monkeypatch.setattr(run_mod, "get_source_config_snapshot", lambda _db, _src: None)
     monkeypatch.setattr(run_mod, "enqueue_job", lambda *_a, **_k: called.__setitem__("enqueue", called["enqueue"] + 1))
 
     run_mod.job_run_source_for_all_wishlists("olx")
