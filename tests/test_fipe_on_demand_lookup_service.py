@@ -1237,6 +1237,63 @@ def test_process_attempts_bootstrap_when_no_local_candidate(db, monkeypatch):
     assert {"year": 2019, "status": "bootstrapped", "confidence_score": None} in outcome_calls[0]["payload"]["outcomes"]
 
 
+def test_process_bootstraps_multiple_entries_when_two_candidates_match_year(db, monkeypatch):
+    """Spec 009: dois modelos candidatos casam a query e ambos têm o ano-alvo -> ambos viram entries."""
+    wishlist = _make_wishlist(db, query="honda fit", year_gte=2019, year_lte=2019)
+    _make_catalog_entry(db)  # Create some catalog data so _ensure_month works
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [
+                {"Label": "Fit LX", "Value": "4828"},
+                {"Label": "Fit EX", "Value": "4829"},
+            ]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            return {
+                "Marca": "Honda",
+                "Modelo": "Fit",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": f"00{model_code}-9",
+                "Valor": "R$ 65.000,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "done"
+    assert out["bootstrapped"] == 1
+
+    entries = (
+        db.query(FipeCatalogEntry)
+        .filter(FipeCatalogEntry.brand_code == "22", FipeCatalogEntry.model_year == 2019)
+        .all()
+    )
+    assert len(entries) == 2
+    assert {e.model_code for e in entries} == {"4828", "4829"}
+
+
 def test_process_skips_year_when_brand_not_matched(db, monkeypatch):
     """Teste 11 (REQ-002): Skip quando marca não bate durante bootstrap."""
     wishlist = _make_wishlist(db, query="honda fit", year_gte=2019, year_lte=2020)
