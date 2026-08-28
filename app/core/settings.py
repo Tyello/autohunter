@@ -353,6 +353,7 @@ class Settings(BaseSettings):
     fipe_lookup_poll_interval_s: int = 60
     fipe_lookup_batch_size: int = 20
     fipe_lookup_max_attempts: int = 3
+    fipe_lookup_year_expand_max: int = 5
 
     # Filesystem cleanup (runtime temp/cache/debug only; safe defaults)
     filesystem_cleanup_enabled: bool = Field(

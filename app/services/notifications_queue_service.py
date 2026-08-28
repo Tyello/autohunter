@@ -16,6 +16,50 @@ from app.services.market_stats_service import batch_get_market_stats, cohort_key
 from app.models.fipe_price import FipePrice
 from app.services.cross_source_dedupe_service import evaluate_cross_source_notification_dedupe
 from app.services.system_logs_service import log
+from app.services.fipe_catalog_resolver_service import resolve_listing_to_fipe_candidates, _ensure_month
+from app.models.fipe_catalog_entry import FipeCatalogEntry
+
+
+def _fallback_fipe_price_via_catalog(db: Session, listing):
+    """Fallback FIPE price lookup via catalog when FipePrice row is missing.
+
+    Calls resolve_listing_to_fipe_candidates with the listing and returns the
+    price from the best candidate if confidence_score >= fipe_lookup_min_confidence.
+
+    Returns:
+        Decimal or None: The FIPE price if found and confident, None otherwise.
+        Never raises exceptions.
+    """
+    try:
+        result = resolve_listing_to_fipe_candidates(
+            db,
+            listing=listing,
+            reference_month=_ensure_month(db, None),
+            limit=5
+        )
+
+        if result.get("status") == "insufficient_data":
+            return None
+
+        best_candidate = result.get("best_candidate")
+        if best_candidate is None:
+            return None
+
+        confidence = best_candidate.get("confidence_score")
+        if confidence is None or confidence < settings.fipe_lookup_min_confidence:
+            return None
+
+        catalog_entry_id = best_candidate.get("catalog_entry_id")
+        if catalog_entry_id is None:
+            return None
+
+        entry = db.query(FipeCatalogEntry).filter(FipeCatalogEntry.id == catalog_entry_id).first()
+        if entry is None:
+            return None
+
+        return entry.price
+    except Exception:
+        return None
 
 
 def queue_notifications_for_matches(
@@ -138,6 +182,8 @@ def queue_notifications_for_matches(
         try:
             lkeys = listing_vehicle_keys(listing)
             fipe = next((fipe_rows.get(k) for k in lkeys if k in fipe_rows), None)
+            if fipe is None:
+                fipe = _fallback_fipe_price_via_catalog(db, listing)
             rarity_ratio = None
             rarity_sample = int(ms.sample_size or 0) if ms else None
             if rarity_sample and rarity_sample > 0:

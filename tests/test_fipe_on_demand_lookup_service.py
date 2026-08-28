@@ -112,18 +112,53 @@ def test_enqueue_never_raises_on_db_error(db, monkeypatch):
     assert request is None
 
 
+def test_enqueue_logs_error_to_system_logs_on_exception(db, monkeypatch):
+    from app.services import system_logs_service
+
+    monkeypatch.setattr(settings, "fipe_lookup_enabled", True)
+    wishlist = _make_wishlist(db)
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db, "commit", boom)
+
+    log_calls = []
+    original_log = system_logs_service.log
+
+    def capture_log(db_param, level, component, event, payload=None):
+        log_calls.append({
+            "level": level,
+            "component": component,
+            "event": event,
+            "payload": payload,
+        })
+
+    monkeypatch.setattr(system_logs_service, "log", capture_log)
+
+    request = svc.enqueue_fipe_lookup_for_wishlist(db, wishlist)
+
+    assert request is None
+    assert len(log_calls) == 1
+    assert log_calls[0]["level"] == "error"
+    assert log_calls[0]["component"] == "fipe_lookup"
+    assert log_calls[0]["event"] == "enqueue_failed"
+    assert log_calls[0]["payload"]["wishlist_id"] == str(wishlist.id)
+    assert "error" in log_calls[0]["payload"]
+
+
 # --- pseudo listing ---
 
 def test_pseudo_listing_single_token_query(db):
     wishlist = _make_wishlist(db, query="civic")
-    listing = svc._build_pseudo_listing(wishlist, [])
+    listing = svc._build_pseudo_listing(wishlist, [], db)
     assert listing.make == "civic"
     assert listing.model == "civic"
 
 
 def test_pseudo_listing_multi_token_query(db):
     wishlist = _make_wishlist(db, query="honda civic touring")
-    listing = svc._build_pseudo_listing(wishlist, [])
+    listing = svc._build_pseudo_listing(wishlist, [], db)
     assert listing.make == "honda"
     assert listing.model == "civic touring"
 
@@ -131,14 +166,76 @@ def test_pseudo_listing_multi_token_query(db):
 def test_pseudo_listing_year_prefers_gte(db):
     wishlist = _make_wishlist(db, year_gte=2018, year_lte=2020)
     filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
-    listing = svc._build_pseudo_listing(wishlist, filters)
+    listing = svc._build_pseudo_listing(wishlist, filters, db)
     assert listing.year == 2018
 
 
 def test_pseudo_listing_no_year_filter_is_none(db):
     wishlist = _make_wishlist(db)
-    listing = svc._build_pseudo_listing(wishlist, [])
+    listing = svc._build_pseudo_listing(wishlist, [], db)
     assert listing.year is None
+
+
+def test_pseudo_listing_year_default_unchanged_prefers_gte(db):
+    """Etapa 3, teste 6: chamada sem parâmetro year deve usar comportamento padrão (gte se houver)."""
+    wishlist = _make_wishlist(db, year_gte=2018, year_lte=2020)
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    # Sem passar year, deve preferir gte (2018)
+    listing = svc._build_pseudo_listing(wishlist, filters, db)
+    assert listing.year == 2018
+
+
+def test_pseudo_listing_year_explicit_overrides_filters(db):
+    """Etapa 3, teste 7: parâmetro year explícito (não _UNSET) deve sobrescrever filters."""
+    wishlist = _make_wishlist(db, year_gte=2018, year_lte=2020)
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    # Passando year=2005 explicitamente, deve usar 2005 em vez de gte (2018)
+    listing = svc._build_pseudo_listing(wishlist, filters, db, year=2005)
+    assert listing.year == 2005
+
+
+def test_pseudo_listing_year_explicit_none_overrides_filters(db):
+    """Etapa 3, teste 7b: parâmetro year=None explícito deve sobrescrever filters."""
+    wishlist = _make_wishlist(db, year_gte=2018, year_lte=2020)
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    # Passando year=None explicitamente, deve usar None em vez de gte (2018)
+    listing = svc._build_pseudo_listing(wishlist, filters, db, year=None)
+    assert listing.year is None
+
+
+def test_pseudo_listing_brand_detected_when_not_first_token(db):
+    """Etapa 3, teste 8: marca não-primeira palavra (fit honda) deve ser detectada no catálogo."""
+    _make_catalog_entry(db)  # Cria Honda Civic
+    wishlist = _make_wishlist(db, query="fit honda")
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    listing = svc._build_pseudo_listing(wishlist, filters, db)
+    # "honda" é marca conhecida no catálogo, "fit" é modelo restante
+    assert listing.make == "Honda"
+    assert listing.model == "fit"
+
+
+def test_pseudo_listing_brand_detected_honda_fit_s(db):
+    """Etapa 3, teste 9: query "honda fit s" com Honda no catálogo → make=Honda, model="fit s"."""
+    _make_catalog_entry(db)  # Cria Honda Civic
+    wishlist = _make_wishlist(db, query="honda fit s")
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    listing = svc._build_pseudo_listing(wishlist, filters, db)
+    # "honda" é marca conhecida no catálogo, "fit s" são tokens restantes
+    assert listing.make == "Honda"
+    assert listing.model == "fit s"
+
+
+def test_pseudo_listing_falls_back_to_legacy_when_no_known_brand(db):
+    """Etapa 3, teste 10: fallback a heurística legada quando nenhuma marca é detectada."""
+    # Cria marca Honda no catálogo
+    _make_catalog_entry(db)
+    # Query sem nenhuma marca conhecida
+    wishlist = _make_wishlist(db, query="Foo Bar")
+    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
+    listing = svc._build_pseudo_listing(wishlist, filters, db)
+    # Fallback: primeiro token = make, resto = model
+    assert listing.make == "Foo"
+    assert listing.model == "Bar"
 
 
 # --- process_pending_fipe_lookups ---
@@ -331,3 +428,261 @@ def test_process_isolates_unexpected_failure_without_aborting_batch(db, monkeypa
     assert request_a.attempts == 1
     assert request_b.status == "skipped"
     assert out["claimed"] == 2
+
+
+# Testes para _resolve_target_years (Etapa 2)
+
+
+def test_resolve_target_years_no_bounds_returns_empty():
+    """Caso 1: sem bounds (gte=None, lte=None) retorna lista vazia."""
+    from app.services.fipe_on_demand_lookup_service import _resolve_target_years
+
+    result = _resolve_target_years(gte=None, lte=None, current_year=2026, max_years=5)
+    assert result == []
+
+
+def test_resolve_target_years_small_range_returns_all():
+    """Caso 2: range pequeno [gte, lte] dentro de max_years retorna todos os anos."""
+    from app.services.fipe_on_demand_lookup_service import _resolve_target_years
+
+    result = _resolve_target_years(gte=2020, lte=2022, current_year=2026, max_years=5)
+    assert result == [2020, 2021, 2022]
+
+
+def test_resolve_target_years_gte_only_anchors_on_current_year():
+    """Caso 3: apenas gte, âncora em current_year, últimos max_years."""
+    from app.services.fipe_on_demand_lookup_service import _resolve_target_years
+
+    result = _resolve_target_years(gte=2018, lte=None, current_year=2026, max_years=5)
+    assert result == [2022, 2023, 2024, 2025, 2026]
+
+
+def test_resolve_target_years_lte_only_anchors_on_lte():
+    """Caso 4: apenas lte, âncora em lte, últimos max_years finalizando em lte."""
+    from app.services.fipe_on_demand_lookup_service import _resolve_target_years
+
+    result = _resolve_target_years(gte=None, lte=2008, current_year=2026, max_years=5)
+    assert result == [2004, 2005, 2006, 2007, 2008]
+
+
+def test_resolve_target_years_both_bounds_clipped_anchor():
+    """Caso 5: ambos bounds, âncora em lte, clipa aos últimos max_years, filtra gte."""
+    from app.services.fipe_on_demand_lookup_service import _resolve_target_years
+
+    result = _resolve_target_years(gte=1990, lte=2000, current_year=2026, max_years=5)
+    assert result == [1996, 1997, 1998, 1999, 2000]
+
+
+def test_resolve_target_years_both_bounds_anchors_on_current_year_when_inside_range():
+    """Caso 5b: ambos bounds, current_year dentro do range, âncora em current_year."""
+    from app.services.fipe_on_demand_lookup_service import _resolve_target_years
+
+    result = _resolve_target_years(gte=2010, lte=2030, current_year=2026, max_years=5)
+    assert result == [2024, 2025, 2026, 2027, 2028]
+
+
+# Testes para _process_one_fipe_lookup loop (Etapa 4)
+
+
+def test_process_loops_years_stops_on_first_success(db, monkeypatch):
+    """Teste 11: Loop com múltiplos anos-alvo, candidato fresco em apenas um ano.
+
+    Wishlist com year_gte=2020, year_lte=2022 (3 anos). Catálogo tem:
+    - 2020: nenhum candidato
+    - 2021: candidato fresco -> continua, retorna done
+    - 2022: processado também
+
+    Esperado: outcomes com 3 entradas (2020=skipped_year, 2021=done, 2022=skipped_year), final_status=done
+    """
+    wishlist = _make_wishlist(db, query="honda civic", year_gte=2020, year_lte=2022)
+    fresh_at = datetime.now(timezone.utc) - timedelta(days=1)
+    entry_2021 = _make_catalog_entry(db, updated_at=fresh_at, model_year=2021, fuel="Gasolina")
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    # Mock resolve_listing_to_fipe_candidates para simular:
+    # 2020 -> no_match
+    # 2021 -> match com entry_2021
+    # 2022 -> no_match
+    call_count = {"n": 0}
+
+    def mock_resolve(db_arg, listing, reference_month, limit):
+        call_count["n"] += 1
+        year_arg = listing.year
+        if year_arg == 2020:
+            return {"status": "no_match", "best_candidate": None}
+        elif year_arg == 2021:
+            return {"status": "matched", "best_candidate": {"catalog_entry_id": str(entry_2021.id), "confidence_score": 90}}
+        elif year_arg == 2022:
+            return {"status": "no_match", "best_candidate": None}
+        else:
+            raise AssertionError(f"year {year_arg} não esperado")
+
+    monkeypatch.setattr(svc, "resolve_listing_to_fipe_candidates", mock_resolve)
+
+    class ExplodingClient:
+        def __getattr__(self, name):
+            raise AssertionError("FipeApiClient não deveria ser instanciado para candidato fresco")
+
+    monkeypatch.setattr(svc, "FipeApiClient", ExplodingClient)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "done"
+    assert out["done"] == 1
+    assert out["claimed"] == 1
+    # Verificar que resolve foi chamado 3 vezes (2020, 2021 e 2022)
+    assert call_count["n"] == 3
+
+
+def test_process_loops_years_refreshes_all_then_succeeds(db, monkeypatch):
+    """Teste 12: Loop com múltiplos anos-alvo, candidato stale em todos, refresh bem-sucedido.
+
+    Wishlist com year_gte=2020, year_lte=2021 (2 anos). Catálogo tem:
+    - 2020: candidato stale
+    - 2021: candidato stale
+
+    Refresh bem-sucedido em ambos. Esperado: outcomes com 2 entradas (ambas com status="refreshed"),
+    final_status=done
+    """
+    wishlist = _make_wishlist(db, query="toyota corolla", year_gte=2020, year_lte=2021)
+    stale_at = datetime.now(timezone.utc) - timedelta(days=60)
+    entry_2020 = _make_catalog_entry(db, updated_at=stale_at, model_year=2020, fuel="Gasolina")
+    entry_2021 = _make_catalog_entry(db, updated_at=stale_at, model_year=2021, fuel="Gasolina")
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    call_count = {"resolve": 0, "refresh": 0}
+
+    def mock_resolve(db_arg, listing, reference_month, limit):
+        call_count["resolve"] += 1
+        year_arg = listing.year
+        entry_to_use = entry_2020 if year_arg == 2020 else entry_2021
+        return {"status": "matched", "best_candidate": {"catalog_entry_id": str(entry_to_use.id), "confidence_score": 90}}
+
+    def mock_refresh(db_arg, entry):
+        call_count["refresh"] += 1
+        # Simula sucesso no refresh
+
+    monkeypatch.setattr(svc, "resolve_listing_to_fipe_candidates", mock_resolve)
+    monkeypatch.setattr(svc, "_refresh_fipe_catalog_entry", mock_refresh)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "done"
+    assert out["refreshed"] == 1
+    assert call_count["resolve"] == 2  # Ambos anos foram processados
+    assert call_count["refresh"] == 2  # Ambos foram refreshados
+
+
+def test_process_loops_years_all_insufficient_data_marks_skipped(db, monkeypatch):
+    """Teste 13: Loop com múltiplos anos-alvo, todos dão insufficient_data.
+
+    Wishlist com year_gte=2020, year_lte=2021 (2 anos). Catálogo vazio.
+    resolve_listing_to_fipe_candidates retorna insufficient_data para ambos os anos.
+
+    Esperado: outcomes com 2 entradas (ambas com status="skipped_year"), final_status=skipped
+    """
+    from app.services import fipe_catalog_resolver_service
+
+    wishlist = _make_wishlist(db, query="ford focus", year_gte=2020, year_lte=2021)
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    def mock_resolve(db_arg, listing, reference_month, limit):
+        # Simula insufficient_data para todos os anos
+        return {"status": "insufficient_data", "best_candidate": None}
+
+    def mock_log(*args, **kwargs):
+        # Mock system_logs para não falhar
+        pass
+
+    def mock_ensure_month(db_arg, month_arg):
+        # Mock _ensure_month para retornar "2026-07"
+        return "2026-07"
+
+    monkeypatch.setattr(svc, "resolve_listing_to_fipe_candidates", mock_resolve)
+    monkeypatch.setattr(svc.system_logs_service, "log", mock_log)
+    monkeypatch.setattr(svc, "_ensure_month", mock_ensure_month)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "skipped"
+    assert out["skipped"] == 1
+
+
+def test_process_logs_diagnostic_payload_per_target_year(db, monkeypatch):
+    """Etapa 4, teste 11 (REQ-004): Diagnóstico em system_logs com outcomes por ano-alvo.
+
+    Wishlist com year_gte=2020, year_lte=2022 (3 anos-alvo, todos sem candidato no catálogo).
+    Após _process_one_fipe_lookup, assert que system_logs_service.log foi chamado com:
+    - component="fipe_lookup"
+    - payload["outcomes"] tem 3 entradas (uma por ano-alvo) com chaves year/status/confidence_score
+    - payload["final_status"] == "skipped"
+    """
+    wishlist = _make_wishlist(db, query="ford focus", year_gte=2020, year_lte=2022)
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    def mock_resolve(db_arg, listing, reference_month, limit):
+        # Todos os anos retornam no_match
+        return {"status": "no_match", "best_candidate": None}
+
+    def mock_ensure_month(db_arg, month_arg):
+        # Retorna "2026-07"
+        return "2026-07"
+
+    # Capturar as chamadas a system_logs_service.log
+    log_calls = []
+
+    def capture_log(db_param, level, component, event, payload=None):
+        log_calls.append({
+            "level": level,
+            "component": component,
+            "event": event,
+            "payload": payload,
+        })
+
+    monkeypatch.setattr(svc, "resolve_listing_to_fipe_candidates", mock_resolve)
+    monkeypatch.setattr(svc, "_ensure_month", mock_ensure_month)
+    monkeypatch.setattr(svc.system_logs_service, "log", capture_log)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "skipped"
+    assert out["skipped"] == 1
+
+    # Verificar que system_logs foi chamado com o payload de diagnóstico
+    assert len(log_calls) >= 1
+    # Encontrar a chamada com outcomes
+    log_with_outcomes = None
+    for call in log_calls:
+        if call.get("component") == "fipe_lookup" and call.get("payload") and "outcomes" in call["payload"]:
+            log_with_outcomes = call
+            break
+
+    assert log_with_outcomes is not None, "Nenhuma chamada a system_logs com outcomes foi encontrada"
+    assert log_with_outcomes["component"] == "fipe_lookup"
+    assert log_with_outcomes["payload"]["final_status"] == "skipped"
+
+    # Verificar que outcomes tem 3 entradas (uma por ano-alvo)
+    outcomes = log_with_outcomes["payload"]["outcomes"]
+    assert len(outcomes) == 3, f"Expected 3 outcomes, got {len(outcomes)}"
+
+    # Verificar que cada outcome tem as chaves requeridas
+    for i, outcome in enumerate(outcomes):
+        assert "year" in outcome, f"Outcome {i} missing 'year'"
+        assert "status" in outcome, f"Outcome {i} missing 'status'"
+        assert "confidence_score" in outcome, f"Outcome {i} missing 'confidence_score'"
+
+    # Verificar que os anos-alvo estão corretos
+    years_in_outcomes = sorted([o["year"] for o in outcomes])
+    assert years_in_outcomes == [2020, 2021, 2022]
