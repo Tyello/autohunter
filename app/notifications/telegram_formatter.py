@@ -198,9 +198,9 @@ def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
     try:
         price_value = float(price)
     except Exception:
-        return None
+        return "💰 Preço não informado pela fonte"
     if price_value <= 0:
-        return None
+        return "💰 Preço não informado pela fonte"
 
     sample_size = market_context.get("sample_size")
     try:

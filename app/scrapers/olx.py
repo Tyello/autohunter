@@ -385,7 +385,37 @@ def _extract_next_data_json(html: str) -> Optional[dict]:
     return None
 
 
-def _extract_items_from_next_data(next_data: dict) -> list[OlxItem]:
+_NEXT_F_PUSH_RE = re.compile(r'self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)')
+_RSC_CHUNK_PREFIX_RE = re.compile(r'^[0-9a-zA-Z]+:(.*)$', re.DOTALL)
+
+
+def _extract_rsc_json_chunks(html: str) -> list[Any]:
+    """Extrai os payloads JSON embutidos no streaming RSC do Next.js App Router:
+    self.__next_f.push([1, "<chunkId>:<json...>"]).
+
+    A OLX migrou as paginas de busca (e o parser antigo so olhava para
+    <script id="__NEXT_DATA__">, formato do Pages Router) para esse streaming,
+    entao _extract_next_data_json passou a nao encontrar nada e o codigo caia
+    no fallback de cards em HTML, cujo seletor de preco (.olx-adcard__price)
+    tambem ficou desatualizado -- resultado: titulo/url extraidos, preco None.
+    """
+    chunks: list[Any] = []
+    for raw in _NEXT_F_PUSH_RE.findall(html or ""):
+        try:
+            decoded = json.loads(raw)
+        except Exception:
+            continue
+        m = _RSC_CHUNK_PREFIX_RE.match(decoded)
+        body = m.group(1) if m else decoded
+        try:
+            data = json.loads(body)
+        except Exception:
+            continue
+        chunks.append(data)
+    return chunks
+
+
+def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
     """
     Os itens aparecem com chaves como:
     - subject
@@ -643,14 +673,9 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
         except Exception:
             html = _fetch_browser_html()
 
-        next_data = _extract_next_data_json(html)
-        if not next_data:
-            items = _fallback_parse_from_cards(html)
-            if not items:
-                raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
-            return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
-
-        items = _extract_items_from_next_data(next_data)
+        items = _parse_olx_listing_items(html)
+        if not items:
+            raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
         return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
     # 2) Preferred: HTTP hybrid
@@ -677,15 +702,28 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
         else:
             raise
 
-    next_data = _extract_next_data_json(html)
-    if not next_data:
-        items = _fallback_parse_from_cards(html)
-        if not items:
-            raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
-        return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
-
-    items = _extract_items_from_next_data(next_data)
+    items = _parse_olx_listing_items(html)
+    if not items:
+        raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
     return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
+
+
+def _parse_olx_listing_items(html: str) -> list[OlxItem]:
+    """Tenta, em ordem: __NEXT_DATA__ (Pages Router, formato legado) -> chunks
+    RSC do App Router (formato atual da busca) -> fallback de cards em HTML."""
+    next_data = _extract_next_data_json(html)
+    if next_data:
+        items = _extract_items_from_next_data(next_data)
+        if items:
+            return items
+
+    rsc_chunks = _extract_rsc_json_chunks(html)
+    if rsc_chunks:
+        items = _extract_items_from_next_data(rsc_chunks)
+        if items:
+            return items
+
+    return _fallback_parse_from_cards(html)
 
 
 def _fallback_parse_from_cards(html: str) -> list[OlxItem]:

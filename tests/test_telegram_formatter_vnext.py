@@ -354,12 +354,13 @@ def test_price_context_with_enough_sample_but_missing_delta():
     assert "Preço informado — comparação" in payload.text
 
 
-def test_missing_price_does_not_show_price_context_fallback():
+def test_missing_price_shows_explicit_not_informed_badge():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(price=None, score_breakdown={"total": 80, "reasons": ["ok"]}))
     assert "Preço informado" not in payload.text
     assert "sem base de mercado" not in payload.text
+    assert "Preço não informado pela fonte" in payload.text
 
 
 def test_fipe_badge_when_delta_exists_in_breakdown():
