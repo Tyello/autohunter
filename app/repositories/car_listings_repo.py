@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func, case, literal_column
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, OperationalError
 
 from app.models.car_listing import CarListing
 from app.services.cross_source_dedupe_service import compute_cross_source_fingerprint
@@ -143,9 +143,14 @@ def _prefer_thumbnail(existing: str | None, incoming: str | None) -> str | None:
     return existing
 
 
-def _is_missing_on_conflict_constraint(exc: ProgrammingError) -> bool:
+def _is_missing_on_conflict_constraint(exc) -> bool:
     msg = str(getattr(exc, "orig", exc)).lower()
-    return "there is no unique or exclusion constraint matching the on conflict specification" in msg
+    # Postgres: "there is no unique or exclusion constraint matching the on conflict specification"
+    # SQLite: "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint" or "no such table"
+    return (
+        "there is no unique or exclusion constraint matching the on conflict specification" in msg
+        or "on conflict clause does not match any primary key or unique constraint" in msg
+    )
 
 
 def _homogenize_bulk_insert_rows(rows: list[dict]) -> list[dict]:
@@ -213,35 +218,159 @@ def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, wi
             db.flush()
             inserted_new += 1
         else:
-            row.title = _prefer_title(row.title, listing.get("title"), row.source)
-            row.url = listing.get("url") or row.url
-            row.thumbnail_url = _prefer_thumbnail(row.thumbnail_url, listing.get("thumbnail_url"))
-            row.price = row.price if row.price is not None else listing.get("price")
-            row.location = row.location if row.location is not None else listing.get("location")
-            row.year = row.year if row.year is not None else listing.get("year")
-            row.make = row.make if row.make is not None else listing.get("make")
-            row.model = row.model if row.model is not None else listing.get("model")
-            row.mileage_km = row.mileage_km if row.mileage_km is not None else listing.get("mileage_km")
-            row.fuel_type = row.fuel_type if row.fuel_type is not None else listing.get("fuel_type")
-            row.transmission = row.transmission if row.transmission is not None else listing.get("transmission")
-            row.version = row.version if row.version is not None else listing.get("version")
-            row.seller_type = row.seller_type if row.seller_type is not None else listing.get("seller_type")
-            row.city = row.city if row.city is not None else listing.get("city")
-            row.state = row.state if row.state is not None else listing.get("state")
-            row.color = row.color if row.color is not None else listing.get("color")
-            row.doors = row.doors if row.doors is not None else listing.get("doors")
-            row.body_type = row.body_type if row.body_type is not None else listing.get("body_type")
+            # Track if any field changed
+            changed = False
+
+            # title: apply same logic as ON CONFLICT
+            new_title = _prefer_title(row.title, listing.get("title"), row.source)
+            if new_title != row.title:
+                changed = True
+            row.title = new_title
+
+            # url: always prefer new
+            new_url = listing.get("url") or row.url
+            if new_url != row.url:
+                changed = True
+            row.url = new_url
+
+            # thumbnail_url
+            new_thumbnail = _prefer_thumbnail(row.thumbnail_url, listing.get("thumbnail_url"))
+            if new_thumbnail != row.thumbnail_url:
+                changed = True
+            row.thumbnail_url = new_thumbnail
+
+            # price: coalesce(existing, new)
+            new_price = row.price if row.price is not None else listing.get("price")
+            if new_price != row.price:
+                changed = True
+            row.price = new_price
+
+            # location: coalesce(existing, new)
+            new_location = row.location if row.location is not None else listing.get("location")
+            if new_location != row.location:
+                changed = True
+            row.location = new_location
+
+            # year: coalesce(existing, new)
+            new_year = row.year if row.year is not None else listing.get("year")
+            if new_year != row.year:
+                changed = True
+            row.year = new_year
+
+            # make: coalesce(existing, new)
+            new_make = row.make if row.make is not None else listing.get("make")
+            if new_make != row.make:
+                changed = True
+            row.make = new_make
+
+            # model: coalesce(existing, new)
+            new_model = row.model if row.model is not None else listing.get("model")
+            if new_model != row.model:
+                changed = True
+            row.model = new_model
+
+            # mileage_km: coalesce(existing, new)
+            new_mileage_km = row.mileage_km if row.mileage_km is not None else listing.get("mileage_km")
+            if new_mileage_km != row.mileage_km:
+                changed = True
+            row.mileage_km = new_mileage_km
+
+            # fuel_type: coalesce(existing, new)
+            new_fuel_type = row.fuel_type if row.fuel_type is not None else listing.get("fuel_type")
+            if new_fuel_type != row.fuel_type:
+                changed = True
+            row.fuel_type = new_fuel_type
+
+            # transmission: coalesce(existing, new)
+            new_transmission = row.transmission if row.transmission is not None else listing.get("transmission")
+            if new_transmission != row.transmission:
+                changed = True
+            row.transmission = new_transmission
+
+            # version: coalesce(existing, new)
+            new_version = row.version if row.version is not None else listing.get("version")
+            if new_version != row.version:
+                changed = True
+            row.version = new_version
+
+            # seller_type: coalesce(existing, new)
+            new_seller_type = row.seller_type if row.seller_type is not None else listing.get("seller_type")
+            if new_seller_type != row.seller_type:
+                changed = True
+            row.seller_type = new_seller_type
+
+            # city: coalesce(existing, new)
+            new_city = row.city if row.city is not None else listing.get("city")
+            if new_city != row.city:
+                changed = True
+            row.city = new_city
+
+            # state: coalesce(existing, new)
+            new_state = row.state if row.state is not None else listing.get("state")
+            if new_state != row.state:
+                changed = True
+            row.state = new_state
+
+            # color: coalesce(existing, new)
+            new_color = row.color if row.color is not None else listing.get("color")
+            if new_color != row.color:
+                changed = True
+            row.color = new_color
+
+            # doors: coalesce(existing, new)
+            new_doors = row.doors if row.doors is not None else listing.get("doors")
+            if new_doors != row.doors:
+                changed = True
+            row.doors = new_doors
+
+            # body_type: coalesce(existing, new)
+            new_body_type = row.body_type if row.body_type is not None else listing.get("body_type")
+            if new_body_type != row.body_type:
+                changed = True
+            row.body_type = new_body_type
+
+            # cross_source_fingerprint: only update if new value is not None
             if listing.get("cross_source_fingerprint") is not None:
-                row.cross_source_fingerprint = listing.get("cross_source_fingerprint")
-            row.raw_payload = row.raw_payload if row.raw_payload is not None else listing.get("raw_payload")
-            row.extractor_version = row.extractor_version if row.extractor_version is not None else listing.get("extractor_version")
-            row.is_sold = bool(row.is_sold) or bool(listing.get("is_sold"))
+                new_csf = listing.get("cross_source_fingerprint")
+                if new_csf != row.cross_source_fingerprint:
+                    changed = True
+                row.cross_source_fingerprint = new_csf
+
+            # raw_payload: coalesce(existing, new)
+            new_raw_payload = row.raw_payload if row.raw_payload is not None else listing.get("raw_payload")
+            if new_raw_payload != row.raw_payload:
+                changed = True
+            row.raw_payload = new_raw_payload
+
+            # extractor_version: coalesce(existing, new)
+            new_extractor_version = row.extractor_version if row.extractor_version is not None else listing.get("extractor_version")
+            if new_extractor_version != row.extractor_version:
+                changed = True
+            row.extractor_version = new_extractor_version
+
+            # is_sold: OR semantics
+            new_is_sold = bool(row.is_sold) or bool(listing.get("is_sold"))
+            if new_is_sold != row.is_sold:
+                changed = True
+            row.is_sold = new_is_sold
+
+            # sold_at: only update if new value is not None and current is None
             if row.sold_at is None and listing.get("sold_at") is not None:
-                row.sold_at = listing.get("sold_at")
-            row.updated_at = now
+                new_sold_at = listing.get("sold_at")
+                if new_sold_at != row.sold_at:
+                    changed = True
+                row.sold_at = new_sold_at
+
+            # updated_at: only update if any field changed
+            if changed:
+                row.updated_at = now
+
             updated += 1
 
         ids.append(row.id)
+
+    # Commit changes to make them visible to subsequent queries
+    db.commit()
 
     if not with_stats:
         return ids
@@ -320,102 +449,160 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
 
     stmt = insert(CarListing).values(listings)
 
+    # Extract column value expressions for reuse in both set_ dict and changed detection
+    title_expr = case(
+        (
+            # GoGarage: external_id = slug, então é seguro sempre atualizar para o título mais recente.
+            (CarListing.source == "gogarage") & stmt.excluded.title.isnot(None),
+            stmt.excluded.title,
+        ),
+        (
+            # TurboClass: o primeiro ingest pode vir "capado" (sem 'SI', sem ano/modelo etc).
+            # Se o novo título for claramente mais informativo, atualiza.
+            (CarListing.source == "turboclass")
+            & stmt.excluded.title.isnot(None)
+            & (
+                CarListing.title.is_(None)
+                | (func.length(stmt.excluded.title) > (func.length(CarListing.title) + 3))
+            ),
+            stmt.excluded.title,
+        ),
+        (
+            # atualiza título quando o existente é claramente "ruim" (ruído de UI / concat quebrada)
+            (
+                CarListing.title.is_(None)
+                | (func.length(CarListing.title) < 6)
+                | CarListing.title.ilike('link para%')
+                | CarListing.title.ilike('% visto%')
+                | CarListing.title.ilike('% pts%')
+                | CarListing.title.ilike('% pontos%')
+                | CarListing.title.ilike('%comparar%')
+                | CarListing.title.ilike('reservado%')
+                | CarListing.title.ilike('%| a%')
+                | CarListing.title.ilike('comprar%')
+            )
+            & stmt.excluded.title.isnot(None),
+            stmt.excluded.title,
+        ),
+        else_=CarListing.title,
+    )
+
+    thumbnail_url_expr = case(
+        (
+            # Preenche quando não existe
+            (CarListing.thumbnail_url.is_(None) & stmt.excluded.thumbnail_url.isnot(None)),
+            stmt.excluded.thumbnail_url,
+        ),
+        (
+            # Troca quando o existente é claramente ruim (logo/placeholder/thumb pequeno)
+            (
+                CarListing.thumbnail_url.ilike('%logo_icarros_compartilhar%')
+                | CarListing.thumbnail_url.ilike('%/comum/imagens/logo%')
+                | CarListing.thumbnail_url.ilike('%thumb%')
+                | CarListing.thumbnail_url.ilike('%fit-in/320%')
+                | CarListing.thumbnail_url.ilike('%fit-in/480%')
+            )
+            & stmt.excluded.thumbnail_url.isnot(None)
+            & (~stmt.excluded.thumbnail_url.ilike('%logo_icarros_compartilhar%')),
+            stmt.excluded.thumbnail_url,
+        ),
+        else_=CarListing.thumbnail_url,
+    )
+
+    price_expr = func.coalesce(CarListing.price, stmt.excluded.price)
+    location_expr = func.coalesce(CarListing.location, stmt.excluded.location)
+    year_expr = func.coalesce(CarListing.year, stmt.excluded.year)
+    make_expr = func.coalesce(CarListing.make, stmt.excluded.make)
+    model_expr = func.coalesce(CarListing.model, stmt.excluded.model)
+    mileage_km_expr = func.coalesce(CarListing.mileage_km, stmt.excluded.mileage_km)
+    fuel_type_expr = func.coalesce(CarListing.fuel_type, stmt.excluded.fuel_type)
+    transmission_expr = func.coalesce(CarListing.transmission, stmt.excluded.transmission)
+    version_expr = func.coalesce(CarListing.version, stmt.excluded.version)
+    seller_type_expr = func.coalesce(CarListing.seller_type, stmt.excluded.seller_type)
+    city_expr = func.coalesce(CarListing.city, stmt.excluded.city)
+    state_expr = func.coalesce(CarListing.state, stmt.excluded.state)
+    color_expr = func.coalesce(CarListing.color, stmt.excluded.color)
+    doors_expr = func.coalesce(CarListing.doors, stmt.excluded.doors)
+    body_type_expr = func.coalesce(CarListing.body_type, stmt.excluded.body_type)
+    cross_source_fingerprint_expr = func.coalesce(stmt.excluded.cross_source_fingerprint, CarListing.cross_source_fingerprint)
+    raw_payload_expr = func.coalesce(CarListing.raw_payload, stmt.excluded.raw_payload)
+    extractor_version_expr = func.coalesce(CarListing.extractor_version, stmt.excluded.extractor_version)
+
+    is_sold_expr = (
+        func.coalesce(CarListing.is_sold, False)
+        | func.coalesce(stmt.excluded.is_sold, False)
+    )
+
+    sold_at_expr = case(
+        (
+            (CarListing.sold_at.is_(None) & stmt.excluded.sold_at.isnot(None)),
+            stmt.excluded.sold_at,
+        ),
+        else_=CarListing.sold_at,
+    )
+
+    url_expr = stmt.excluded.url
+
+    # Build changed detection: OR of is_distinct_from comparisons for all columns except updated_at
+    changed = (
+        title_expr.is_distinct_from(CarListing.title)
+        | thumbnail_url_expr.is_distinct_from(CarListing.thumbnail_url)
+        | price_expr.is_distinct_from(CarListing.price)
+        | location_expr.is_distinct_from(CarListing.location)
+        | year_expr.is_distinct_from(CarListing.year)
+        | make_expr.is_distinct_from(CarListing.make)
+        | model_expr.is_distinct_from(CarListing.model)
+        | mileage_km_expr.is_distinct_from(CarListing.mileage_km)
+        | fuel_type_expr.is_distinct_from(CarListing.fuel_type)
+        | transmission_expr.is_distinct_from(CarListing.transmission)
+        | version_expr.is_distinct_from(CarListing.version)
+        | seller_type_expr.is_distinct_from(CarListing.seller_type)
+        | city_expr.is_distinct_from(CarListing.city)
+        | state_expr.is_distinct_from(CarListing.state)
+        | color_expr.is_distinct_from(CarListing.color)
+        | doors_expr.is_distinct_from(CarListing.doors)
+        | body_type_expr.is_distinct_from(CarListing.body_type)
+        | cross_source_fingerprint_expr.is_distinct_from(CarListing.cross_source_fingerprint)
+        | raw_payload_expr.is_distinct_from(CarListing.raw_payload)
+        | extractor_version_expr.is_distinct_from(CarListing.extractor_version)
+        | is_sold_expr.is_distinct_from(CarListing.is_sold)
+        | sold_at_expr.is_distinct_from(CarListing.sold_at)
+        | url_expr.is_distinct_from(CarListing.url)
+    )
+
     stmt = stmt.on_conflict_do_update(
         index_elements=["source", "external_id"],
         set_={
             # mantém valores já existentes quando não-null; caso contrário, preenche do novo scrape
-            "title": case(
-    (
-        # GoGarage: external_id = slug, então é seguro sempre atualizar para o título mais recente.
-        (CarListing.source == "gogarage") & stmt.excluded.title.isnot(None),
-        stmt.excluded.title,
-    ),
-    (
-        # TurboClass: o primeiro ingest pode vir "capado" (sem 'SI', sem ano/modelo etc).
-        # Se o novo título for claramente mais informativo, atualiza.
-        (CarListing.source == "turboclass")
-        & stmt.excluded.title.isnot(None)
-        & (
-            CarListing.title.is_(None)
-            | (func.length(stmt.excluded.title) > (func.length(CarListing.title) + 3))
-        ),
-        stmt.excluded.title,
-    ),
-    (
-        # atualiza título quando o existente é claramente "ruim" (ruído de UI / concat quebrada)
-        (
-            CarListing.title.is_(None)
-            | (func.length(CarListing.title) < 6)
-            | CarListing.title.ilike('link para%')
-            | CarListing.title.ilike('% visto%')
-            | CarListing.title.ilike('% pts%')
-            | CarListing.title.ilike('% pontos%')
-            | CarListing.title.ilike('%comparar%')
-            | CarListing.title.ilike('reservado%')
-            | CarListing.title.ilike('%| a%')
-            | CarListing.title.ilike('comprar%')
-        )
-        & stmt.excluded.title.isnot(None),
-        stmt.excluded.title,
-    ),
-    else_=CarListing.title,
-),
-            "thumbnail_url": case(
-    (
-        # Preenche quando não existe
-        (CarListing.thumbnail_url.is_(None) & stmt.excluded.thumbnail_url.isnot(None)),
-        stmt.excluded.thumbnail_url,
-    ),
-    (
-        # Troca quando o existente é claramente ruim (logo/placeholder/thumb pequeno)
-        (
-            CarListing.thumbnail_url.ilike('%logo_icarros_compartilhar%')
-            | CarListing.thumbnail_url.ilike('%/comum/imagens/logo%')
-            | CarListing.thumbnail_url.ilike('%thumb%')
-            | CarListing.thumbnail_url.ilike('%fit-in/320%')
-            | CarListing.thumbnail_url.ilike('%fit-in/480%')
-        )
-        & stmt.excluded.thumbnail_url.isnot(None)
-        & (~stmt.excluded.thumbnail_url.ilike('%logo_icarros_compartilhar%')),
-        stmt.excluded.thumbnail_url,
-    ),
-    else_=CarListing.thumbnail_url,
-),
-            "price": func.coalesce(CarListing.price, stmt.excluded.price),
-            "location": func.coalesce(CarListing.location, stmt.excluded.location),
+            "title": title_expr,
+            "thumbnail_url": thumbnail_url_expr,
+            "price": price_expr,
+            "location": location_expr,
             # Promoted common fields: fill when missing.
-            "year": func.coalesce(CarListing.year, stmt.excluded.year),
-            "make": func.coalesce(CarListing.make, stmt.excluded.make),
-            "model": func.coalesce(CarListing.model, stmt.excluded.model),
-            "mileage_km": func.coalesce(CarListing.mileage_km, stmt.excluded.mileage_km),
-            "fuel_type": func.coalesce(CarListing.fuel_type, stmt.excluded.fuel_type),
-            "transmission": func.coalesce(CarListing.transmission, stmt.excluded.transmission),
-            "version": func.coalesce(CarListing.version, stmt.excluded.version),
-            "seller_type": func.coalesce(CarListing.seller_type, stmt.excluded.seller_type),
-            "city": func.coalesce(CarListing.city, stmt.excluded.city),
-            "state": func.coalesce(CarListing.state, stmt.excluded.state),
-            "color": func.coalesce(CarListing.color, stmt.excluded.color),
-            "doors": func.coalesce(CarListing.doors, stmt.excluded.doors),
-            "body_type": func.coalesce(CarListing.body_type, stmt.excluded.body_type),
-            "cross_source_fingerprint": func.coalesce(stmt.excluded.cross_source_fingerprint, CarListing.cross_source_fingerprint),
-            "raw_payload": func.coalesce(CarListing.raw_payload, stmt.excluded.raw_payload),
-            "extractor_version": func.coalesce(CarListing.extractor_version, stmt.excluded.extractor_version),
+            "year": year_expr,
+            "make": make_expr,
+            "model": model_expr,
+            "mileage_km": mileage_km_expr,
+            "fuel_type": fuel_type_expr,
+            "transmission": transmission_expr,
+            "version": version_expr,
+            "seller_type": seller_type_expr,
+            "city": city_expr,
+            "state": state_expr,
+            "color": color_expr,
+            "doors": doors_expr,
+            "body_type": body_type_expr,
+            "cross_source_fingerprint": cross_source_fingerprint_expr,
+            "raw_payload": raw_payload_expr,
+            "extractor_version": extractor_version_expr,
             # Sold state: once sold, never revert (OR semantics).
-            "is_sold": (
-                func.coalesce(CarListing.is_sold, False)
-                | func.coalesce(stmt.excluded.is_sold, False)
-            ),
+            "is_sold": is_sold_expr,
             # When marking sold, keep the first sold_at we saw (or set it from excluded).
-            "sold_at": case(
-                (
-                    (CarListing.sold_at.is_(None) & stmt.excluded.sold_at.isnot(None)),
-                    stmt.excluded.sold_at,
-                ),
-                else_=CarListing.sold_at,
-            ),
+            "sold_at": sold_at_expr,
             # url normalmente é estável; se mudar, preferimos o novo
-            "updated_at": func.now(),
-            "url": stmt.excluded.url,
+            "url": url_expr,
+            # updated_at: only update if any column value changed
+            "updated_at": case((changed, func.now()), else_=CarListing.updated_at),
         },
     )
 
@@ -425,7 +612,7 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
     stmt = stmt.returning(CarListing.id, inserted_expr)
     try:
         result = db.execute(stmt)
-    except ProgrammingError as exc:
+    except (ProgrammingError, OperationalError) as exc:
         if not _is_missing_on_conflict_constraint(exc):
             raise
         db.rollback()
