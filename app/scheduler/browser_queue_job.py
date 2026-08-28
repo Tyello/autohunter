@@ -180,14 +180,6 @@ def job_browser_queue_worker():
         except Exception:
             db.rollback()
             raise
-
-        _log_best_effort(
-            db,
-            "info",
-            "browser_queue_worker",
-            "job_completed",
-            {"job_id": job_id, "source": job_source, "dur_ms": dur_ms, "status": status, "ok": ok},
-        )
     except Exception as e:
         err_text = f"{type(e).__name__}: {e}"
         shutdown_exc = is_shutdown_requested() or "cannot schedule new futures after interpreter shutdown" in str(e).lower()
