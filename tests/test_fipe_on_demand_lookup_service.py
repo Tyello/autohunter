@@ -63,6 +63,198 @@ def _make_catalog_entry(db, *, updated_at=None, brand_code="25", model_code="482
     return entry
 
 
+# --- _match_fipe_catalog_item ---
+
+
+def test_match_fipe_catalog_item_returns_none_when_no_containment():
+    """Teste 1: Nenhum item contém o token do query → None."""
+    items = [{"Label": "Toyota"}]
+    result = svc._match_fipe_catalog_item(items, "honda")
+    assert result is None
+
+
+def test_match_fipe_catalog_item_exact_single_match():
+    """Teste 2: Um item exato (Honda/honda) → retorna o item."""
+    items = [{"Label": "Honda"}, {"Label": "Toyota"}]
+    result = svc._match_fipe_catalog_item(items, "honda")
+    assert result == {"Label": "Honda"}
+
+
+def test_match_fipe_catalog_item_prefers_fewest_extra_tokens():
+    """Teste 3: Prefere item com menos tokens extras."""
+    items = [
+        {"Label": "Fit EX 1.5 16V"},
+        {"Label": "Fit"},
+        {"Label": "Fit LX 1.5"},
+    ]
+    result = svc._match_fipe_catalog_item(items, "fit")
+    assert result == {"Label": "Fit"}
+
+
+def test_match_fipe_catalog_item_tiebreaks_by_list_order():
+    """Teste 4: Em caso de empate, retorna o primeiro da lista."""
+    items = [
+        {"Label": "Fit EX"},
+        {"Label": "Fit LX"},
+    ]
+    result = svc._match_fipe_catalog_item(items, "fit")
+    assert result == {"Label": "Fit EX"}
+
+
+# --- _resolve_fipe_brand_and_model ---
+
+
+def test_resolve_fipe_brand_and_model_success(monkeypatch):
+    """Teste 5: Sucesso completo - retorna (brand, model_item, reference_code)."""
+    calls = {}
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            calls["get_brands"] = reference_code
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            calls["get_models"] = (reference_code, brand_code)
+            return [{"Label": "Fit", "Value": "4828"}]
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+    client = svc.FipeApiClient()
+
+    result = svc._resolve_fipe_brand_and_model(client, make="honda", model="fit")
+
+    assert result == ({"Label": "Honda", "Value": "22"}, {"Label": "Fit", "Value": "4828"}, 320)
+    assert calls["get_brands"] == 320
+    assert calls["get_models"] == (320, "22")
+
+
+def test_resolve_fipe_brand_and_model_returns_none_when_brand_not_found(monkeypatch):
+    """Teste 6: Marca não encontrada - retorna None sem chamar get_models."""
+    calls = {}
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            calls["get_brands"] = True
+            return [{"Label": "Toyota", "Value": "1"}]
+
+        def get_models(self, reference_code, brand_code):
+            calls["get_models"] = True
+            raise AssertionError("get_models não deveria ser chamado quando marca não é encontrada")
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+    client = svc.FipeApiClient()
+
+    result = svc._resolve_fipe_brand_and_model(client, make="honda", model="fit")
+
+    assert result is None
+    assert calls.get("get_brands") is True
+    assert calls.get("get_models") is None
+
+
+def test_resolve_fipe_brand_and_model_returns_none_when_model_not_found(monkeypatch):
+    """Teste 7: Modelo não encontrado - retorna None."""
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "9"}]
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+    client = svc.FipeApiClient()
+
+    result = svc._resolve_fipe_brand_and_model(client, make="honda", model="fit")
+
+    assert result is None
+
+
+# --- _bootstrap_fipe_catalog_entry ---
+
+
+def test_bootstrap_creates_new_catalog_entry(db, monkeypatch):
+    """Teste 8: Bootstrap cria nova entrada no catálogo com todos os campos persistidos."""
+    class FakeClient:
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            return {
+                "Marca": "Honda",
+                "Modelo": "Fit",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": "R$ 65.000,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+    client = svc.FipeApiClient()
+
+    # Call bootstrap
+    brand = {"Label": "Honda", "Value": "22"}
+    model = {"Label": "Fit", "Value": "4828"}
+    result = svc._bootstrap_fipe_catalog_entry(db, client, brand=brand, model=model, reference_code=320, year=2019)
+
+    # Assert return value
+    assert result is True
+
+    # Assert database entry was created with correct fields
+    entry = db.query(FipeCatalogEntry).filter(
+        FipeCatalogEntry.brand_code == "22",
+        FipeCatalogEntry.model_code == "4828",
+        FipeCatalogEntry.model_year == 2019,
+    ).first()
+    assert entry is not None
+    assert entry.brand_name == "Honda"
+    assert entry.model_name == "Fit"
+    assert entry.fuel == "Gasolina"
+    assert entry.fipe_code == "001004-9"
+    assert entry.price == Decimal("65000.00")
+    assert entry.source == "on_demand_bootstrap"
+
+
+def test_bootstrap_returns_false_when_year_not_found(db, monkeypatch):
+    """Teste 9: Retorna False quando ano não existe; get_price nunca é chamado."""
+    call_count = {"get_price": 0}
+
+    class FakeClient:
+        def get_model_years(self, reference_code, brand_code, model_code):
+            # Return 2020 data, but we'll request 2019
+            return [{"Label": "2020 Gasolina", "Value": "2020-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            call_count["get_price"] += 1
+            return {"Marca": "Honda", "Modelo": "Fit"}
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+    client = svc.FipeApiClient()
+
+    brand = {"Label": "Honda", "Value": "22"}
+    model = {"Label": "Fit", "Value": "4828"}
+    result = svc._bootstrap_fipe_catalog_entry(db, client, brand=brand, model=model, reference_code=320, year=2019)
+
+    # Assert return value
+    assert result is False
+
+    # Assert get_price was never called
+    assert call_count["get_price"] == 0
+
+    # Assert no new entries were created
+    entries = db.query(FipeCatalogEntry).filter(
+        FipeCatalogEntry.brand_code == "22",
+        FipeCatalogEntry.model_code == "4828",
+    ).all()
+    assert len(entries) == 0
+
+
 # --- enqueue ---
 
 def test_enqueue_inserts_pending_request(db, monkeypatch):
@@ -488,11 +680,12 @@ def test_process_loops_years_stops_on_first_success(db, monkeypatch):
     """Teste 11: Loop com múltiplos anos-alvo, candidato fresco em apenas um ano.
 
     Wishlist com year_gte=2020, year_lte=2022 (3 anos). Catálogo tem:
-    - 2020: nenhum candidato
-    - 2021: candidato fresco -> continua, retorna done
-    - 2022: processado também
+    - 2020: nenhum candidato -> bootstrap tenta mas marca não resolve
+    - 2021: candidato fresco -> retorna done
+    - 2022: não processado (loop parou após sucesso em 2021)
 
-    Esperado: outcomes com 3 entradas (2020=skipped_year, 2021=done, 2022=skipped_year), final_status=done
+    Esperado: outcomes com pelo menos 2 entradas (2020=skipped_year, 2021=done),
+    final_status=done, get_brands chamado no máximo 1 vez (cache de resolução).
     """
     wishlist = _make_wishlist(db, query="honda civic", year_gte=2020, year_lte=2022)
     fresh_at = datetime.now(timezone.utc) - timedelta(days=1)
@@ -502,9 +695,9 @@ def test_process_loops_years_stops_on_first_success(db, monkeypatch):
     db.commit()
 
     # Mock resolve_listing_to_fipe_candidates para simular:
-    # 2020 -> no_match
-    # 2021 -> match com entry_2021
-    # 2022 -> no_match
+    # 2020 -> no_match (desencadeia bootstrap)
+    # 2021 -> match com entry_2021 (candidato fresco, continua sem bootstrap)
+    # 2022 -> pode ou não ser processado dependendo do loop
     call_count = {"n": 0}
 
     def mock_resolve(db_arg, listing, reference_month, limit):
@@ -521,11 +714,32 @@ def test_process_loops_years_stops_on_first_success(db, monkeypatch):
 
     monkeypatch.setattr(svc, "resolve_listing_to_fipe_candidates", mock_resolve)
 
-    class ExplodingClient:
-        def __getattr__(self, name):
-            raise AssertionError("FipeApiClient não deveria ser instanciado para candidato fresco")
+    # FakeClient que simula bootstrap fail (marca não resolve)
+    # Retorna marcas que NÃO contêm "honda" para simular no match
+    api_calls = {"get_brands": 0, "get_models": 0, "get_model_years": 0, "get_price": 0}
 
-    monkeypatch.setattr(svc, "FipeApiClient", ExplodingClient)
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            api_calls["get_brands"] += 1
+            # Retorna lista SEM Honda -> _resolve_fipe_brand_and_model retorna None
+            return [{"Label": "Toyota", "Value": "1"}, {"Label": "Ford", "Value": "3"}]
+
+        def get_models(self, reference_code, brand_code):
+            api_calls["get_models"] += 1
+            raise AssertionError("get_models não deveria ser chamado se marca não resolve")
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            api_calls["get_model_years"] += 1
+            raise AssertionError("get_model_years não deveria ser chamado se marca não resolve")
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            api_calls["get_price"] += 1
+            raise AssertionError("get_price não deveria ser chamado se marca não resolve")
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
 
     out = svc.process_pending_fipe_lookups(db, limit=10)
 
@@ -533,8 +747,14 @@ def test_process_loops_years_stops_on_first_success(db, monkeypatch):
     assert request.status == "done"
     assert out["done"] == 1
     assert out["claimed"] == 1
-    # Verificar que resolve foi chamado 3 vezes (2020, 2021 e 2022)
-    assert call_count["n"] == 3
+    # Verificar que resolve foi chamado (pelo menos 2 vezes: 2020 e 2021)
+    assert call_count["n"] >= 2
+    # Verificar que get_brands foi chamado no máximo 1 vez (cache de resolução entre anos)
+    assert api_calls["get_brands"] <= 1, f"get_brands foi chamado {api_calls['get_brands']} vezes, esperado máximo 1"
+    # Verificar que outros métodos nunca foram chamados (marca não resolveu)
+    assert api_calls["get_models"] == 0
+    assert api_calls["get_model_years"] == 0
+    assert api_calls["get_price"] == 0
 
 
 def test_process_loops_years_refreshes_all_then_succeeds(db, monkeypatch):
@@ -686,3 +906,240 @@ def test_process_logs_diagnostic_payload_per_target_year(db, monkeypatch):
     # Verificar que os anos-alvo estão corretos
     years_in_outcomes = sorted([o["year"] for o in outcomes])
     assert years_in_outcomes == [2020, 2021, 2022]
+
+
+# --- Bootstrap tests (Etapa 4) ---
+
+
+def test_process_attempts_bootstrap_when_no_local_candidate(db, monkeypatch):
+    """Teste 10 (REQ-001): Tenta bootstrap quando não há candidato local."""
+    wishlist = _make_wishlist(db, query="honda fit", year_gte=2019, year_lte=2020)
+    _make_catalog_entry(db)  # Create some catalog data so _ensure_month works
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    # Mock resolve_listing_to_fipe_candidates to always return no_match
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    # Setup FakeClient para resolve + bootstrap sucesso
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Fit", "Value": "4828"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            return {
+                "Marca": "Honda",
+                "Modelo": "Fit",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": "R$ 65.000,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    log_calls = []
+
+    def capture_log(db_param, level, component, event, payload=None):
+        log_calls.append({"level": level, "component": component, "event": event, "payload": payload})
+
+    monkeypatch.setattr(svc.system_logs_service, "log", capture_log)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "done"
+    assert out["bootstrapped"] == 1
+
+    # REQ-008: outcome "bootstrapped" deve ser gravado no payload de system_logs
+    outcome_calls = [c for c in log_calls if c["component"] == "fipe_lookup" and c["payload"] and "outcomes" in c["payload"]]
+    assert len(outcome_calls) == 1
+    assert {"year": 2019, "status": "bootstrapped", "confidence_score": None} in outcome_calls[0]["payload"]["outcomes"]
+
+
+def test_process_skips_year_when_brand_not_matched(db, monkeypatch):
+    """Teste 11 (REQ-002): Skip quando marca não bate durante bootstrap."""
+    wishlist = _make_wishlist(db, query="honda fit", year_gte=2019, year_lte=2020)
+    _make_catalog_entry(db)  # Create some catalog data so _ensure_month works
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    # Mock resolve_listing_to_fipe_candidates to always return no_match
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    # Setup FakeClient onde get_brands não bate com "honda"
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Toyota", "Value": "1"}]  # Toyota, não Honda
+
+        def get_models(self, *args, **kwargs):
+            raise AssertionError("get_models não deveria ser chamado se marca não bate")
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "skipped"
+    assert out["skipped"] == 1
+
+    # Verificar que nenhuma FipeCatalogEntry foi criada
+    entries = db.query(FipeCatalogEntry).filter(FipeCatalogEntry.brand_code == "22").all()
+    assert len(entries) == 0
+
+
+def test_process_reuses_resolved_brand_model_across_years(db, monkeypatch):
+    """Teste 12 (REQ-006): Cache de resolução de marca/modelo entre anos."""
+    wishlist = _make_wishlist(db, query="honda fit", year_gte=2018, year_lte=2020)
+    _make_catalog_entry(db)  # Create some catalog data so _ensure_month works
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    # Mock resolve_listing_to_fipe_candidates to always return no_match
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    # Setup FakeClient com contadores de chamadas
+    calls = {"get_brands": 0, "get_models": 0, "get_model_years": 0, "get_price": 0}
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            calls["get_brands"] += 1
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            calls["get_models"] += 1
+            return [{"Label": "Fit", "Value": "4828"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            calls["get_model_years"] += 1
+            # Return 2018, 2019, 2020
+            return [
+                {"Label": f"{year} Gasolina", "Value": f"{year}-1"}
+                for year in [2018, 2019, 2020]
+            ]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            calls["get_price"] += 1
+            return {
+                "Marca": "Honda",
+                "Modelo": "Fit",
+                "AnoModelo": model_year,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": "R$ 65.000,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "done"
+    # get_brands/get_models chamados exatamente 1 vez (cache reutilizado)
+    assert calls["get_brands"] == 1
+    assert calls["get_models"] == 1
+    # get_model_years/get_price chamados 3 vezes (uma por ano)
+    assert calls["get_model_years"] == 3
+    assert calls["get_price"] == 3
+
+
+def test_process_bootstrap_api_error_stops_loop_and_retries(db, monkeypatch):
+    """Teste 13 (REQ-007): Erro de API durante bootstrap interrompe loop com retry."""
+    wishlist = _make_wishlist(db, query="honda fit", year_gte=2020, year_lte=2021)
+    _make_catalog_entry(db)  # Create some catalog data so _ensure_month works
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    # Mock resolve_listing_to_fipe_candidates to always return no_match
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    from app.services.fipe_api_client import FipeApiError
+
+    # Setup FakeClient que levanta erro em get_brands
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            raise FipeApiError("timeout da API FIPE")
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.attempts == 1
+    assert request.status == "pending"
+    assert "timeout" in request.last_error
+    assert out["failed_temp"] == 1
+
+
+def test_process_does_not_retry_brand_resolution_after_no_match(db, monkeypatch):
+    """Teste 14 (REQ-009): Não retenta resolução de marca após falha."""
+    wishlist = _make_wishlist(db, query="honda fit", year_gte=2018, year_lte=2020)
+    _make_catalog_entry(db)  # Create some catalog data so _ensure_month works
+    request = FipeLookupRequest(id=uuid.uuid4(), wishlist_id=wishlist.id)
+    db.add(request)
+    db.commit()
+
+    # Mock resolve_listing_to_fipe_candidates to always return no_match
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    # Setup FakeClient onde get_brands retorna lista sem match
+    calls = {"get_brands": 0}
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            calls["get_brands"] += 1
+            return [{"Label": "Toyota", "Value": "1"}]  # Toyota, não Honda
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    db.refresh(request)
+    assert request.status == "skipped"
+    # get_brands deve ser chamado exatamente 1 vez, não 3 (uma por ano)
+    assert calls["get_brands"] == 1

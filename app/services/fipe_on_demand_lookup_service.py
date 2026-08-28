@@ -12,13 +12,175 @@ from app.models.fipe_lookup_request import FipeLookupRequest
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
 from app.services.fipe_api_client import FipeApiClient, FipeApiError
-from app.services.fipe_catalog_resolver_service import _ensure_month, resolve_listing_to_fipe_candidates
+from app.services.fipe_catalog_resolver_service import _ensure_month, resolve_listing_to_fipe_candidates, important_vehicle_tokens
 from app.services.fipe_external_pipeline_adapter import normalize_external_fipe_row
 from app.services.fipe_monthly_sync_service import upsert_fipe_catalog_entries
 from app.services import system_logs_service
 
 # Sentinel para distinguir "parâmetro year não passado" de "year=None"
 _UNSET = object()
+
+
+def _match_fipe_catalog_item(items: list[dict], query_text: str, *, label_key: str = "Label") -> dict | None:
+    """
+    Encontra o item da lista cuja label contém todos os tokens do query_text,
+    com o mínimo de "extra tokens" (tokens na label que não estão no query).
+    Se houver empate, retorna o primeiro da lista.
+    Se nenhum item contém todos os tokens do query, retorna None.
+
+    Tokenização usa important_vehicle_tokens(texto) para extrair palavras-chave.
+    """
+    if not items or not query_text:
+        return None
+
+    query_tokens = important_vehicle_tokens(query_text)
+    if not query_tokens:
+        return None
+
+    best_item = None
+    best_extra_count = float("inf")
+
+    for item in items:
+        label = item.get(label_key, "")
+        label_tokens = important_vehicle_tokens(label)
+
+        # Verificar se label contém todos os tokens do query
+        if not query_tokens.issubset(label_tokens):
+            continue
+
+        # Contar tokens extras na label
+        extra_tokens = label_tokens - query_tokens
+        extra_count = len(extra_tokens)
+
+        # Preferir item com menos tokens extras; primeiro da lista em caso de empate
+        if extra_count < best_extra_count:
+            best_extra_count = extra_count
+            best_item = item
+
+    return best_item
+
+
+def _resolve_fipe_brand_and_model(
+    client: FipeApiClient, *, make: str, model: str
+) -> tuple[dict, dict, int] | None:
+    """
+    Resolve brand and model from FIPE API for the given make and model strings.
+
+    Steps:
+    1. Get the latest reference table and extract reference_code.
+    2. Get brands list and match the make using _match_fipe_catalog_item.
+       If no brand match -> return None (do NOT call get_models).
+    3. Get models list for the matched brand and match the model using _match_fipe_catalog_item.
+       If no model match -> return None.
+    4. Return (brand, model_item, reference_code).
+
+    Propagates FipeApiError from client calls without catching.
+    """
+    # Step 1: Get reference table
+    reference_table = client.get_latest_reference_table()
+    reference_code = reference_table["Codigo"]
+
+    # Step 2: Get brands and match make
+    brands = client.get_brands(reference_code)
+    brand = _match_fipe_catalog_item(brands, make)
+    if brand is None:
+        return None
+
+    # Step 3: Get models and match model
+    models = client.get_models(reference_code, brand["Value"])
+    model_item = _match_fipe_catalog_item(models, model)
+    if model_item is None:
+        return None
+
+    # Step 4: Return resolved items
+    return (brand, model_item, reference_code)
+
+
+def _bootstrap_fipe_catalog_entry(
+    db: Session, client: FipeApiClient, *, brand: dict, model: dict, reference_code: int, year: int
+) -> bool:
+    """
+    Bootstrap a FIPE catalog entry from API data.
+
+    Steps:
+    1. years = client.get_model_years(reference_code, brand["Value"], model["Value"]).
+    2. year_matches = [item for item in (years or []) if str(item.get("Value", "")).split("-", 1)[0] == str(year)].
+       If empty -> return False (year does not exist in FIPE for this model; NOT an error).
+    3. target = year_matches[0] (first occurrence — no fuel reference).
+    4. value = str(target.get("Value") or ""); fuel_code = value.split("-", 1)[1] if "-" in value else value.
+    5. price_data = client.get_price(reference_code=reference_code, brand_code=brand["Value"],
+       model_code=model["Value"], model_year=year, fuel_code=fuel_code).
+    6. raw_row = {
+         "tipo_veiculo": "car",
+         "marca": price_data.get("Marca"),
+         "modelo": price_data.get("Modelo"),
+         "ano": price_data.get("AnoModelo"),
+         "combustivel": price_data.get("Combustivel"),
+         "codigo_fipe": price_data.get("CodigoFipe"),
+         "valor": price_data.get("Valor"),
+         "codigo_marca": brand["Value"],
+         "codigo_modelo": model["Value"],
+         "codigo_ano": value,
+       }
+    7. current_month = datetime.now(timezone.utc).strftime("%Y-%m").
+    8. normalized = normalize_external_fipe_row(raw_row, reference_month=current_month).
+       If None -> raise FipeApiError("resposta da API FIPE não pôde ser normalizada durante bootstrap").
+    9. upsert_fipe_catalog_entries(db, [normalized], reference_month=current_month, source="on_demand_bootstrap").
+    10. Return True.
+
+    Propagates FipeApiError from client calls without catching.
+    """
+    # Step 1: Get model years
+    years = client.get_model_years(reference_code, brand["Value"], model["Value"])
+
+    # Step 2: Match year
+    year_matches = [item for item in (years or []) if str(item.get("Value", "")).split("-", 1)[0] == str(year)]
+    if not year_matches:
+        return False
+
+    # Step 3: Get target
+    target = year_matches[0]
+
+    # Step 4: Extract fuel code
+    value = str(target.get("Value") or "")
+    fuel_code = value.split("-", 1)[1] if "-" in value else value
+
+    # Step 5: Get price data
+    price_data = client.get_price(
+        reference_code=reference_code,
+        brand_code=brand["Value"],
+        model_code=model["Value"],
+        model_year=year,
+        fuel_code=fuel_code,
+    )
+
+    # Step 6: Build raw row
+    raw_row = {
+        "tipo_veiculo": "car",
+        "marca": price_data.get("Marca"),
+        "modelo": price_data.get("Modelo"),
+        "ano": price_data.get("AnoModelo"),
+        "combustivel": price_data.get("Combustivel"),
+        "codigo_fipe": price_data.get("CodigoFipe"),
+        "valor": price_data.get("Valor"),
+        "codigo_marca": brand["Value"],
+        "codigo_modelo": model["Value"],
+        "codigo_ano": value,
+    }
+
+    # Step 7: Get current month
+    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+
+    # Step 8: Normalize
+    normalized = normalize_external_fipe_row(raw_row, reference_month=current_month)
+    if normalized is None:
+        raise FipeApiError("resposta da API FIPE não pôde ser normalizada durante bootstrap")
+
+    # Step 9: Upsert
+    upsert_fipe_catalog_entries(db, [normalized], reference_month=current_month, source="on_demand_bootstrap")
+
+    # Step 10: Return True
+    return True
 
 
 def _extract_year_bounds(filters: list[WishlistFilter]) -> tuple[int | None, int | None]:
@@ -278,6 +440,63 @@ def _refresh_fipe_catalog_entry(db: Session, entry: FipeCatalogEntry) -> None:
     upsert_fipe_catalog_entries(db, [normalized], reference_month=current_month, source="on_demand")
 
 
+def _apply_bootstrap_api_error(
+    db: Session, request: FipeLookupRequest, wishlist: Wishlist, outcomes: list[dict], year: int | None, exc: Exception
+) -> str:
+    """
+    Handle FipeApiError during bootstrap (brand/model resolution or catalog entry creation).
+
+    Identical to the existing `except FipeApiError` block in _process_one_fipe_lookup for refresh,
+    extracted as a reusable helper:
+    1. Append {"year": year, "status": "api_error", "confidence_score": None} to outcomes.
+    2. Roll back database.
+    3. Increment request.attempts and set request.last_error = str(exc)[:1000].
+    4. If request.attempts >= settings.fipe_lookup_max_attempts: set status="failed" and processed_at.
+       Otherwise: set status="pending".
+    5. Log to system_logs with "api_error" as final_status.
+    6. Commit database.
+    7. Return "failed_final" if max attempts reached, else "failed_temp".
+    """
+    # 1. Append error outcome
+    outcomes.append({"year": year, "status": "api_error", "confidence_score": None})
+
+    # 2. Rollback
+    db.rollback()
+
+    # 3. Increment attempts and set error message
+    request.attempts += 1
+    request.last_error = str(exc)[:1000]
+
+    # 4. Determine status
+    if request.attempts >= settings.fipe_lookup_max_attempts:
+        request.status = "failed"
+        request.processed_at = datetime.now(timezone.utc)
+    else:
+        request.status = "pending"
+
+    # 5. Log to system_logs
+    try:
+        system_logs_service.log(
+            db,
+            "info",
+            "fipe_lookup",
+            "fipe on-demand lookup outcome",
+            payload={
+                "wishlist_id": str(wishlist.id),
+                "outcomes": outcomes,
+                "final_status": "api_error",
+            },
+        )
+    except Exception:
+        pass
+
+    # 6. Commit
+    db.commit()
+
+    # 7. Return outcome
+    return "failed_final" if request.attempts >= settings.fipe_lookup_max_attempts else "failed_temp"
+
+
 def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
     """
     Process FIPE lookup request com loop sobre múltiplos anos-alvo.
@@ -321,6 +540,11 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
     outcomes = []
     final_outcome = None  # Rastreia o tipo de sucesso (done ou refreshed)
 
+    # Bootstrap variables (Etapa 4)
+    bootstrap_attempted = False
+    bootstrap_resolved = None
+    bootstrap_client = None
+
     # 6. Loop sobre anos-alvo (crescente)
     for year in sorted(target_years):
         pseudo_listing = _build_pseudo_listing(wishlist, filters, db, year=year)
@@ -330,7 +554,36 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
 
         # Lógica de decisão para este ano
         if result["status"] == "insufficient_data" or best is None:
-            # insufficient_data ou no_match
+            # insufficient_data ou no_match: tenta bootstrap
+            if (
+                not bootstrap_attempted
+                and pseudo_listing.make
+                and pseudo_listing.model
+                and year is not None
+            ):
+                bootstrap_attempted = True
+                bootstrap_client = FipeApiClient()
+                try:
+                    bootstrap_resolved = _resolve_fipe_brand_and_model(
+                        bootstrap_client, make=pseudo_listing.make, model=pseudo_listing.model
+                    )
+                except FipeApiError as exc:
+                    return _apply_bootstrap_api_error(db, request, wishlist, outcomes, year, exc)
+
+            if bootstrap_resolved:
+                brand, model_item, reference_code = bootstrap_resolved
+                try:
+                    created = _bootstrap_fipe_catalog_entry(
+                        db, bootstrap_client, brand=brand, model=model_item, reference_code=reference_code, year=year
+                    )
+                except FipeApiError as exc:
+                    return _apply_bootstrap_api_error(db, request, wishlist, outcomes, year, exc)
+                if created:
+                    outcomes.append({"year": year, "status": "bootstrapped", "confidence_score": None})
+                    if final_outcome is None:
+                        final_outcome = "bootstrapped"
+                    continue
+
             outcomes.append({"year": year, "status": "skipped_year", "confidence_score": None})
             continue
 
@@ -459,7 +712,7 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
 
 def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> dict:
     batch_limit = int(limit if limit is not None else settings.fipe_lookup_batch_size)
-    counters = {"claimed": 0, "done": 0, "skipped": 0, "refreshed": 0, "failed_temp": 0, "failed_final": 0}
+    counters = {"claimed": 0, "done": 0, "skipped": 0, "refreshed": 0, "bootstrapped": 0, "failed_temp": 0, "failed_final": 0}
 
     pending = (
         db.query(FipeLookupRequest)
