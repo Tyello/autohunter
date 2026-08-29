@@ -120,6 +120,10 @@ def _resolve_fipe_brand_and_models(
        If candidates list is empty -> return None.
     4. Return (brand, candidates, reference_code).
 
+    Note: get_latest_reference_table/get_brands/get_models são cacheados por TTL a nível de
+    client (FipeApiClient._catalog_cache — ver PREM cache), então chamadas repetidas para a
+    mesma marca/modelo dentro da janela de TTL não geram nova requisição externa.
+
     Propagates FipeApiError from client calls without catching.
     """
     # Step 1: Get reference table
@@ -433,13 +437,13 @@ def _find_target_year(years: list[dict], entry: FipeCatalogEntry) -> dict | None
     return year_matches[0]
 
 
-def _refresh_fipe_catalog_entry(db: Session, entry: FipeCatalogEntry) -> None:
+def _refresh_fipe_catalog_entry(db: Session, entry: FipeCatalogEntry, client: FipeApiClient | None = None) -> None:
     if not entry.brand_code or not entry.model_code:
         raise FipeApiError(
             f"brand_code/model_code ausentes no candidato catalog_entry_id={entry.id}; refresh direcionado inviável"
         )
 
-    client = FipeApiClient()
+    client = client or FipeApiClient()
     reference_table = client.get_latest_reference_table()
     reference_code = reference_table.get("Codigo")
 
@@ -804,6 +808,11 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
         .all()
     )
 
+    # Client compartilhado pelas requests do caminho reativo dentro do batch: reaproveita
+    # o cache TTL de marca/modelo/ano (fipe_api_client._catalog_cache) e o FipeRateLimiter
+    # entre requests, em vez de recriar (e perder cache/estado de throttle) a cada request.
+    reactive_client = FipeApiClient() if any(r.listing_make is not None for r in pending) else None
+
     for request in pending:
         request.status = "processing"
         db.commit()
@@ -811,8 +820,7 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
         try:
             if request.listing_make is not None:
                 # Caminho reativo
-                client = FipeApiClient()
-                outcome = _process_one_reactive_fipe_lookup(db, client, request)
+                outcome = _process_one_reactive_fipe_lookup(db, reactive_client, request)
             else:
                 # Caminho clássico
                 outcome = _process_one_fipe_lookup(db, request)
@@ -829,5 +837,8 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
                 request.status = "pending"
                 counters["failed_temp"] += 1
             db.commit()
+
+    if reactive_client is not None and hasattr(reactive_client, "cache_stats"):
+        counters["fipe_cache"] = reactive_client.cache_stats()
 
     return counters

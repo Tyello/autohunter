@@ -357,6 +357,7 @@ class Settings(BaseSettings):
     fipe_lookup_max_attempts: int = 3
     fipe_lookup_year_expand_max: int = 5
     fipe_lookup_reactive_cooldown_days: int = 7
+    fipe_catalog_cache_ttl_s: int = 900
 
     # Filesystem cleanup (runtime temp/cache/debug only; safe defaults)
     filesystem_cleanup_enabled: bool = Field(

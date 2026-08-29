@@ -26,6 +26,43 @@ def _client(monkeypatch, **kwargs):
     return FipeApiClient(rate_limit_ms=0, max_throttle_ms=5000, max_retries=3, timeout_s=20, **kwargs)
 
 
+def test_catalog_ttl_cache_avoids_repeated_external_calls_in_bootstrap_scenario(monkeypatch):
+    """Cenário de bootstrap: várias resoluções de marca/modelo/ano para a MESMA
+    marca+modelo (comum quando várias wishlists on-demand caem na mesma janela de
+    batch). Com o client compartilhado, a 2a+ chamada deve vir do cache TTL em vez
+    de bater na API externa de novo — reduzindo chamadas externas."""
+    client = _client(monkeypatch)
+    calls = {"n": 0}
+
+    def fake_request(endpoint, body):
+        calls["n"] += 1
+        if endpoint == "ConsultarTabelaDeReferencia":
+            return [{"Codigo": 320, "Mes": "agosto/2026"}]
+        if endpoint == "ConsultarMarcas":
+            return [{"Label": "Honda", "Value": "22"}]
+        if endpoint == "ConsultarModelos":
+            return [{"Label": "Civic", "Value": "9"}]
+        if endpoint == "ConsultarAnoModelo":
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+        raise AssertionError(f"endpoint inesperado: {endpoint}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    # Simula 5 lookups on-demand na mesma marca/modelo dentro do mesmo batch.
+    for _ in range(5):
+        ref = client.get_latest_reference_table()
+        brands = client.get_brands(ref["Codigo"])
+        models = client.get_models(ref["Codigo"], brands[0]["Value"])
+        client.get_model_years(ref["Codigo"], brands[0]["Value"], models[0]["Value"])
+
+    # 4 endpoints distintos batidos apenas na 1a iteração; as 4 seguintes vêm do cache.
+    assert calls["n"] == 4
+
+    stats = client.cache_stats()
+    assert stats["misses"] == 4
+    assert stats["hits"] == 4 * 4  # 4 chamadas cacheadas x 4 iterações restantes
+
+
 def test_get_latest_reference_table(monkeypatch):
     client = _client(monkeypatch)
     monkeypatch.setattr(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -11,6 +12,44 @@ from app.services.fipe_rate_limiter import FipeRateLimiter
 
 class FipeApiError(Exception):
     pass
+
+
+class _CatalogTTLCache:
+    """Cache com TTL para respostas de catálogo (marca/modelo/ano) por instância de client.
+
+    Escopo por instância (não módulo/classe): evita vazar dados entre instâncias em
+    testes que criam clients frescos com mocks distintos, mas ainda permite reuso
+    quando o chamador compartilha 1 client entre várias chamadas (ex.: 1 batch de
+    lookups on-demand), que é onde a maior parte das chamadas externas é evitada.
+    """
+
+    def __init__(self, ttl_s: float) -> None:
+        self._ttl_s = ttl_s
+        self._store: dict[Any, tuple[float, Any]] = {}
+        self._lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+
+    def get_or_set(self, key: Any, compute):
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is not None:
+                expires_at, value = entry
+                if time.monotonic() < expires_at:
+                    self.hits += 1
+                    return value
+                del self._store[key]
+
+        value = compute()
+
+        with self._lock:
+            self.misses += 1
+            self._store[key] = (time.monotonic() + self._ttl_s, value)
+        return value
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            return {"hits": self.hits, "misses": self.misses}
 
 
 class FipeApiClient:
@@ -25,7 +64,11 @@ class FipeApiClient:
         max_retries: int | None = None,
         timeout_s: int | None = None,
         rate_limiter: FipeRateLimiter | None = None,
+        catalog_cache_ttl_s: float | None = None,
     ) -> None:
+        self._catalog_cache = _CatalogTTLCache(
+            ttl_s=float(catalog_cache_ttl_s if catalog_cache_ttl_s is not None else settings.fipe_catalog_cache_ttl_s)
+        )
         self._rate_limit_ms = int(rate_limit_ms if rate_limit_ms is not None else settings.fipe_api_rate_limit_ms)
         self._max_throttle_ms = int(max_throttle_ms if max_throttle_ms is not None else settings.fipe_api_max_throttle_ms)
         self._max_retries = int(max_retries if max_retries is not None else settings.fipe_api_max_retries)
@@ -50,7 +93,9 @@ class FipeApiClient:
         )
 
     def get_reference_tables(self) -> list[dict]:
-        return self._request("ConsultarTabelaDeReferencia", {})
+        return self._catalog_cache.get_or_set(
+            ("reference_tables",), lambda: self._request("ConsultarTabelaDeReferencia", {})
+        )
 
     def get_latest_reference_table(self) -> dict:
         tables = self.get_reference_tables()
@@ -59,34 +104,46 @@ class FipeApiClient:
         return tables[0]
 
     def get_brands(self, reference_code: int) -> list[dict]:
-        return self._request(
-            "ConsultarMarcas",
-            {"codigoTabelaReferencia": reference_code, "codigoTipoVeiculo": self.VEHICLE_TYPE_CAR},
+        return self._catalog_cache.get_or_set(
+            ("brands", reference_code),
+            lambda: self._request(
+                "ConsultarMarcas",
+                {"codigoTabelaReferencia": reference_code, "codigoTipoVeiculo": self.VEHICLE_TYPE_CAR},
+            ),
         )
 
     def get_models(self, reference_code: int, brand_code: str) -> list[dict]:
-        data = self._request(
-            "ConsultarModelos",
-            {
-                "codigoTabelaReferencia": reference_code,
-                "codigoTipoVeiculo": self.VEHICLE_TYPE_CAR,
-                "codigoMarca": brand_code,
-            },
-        )
-        if isinstance(data, dict):
-            return data.get("Modelos") or []
-        return data
+        def _fetch():
+            data = self._request(
+                "ConsultarModelos",
+                {
+                    "codigoTabelaReferencia": reference_code,
+                    "codigoTipoVeiculo": self.VEHICLE_TYPE_CAR,
+                    "codigoMarca": brand_code,
+                },
+            )
+            if isinstance(data, dict):
+                return data.get("Modelos") or []
+            return data
+
+        return self._catalog_cache.get_or_set(("models", reference_code, brand_code), _fetch)
 
     def get_model_years(self, reference_code: int, brand_code: str, model_code: str) -> list[dict]:
-        return self._request(
-            "ConsultarAnoModelo",
-            {
-                "codigoTabelaReferencia": reference_code,
-                "codigoTipoVeiculo": self.VEHICLE_TYPE_CAR,
-                "codigoMarca": brand_code,
-                "codigoModelo": model_code,
-            },
+        return self._catalog_cache.get_or_set(
+            ("model_years", reference_code, brand_code, model_code),
+            lambda: self._request(
+                "ConsultarAnoModelo",
+                {
+                    "codigoTabelaReferencia": reference_code,
+                    "codigoTipoVeiculo": self.VEHICLE_TYPE_CAR,
+                    "codigoMarca": brand_code,
+                    "codigoModelo": model_code,
+                },
+            ),
         )
+
+    def cache_stats(self) -> dict[str, int]:
+        return self._catalog_cache.stats()
 
     def get_price(
         self,
