@@ -322,6 +322,8 @@ class Settings(BaseSettings):
     telegram_text_max: int = 4000
     safe_chunk: int = 3800
     source_config_cache_ttl_seconds: int = 60
+    source_group_max_workers: int = 4
+    source_max_concurrent_per_source: int = 2
     operational_retention_system_logs_days: int = 10
     operational_retention_telemetry_events_days: int = 10
     operational_retention_scrape_jobs_days: int = 7

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -8,12 +9,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.core.settings import settings
+from app.db.session import SessionLocal
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.models.source_run import SourceRun
 from app.models.wishlist import Wishlist
 from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
 from app.services.search_deduplication_service import canonical_search_key
+from app.services.source_concurrency import get_source_semaphore
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context, get_source_config_snapshot
@@ -41,6 +44,71 @@ from app.services.listing_activity_service import reconcile_listing_activity_for
 
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_group_error(*, res: dict, src: str, url: str, health: HealthCollector) -> dict:
+    """Extract error classification logic without DB calls.
+
+    Returns dict with keys: reason, category, retryable, http_status, status_cls, bucket, wm_diag.
+    Applies all side-effects to health (inc, count, add_note, set_error).
+    """
+    reason = res.get("reason") or "error"
+    wm_diag = extract_webmotors_diag(res.get("error")) if src == "webmotors" else None
+    category = "unknown_error"
+    retryable = None
+    http_status = None
+    status_cls = RunStatus.ERR
+    bucket = "unknown_error"
+
+    if reason == "blocked":
+        status_cls = RunStatus.BLOCKED
+        hs = int(res.get("status_code") or 0)
+        category = f"http_{hs}" if hs else "blocked"
+        http_status = hs or None
+        retryable = True
+        bucket = "blocked_403" if hs == 403 else "blocked_429" if hs == 429 else "blocked_captcha"
+        if isinstance(wm_diag, dict) and wm_diag.get("bucket") == "BLOCKED":
+            category = "webmotors_blocked"
+        health.inc("blocked", 1)
+    else:
+        if isinstance(wm_diag, dict):
+            wmb = str(wm_diag.get("bucket") or "").upper()
+            if wmb == "PROXY":
+                category, status_cls, retryable, bucket = "webmotors_proxy", RunStatus.PROXY, True, "proxy_error"
+            elif wmb == "NET":
+                category, status_cls, retryable, bucket = "webmotors_net", RunStatus.NET, True, "timeout"
+            elif wmb == "BLOCKED":
+                category, status_cls, retryable, bucket = "webmotors_blocked", RunStatus.BLOCKED, True, "blocked_captcha"
+            elif wmb == "PARSER":
+                category, status_cls, retryable, bucket = "webmotors_parser", RunStatus.PARSE, False, "parse_error"
+            elif wmb == "BROWSER":
+                category, status_cls, retryable, bucket = "webmotors_browser", RunStatus.ERR, True, "unknown_error"
+            else:
+                category, status_cls, retryable, bucket = "webmotors_unknown", RunStatus.ERR, True, "unknown_error"
+        else:
+            category, status_cls, retryable, http_status, bucket = classify_error(Exception(str(res.get("error") or reason)))
+
+    health.inc("errors", 1)
+    health.count(bucket, 1)
+    if isinstance(wm_diag, dict):
+        health.add_note(
+            "wm_diag "
+            f"bucket={wm_diag.get('bucket')} stage={wm_diag.get('stage')} "
+            f"path={wm_diag.get('fetch_path')} attempts={wm_diag.get('attempt')} "
+            f"http={wm_diag.get('http_status')} cards={wm_diag.get('cards_found')} "
+            f"title={wm_diag.get('page_title')} final_url={wm_diag.get('final_url')}"
+        )
+    health.set_error(category, str(res.get("error") or reason), http_status=http_status, retryable=retryable)
+
+    return {
+        "reason": reason,
+        "category": category,
+        "retryable": retryable,
+        "http_status": http_status,
+        "status_cls": status_cls,
+        "bucket": bucket,
+        "wm_diag": wm_diag,
+    }
 
 
 def _ad_to_listing(ad) -> dict[str, Any]:
@@ -210,6 +278,49 @@ def _zero_result_observability_payload(
             }
         )
     return out
+
+
+def _process_group_isolated(*, url: str, g: dict, src: str, job_name: str, scrape_dispatch) -> dict:
+    """Run one URL group's scrape+ingest+match fully isolated for use from a worker thread.
+
+    Opens its own DB session and ScrapeContext (never shares the caller's), guards the
+    actual scrape call with the per-source semaphore, and never raises: any exception is
+    converted into an ``ok: False`` result so one failing group cannot take down the others.
+    """
+    thread_db = SessionLocal()
+    thread_health = HealthCollector(source_name=src)
+    try:
+        thread_ctx = build_scrape_context(thread_db, src)
+        sem = get_source_semaphore(src)
+        with sem:
+            res = scrape_ingest_match(
+                thread_db,
+                job_name,
+                scrape_dispatch,
+                url,
+                ctx=thread_ctx,
+                wishlist=None,
+                health=thread_health,
+            )
+        return {"url": url, "g": g, "res": res, "health": thread_health, "ctx": thread_ctx}
+    except Exception as exc:
+        try:
+            thread_db.rollback()
+        except Exception:
+            pass
+        exc_type = type(exc).__name__
+        res = {
+            "ok": False,
+            "reason": "error",
+            "error": f"{exc_type}: {exc}",
+            "url": url,
+            "exc_type": exc_type,
+            "is_bug": True,
+        }
+        return {"url": url, "g": g, "res": res, "health": thread_health, "ctx": None}
+    finally:
+        thread_db.close()
+
 
 def run_source_for_all_wishlists(
     db: Session,
@@ -403,17 +514,30 @@ def run_source_for_all_wishlists(
     last_adapter_meta: dict[str, Any] | None = None
     group_summaries: list[dict[str, Any]] = []
 
-    for url, g in groups.items():
-        job_name = f"scraper_{src}"
-        res = scrape_ingest_match(
-            db,
-            job_name,
-            _scrape_dispatch,
-            url,
-            ctx=ctx,
-            wishlist=None,
-            health=health,
-        )
+    job_name = f"scraper_{src}"
+    ordered_urls = list(groups.keys())
+    max_workers = max(1, min(int(settings.source_group_max_workers or 1), len(ordered_urls) or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [
+            pool.submit(
+                _process_group_isolated,
+                url=u,
+                g=groups[u],
+                src=src,
+                job_name=job_name,
+                scrape_dispatch=_scrape_dispatch,
+            )
+            for u in ordered_urls
+        ]
+        results_in_order = [f.result() for f in futures]
+
+    first_failure: dict | None = None
+    for entry in results_in_order:
+        url = entry["url"]
+        g = entry["g"]
+        res = entry["res"]
+        group_ctx = entry["ctx"]
+        entry_health = entry["health"]
 
         any_hybrid_browser = any_hybrid_browser or bool(res.get("hybrid_browser_used"))
         any_hybrid_blocked = any_hybrid_blocked or bool(res.get("hybrid_blocked"))
@@ -425,214 +549,15 @@ def run_source_for_all_wishlists(
             last_adapter_meta = dict(res.get("adapter_meta") or {})
 
         if not res.get("ok"):
-            reason = res.get("reason") or "error"
-            wm_diag = extract_webmotors_diag(res.get("error")) if src == "webmotors" else None
-            category = "unknown_error"
-            retryable = None
-            http_status = None
-            status_cls = RunStatus.ERR
-            bucket = "unknown_error"
-            if reason == "blocked":
-                status_cls = RunStatus.BLOCKED
-                hs = int(res.get("status_code") or 0)
-                category = f"http_{hs}" if hs else "blocked"
-                http_status = hs or None
-                retryable = True
-                bucket = "blocked_403" if hs == 403 else "blocked_429" if hs == 429 else "blocked_captcha"
-                if isinstance(wm_diag, dict) and wm_diag.get("bucket") == "BLOCKED":
-                    category = "webmotors_blocked"
-                health.inc("blocked", 1)
-            else:
-                if isinstance(wm_diag, dict):
-                    wmb = str(wm_diag.get("bucket") or "").upper()
-                    if wmb == "PROXY":
-                        category, status_cls, retryable, bucket = "webmotors_proxy", RunStatus.PROXY, True, "proxy_error"
-                    elif wmb == "NET":
-                        category, status_cls, retryable, bucket = "webmotors_net", RunStatus.NET, True, "timeout"
-                    elif wmb == "BLOCKED":
-                        category, status_cls, retryable, bucket = "webmotors_blocked", RunStatus.BLOCKED, True, "blocked_captcha"
-                    elif wmb == "PARSER":
-                        category, status_cls, retryable, bucket = "webmotors_parser", RunStatus.PARSE, False, "parse_error"
-                    elif wmb == "BROWSER":
-                        category, status_cls, retryable, bucket = "webmotors_browser", RunStatus.ERR, True, "unknown_error"
-                    else:
-                        category, status_cls, retryable, bucket = "webmotors_unknown", RunStatus.ERR, True, "unknown_error"
-                else:
-                    category, status_cls, retryable, http_status, bucket = classify_error(Exception(str(res.get("error") or reason)))
-            health.inc("errors", 1)
-            health.count(bucket, 1)
-            if isinstance(wm_diag, dict):
-                health.add_note(
-                    "wm_diag "
-                    f"bucket={wm_diag.get('bucket')} stage={wm_diag.get('stage')} "
-                    f"path={wm_diag.get('fetch_path')} attempts={wm_diag.get('attempt')} "
-                    f"http={wm_diag.get('http_status')} cards={wm_diag.get('cards_found')} "
-                    f"title={wm_diag.get('page_title')} final_url={wm_diag.get('final_url')}"
-                )
-            health.set_error(category, str(res.get("error") or reason), http_status=http_status, retryable=retryable)
-            run_summary_err = add_anomaly_notes(health.finalize(status_cls)).model_dump(mode="json")
-            run_summary_err["impl"] = flags.impl
-            run_summary_err["runtime_impl"] = last_runtime_impl
-            if isinstance(last_adapter_meta, dict):
-                run_summary_err["adapter_raw_count"] = last_adapter_meta.get("raw_count")
-                run_summary_err["adapter_normalized_count"] = last_adapter_meta.get("normalized_count")
-            if reason == "blocked":
-                duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
-                minutes = mark_blocked(
-                    db,
-                    src,
-                    base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
-                    http_status=res.get("status_code"),
-                    url=res.get("url") or url,
-                )
-                payload = build_run_payload(
-                    run_summary=run_summary_err,
-                    run_reason=reason,
-                    hybrid_browser_used=bool(res.get("hybrid_browser_used")),
-                    hybrid_blocked=bool(res.get("hybrid_blocked")),
-                    hybrid_blocked_status=res.get("hybrid_blocked_status"),
-                    backoff_minutes=minutes,
-                    webmotors_diag=wm_diag,
-                    dual_report=getattr(ctx, "_dual_run_report_path", None),
-                    runtime_impl=last_runtime_impl,
-                    adapter_meta=last_adapter_meta,
-                )
-                run_row = record_run(
-                    db,
-                    source=src,
-                    kind=kind,
-                    status="blocked",
-                    url=res.get("url") or url,
-                    http_status=res.get("status_code"),
-                    duration_ms=duration_ms,
-                    groups=groups_count,
-                    wishlists=total_wishlists,
-                    proxy_server=ctx.proxy_server,
-                    browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
-                    force_browser=bool(ctx.force_browser),
-                    error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
-                    payload=payload,
-                )
-                logger.info("source_run_summary", extra=run_summary_err)
-                emit_event(
-                    db,
-                    level="warn",
-                    event_type="source_blocked",
-                    source=src,
-                    run_id=run_row.id,
-                    message="source_blocked",
-                    evidence={"minutes": minutes, "url": res.get("url") or url, "http_status": res.get("status_code"), "kind": kind, "run_reason": reason},
-                    tags=[kind, reason, "blocked"],
-                )
-                log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, reason, "blocked"])
-                db.commit()
-                return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason, "payload": payload}
+            # Classifica no HealthCollector local do grupo (não no `health` já mesclado) para que
+            # `merge()` preserve o last_error do PRIMEIRO grupo falho por ordem original, não do último.
+            classification = _classify_group_error(res=res, src=src, url=url, health=entry_health)
+            health.merge(entry_health)
+            if first_failure is None:
+                first_failure = {"url": url, "res": res, "ctx": group_ctx, "classification": classification}
+            continue
 
-            if bool(res.get("is_bug")):
-                err = res.get("error") or "scrape_failed"
-                duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
-                minutes = mark_bug(db, src, error=err, url=res.get("url") or url)
-                run_row = record_run(
-                    db,
-                    source=src,
-                    kind=kind,
-                    status="error",
-                    url=res.get("url") or url,
-                    duration_ms=duration_ms,
-                    groups=groups_count,
-                    wishlists=total_wishlists,
-                    proxy_server=ctx.proxy_server,
-                    browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
-                    force_browser=bool(ctx.force_browser),
-                    error=f"{err} (bug_retry={minutes}m)",
-                    payload=build_run_payload(
-                        run_summary=run_summary_err,
-                        run_reason=reason,
-                        hybrid_browser_used=bool(res.get("hybrid_browser_used")),
-                        hybrid_blocked=bool(res.get("hybrid_blocked")),
-                        hybrid_blocked_status=res.get("hybrid_blocked_status"),
-                        retry_minutes=minutes,
-                        is_bug=True,
-                        webmotors_diag=wm_diag,
-                        dual_report=getattr(ctx, "_dual_run_report_path", None),
-                        runtime_impl=last_runtime_impl,
-                        adapter_meta=last_adapter_meta,
-                    ),
-                )
-                logger.info("source_run_summary", extra=run_summary_err)
-                emit_event(
-                    db,
-                    level="error",
-                    event_type="scrape_failed_bug",
-                    source=src,
-                    run_id=run_row.id,
-                    message="scrape_failed_bug",
-                    evidence={"error": err, "url": res.get("url") or url, "retry_minutes": minutes, "kind": kind, "run_reason": reason},
-                    tags=[kind, reason, "bug"],
-                )
-                log(
-                    db,
-                    "error",
-                    component,
-                    "scrape_failed_bug",
-                    {"error": err, "url": res.get("url") or url, "retry_minutes": minutes},
-                    source=src,
-                    run_id=run_row.id,
-                    event_type="scrape_failed_bug",
-                    tags=[kind, reason, "bug"],
-                )
-                db.commit()
-                return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
-
-            err = res.get("error") or "scrape_failed"
-            duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
-            minutes = mark_error(
-                db,
-                src,
-                base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
-                error=err,
-                url=res.get("url") or url,
-            )
-            run_row = record_run(
-                db,
-                source=src,
-                kind=kind,
-                status="error",
-                url=res.get("url") or url,
-                duration_ms=duration_ms,
-                groups=groups_count,
-                wishlists=total_wishlists,
-                proxy_server=ctx.proxy_server,
-                browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
-                force_browser=bool(ctx.force_browser),
-                error=f"{err} (backoff={minutes}m)",
-                payload=build_run_payload(
-                    run_summary=run_summary_err,
-                    run_reason=reason,
-                    hybrid_browser_used=bool(res.get("hybrid_browser_used")),
-                    hybrid_blocked=bool(res.get("hybrid_blocked")),
-                    hybrid_blocked_status=res.get("hybrid_blocked_status"),
-                    backoff_minutes=minutes,
-                    webmotors_diag=wm_diag,
-                    dual_report=getattr(ctx, "_dual_run_report_path", None),
-                    runtime_impl=last_runtime_impl,
-                    adapter_meta=last_adapter_meta,
-                ),
-            )
-            logger.info("source_run_summary", extra=run_summary_err)
-            emit_event(
-                db,
-                level="error",
-                event_type="scrape_failed",
-                source=src,
-                run_id=run_row.id,
-                message="scrape_failed",
-                evidence={"error": err, "url": res.get("url") or url, "backoff_minutes": minutes, "kind": kind, "run_reason": reason},
-                tags=[kind, reason, "error"],
-            )
-            log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes}, source=src, run_id=run_row.id, event_type="scrape_failed", tags=[kind, reason, "error"])
-            db.commit()
-            return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
+        health.merge(entry_health)
 
         group_summaries.append(
             {
@@ -655,6 +580,182 @@ def run_source_for_all_wishlists(
         for wid, seen_items in (res.get("seen_identities_by_wishlist") or {}).items():
             bucket = seen_identities_by_wishlist.setdefault(str(wid), [])
             bucket.extend(seen_items or [])
+
+    if first_failure is not None:
+        url = first_failure["url"]
+        res = first_failure["res"]
+        group_ctx = first_failure["ctx"]
+        classification = first_failure["classification"]
+        reason = classification["reason"]
+        wm_diag = classification["wm_diag"]
+        category = classification["category"]
+        retryable = classification["retryable"]
+        http_status = classification["http_status"]
+        status_cls = classification["status_cls"]
+        bucket = classification["bucket"]
+        run_summary_err = add_anomaly_notes(health.finalize(status_cls)).model_dump(mode="json")
+        run_summary_err["impl"] = flags.impl
+        run_summary_err["runtime_impl"] = last_runtime_impl
+        if isinstance(last_adapter_meta, dict):
+            run_summary_err["adapter_raw_count"] = last_adapter_meta.get("raw_count")
+            run_summary_err["adapter_normalized_count"] = last_adapter_meta.get("normalized_count")
+        if reason == "blocked":
+            duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+            minutes = mark_blocked(
+                db,
+                src,
+                base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
+                http_status=res.get("status_code"),
+                url=res.get("url") or url,
+            )
+            payload = build_run_payload(
+                run_summary=run_summary_err,
+                run_reason=reason,
+                hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                hybrid_blocked=bool(res.get("hybrid_blocked")),
+                hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                backoff_minutes=minutes,
+                webmotors_diag=wm_diag,
+                dual_report=getattr(group_ctx, "_dual_run_report_path", None),
+                runtime_impl=last_runtime_impl,
+                adapter_meta=last_adapter_meta,
+            )
+            run_row = record_run(
+                db,
+                source=src,
+                kind=kind,
+                status="blocked",
+                url=res.get("url") or url,
+                http_status=res.get("status_code"),
+                duration_ms=duration_ms,
+                groups=groups_count,
+                wishlists=total_wishlists,
+                proxy_server=ctx.proxy_server,
+                browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+                force_browser=bool(ctx.force_browser),
+                error=f"blocked(backoff={minutes}m; browser_fallback={bool(res.get('hybrid_browser_used'))})",
+                payload=payload,
+            )
+            logger.info("source_run_summary", extra=run_summary_err)
+            emit_event(
+                db,
+                level="warn",
+                event_type="source_blocked",
+                source=src,
+                run_id=run_row.id,
+                message="source_blocked",
+                evidence={"minutes": minutes, "url": res.get("url") or url, "http_status": res.get("status_code"), "kind": kind, "run_reason": reason},
+                tags=[kind, reason, "blocked"],
+            )
+            log(db, "warn", component, "backoff_applied", {"minutes": minutes, "url": res.get("url") or url}, source=src, run_id=run_row.id, event_type="source_blocked", tags=[kind, reason, "blocked"])
+            db.commit()
+            return {"ok": False, "status": "blocked", "backoff_minutes": minutes, "http_status": res.get("status_code"), "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason, "payload": payload}
+
+        if bool(res.get("is_bug")):
+            err = res.get("error") or "scrape_failed"
+            duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+            minutes = mark_bug(db, src, error=err, url=res.get("url") or url)
+            run_row = record_run(
+                db,
+                source=src,
+                kind=kind,
+                status="error",
+                url=res.get("url") or url,
+                duration_ms=duration_ms,
+                groups=groups_count,
+                wishlists=total_wishlists,
+                proxy_server=ctx.proxy_server,
+                browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+                force_browser=bool(ctx.force_browser),
+                error=f"{err} (bug_retry={minutes}m)",
+                payload=build_run_payload(
+                    run_summary=run_summary_err,
+                    run_reason=reason,
+                    hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                    hybrid_blocked=bool(res.get("hybrid_blocked")),
+                    hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                    retry_minutes=minutes,
+                    is_bug=True,
+                    webmotors_diag=wm_diag,
+                    dual_report=getattr(group_ctx, "_dual_run_report_path", None),
+                    runtime_impl=last_runtime_impl,
+                    adapter_meta=last_adapter_meta,
+                ),
+            )
+            logger.info("source_run_summary", extra=run_summary_err)
+            emit_event(
+                db,
+                level="error",
+                event_type="scrape_failed_bug",
+                source=src,
+                run_id=run_row.id,
+                message="scrape_failed_bug",
+                evidence={"error": err, "url": res.get("url") or url, "retry_minutes": minutes, "kind": kind, "run_reason": reason},
+                tags=[kind, reason, "bug"],
+            )
+            log(
+                db,
+                "error",
+                component,
+                "scrape_failed_bug",
+                {"error": err, "url": res.get("url") or url, "retry_minutes": minutes},
+                source=src,
+                run_id=run_row.id,
+                event_type="scrape_failed_bug",
+                tags=[kind, reason, "bug"],
+            )
+            db.commit()
+            return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
+
+        err = res.get("error") or "scrape_failed"
+        duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+        minutes = mark_error(
+            db,
+            src,
+            base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
+            error=err,
+            url=res.get("url") or url,
+        )
+        run_row = record_run(
+            db,
+            source=src,
+            kind=kind,
+            status="error",
+            url=res.get("url") or url,
+            duration_ms=duration_ms,
+            groups=groups_count,
+            wishlists=total_wishlists,
+            proxy_server=ctx.proxy_server,
+            browser_fallback_enabled=bool(ctx.browser_fallback_enabled),
+            force_browser=bool(ctx.force_browser),
+            error=f"{err} (backoff={minutes}m)",
+            payload=build_run_payload(
+                run_summary=run_summary_err,
+                run_reason=reason,
+                hybrid_browser_used=bool(res.get("hybrid_browser_used")),
+                hybrid_blocked=bool(res.get("hybrid_blocked")),
+                hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                backoff_minutes=minutes,
+                webmotors_diag=wm_diag,
+                dual_report=getattr(group_ctx, "_dual_run_report_path", None),
+                runtime_impl=last_runtime_impl,
+                adapter_meta=last_adapter_meta,
+            ),
+        )
+        logger.info("source_run_summary", extra=run_summary_err)
+        emit_event(
+            db,
+            level="error",
+            event_type="scrape_failed",
+            source=src,
+            run_id=run_row.id,
+            message="scrape_failed",
+            evidence={"error": err, "url": res.get("url") or url, "backoff_minutes": minutes, "kind": kind, "run_reason": reason},
+            tags=[kind, reason, "error"],
+        )
+        log(db, "error", component, "scrape_failed", {"error": err, "url": res.get("url") or url, "backoff_minutes": minutes}, source=src, run_id=run_row.id, event_type="scrape_failed", tags=[kind, reason, "error"])
+        db.commit()
+        return {"ok": False, "status": "error", "error": err, "backoff_minutes": minutes, "url": res.get("url") or url, "duration_ms": duration_ms, "run_reason": reason}
 
     duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
     run_summary_ok = add_anomaly_notes(health.finalize(RunStatus.OK)).model_dump(mode="json")

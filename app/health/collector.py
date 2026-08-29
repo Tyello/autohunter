@@ -86,6 +86,26 @@ class HealthCollector:
         if t:
             self._notes.append(t)
 
+    def merge(self, other: "HealthCollector") -> None:
+        """Merge another HealthCollector into this one (for parallel processing).
+
+        Adds all counters, buckets, and notes from other into self.
+        If other has a last_error and self doesn't, keeps other's; otherwise keeps self's.
+        """
+        if not isinstance(other, HealthCollector):
+            return
+        # Merge counters (sum them)
+        for key in self._counters:
+            self._counters[key] += other._counters.get(key, 0)
+        # Merge buckets (sum them)
+        for key in self._buckets:
+            self._buckets[key] += other._buckets.get(key, 0)
+        # Merge notes (append all)
+        self._notes.extend(other._notes)
+        # Merge last_error (keep self's if set, otherwise use other's)
+        if self._last_error is None and other._last_error is not None:
+            self._last_error = other._last_error
+
     def finalize(self, status: RunStatus) -> RunSummary:
         ended_at = utcnow()
         dur_ms = int(max(0, (ended_at - self.started_at).total_seconds() * 1000))
