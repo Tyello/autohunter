@@ -536,6 +536,52 @@ def _apply_bootstrap_api_error(
     return "failed_final" if request.attempts >= settings.fipe_lookup_max_attempts else "failed_temp"
 
 
+def _process_one_reactive_fipe_lookup(db: Session, client: FipeApiClient, request: FipeLookupRequest) -> str:
+    """
+    Caminho reativo: request.listing_make/listing_model/target_year já setados (PREM-01).
+    Resolve marca/modelo e faz bootstrap pra um ano específico.
+
+    Retorna "bootstrapped" se criou entries, "skipped" se não criou,
+    ou "failed_final"/"failed_temp" em caso de erro com retry.
+    """
+    # Carregar wishlist
+    wishlist = db.query(Wishlist).filter(Wishlist.id == request.wishlist_id).first()
+    if wishlist is None:
+        return _mark_skipped(db, request)
+
+    # Tentar resolver marca/modelo
+    try:
+        resolved = _resolve_fipe_brand_and_models(client, make=request.listing_make, model=request.listing_model)
+    except FipeApiError as exc:
+        return _apply_bootstrap_api_error(db, request, wishlist, [], request.target_year, exc)
+
+    # Se marca/modelo não resolveu
+    if resolved is None:
+        return _mark_skipped(db, request)
+
+    brand, candidates, reference_code = resolved
+    model_years_cache: dict[str, list[dict]] = {}
+
+    # Tentar bootstrap pra o ano específico
+    try:
+        created = _bootstrap_fipe_catalog_entries_for_year(
+            db, client, brand=brand, model_candidates=candidates,
+            reference_code=reference_code, year=request.target_year,
+            model_years_cache=model_years_cache,
+        )
+    except FipeApiError as exc:
+        return _apply_bootstrap_api_error(db, request, wishlist, [], request.target_year, exc)
+
+    # Decidir outcome
+    if created > 0:
+        request.status = "done"
+        request.processed_at = datetime.now(timezone.utc)
+        db.commit()
+        return "bootstrapped"
+    else:
+        return _mark_skipped(db, request)
+
+
 def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
     """
     Process FIPE lookup request com loop sobre múltiplos anos-alvo.
@@ -763,7 +809,13 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
         db.commit()
         counters["claimed"] += 1
         try:
-            outcome = _process_one_fipe_lookup(db, request)
+            if request.listing_make is not None:
+                # Caminho reativo
+                client = FipeApiClient()
+                outcome = _process_one_reactive_fipe_lookup(db, client, request)
+            else:
+                # Caminho clássico
+                outcome = _process_one_fipe_lookup(db, request)
             counters[outcome] += 1
         except Exception as exc:
             db.rollback()

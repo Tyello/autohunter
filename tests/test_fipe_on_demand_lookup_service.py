@@ -1467,3 +1467,196 @@ def test_process_does_not_retry_brand_resolution_after_no_match(db, monkeypatch)
     assert request.status == "skipped"
     # get_brands deve ser chamado exatamente 1 vez, não 3 (uma por ano)
     assert calls["get_brands"] == 1
+
+
+# --- Testes para _process_one_reactive_fipe_lookup (Etapa 2) ---
+
+
+def test_process_one_reactive_fipe_lookup_bootstraps_from_listing_make_model_year(db, monkeypatch):
+    """Teste: request com listing_make="Honda", listing_model="Civic", target_year=2019; FakeClient com marca/modelo/ano batendo; assert FipeCatalogEntry criada com model_year=2019, retorno "bootstrapped"."""
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "9"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            return {
+                "Marca": "Honda",
+                "Modelo": "Civic",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": "R$ 100.000,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Criar uma wishlist pra ter um wishlist_id válido
+    wishlist = _make_wishlist(db)
+
+    # Criar a request reativa
+    request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+
+    # Chamar a função
+    client = svc.FipeApiClient()
+    result = svc._process_one_reactive_fipe_lookup(db, client, request)
+
+    # Assert
+    assert result == "bootstrapped", f"Expected 'bootstrapped', got '{result}'"
+
+    # Verificar que uma FipeCatalogEntry foi criada
+    entries = db.query(FipeCatalogEntry).filter(
+        FipeCatalogEntry.brand_code == "22",
+        FipeCatalogEntry.model_year == 2019,
+    ).all()
+    assert len(entries) >= 1
+    assert entries[0].source == "on_demand_bootstrap"
+
+
+def test_process_one_reactive_fipe_lookup_returns_skipped_when_brand_not_found(db, monkeypatch):
+    """Teste: FakeClient sem a marca; assert retorno "skipped", nenhuma entry criada."""
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Toyota", "Value": "1"}]  # Sem Audi
+
+        def get_models(self, reference_code, brand_code):
+            raise AssertionError("get_models não deveria ser chamado")
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Criar uma wishlist
+    wishlist = _make_wishlist(db)
+
+    # Criar a request reativa
+    request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+
+    # Chamar a função
+    client = svc.FipeApiClient()
+    result = svc._process_one_reactive_fipe_lookup(db, client, request)
+
+    # Assert
+    assert result == "skipped"
+
+    # Verificar que nenhuma entry foi criada
+    entries = db.query(FipeCatalogEntry).filter(
+        FipeCatalogEntry.brand_code == "22"
+    ).all()
+    assert len(entries) == 0
+
+
+def test_process_pending_fipe_lookups_routes_reactive_request_to_reactive_path(db, monkeypatch):
+    """Teste: cria duas requests (reativa e clássica); assert que cada uma é roteada para sua função correspondente."""
+    # Criar wishlist
+    wishlist = _make_wishlist(db, query="honda civic", year_gte=2019, year_lte=2019)
+
+    # Criar request reativa
+    reactive_request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(reactive_request)
+
+    # Criar request clássica (vazia, pra usar o fluxo padrão)
+    classic_request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        status="pending"
+    )
+    db.add(classic_request)
+    db.commit()
+
+    # Track which function cada request foi enviada para
+    call_tracking = {"reactive_calls": [], "classic_calls": []}
+
+    original_reactive = svc._process_one_reactive_fipe_lookup
+    original_classic = svc._process_one_fipe_lookup
+
+    def tracked_reactive(db_arg, client_arg, request_arg):
+        call_tracking["reactive_calls"].append(request_arg.id)
+        return original_reactive(db_arg, client_arg, request_arg)
+
+    def tracked_classic(db_arg, request_arg):
+        call_tracking["classic_calls"].append(request_arg.id)
+        return original_classic(db_arg, request_arg)
+
+    monkeypatch.setattr(svc, "_process_one_reactive_fipe_lookup", tracked_reactive)
+    monkeypatch.setattr(svc, "_process_one_fipe_lookup", tracked_classic)
+
+    # Mock FipeApiClient para evitar erros
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "9"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            return {
+                "Marca": "Honda",
+                "Modelo": "Civic",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": "R$ 100.000,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Mock resolve_listing_to_fipe_candidates para não falhar
+    monkeypatch.setattr(
+        svc,
+        "resolve_listing_to_fipe_candidates",
+        lambda *a, **k: {"status": "no_match", "best_candidate": None},
+    )
+
+    # Chamar process_pending_fipe_lookups
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    # Assert: reactive_request foi roteado para _process_one_reactive_fipe_lookup
+    assert reactive_request.id in call_tracking["reactive_calls"]
+    assert reactive_request.id not in call_tracking["classic_calls"]
+
+    # Assert: classic_request foi roteado para _process_one_fipe_lookup
+    assert classic_request.id in call_tracking["classic_calls"]
+    assert classic_request.id not in call_tracking["reactive_calls"]

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Text, DateTime, ForeignKey, Integer
+from sqlalchemy import Text, DateTime, ForeignKey, Integer, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base, TimestampMixin
@@ -11,6 +11,13 @@ from app.db.base import Base, TimestampMixin
 
 class Notification(TimestampMixin, Base):
     __tablename__ = "notifications"
+
+    __table_args__ = (
+        UniqueConstraint("wishlist_id", "car_listing_id", name="uq_notifications_wishlist_listing"),
+        Index("ix_notifications_status_created_at", "status", "created_at"),
+        Index("ix_notifications_user_status_created_at", "user_id", "status", "created_at"),
+        Index("ix_notifications_reason", "reason"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

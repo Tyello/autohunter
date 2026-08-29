@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import settings
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
+from app.models.fipe_lookup_request import FipeLookupRequest
 from app.scoring.score_v2 import score_ad
 from app.services.fipe_service import current_reference_month, listing_vehicle_keys
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing
@@ -18,6 +20,8 @@ from app.services.cross_source_dedupe_service import evaluate_cross_source_notif
 from app.services.system_logs_service import log
 from app.services.fipe_catalog_resolver_service import resolve_listing_to_fipe_candidates, _ensure_month
 from app.models.fipe_catalog_entry import FipeCatalogEntry
+from app.services.matching_service import _extract_year
+from app.services.fipe_monthly_sync_service import normalize_fipe_text
 
 
 def _fallback_fipe_price_via_catalog(db: Session, listing):
@@ -60,6 +64,75 @@ def _fallback_fipe_price_via_catalog(db: Session, listing):
         return entry.price
     except Exception:
         return None
+
+
+def _enqueue_reactive_fipe_lookup(db: Session, wishlist, listing) -> None:
+    """Enqueue a reactive FIPE lookup when catalog fallback returns None.
+
+    Best-effort, never raises exceptions. Creates a FipeLookupRequest with
+    listing_make, listing_model, and target_year for later async processing.
+
+    Implements deduplication and cooldown logic:
+    - Skips if make or model are empty after normalization.
+    - Skips if year cannot be extracted.
+    - Skips if a pending/processing request exists for the same (wishlist, make, model, year).
+    - Skips if a recent (done/skipped/failed) request exists within cooldown window.
+    - Otherwise creates a new FipeLookupRequest with status='pending'.
+    """
+    try:
+        # Normalize make and model
+        make = normalize_fipe_text(getattr(listing, "make", None) or "")
+        model = normalize_fipe_text(getattr(listing, "model", None) or "")
+
+        # Skip if make or model is empty after normalization
+        if not make or not model:
+            return
+
+        # Extract year
+        year = _extract_year(listing)
+        if year is None:
+            return
+
+        # Check cooldown/dedup
+        cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.fipe_lookup_reactive_cooldown_days)
+
+        # Query for existing requests
+        existing = db.query(FipeLookupRequest).filter(
+            FipeLookupRequest.wishlist_id == wishlist.id,
+            FipeLookupRequest.listing_make == make,
+            FipeLookupRequest.listing_model == model,
+            FipeLookupRequest.target_year == year,
+        ).first()
+
+        if existing is not None:
+            # Check if it's pending/processing or within cooldown
+            if existing.status in ("pending", "processing"):
+                return
+            # Check if it's within cooldown (status in done/skipped/failed AND processed_at > cutoff)
+            if existing.status in ("done", "skipped", "failed"):
+                if existing.processed_at is not None:
+                    # Ensure both datetimes have timezone for comparison
+                    processed_at = existing.processed_at
+                    if processed_at.tzinfo is None:
+                        processed_at = processed_at.replace(tzinfo=timezone.utc)
+                    if processed_at > cooldown_cutoff:
+                        return
+
+        # Create new FipeLookupRequest
+        db.add(
+            FipeLookupRequest(
+                id=uuid.uuid4(),
+                wishlist_id=wishlist.id,
+                listing_make=make,
+                listing_model=model,
+                target_year=year,
+                status="pending",
+            )
+        )
+        db.flush()
+    except Exception:
+        # Never raise; this is best-effort
+        pass
 
 
 def queue_notifications_for_matches(
@@ -184,6 +257,9 @@ def queue_notifications_for_matches(
             fipe = next((fipe_rows.get(k) for k in lkeys if k in fipe_rows), None)
             if fipe is None:
                 fipe = _fallback_fipe_price_via_catalog(db, listing)
+                # Enqueue reactive FIPE lookup if catalog fallback returned None
+                if fipe is None:
+                    _enqueue_reactive_fipe_lookup(db, wishlist, listing)
             rarity_ratio = None
             rarity_sample = int(ms.sample_size or 0) if ms else None
             if rarity_sample and rarity_sample > 0:

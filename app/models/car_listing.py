@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Text, Numeric, Integer, Boolean, DateTime
+from sqlalchemy import Text, Numeric, Integer, Boolean, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base, TimestampMixin
@@ -22,6 +22,10 @@ class CarListing(TimestampMixin, Base):
     """
 
     __tablename__ = "car_listings"
+
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_car_listings_source_external_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

@@ -19,6 +19,9 @@ class FipeLookupRequest(TimestampMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    listing_make: Mapped[str | None] = mapped_column(Text, nullable=True)
+    listing_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
