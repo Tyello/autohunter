@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.core.settings import settings
 from app.core.shutdown import is_shutdown_requested
-from app.db.session import SessionLocal
+from app.db.session import session_scope
 from app.sources import list_sources
 from app.scheduler.heartbeat import heartbeat
 from app.scheduler.worker_threads import start_worker_thread
@@ -38,7 +38,7 @@ def _utcnow():
 def _log_suppressed_exception(*, stage: str, exc: Exception, impact: str, fallback: str, worker: str | None = None) -> None:
     worker_label = worker or "scheduler"
     try:
-        with SessionLocal() as db:
+        with session_scope() as db:
             log(
                 db,
                 "warn",
@@ -52,7 +52,6 @@ def _log_suppressed_exception(*, stage: str, exc: Exception, impact: str, fallba
                     "fallback": fallback,
                 },
             )
-            db.commit()
     except Exception:
         return
 
@@ -77,7 +76,7 @@ def _print_throttled_scheduler_error(stage: str, exc: Exception) -> None:
 
 def _bootstrap_source_configs_once() -> None:
     try:
-        with SessionLocal() as db:
+        with session_scope() as db:
             created = ensure_source_configs(db)
             db.commit()
             if created:
@@ -96,18 +95,12 @@ def _bootstrap_source_configs_once() -> None:
 def job_heartbeat():
     if is_shutdown_requested():
         return
-    db = SessionLocal()
     try:
-        heartbeat(db)
-        db.commit()
+        with session_scope() as db:
+            heartbeat(db)
+            db.commit()
     except Exception as exc:
-        try:
-            db.rollback()
-        except Exception:
-            pass
         _print_throttled_scheduler_error("heartbeat", exc)
-    finally:
-        db.close()
 
 
 def job_run_source_for_all_wishlists(source_name: str):
@@ -127,7 +120,7 @@ def job_run_source_for_all_wishlists(source_name: str):
     if not plugin:
         return
 
-    with SessionLocal() as db:
+    with session_scope() as db:
         try:
             cfg = get_source_config_snapshot(db, src)
             if not cfg or not bool(cfg.is_enabled) or plugin.scrape is None:
@@ -208,6 +201,10 @@ def job_run_source_for_all_wishlists(source_name: str):
                 db.commit()
             except Exception:
                 pass
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
 
 def start_scheduler() -> BackgroundScheduler:
@@ -236,7 +233,7 @@ def start_scheduler() -> BackgroundScheduler:
             from app.services.playwright_smoke import assert_playwright_ready
             from app.services.admin_programming_alerts import maybe_alert_programming_error
 
-            with SessionLocal() as db:
+            with session_scope() as db:
                 try:
                     assert_playwright_ready()
                 except Exception as e:
@@ -286,7 +283,7 @@ def start_scheduler() -> BackgroundScheduler:
     from app.scheduler.auction_notification_job import job_scheduled_auction_notification
     from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
     from app.bot.sender import telegram_sender
-    with SessionLocal() as db:
+    with session_scope() as db:
         auction_cfg = get_auction_notification_runtime_settings(db)
     sched.add_job(
         job_send_notifications,

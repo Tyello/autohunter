@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from app.core.settings import settings
@@ -110,21 +111,23 @@ def test_req003_each_group_opens_and_closes_its_own_session(db, monkeypatch):
     lock = threading.Lock()
     real_session_local = svc.SessionLocal
 
-    def _tracking_session_local():
+    @contextmanager
+    def _tracking_session_scope():
         session = real_session_local()
         with lock:
             opened.append(id(session))
-        orig_close = session.close
-
-        def _close():
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
             with lock:
                 closed.append(id(session))
-            orig_close()
+            session.close()
 
-        session.close = _close
-        return session
-
-    monkeypatch.setattr(svc, "SessionLocal", _tracking_session_local)
+    monkeypatch.setattr(svc, "session_scope", _tracking_session_scope)
 
     res = svc.run_source_for_all_wishlists(db, "mercadolivre", kind="scheduler", force=True, ignore_backoff=True)
 

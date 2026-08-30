@@ -68,8 +68,17 @@ def test_heartbeat_rolls_back_and_logs_short_error(monkeypatch, capsys):
         def close(self):
             self.closed = True
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if exc_type is not None:
+                self.rollback()
+            self.close()
+            return False
+
     db = DummyDB()
-    monkeypatch.setattr(scheduler_run, "SessionLocal", lambda: db)
+    monkeypatch.setattr(scheduler_run, "session_scope", lambda: db)
     monkeypatch.setattr(scheduler_run, "heartbeat", lambda _db: None)
     monkeypatch.setattr(scheduler_run, "_last_heartbeat_error_log_at", None)
 
@@ -128,7 +137,7 @@ def test_interpreter_shutdown_error_not_marked_failed_and_logged(monkeypatch):
     marks = {"failed": 0}
     logs: list[tuple[str, str, str, dict]] = []
 
-    monkeypatch.setattr(http_queue_job, "SessionLocal", lambda: db)
+    monkeypatch.setattr(http_queue_job, "session_scope", lambda: db)
     monkeypatch.setattr(http_queue_job, "dequeue_next_job", lambda *_a, **_k: DummyJob())
     monkeypatch.setattr(
         http_queue_job,

@@ -13,6 +13,11 @@ class FipeRateLimiter:
     em 429 e recupera gradualmente após sucessos consecutivos, para que um burst
     de 429 no início de um crawl de horas não deixe o resto do crawl permanentemente
     lento.
+
+    Nota: acquire() bloqueia a thread chamadora via time.sleep. Isso é seguro porque o job
+    fipe_lookup roda isolado em seu próprio ThreadPoolExecutor (ver app/scheduler/run.py,
+    executor "fipe_lookup"), separado dos pools "http" e "browser" — o bloqueio aqui não
+    afeta outros workers do scheduler.
     """
 
     def __init__(

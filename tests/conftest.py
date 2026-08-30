@@ -50,7 +50,7 @@ def _compile_array_sqlite(type_, compiler, **kw):
 
 from app.db.base import Base
 from app.db.deps import get_db
-from app.db.session import SessionLocal, engine
+from app.db.session import SessionLocalHTTP, engine
 from app.core.settings import settings
 
 
@@ -78,7 +78,12 @@ def _force_fb_test_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture()
 def db():
-    session = SessionLocal()
+    # SessionLocalHTTP (sem guarda de thread): esta fixture é reaproveitada pela
+    # fixture `client` como a Session de Depends(get_db), e o TestClient despacha
+    # dependências síncronas via threadpool — podendo trocar de thread entre
+    # chamadas. Uma ThreadSafeSession dispararia o guard de thread cruzada nesse
+    # cenário (ver app/db/deps.py para o equivalente de produção).
+    session = SessionLocalHTTP()
     try:
         yield session
     finally:

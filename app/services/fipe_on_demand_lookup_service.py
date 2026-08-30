@@ -586,7 +586,7 @@ def _process_one_reactive_fipe_lookup(db: Session, client: FipeApiClient, reques
         return _mark_skipped(db, request)
 
 
-def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
+def _process_one_fipe_lookup(db: Session, client: FipeApiClient, request: FipeLookupRequest) -> str:
     """
     Process FIPE lookup request com loop sobre múltiplos anos-alvo.
 
@@ -632,7 +632,6 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
     # Bootstrap variables (Etapa 3+)
     bootstrap_attempted = False
     bootstrap_resolved = None  # Now: tuple(brand, model_candidates_list, reference_code) | None
-    bootstrap_client = None
     model_years_cache: dict[str, list[dict]] = {}  # Cache por modelo, cross-year dentro do request
 
     # 6. Loop sobre anos-alvo (crescente)
@@ -647,10 +646,9 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
             # insufficient_data ou no_match: tenta bootstrap
             if not bootstrap_attempted and pseudo_listing.make and pseudo_listing.model and year is not None:
                 bootstrap_attempted = True
-                bootstrap_client = FipeApiClient()
                 try:
                     bootstrap_resolved = _resolve_fipe_brand_and_models(
-                        bootstrap_client, make=pseudo_listing.make, model=pseudo_listing.model
+                        client, make=pseudo_listing.make, model=pseudo_listing.model
                     )
                 except FipeApiError as exc:
                     return _apply_bootstrap_api_error(db, request, wishlist, outcomes, year, exc)
@@ -659,7 +657,7 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
                 brand, model_candidates, reference_code = bootstrap_resolved
                 try:
                     created_count = _bootstrap_fipe_catalog_entries_for_year(
-                        db, bootstrap_client, brand=brand, model_candidates=model_candidates,
+                        db, client, brand=brand, model_candidates=model_candidates,
                         reference_code=reference_code, year=year, model_years_cache=model_years_cache,
                     )
                 except FipeApiError as exc:
@@ -796,6 +794,22 @@ def _process_one_fipe_lookup(db: Session, request: FipeLookupRequest) -> str:
     return _mark_skipped(db, request)
 
 
+def _fipe_cache_report(client: FipeApiClient) -> dict:
+    """
+    Gera relatório de cache stats com hit_rate calculado.
+
+    Retorna {"hits": int, "misses": int, "hit_rate": float}
+    onde hit_rate = hits / (hits + misses) arredondado com round(x, 4),
+    ou 0.0 se hits + misses == 0.
+    """
+    stats = client.cache_stats()
+    hits = stats.get("hits", 0)
+    misses = stats.get("misses", 0)
+    total = hits + misses
+    hit_rate = round(hits / total, 4) if total else 0.0
+    return {"hits": hits, "misses": misses, "hit_rate": hit_rate}
+
+
 def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> dict:
     batch_limit = int(limit if limit is not None else settings.fipe_lookup_batch_size)
     counters = {"claimed": 0, "done": 0, "skipped": 0, "refreshed": 0, "bootstrapped": 0, "failed_temp": 0, "failed_final": 0}
@@ -811,7 +825,7 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
     # Client compartilhado pelas requests do caminho reativo dentro do batch: reaproveita
     # o cache TTL de marca/modelo/ano (fipe_api_client._catalog_cache) e o FipeRateLimiter
     # entre requests, em vez de recriar (e perder cache/estado de throttle) a cada request.
-    reactive_client = FipeApiClient() if any(r.listing_make is not None for r in pending) else None
+    client = FipeApiClient() if pending else None
 
     for request in pending:
         request.status = "processing"
@@ -820,10 +834,10 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
         try:
             if request.listing_make is not None:
                 # Caminho reativo
-                outcome = _process_one_reactive_fipe_lookup(db, reactive_client, request)
+                outcome = _process_one_reactive_fipe_lookup(db, client, request)
             else:
                 # Caminho clássico
-                outcome = _process_one_fipe_lookup(db, request)
+                outcome = _process_one_fipe_lookup(db, client, request)
             counters[outcome] += 1
         except Exception as exc:
             db.rollback()
@@ -838,7 +852,7 @@ def process_pending_fipe_lookups(db: Session, *, limit: int | None = None) -> di
                 counters["failed_temp"] += 1
             db.commit()
 
-    if reactive_client is not None and hasattr(reactive_client, "cache_stats"):
-        counters["fipe_cache"] = reactive_client.cache_stats()
+    if client is not None and hasattr(client, "cache_stats"):
+        counters["fipe_cache"] = _fipe_cache_report(client)
 
     return counters

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal
+from app.db.session import session_scope
 from app.core.settings import settings
 from app.models.autopilot_finding import AutopilotFinding
 from app.services.autopilot_service import build_candidates, upsert_findings, should_alert, mark_alerted, format_alert, format_daily_digest, resolve_stale_operational_findings
@@ -19,7 +19,7 @@ def job_autopilot_scan() -> None:
         return
 
     now = _utcnow()
-    with SessionLocal() as db:
+    with session_scope() as db:
         cands = build_candidates(db, now)
         resolve_stale_operational_findings(db, {c.kind for c in cands}, now)
         touched = upsert_findings(db, cands, now)
@@ -50,7 +50,7 @@ def job_autopilot_daily_digest() -> None:
     now = _utcnow()
     since = now - timedelta(hours=24)
 
-    with SessionLocal() as db:
+    with session_scope() as db:
         rows = (
             db.query(AutopilotFinding)
             .filter(AutopilotFinding.last_seen_at >= since)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 from app.scheduler import fipe_update_job
 
@@ -24,7 +25,7 @@ def test_job_crawls_when_no_static_input_path(monkeypatch):
         return None
 
     monkeypatch.setattr(fipe_update_job, "run_audited_monthly_fipe_update", fake_run)
-    monkeypatch.setattr(fipe_update_job, "SessionLocal", lambda: _FakeSessionCtx())
+    monkeypatch.setattr(fipe_update_job, "session_scope", _fake_session_scope)
 
     fipe_update_job.job_monthly_fipe_update()
 
@@ -47,7 +48,7 @@ def test_job_uses_static_input_path_when_configured(monkeypatch):
         return None
 
     monkeypatch.setattr(fipe_update_job, "run_audited_monthly_fipe_update", fake_run)
-    monkeypatch.setattr(fipe_update_job, "SessionLocal", lambda: _FakeSessionCtx())
+    monkeypatch.setattr(fipe_update_job, "session_scope", _fake_session_scope)
 
     fipe_update_job.job_monthly_fipe_update()
 
@@ -71,7 +72,7 @@ def test_job_passes_concurrency_setting_to_crawler(monkeypatch):
         return None
 
     monkeypatch.setattr(fipe_update_job, "run_audited_monthly_fipe_update", fake_run)
-    monkeypatch.setattr(fipe_update_job, "SessionLocal", lambda: _FakeSessionCtx())
+    monkeypatch.setattr(fipe_update_job, "session_scope", _fake_session_scope)
 
     fipe_update_job.job_monthly_fipe_update()
 
@@ -94,7 +95,7 @@ def test_temp_file_cleaned_up_on_success_and_failure(monkeypatch):
         return None
 
     monkeypatch.setattr(fipe_update_job, "run_audited_monthly_fipe_update", fake_run_ok)
-    monkeypatch.setattr(fipe_update_job, "SessionLocal", lambda: _FakeSessionCtx())
+    monkeypatch.setattr(fipe_update_job, "session_scope", _fake_session_scope)
 
     fipe_update_job.job_monthly_fipe_update()
     assert not paths_seen[0].exists()
@@ -109,9 +110,7 @@ def test_temp_file_cleaned_up_on_success_and_failure(monkeypatch):
     assert not paths_seen[1].exists()
 
 
-class _FakeSessionCtx:
-    def __enter__(self):
-        return object()
-
-    def __exit__(self, *exc):
-        return False
+@contextmanager
+def _fake_session_scope():
+    """Mock session_scope that yields a fake db object without real DB interaction."""
+    yield object()

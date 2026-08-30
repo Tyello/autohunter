@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.core.settings import settings
 from app.core.shutdown import is_shutdown_requested
-from app.db.session import SessionLocal
+from app.db.session import session_scope
 from app.services.system_logs_service import log
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.scrape_jobs_service import dequeue_next_job, mark_done, mark_failed
@@ -24,7 +24,7 @@ def job_http_queue_worker(worker_id: str = "http_worker"):
     if is_shutdown_requested():
         return
 
-    with SessionLocal() as db:
+    with session_scope() as db:
         job = None
         try:
             job = dequeue_next_job(db, queue="http", lock_owner=worker_id)

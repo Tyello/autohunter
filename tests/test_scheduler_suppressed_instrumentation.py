@@ -15,7 +15,7 @@ def test_scheduler_suppressed_exception_logs_context(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr("app.scheduler.run.SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr("app.scheduler.run.session_scope", lambda: _Ctx())
 
     def _fake_log(db, level, component, message, payload):
         captured.update({

@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 
 from app.core.settings import settings
-from app.db.session import SessionLocal
+from app.db.session import session_scope
 from app.models.fipe_update_run import FipeUpdateRun
 from app.services.fipe_api_client import FipeApiClient
 from app.services.fipe_catalog_crawler import crawl_latest_fipe_prices
@@ -14,7 +14,7 @@ from app.services.fipe_update_job_service import run_audited_monthly_fipe_update
 def run_monthly_fipe_update_once(*, limit_brands: int | None = None) -> FipeUpdateRun:
     static_path = getattr(settings, "fipe_monthly_update_input_path", None)
     if static_path:
-        with SessionLocal() as db:
+        with session_scope() as db:
             return run_audited_monthly_fipe_update(db)
 
     shared_rate_limiter = FipeRateLimiter(
@@ -33,7 +33,7 @@ def run_monthly_fipe_update_once(*, limit_brands: int | None = None) -> FipeUpda
         temp_path = Path(tmp.name)
 
     try:
-        with SessionLocal() as db:
+        with session_scope() as db:
             return run_audited_monthly_fipe_update(db, input_path=temp_path)
     finally:
         temp_path.unlink(missing_ok=True)

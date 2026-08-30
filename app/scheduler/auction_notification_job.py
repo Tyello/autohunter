@@ -4,7 +4,7 @@ import asyncio
 import threading
 from time import perf_counter
 
-from app.db.session import SessionLocal
+from app.db.session import session_scope
 from app.services.auction_notification_job_service import run_auction_notification_job
 from app.services.auction_notification_settings_service import get_auction_notification_runtime_settings
 from app.services.system_logs_service import log
@@ -94,5 +94,5 @@ def run_scheduled_auction_notification_job(db, bot=None) -> dict:
 
 
 def job_scheduled_auction_notification(bot=None) -> None:
-    with SessionLocal() as db:
+    with session_scope() as db:
         run_scheduled_auction_notification_job(db, bot=bot)

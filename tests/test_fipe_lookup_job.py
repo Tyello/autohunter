@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from app.scheduler.fipe_lookup_job import job_process_fipe_lookups
 
 
@@ -22,9 +24,14 @@ class _SessionCtx:
 
 def test_job_runs_process_pending_logs_and_commits(monkeypatch):
     db = _FakeDB()
+
+    @contextmanager
+    def mock_session_scope():
+        yield db
+
     monkeypatch.setattr(
-        "app.scheduler.fipe_lookup_job.SessionLocal",
-        lambda: _SessionCtx(db),
+        "app.scheduler.fipe_lookup_job.session_scope",
+        mock_session_scope,
     )
     monkeypatch.setattr(
         "app.scheduler.fipe_lookup_job.process_pending_fipe_lookups",
@@ -48,9 +55,14 @@ def test_job_runs_process_pending_logs_and_commits(monkeypatch):
 
 def test_job_logs_error_and_still_commits_on_failure(monkeypatch):
     db = _FakeDB()
+
+    @contextmanager
+    def mock_session_scope():
+        yield db
+
     monkeypatch.setattr(
-        "app.scheduler.fipe_lookup_job.SessionLocal",
-        lambda: _SessionCtx(db),
+        "app.scheduler.fipe_lookup_job.session_scope",
+        mock_session_scope,
     )
 
     def boom(_db):

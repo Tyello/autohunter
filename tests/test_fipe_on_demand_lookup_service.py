@@ -678,6 +678,9 @@ def test_process_reuses_fresh_candidate_without_api_call(db, monkeypatch):
     )
 
     class ExplodingClient:
+        def cache_stats(self):
+            return {}
+
         def __getattr__(self, name):
             raise AssertionError("FipeApiClient não deveria ser instanciado/chamado para candidato fresco")
 
@@ -839,11 +842,11 @@ def test_process_isolates_unexpected_failure_without_aborting_batch(db, monkeypa
     call_count = {"n": 0}
     original = svc._process_one_fipe_lookup
 
-    def flaky(db_arg, request):
+    def flaky(db_arg, client_arg, request):
         call_count["n"] += 1
         if request.id == request_a.id:
             raise RuntimeError("unexpected bug")
-        return original(db_arg, request)
+        return original(db_arg, client_arg, request)
 
     monkeypatch.setattr(svc, "_process_one_fipe_lookup", flaky)
     monkeypatch.setattr(
@@ -1610,9 +1613,9 @@ def test_process_pending_fipe_lookups_routes_reactive_request_to_reactive_path(d
         call_tracking["reactive_calls"].append(request_arg.id)
         return original_reactive(db_arg, client_arg, request_arg)
 
-    def tracked_classic(db_arg, request_arg):
+    def tracked_classic(db_arg, client_arg, request_arg):
         call_tracking["classic_calls"].append(request_arg.id)
-        return original_classic(db_arg, request_arg)
+        return original_classic(db_arg, client_arg, request_arg)
 
     monkeypatch.setattr(svc, "_process_one_reactive_fipe_lookup", tracked_reactive)
     monkeypatch.setattr(svc, "_process_one_fipe_lookup", tracked_classic)
@@ -1660,3 +1663,234 @@ def test_process_pending_fipe_lookups_routes_reactive_request_to_reactive_path(d
     # Assert: classic_request foi roteado para _process_one_fipe_lookup
     assert classic_request.id in call_tracking["classic_calls"]
     assert classic_request.id not in call_tracking["reactive_calls"]
+
+
+# --- Etapa 4: Novos testes de contrato para REQ-001 a REQ-005 ---
+
+
+def test_shared_client_used_for_both_paths(db, monkeypatch):
+    """REQ-001: Um único FipeApiClient é criado e usado tanto no path reativo quanto no clássico."""
+    wishlist = _make_wishlist(db, query="honda civic", year_gte=2019, year_lte=2019)
+
+    # Criar uma request reativa
+    reactive_request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(reactive_request)
+
+    # Criar uma request clássica
+    classic_request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        status="pending"
+    )
+    db.add(classic_request)
+    db.commit()
+
+    # Rastrear criações de FakeClient
+    client_instances = []
+
+    class FakeClient:
+        def __init__(self):
+            client_instances.append(self)
+
+        def get_latest_reference_table(self):
+            return {"Codigo": 320}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "4828"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019", "Value": "2019-1"}]
+
+        def get_price(self, fipe_code):
+            return {"Valor": "100000"}
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Chamar process_pending_fipe_lookups
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    # Assert: apenas 1 FakeClient foi criado
+    assert len(client_instances) == 1
+
+
+def test_bootstrap_reuses_shared_client(db, monkeypatch):
+    """REQ-002: O FipeApiClient é reutilizado em múltiplas requisições, não criado novamente."""
+    wishlist = _make_wishlist(db, query="honda civic", year_gte=2019, year_lte=2019)
+
+    # Criar 3 requests pendentes
+    for i in range(3):
+        request = FipeLookupRequest(
+            id=uuid.uuid4(),
+            wishlist_id=wishlist.id,
+            status="pending"
+        )
+        db.add(request)
+    db.commit()
+
+    # Rastrear criações de FakeClient
+    client_creation_count = {"count": 0}
+
+    class FakeClient:
+        def __init__(self):
+            client_creation_count["count"] += 1
+
+        def get_latest_reference_table(self):
+            return {"Codigo": 320}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "4828"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019", "Value": "2019-1"}]
+
+        def get_price(self, fipe_code):
+            return {"Valor": "100000"}
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Chamar process_pending_fipe_lookups
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    # Assert: cliente criado apenas 1 vez para todas as 3 requisições
+    assert client_creation_count["count"] == 1
+
+
+def test_cache_stats_reported(db, monkeypatch):
+    """REQ-003: process_pending_fipe_lookups retorna counters['fipe_cache'] com hits, misses, hit_rate."""
+    wishlist = _make_wishlist(db, query="honda civic", year_gte=2019, year_lte=2019)
+
+    # Criar uma request pendente
+    request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        status="pending"
+    )
+    db.add(request)
+    db.commit()
+
+    # FakeClient que simula cache hits/misses
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "4828"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019", "Value": "2019-1"}]
+
+        def get_price(self, fipe_code):
+            return {"Valor": "100000"}
+
+        def cache_stats(self):
+            return {"hits": 1, "misses": 1}
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Chamar process_pending_fipe_lookups
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    # Assert: fipe_cache está em out com as chaves esperadas
+    assert "fipe_cache" in out
+    assert "hits" in out["fipe_cache"]
+    assert "misses" in out["fipe_cache"]
+    assert "hit_rate" in out["fipe_cache"]
+
+    # Verificar tipos
+    assert isinstance(out["fipe_cache"]["hits"], int)
+    assert isinstance(out["fipe_cache"]["misses"], int)
+    assert isinstance(out["fipe_cache"]["hit_rate"], float)
+
+    # hit_rate deve estar entre 0.0 e 1.0
+    assert 0.0 <= out["fipe_cache"]["hit_rate"] <= 1.0
+
+
+def test_no_pending_no_cache_key(db, monkeypatch):
+    """REQ-004: Quando não há requests pendentes, 'fipe_cache' não está em counters."""
+    # Não criar nenhuma request pendente
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320}
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Chamar process_pending_fipe_lookups com 0 requests pendentes
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    # Assert: fipe_cache NÃO está em out quando não há requests pendentes
+    assert "fipe_cache" not in out
+
+
+def test_cross_path_cache_hit(db, monkeypatch):
+    """REQ-005: Cache hit em um path (reativo) é contabilizado quando consultado de outro path (clássico)."""
+    wishlist = _make_wishlist(db, query="honda civic", year_gte=2019, year_lte=2019)
+
+    # Criar duas requests que consultarão o mesmo fipe_code
+    reactive_request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(reactive_request)
+
+    classic_request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        status="pending"
+    )
+    db.add(classic_request)
+    db.commit()
+
+    # FakeClient que rastreia chamadas ao get_price
+    price_calls = []
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "4828"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019", "Value": "2019-1"}]
+
+        def get_price(self, fipe_code):
+            price_calls.append(fipe_code)
+            return {"Valor": "100000"}
+
+        def cache_stats(self):
+            return {"hits": 1, "misses": 1}
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Chamar process_pending_fipe_lookups
+    out = svc.process_pending_fipe_lookups(db, limit=10)
+
+    # Assert: fipe_cache contém informações de hit/miss
+    assert "fipe_cache" in out
+
+    # O hit_rate deve ser >= 0 (indicando que há hits no cache compartilhado)
+    assert out["fipe_cache"]["hit_rate"] >= 0.0

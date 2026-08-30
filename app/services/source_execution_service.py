@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.core.settings import settings
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, session_scope
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
 from app.models.source_run import SourceRun
@@ -287,27 +287,23 @@ def _process_group_isolated(*, url: str, g: dict, src: str, job_name: str, scrap
     actual scrape call with the per-source semaphore, and never raises: any exception is
     converted into an ``ok: False`` result so one failing group cannot take down the others.
     """
-    thread_db = SessionLocal()
     thread_health = HealthCollector(source_name=src)
     try:
-        thread_ctx = build_scrape_context(thread_db, src)
-        sem = get_source_semaphore(src)
-        with sem:
-            res = scrape_ingest_match(
-                thread_db,
-                job_name,
-                scrape_dispatch,
-                url,
-                ctx=thread_ctx,
-                wishlist=None,
-                health=thread_health,
-            )
-        return {"url": url, "g": g, "res": res, "health": thread_health, "ctx": thread_ctx}
+        with session_scope() as thread_db:
+            thread_ctx = build_scrape_context(thread_db, src)
+            sem = get_source_semaphore(src)
+            with sem:
+                res = scrape_ingest_match(
+                    thread_db,
+                    job_name,
+                    scrape_dispatch,
+                    url,
+                    ctx=thread_ctx,
+                    wishlist=None,
+                    health=thread_health,
+                )
+            return {"url": url, "g": g, "res": res, "health": thread_health, "ctx": thread_ctx}
     except Exception as exc:
-        try:
-            thread_db.rollback()
-        except Exception:
-            pass
         exc_type = type(exc).__name__
         res = {
             "ok": False,
@@ -318,8 +314,6 @@ def _process_group_isolated(*, url: str, g: dict, src: str, job_name: str, scrap
             "is_bug": True,
         }
         return {"url": url, "g": g, "res": res, "health": thread_health, "ctx": None}
-    finally:
-        thread_db.close()
 
 
 def run_source_for_all_wishlists(

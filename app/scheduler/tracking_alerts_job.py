@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from app.db.session import SessionLocal
+from app.db.session import session_scope
 from app.models.car_listing import CarListing
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.system_logs_service import log
@@ -12,7 +12,7 @@ from app.core.settings import settings
 
 def job_tracking_price_alerts() -> None:
     t0 = time.time()
-    with SessionLocal() as db:
+    with session_scope() as db:
         try:
             batch = max(1, int(getattr(settings, "tracking_price_alerts_batch_size", 50) or 50))
             rows = (
@@ -34,4 +34,3 @@ def job_tracking_price_alerts() -> None:
         except Exception as e:
             db.rollback()
             log(db, "error", "tracking_alerts", "job failed", {"error": str(e), "ms": int((time.time()-t0)*1000)})
-            db.commit()

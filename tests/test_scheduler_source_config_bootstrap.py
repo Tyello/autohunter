@@ -19,7 +19,7 @@ def test_bootstrap_source_configs_once_calls_ensure(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr(run_mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(run_mod, "session_scope", _Ctx)
     monkeypatch.setattr(run_mod, "ensure_source_configs", lambda _db: ["olx"])
     monkeypatch.setattr(run_mod, "log", lambda *_a, **_k: called.__setitem__("log", called["log"] + 1))
 
@@ -50,7 +50,7 @@ def test_job_tick_does_not_call_ensure_source_configs_when_cfg_exists(monkeypatc
     cfg = SimpleNamespace(is_enabled=True, force_browser=False, sched_minutes=1)
     allowed = SimpleNamespace(is_allowed=True)
 
-    monkeypatch.setattr(run_mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(run_mod, "session_scope", _Ctx)
     monkeypatch.setattr(run_mod, "get_source", lambda _src: plugin)
     monkeypatch.setattr(run_mod, "get_source_config_snapshot", lambda _db, _src: cfg)
     monkeypatch.setattr(run_mod, "_get_state", lambda _db, _src: None)
@@ -82,7 +82,7 @@ def test_job_tick_with_missing_cfg_returns_without_crashing(monkeypatch):
 
     plugin = SimpleNamespace(name="olx", scrape=lambda *_a, **_k: [], fetch_mode="http")
 
-    monkeypatch.setattr(run_mod, "SessionLocal", lambda: _Ctx())
+    monkeypatch.setattr(run_mod, "session_scope", _Ctx)
     monkeypatch.setattr(run_mod, "get_source", lambda _src: plugin)
     monkeypatch.setattr(run_mod, "get_source_config_snapshot", lambda _db, _src: None)
     monkeypatch.setattr(run_mod, "enqueue_job", lambda *_a, **_k: called.__setitem__("enqueue", called["enqueue"] + 1))
