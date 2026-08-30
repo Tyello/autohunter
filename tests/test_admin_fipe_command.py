@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.bot import handlers_admin
-from app.bot import admin_handlers_fipe
+from app.bot.admin import router as admin_router
+from app.bot.admin import fipe as admin_handlers_fipe
 
 
 class _Msg:
@@ -43,14 +44,14 @@ def test_render_admin_fipe_coverage_has_expected_sections():
 
 
 def test_admin_fipe_non_admin(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: False)
     up = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe")))
     assert "Sem permissão" in up.message.sent[-1]
 
 
 def test_admin_fipe_coverage_defaults_and_limit_cap(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
 
     calls = {}
 
@@ -79,7 +80,7 @@ def test_admin_fipe_coverage_defaults_and_limit_cap(monkeypatch):
 
 
 def test_admin_fipe_coverage_value_error(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
 
     def _fake(db, reference_month=None, limit=20):
         raise ValueError("reference_month inválido")
@@ -91,20 +92,20 @@ def test_admin_fipe_coverage_value_error(monkeypatch):
 
 
 def test_admin_dispatch_calls_new_fipe_handler(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     calls = {}
 
     async def _fake(update, raw_args):
         calls["raw_args"] = raw_args
 
-    monkeypatch.setattr(handlers_admin, "admin_fipe", _fake)
+    monkeypatch.setattr(admin_router, "admin_fipe", _fake)
     up = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "coverage")))
     assert calls["raw_args"] == ["coverage"]
 
 
 def test_admin_fipe_catalog_summary(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
 
     class _Q:
         def __init__(self, value):
@@ -155,14 +156,14 @@ def test_admin_fipe_catalog_summary(monkeypatch):
 
 
 def test_admin_fipe_catalog_invalid_month(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     up = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("fipe", "catalog", "foo")))
     assert up.message.sent[-1] == "reference_month inválido; esperado YYYY-MM"
 
 
 def test_admin_invalid_action_help_lists_fipe(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     up = _Up(1)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("comando_invalido")))
     msg = up.message.sent[-1]
@@ -175,7 +176,7 @@ def test_admin_invalid_action_help_lists_fipe(monkeypatch):
 
 
 def test_admin_fipe_resolve_not_found(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
 
     class _Q:
         def __init__(self, value): self.value=value
@@ -198,7 +199,7 @@ def test_admin_fipe_resolve_not_found(monkeypatch):
 
 
 def test_admin_fipe_resolve_success(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
 
     listing = SimpleNamespace(id="l1", make="Honda", model="Civic", year=2015)
 
@@ -230,7 +231,7 @@ def test_admin_fipe_resolve_success(monkeypatch):
 
 
 def test_admin_fipe_resolver_status(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     monkeypatch.setattr(admin_handlers_fipe, "build_fipe_resolver_coverage_report", lambda *a, **k: {
         "reference_month": "2026-05", "sample_size": 10,
         "status_counts": {"matched": 2, "ambiguous": 3, "no_match": 4, "insufficient_data": 1},
@@ -265,7 +266,7 @@ def test_render_admin_fipe_resolve_details():
     assert "Motivo ambiguidade" in msg
 
 def test_admin_fipe_plan_default_and_limit_cap(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     calls = {}
 
     def _fake(db, reference_month, limit=100, min_confidence=80):
@@ -306,7 +307,7 @@ def test_admin_fipe_plan_default_and_limit_cap(monkeypatch):
 
 
 def test_admin_fipe_apply_plan_default_dry(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     calls = {}
 
     def _fake(db, **kwargs):
@@ -333,7 +334,7 @@ def test_admin_fipe_apply_plan_default_dry(monkeypatch):
 
 
 def test_admin_fipe_apply_plan_live_and_limit_cap(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     calls = {}
 
     def _fake(db, **kwargs):
@@ -416,7 +417,7 @@ def test_render_admin_fipe_apply_history_error_and_legacy_payload():
 
 
 def test_admin_fipe_apply_history_dispatch_and_limit_cap(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     calls = {"limit": None}
 
     class _Q:
@@ -489,7 +490,7 @@ def test_render_admin_fipe_apply_status_with_live_and_error():
 
 
 def test_admin_fipe_apply_status_dispatch_and_limit_cap(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     calls = {}
 
     def _fake(db, reference_month=None, limit=10):

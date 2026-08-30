@@ -2,6 +2,8 @@ import asyncio
 import types
 
 from app.bot import handlers_admin
+from app.bot.admin import router as admin_router
+from app.bot.admin import auctions as admin_auctions_module
 
 
 class _Msg:
@@ -23,9 +25,9 @@ def _ctx(*args):
 
 
 def test_admin_auctions_inspect_render_and_non_admin(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     monkeypatch.setattr(
-        handlers_admin,
+        admin_auctions_module,
         "inspect_auction_source",
         lambda **kwargs: {
             "source": "win_auctions",
@@ -57,21 +59,21 @@ def test_admin_auctions_inspect_render_and_non_admin(monkeypatch):
     assert "text_preview: preview" in text
     assert "browser:" not in text
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: False)
     up2 = _Update(chat_id=10)
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("auctions", "inspect", "win")))
     assert "Sem permissão" in up2.message.sent[-1]
 
 
 def test_admin_auctions_inspect_with_detail_url_passes_param(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     seen = {}
 
     def _inspect(**kwargs):
         seen.update(kwargs)
         return {"source": "win_auctions", "fetched": 0, "reason": "detail_without_extractable_signals", "candidates": []}
 
-    monkeypatch.setattr(handlers_admin, "inspect_auction_source", _inspect)
+    monkeypatch.setattr(admin_auctions_module, "inspect_auction_source", _inspect)
     up = _Update()
     detail_url = "https://www.winleiloes.com.br/item/4042/detalhes?page=1"
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "inspect", "win", "--url", detail_url)))
@@ -79,9 +81,9 @@ def test_admin_auctions_inspect_with_detail_url_passes_param(monkeypatch):
 
 
 def test_admin_auctions_inspect_renders_endpoint_candidates_and_preview(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     monkeypatch.setattr(
-        handlers_admin,
+        admin_auctions_module,
         "inspect_auction_source",
         lambda **kwargs: {
             "source": "win_auctions",
@@ -116,9 +118,9 @@ def test_admin_auctions_inspect_renders_endpoint_candidates_and_preview(monkeypa
 
 
 def test_admin_auctions_inspect_renders_win_detail_diagnostics(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     monkeypatch.setattr(
-        handlers_admin,
+        admin_auctions_module,
         "inspect_auction_source",
         lambda **kwargs: {
             "source": "win_auctions",
@@ -146,10 +148,10 @@ def test_admin_auctions_inspect_renders_win_detail_diagnostics(monkeypatch):
 
 
 def test_admin_auctions_inspect_win_detail_is_compact_and_truncated(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     noisy = "x" * 500
     monkeypatch.setattr(
-        handlers_admin,
+        admin_auctions_module,
         "inspect_auction_source",
         lambda **kwargs: {
             "source": "win_auctions",
@@ -181,7 +183,7 @@ def test_admin_auctions_inspect_win_detail_is_compact_and_truncated(monkeypatch)
 
 def test_truncate_admin_message_adds_warning_suffix():
     text = "a" * 4000
-    out, truncated = handlers_admin._truncate_admin_message(text, max_chars=3500)
+    out, truncated = admin_auctions_module._truncate_admin_message(text, max_chars=3500)
     assert truncated is True
     assert len(out) <= 3500
     assert "Diagnóstico reduzido para caber no Telegram." in out

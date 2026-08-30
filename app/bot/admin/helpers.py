@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from telegram import Update
+
+from app.bot.text_sanitize import sanitize_for_telegram
 
 AUCTION_SETTINGS_LIMITS = {
     "scheduler_minutes": (15, 1440),
@@ -88,3 +92,28 @@ def short(s: Optional[str], n: int = 140) -> str:
         return "-"
     s = " ".join(s.split())
     return s if len(s) <= n else s[: max(0, n - 3)] + "..."
+
+
+def chunk_lines(text: str, max_len: int = 3600) -> List[str]:
+    lines = (text or "").splitlines()
+    out: List[str] = []
+    buf: List[str] = []
+    size = 0
+    for ln in lines:
+        add = len(ln) + 1
+        if buf and (size + add > max_len):
+            out.append("\n".join(buf))
+            buf = []
+            size = 0
+        buf.append(ln)
+        size += add
+    if buf:
+        out.append("\n".join(buf))
+    return out
+
+
+async def reply_chunked(update: Update, text: str, max_len: int = 3600):
+    # Telegram costuma falhar acima de ~4096; 3600 é safe.
+    chunks = chunk_lines(text, max_len=max_len)
+    for ch in chunks:
+        await update.message.reply_text(sanitize_for_telegram(ch))

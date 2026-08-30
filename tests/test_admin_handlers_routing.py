@@ -3,6 +3,7 @@ import types
 import asyncio
 
 from app.bot import handlers_admin
+from app.bot.admin import router as admin_router
 
 
 class _Msg:
@@ -23,15 +24,15 @@ def test_cmd_admin_sources_routing_preserved(monkeypatch):
     update = _Update()
     context = types.SimpleNamespace(args=["sources"])
 
-    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
+    monkeypatch.setattr("app.bot.admin.router.is_admin", lambda _cid: True)
 
     called = {"ok": False}
 
-    async def _fake_sources(update, args):
+    async def _fake_sources(update, args, **kwargs):
         called["ok"] = True
         assert args == []
 
-    monkeypatch.setattr(handlers_admin, "_admin_sources_dispatch", _fake_sources)
+    monkeypatch.setattr(admin_router, "admin_sources_dispatch", _fake_sources)
 
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert called["ok"] is True

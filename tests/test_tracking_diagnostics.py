@@ -5,6 +5,7 @@ import types
 from datetime import datetime, timedelta, timezone
 
 from app.bot import handlers_admin
+from app.bot.admin import router as admin_router
 from app.bot.admin_tracking_diagnostics import parse_tracking_window_hours, render_tracking_diagnostics
 from app.models.notification import Notification
 from app.models.system_log import SystemLog
@@ -75,21 +76,21 @@ def _ctx(*args): return types.SimpleNamespace(args=list(args))
 
 def test_admin_tracking_auth_and_window(monkeypatch):
     up = _Update(chat_id=9)
-    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: False)
+    monkeypatch.setattr("app.bot.admin.router.is_admin", lambda _cid: False)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("tracking")))
     assert "Sem permissão" in up.message.sent[-1]
 
     up2 = _Update(chat_id=1)
-    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
+    monkeypatch.setattr("app.bot.admin.router.is_admin", lambda _cid: True)
     calls = {}
     class _S:
         def __enter__(self): return object()
         def __exit__(self, *a): return False
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.SessionLocal", _S)
+    monkeypatch.setattr("app.bot.admin.diagnostics.SessionLocal", _S)
     def _fake(db, window_hours=24):
         calls["w"] = window_hours
         return {"window_hours": window_hours, "tracked": {}, "price_drop_notifications": {}, "last_tracking_job": {}, "examples": {}}
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.build_tracking_diagnostics", _fake)
+    monkeypatch.setattr("app.bot.admin.diagnostics.build_tracking_diagnostics", _fake)
 
     asyncio.run(handlers_admin.cmd_admin(up2, _ctx("tracking", "status", "48")))
     assert calls["w"] == 48

@@ -6,7 +6,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.bot import handlers_admin
-from app.bot import admin_handlers_digest
+from app.bot.admin import router as admin_router
+from app.bot.admin import digest as admin_handlers_digest
 from app.models.user import User
 from app.scheduler import weekly_digest_job
 from app.services.weekly_digest_preferences_service import set_weekly_digest_enabled, get_digest_preference
@@ -88,7 +89,7 @@ def _ctx(*args):
 
 
 def test_admin_digest_run_modes(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     monkeypatch.setattr(handlers_admin.settings, "weekly_digest_job_enabled", False)
     monkeypatch.setattr(admin_handlers_digest, "run_weekly_digest_once", lambda dry_run=True: {"checked": 2, "eligible": 1, "sent": 1, "skipped_recent": 0, "skipped_empty": 0, "failed": 0})
     up = _Update()
@@ -99,7 +100,7 @@ def test_admin_digest_run_modes(monkeypatch):
 
 
 def test_admin_digest_run_non_admin_denied(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: False)
     up = _Update(chat_id=123)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("digest", "run")))
     assert "sem permissão" in up.message.sent[-1].lower()

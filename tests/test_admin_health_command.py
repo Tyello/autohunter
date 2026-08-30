@@ -5,7 +5,8 @@ import types
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from app.bot import handlers_admin
+from app.bot.admin import health as health_module
+from app.bot.admin.helpers import chunk_lines
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
 from app.models.scrape_job import ScrapeJob
@@ -38,9 +39,9 @@ def _run_health(monkeypatch, update, args=None):
     async def _fake_reply_chunked(_update, text, max_len=3600):
         captured["text"] = text
 
-    monkeypatch.setattr(handlers_admin, "_reply_chunked", _fake_reply_chunked)
-    monkeypatch.setattr(handlers_admin, "sanitize_for_telegram", lambda t: t)
-    asyncio.run(handlers_admin._admin_health(update, raw_args=args or []))
+    monkeypatch.setattr(health_module, "_reply_chunked", _fake_reply_chunked)
+    monkeypatch.setattr(health_module, "sanitize_for_telegram", lambda t: t)
+    asyncio.run(health_module.admin_health(update, raw_args=args or []))
     return captured["text"]
 
 
@@ -66,7 +67,7 @@ def _mk_user_and_listing(db):
 
 def test_admin_health_blocks_non_admin_without_opening_db(monkeypatch):
     update = _Update(chat_id=999)
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: False)
 
     called = {"db": False}
 
@@ -78,9 +79,9 @@ def test_admin_health_blocks_non_admin_without_opening_db(monkeypatch):
         def __exit__(self, *_args):
             return False
 
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionFail())
+    monkeypatch.setattr(health_module, "SessionLocal", lambda: _SessionFail())
 
-    asyncio.run(handlers_admin._admin_health(update, raw_args=[]))
+    asyncio.run(health_module.admin_health(update, raw_args=[]))
     assert called["db"] is False
     assert update.message.sent and "Sem permissão" in update.message.sent[-1]
 
@@ -90,7 +91,7 @@ def test_admin_health_authorized_includes_heartbeat_not_stale(monkeypatch, db):
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=2)))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     text = _run_health(monkeypatch, _Update(), [])
 
     assert "Scheduler heartbeat:" in text
@@ -102,7 +103,7 @@ def test_admin_health_marks_stale_heartbeat(monkeypatch, db):
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=120)))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     text = _run_health(monkeypatch, _Update(), [])
 
     assert "Scheduler heartbeat:" in text
@@ -142,7 +143,7 @@ def test_admin_health_stale_filters_and_sections(monkeypatch, db):
     db.add(SourceRun(source="olx", kind="scheduler", status="error", created_at=now - timedelta(minutes=40), error="err-old"))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     text = _run_health(monkeypatch, _Update(), ["verbose"])
 
     assert "Sources stale:" in text
@@ -163,7 +164,7 @@ def test_admin_health_experimental_enabled_source_is_not_stale_critical(monkeypa
     db.add(SourceRun(source="kavak", kind="scheduler", status="success", created_at=old))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     text = _run_health(monkeypatch, _Update(), ["verbose"])
 
     assert "- kavak: stale" not in text
@@ -185,12 +186,12 @@ def test_admin_health_not_implemented_source_is_not_stale_critical(monkeypatch, 
         default_enabled=False,
         default_sched_minutes=60,
     )
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [plugin])
+    monkeypatch.setattr(health_module, "list_sources", lambda: [plugin])
     db.add(SourceConfig(source="not_impl_source", is_enabled=True, sched_minutes=60))
     db.add(SourceRun(source="not_impl_source", kind="scheduler", status="success", created_at=old))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     text = _run_health(monkeypatch, _Update(), ["verbose"])
 
     assert "Sources stale:" not in text or "- not_impl_source: stale" not in text
@@ -199,7 +200,7 @@ def test_admin_health_not_implemented_source_is_not_stale_critical(monkeypatch, 
 
 
 def test_admin_health_verbose_uses_chunking(monkeypatch, db):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     now = datetime.now(timezone.utc)
     for i in range(30):
         db.add(SourceRun(source="olx", kind="scheduler", status="error", created_at=now - timedelta(minutes=i), error=f"boom-{i}"))
@@ -208,23 +209,23 @@ def test_admin_health_verbose_uses_chunking(monkeypatch, db):
     chunks: list[str] = []
 
     async def _capture_reply(update, text, max_len=3600):
-        for c in handlers_admin._chunk_lines(text, max_len=200):
+        for c in chunk_lines(text, max_len=200):
             chunks.append(c)
             await update.message.reply_text(c)
 
-    monkeypatch.setattr(handlers_admin, "_reply_chunked", _capture_reply)
-    monkeypatch.setattr(handlers_admin, "sanitize_for_telegram", lambda t: t)
+    monkeypatch.setattr(health_module, "_reply_chunked", _capture_reply)
+    monkeypatch.setattr(health_module, "sanitize_for_telegram", lambda t: t)
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_health(update, raw_args=["verbose"]))
+    asyncio.run(health_module.admin_health(update, raw_args=["verbose"]))
 
     assert len(chunks) >= 2
     assert all(len(c) <= 200 for c in chunks)
 
 
 def test_admin_health_includes_wishlist_cache_line(monkeypatch, db):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
-    monkeypatch.setattr(handlers_admin.settings, "wishlist_summaries_cache_ttl_seconds", 0)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module.settings, "wishlist_summaries_cache_ttl_seconds", 0)
 
     text = _run_health(monkeypatch, _Update(), [])
 
@@ -235,9 +236,9 @@ def test_admin_health_includes_wishlist_cache_line(monkeypatch, db):
 def test_admin_health_includes_backup_status(monkeypatch, db):
     from app.services.backup_health_service import BackupHealthResult
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(health_module, "is_admin", lambda _cid: True)
     monkeypatch.setattr(
-        handlers_admin._admin_health_module,
+        health_module,
         "get_backup_health",
         lambda now=None: BackupHealthResult(
             status="WARNING",

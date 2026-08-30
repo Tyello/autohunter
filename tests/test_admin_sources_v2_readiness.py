@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.bot import admin_handlers_sources
+from app.bot.admin import sources as admin_handlers_sources
 
 
 class _Message:

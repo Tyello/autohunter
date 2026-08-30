@@ -50,7 +50,7 @@ def test_fipe_update_scheduler_due_when_last_success_old(db, monkeypatch):
 
 
 def test_admin_fipe_update_status_renderer():
-    from app.bot.admin_handlers_fipe import render_admin_fipe_update_status
+    from app.bot.admin.fipe import render_admin_fipe_update_status
     text = render_admin_fipe_update_status({"last": None, "enabled": True, "next_schedule": "monthly day 05 at 05:00 UTC", "due_by_last_success": True})
     assert "FIPE atualização mensal" in text
     assert "Due pelo último sucesso: True" in text

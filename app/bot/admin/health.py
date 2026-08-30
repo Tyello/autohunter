@@ -6,8 +6,13 @@ from typing import Optional, Dict, List, Any
 from sqlalchemy import func
 from telegram import Update
 
-from app.bot.admin import is_admin
-from app.bot.admin_helpers import as_utc as _as_utc, fmt_dt as _fmt_dt, short as _short
+from app.bot.admin.auth import is_admin
+from app.bot.admin.helpers import (
+    as_utc as _as_utc,
+    fmt_dt as _fmt_dt,
+    reply_chunked as _reply_chunked,
+    short as _short,
+)
 from app.bot.text_sanitize import sanitize_for_telegram
 from app.core.settings import settings
 from app.db.session import SessionLocal
@@ -36,13 +41,6 @@ def _mins_left(dt: Optional[datetime], now: datetime) -> Optional[int]:
     if not dt:
         return None
     return int(max(0, (dt - now).total_seconds()) // 60)
-
-
-async def _reply_chunked(update: Update, text: str, max_len: int = 3600):
-    msg = update.effective_message
-    parts = [text[i:i+max_len] for i in range(0, len(text), max_len)]
-    for p in parts or [text]:
-        await msg.reply_text(p)
 
 
 async def admin_health(update: Update, raw_args: Optional[List[str]] = None):

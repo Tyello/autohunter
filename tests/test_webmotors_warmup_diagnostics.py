@@ -1,8 +1,8 @@
 import asyncio
 
 from app.scrapers.webmotors_ops import detect_webmotors_challenge
-from app.bot import handlers_admin
-from app.bot.handlers_admin import _render_warmup_result
+from app.bot.admin import misc as handlers_admin
+from app.bot.admin.misc import _render_warmup_result
 
 
 def test_detect_webmotors_challenge_signals():

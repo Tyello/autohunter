@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func, case, literal_column
+from sqlalchemy import func, case, literal_column, literal, text
 from sqlalchemy.exc import ProgrammingError, OperationalError
 
 from app.models.car_listing import CarListing
@@ -361,6 +361,12 @@ def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, wi
                     changed = True
                 row.sold_at = new_sold_at
 
+            # Liveness: always reset status to 'ativo' and update last_seen_at on upsert
+            if row.status != 'ativo':
+                changed = True
+            row.status = 'ativo'
+            row.last_seen_at = now
+
             # updated_at: only update if any field changed
             if changed:
                 row.updated_at = now
@@ -448,6 +454,12 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
         return []
 
     stmt = insert(CarListing).values(listings)
+
+    # Bound Python timestamp (not func.now()) so upsert timing has microsecond
+    # precision consistently across dialects: SQLite's func.now() compiles to
+    # CURRENT_TIMESTAMP, which only has whole-second resolution and can make
+    # rapid consecutive upserts (e.g. in tests) appear to not advance in time.
+    now_ts = datetime.now(timezone.utc)
 
     # Extract column value expressions for reuse in both set_ dict and changed detection
     title_expr = case(
@@ -601,15 +613,26 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
             "sold_at": sold_at_expr,
             # url normalmente é estável; se mudar, preferimos o novo
             "url": url_expr,
+            # Liveness: reset status to ativo on every upsert, update last_seen_at
+            "status": literal('ativo'),
+            "last_seen_at": now_ts,
             # updated_at: only update if any column value changed
-            "updated_at": case((changed, func.now()), else_=CarListing.updated_at),
+            "updated_at": case((changed, literal(now_ts)), else_=CarListing.updated_at),
         },
     )
 
     # `xmax` is a PostgreSQL system column (not part of mapped table columns),
     # so reference it as a literal SQL column in RETURNING.
-    inserted_expr = (literal_column("xmax") == 0).label("inserted")
-    stmt = stmt.returning(CarListing.id, inserted_expr)
+    # For SQLite, use a different approach since it doesn't support xmax.
+    dialect_name = db.bind.dialect.name.lower()
+    if dialect_name == 'sqlite':
+        # SQLite: just return IDs; stats tracking is best-effort
+        stmt = stmt.returning(CarListing.id)
+    else:
+        # PostgreSQL and other databases: use xmax to detect inserts
+        inserted_expr = (literal_column("xmax") == 0).label("inserted")
+        stmt = stmt.returning(CarListing.id, inserted_expr)
+
     try:
         result = db.execute(stmt)
     except (ProgrammingError, OperationalError) as exc:
@@ -620,8 +643,22 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
     rows = result.fetchall()
     ids = [row[0] for row in rows]
 
+    # Commit to make changes visible, and expire the identity map so any
+    # already-loaded ORM objects for these rows are re-read fresh on next
+    # access (db.execute() bypasses the ORM's in-memory attribute sync).
+    db.commit()
+
     if not with_stats:
         return ids
+
+    # For SQLite, we don't have xmax, so we return zeroed stats
+    if dialect_name == 'sqlite':
+        return {
+            "ids": ids,
+            "inserted_new": 0,
+            "updated": 0,
+            "upserted": len(ids),
+        }
 
     inserted_new = sum(1 for row in rows if bool(row[1]))
     upserted = len(rows)

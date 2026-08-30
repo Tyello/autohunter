@@ -5,6 +5,7 @@ import types
 import uuid
 
 from app.bot import handlers_admin
+from app.bot.admin import users as admin_users
 from app.models.account import Account
 from app.models.plan import Plan
 from app.models.subscription import Subscription
@@ -53,7 +54,7 @@ def test_admin_users_renders_only_public_plan_labels(monkeypatch, db):
     db.add(free_user)
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(admin_users, "SessionLocal", lambda: _SessionWrap(db))
     update = _Update()
     asyncio.run(handlers_admin._admin_users(update, []))
     text = update.effective_message.sent[-1]

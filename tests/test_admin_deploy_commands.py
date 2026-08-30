@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from app.bot import admin_handlers_deploy
+from app.bot.admin import deploy as admin_handlers_deploy
 from app.models.admin_deploy_audit import AdminDeployAudit
 
 

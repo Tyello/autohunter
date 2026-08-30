@@ -4,6 +4,7 @@ import uuid
 
 from app.bot import handlers
 from app.bot import handlers_admin
+from app.bot.admin import router as admin_router
 from app.bot import handlers_debug
 from app.models.account import Account
 from app.models.plan import Plan
@@ -91,14 +92,14 @@ def test_cmd_admin_health_authorized_dispatch(monkeypatch):
     update = _Update(chat_id=777)
     context = types.SimpleNamespace(args=["health", "verbose"])
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     called = {"ok": False, "args": None}
 
     async def _fake_health(_update, raw_args=None):
         called["ok"] = True
         called["args"] = raw_args
 
-    monkeypatch.setattr(handlers_admin, "_admin_health", _fake_health)
+    monkeypatch.setattr(admin_router, "admin_health", _fake_health)
 
     asyncio.run(handlers_admin.cmd_admin(update, context))
     assert called["ok"] is True

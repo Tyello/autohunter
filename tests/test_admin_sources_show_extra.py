@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from app.bot import admin_handlers_sources as mod
+from app.bot.admin import sources as mod
 
 
 class _Msg:

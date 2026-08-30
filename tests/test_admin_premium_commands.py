@@ -3,6 +3,8 @@ import types
 import uuid
 
 from app.bot import handlers_admin
+from app.bot.admin import router as admin_router
+from app.bot.admin import misc as admin_misc
 from app.models.account import Account
 from app.models.plan import Plan
 from app.models.subscription import Subscription
@@ -51,8 +53,8 @@ def test_admin_premium_activate_annual_and_365d(monkeypatch, db):
     user = _mk_user(db, 123456)
     db.add(Plan(code="premium", name="Premium", daily_alert_limit=10, max_wishlists=5, is_active=True))
     db.commit()
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_misc, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("premium", "activate", "123456", "annual")))
     assert "Premium ativado" in up.message.sent[-1]
@@ -67,13 +69,13 @@ def test_admin_premium_activate_guards_and_errors(monkeypatch, db):
     _mk_user(db, 888001)
     db.add(Plan(code="premium", name="Premium", daily_alert_limit=10, max_wishlists=5, is_active=True))
     db.commit()
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(admin_misc, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update(chat_id=1)
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: False)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: False)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("premium", "activate", "888001", "monthly")))
     assert "Sem permissão." in up.message.sent[-1]
 
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("premium", "activate", "999999", "monthly")))
     assert "Usuário não encontrado." in up.message.sent[-1]
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("premium", "activate", "888001", "weird")))
@@ -82,8 +84,8 @@ def test_admin_premium_activate_guards_and_errors(monkeypatch, db):
 
 def test_admin_premium_activate_missing_plan_and_status(monkeypatch, db):
     _mk_user(db, 777001)
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
-    monkeypatch.setattr(handlers_admin, "SessionLocal", lambda: _SessionWrap(db))
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_misc, "SessionLocal", lambda: _SessionWrap(db))
     up = _Update()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("premium", "activate", "777001", "annual")))
     assert "Plano premium não encontrado no banco" in up.message.sent[-1]

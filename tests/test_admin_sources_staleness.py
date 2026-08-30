@@ -2,7 +2,7 @@ import asyncio
 import types
 from datetime import datetime, timedelta, timezone
 
-from app.bot import handlers_admin
+from app.bot.admin import sources
 from app.models.source_config import SourceConfig
 from app.models.source_run import SourceRun
 from app.models.source_state import SourceState
@@ -52,10 +52,10 @@ def test_admin_sources_marks_stale_and_global_hint(db, monkeypatch):
     _add_source(db, source="s3", age_minutes=470)
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("s1"), _Plugin("s2"), _Plugin("s3")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("s1"), _Plugin("s2"), _Plugin("s3")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
 
     out = "\n".join(update.message.sent)
     assert "STALE" in out
@@ -65,10 +65,10 @@ def test_admin_sources_marks_stale_and_global_hint(db, monkeypatch):
 def test_admin_sources_recent_run_keeps_ok(db, monkeypatch):
     _add_source(db, source="oksrc", age_minutes=20)
     db.commit()
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("oksrc")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("oksrc")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
 
     out = "\n".join(update.message.sent)
     assert "✅ OK" in out
@@ -83,10 +83,10 @@ def test_admin_sources_24h_effective_runs_exposes_expected_window(db, monkeypatc
     db.add(SourceRun(source="sched60", kind="scheduler", status="success", created_at=now - timedelta(hours=5)))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("sched60")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("sched60")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
 
     out = "\n".join(update.message.sent)
     assert "24h efetivas:" in out
@@ -99,10 +99,10 @@ def test_admin_sources_preserves_disabled_and_error_states(db, monkeypatch):
     _add_source(db, source="error_src", enabled=True, status="error", age_minutes=20)
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("disabled_src"), _Plugin("error_src")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("disabled_src"), _Plugin("error_src")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
 
     out = "\n".join(update.message.sent)
     assert "DISABLED" in out
@@ -115,13 +115,13 @@ def test_admin_sources_deprioritized_blocked_is_non_critical(db, monkeypatch):
     db.commit()
 
     monkeypatch.setattr(
-        handlers_admin,
+        sources,
         "list_sources",
         lambda: [_Plugin("olx", role="primary"), _Plugin("webmotors", role="deprioritized")],
     )
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
     assert "webmotors" in out
     assert "role=deprioritized não crítico global" in out
@@ -137,10 +137,10 @@ def test_admin_sources_global_stale_denominator_uses_only_critical_sources(db, m
 
     plugins = [_Plugin("critical_a", role="primary"), _Plugin("critical_b", role="primary")]
     plugins.extend(_Plugin(f"deprior_{i}", role="deprioritized") for i in range(5))
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: plugins)
+    monkeypatch.setattr(sources, "list_sources", lambda: plugins)
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
     assert "Sources críticas stale: 2/2 (100%)" in out
 
@@ -157,9 +157,9 @@ def test_admin_sources_global_stale_with_recent_heartbeat_and_no_runs_shows_acti
     db.add(ScrapeJob(source="s1", queue="http", run_at=now - timedelta(minutes=5), status="queued", attempt=0, max_attempts=3, priority=0))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("s1"), _Plugin("s2"), _Plugin("s3")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("s1"), _Plugin("s2"), _Plugin("s3")])
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
     assert "heartbeat recente, mas 0 source runs na janela" in out
     assert "provável falha no enqueue, workers ou persistência" in out
@@ -183,10 +183,10 @@ def test_admin_sources_separates_effective_runs_from_operational_skips(db, monke
         )
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("olx")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("olx")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "runs=90/24" not in out
@@ -214,10 +214,10 @@ def test_admin_sources_only_recent_skips_are_observable_not_stale(db, monkeypatc
     )
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("mercadolivre")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("mercadolivre")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "STALE" not in out
@@ -236,10 +236,10 @@ def test_admin_sources_recent_error_is_effective_and_not_masked_by_later_skips(d
     db.add(SourceRun(source="chavesnamao", kind="scheduler", status="skipped", created_at=now - timedelta(minutes=1), payload={"reason": "backoff"}))
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("chavesnamao")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("chavesnamao")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "24h efetivas: ok=0 err=1 blk=0 total=1/24 (4%)" in out
@@ -255,13 +255,13 @@ def test_admin_sources_experimental_stale_does_not_contaminate_critical_health(d
     db.commit()
 
     monkeypatch.setattr(
-        handlers_admin,
+        sources,
         "list_sources",
         lambda: [_Plugin("primary_src", role="primary"), _Plugin("experimental_src", role="experimental")],
     )
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "experimental_src" in out
@@ -313,10 +313,10 @@ def test_admin_sources_renders_zero_result_suspect_for_mercadolivre_canary(db, m
     )
     db.commit()
 
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("mercadolivre")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("mercadolivre")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "zero_result_suspect" in out
@@ -348,10 +348,10 @@ def test_admin_sources_lists_impl_warning_for_real_drift(db, monkeypatch):
         )
     )
     db.commit()
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("mercadolivre")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("mercadolivre")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "impl⚠️" in out
@@ -376,10 +376,10 @@ def test_admin_sources_does_not_pollute_when_impl_alignment_ok(db, monkeypatch):
     db.add(SourceState(source="olx", last_run_at=now - timedelta(minutes=5), last_status="success", last_payload=payload))
     db.add(SourceRun(source="olx", kind="scheduler", status="success", created_at=now - timedelta(minutes=5), payload=payload))
     db.commit()
-    monkeypatch.setattr(handlers_admin, "list_sources", lambda: [_Plugin("olx")])
+    monkeypatch.setattr(sources, "list_sources", lambda: [_Plugin("olx")])
 
     update = _Update()
-    asyncio.run(handlers_admin._admin_sources(update, verbose=False))
+    asyncio.run(sources._admin_sources(update, verbose=False))
     out = "\n".join(update.message.sent)
 
     assert "impl⚠️" not in out

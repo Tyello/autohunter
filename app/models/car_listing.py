@@ -6,7 +6,8 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Text, Numeric, Integer, Boolean, DateTime, UniqueConstraint
+from sqlalchemy import Text, Numeric, Integer, Boolean, DateTime, UniqueConstraint, CheckConstraint
+from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base, TimestampMixin
@@ -25,6 +26,7 @@ class CarListing(TimestampMixin, Base):
 
     __table_args__ = (
         UniqueConstraint("source", "external_id", name="uq_car_listings_source_external_id"),
+        CheckConstraint("status IN ('ativo','suspeito','inativo')", name="check_status_valid"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -71,4 +73,6 @@ class CarListing(TimestampMixin, Base):
     # Marketplace lifecycle
     is_sold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default='ativo')
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=sql_text('CURRENT_TIMESTAMP'))
 

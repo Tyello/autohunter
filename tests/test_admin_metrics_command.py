@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.bot import handlers_admin
-from app.bot.admin_handlers_metrics import admin_metrics
+from app.bot.admin import router as admin_router
+from app.bot.admin.metrics import admin_metrics
 from app.models.account import Account
 from app.models.car_listing import CarListing
 from app.models.notification import Notification
@@ -42,7 +43,7 @@ def _bind_session(monkeypatch, db):
         def __exit__(self, *_args):
             return False
 
-    import app.bot.admin_handlers_metrics as m
+    import app.bot.admin.metrics as m
 
     monkeypatch.setattr(m, "SessionLocal", lambda: _S())
 
@@ -118,14 +119,14 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
 
 
 def test_cmd_admin_metrics_dispatch(monkeypatch):
-    monkeypatch.setattr(handlers_admin, "is_admin", lambda _cid: True)
+    monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     called = {"args": None}
 
     async def _fake_admin_metrics(update, raw_args):
         called["args"] = raw_args
         await update.message.reply_text("ok")
 
-    monkeypatch.setattr(handlers_admin, "admin_metrics", _fake_admin_metrics)
+    monkeypatch.setattr(admin_router, "admin_metrics", _fake_admin_metrics)
     up = _Up()
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("metrics", "x")))
     assert called["args"] == ["x"]

@@ -2,7 +2,8 @@ import asyncio
 import types
 
 from app.bot import handlers_admin
-from app.bot import admin_handlers_diagnostics
+from app.bot.admin import router as admin_router
+from app.bot.admin import diagnostics as admin_handlers_diagnostics
 from app.bot.admin_dedupe_diagnostics import (
     parse_dedupe_collisions_limit,
     render_cross_source_dedupe_collisions,
@@ -68,14 +69,14 @@ def test_render_dedupe_shadow_report_truncates_and_shows_flags():
 
 def test_admin_dedupe_denies_non_admin(monkeypatch):
     up = _Update(chat_id=99)
-    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: False)
+    monkeypatch.setattr("app.bot.admin.router.is_admin", lambda _cid: False)
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("dedupe")))
     assert up.message.sent[-1] == "Sem permissão."
 
 
 def test_admin_dedupe_calls_service_and_renders_collisions(monkeypatch):
     up = _Update(chat_id=1)
-    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
+    monkeypatch.setattr("app.bot.admin.router.is_admin", lambda _cid: True)
     calls = {}
 
     class _DummySession:
@@ -89,11 +90,11 @@ def test_admin_dedupe_calls_service_and_renders_collisions(monkeypatch):
         calls["limit"] = limit
         return [{"fingerprint": "abc", "listing_count": 2, "source_count": 2, "sources": ["olx", "mercadolivre"], "examples": []}]
 
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.SessionLocal", _DummySession)
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.find_cross_source_fingerprint_collisions", _fake_find)
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.settings.cross_source_dedupe_enabled", False)
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.settings.cross_source_dedupe_shadow_mode", True)
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.settings.cross_source_dedupe_window_days", 30)
+    monkeypatch.setattr("app.bot.admin.diagnostics.SessionLocal", _DummySession)
+    monkeypatch.setattr("app.bot.admin.diagnostics.find_cross_source_fingerprint_collisions", _fake_find)
+    monkeypatch.setattr("app.bot.admin.diagnostics.settings.cross_source_dedupe_enabled", False)
+    monkeypatch.setattr("app.bot.admin.diagnostics.settings.cross_source_dedupe_shadow_mode", True)
+    monkeypatch.setattr("app.bot.admin.diagnostics.settings.cross_source_dedupe_window_days", 30)
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("dedupe", "collisions", "999")))
     assert calls["limit"] == 20
@@ -102,7 +103,7 @@ def test_admin_dedupe_calls_service_and_renders_collisions(monkeypatch):
 
 def test_admin_dedupe_shadow_defaults_and_caps(monkeypatch):
     up = _Update(chat_id=1)
-    monkeypatch.setattr("app.bot.handlers_admin.is_admin", lambda _cid: True)
+    monkeypatch.setattr("app.bot.admin.router.is_admin", lambda _cid: True)
     calls = {}
 
     class _DummySession:
@@ -117,8 +118,8 @@ def test_admin_dedupe_shadow_defaults_and_caps(monkeypatch):
         calls["limit"] = limit
         return {"window_hours": hours, "flags": {"enabled": False, "shadow_mode": True, "window_days": 30}, "events": {"shadow_hit": 0, "live_suppressed": 0, "evaluation_error": 0}, "top_source_pairs": [], "top_fingerprints": [], "examples": []}
 
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.SessionLocal", _DummySession)
-    monkeypatch.setattr("app.bot.admin_handlers_diagnostics.build_cross_source_dedupe_shadow_report", _fake_report)
+    monkeypatch.setattr("app.bot.admin.diagnostics.SessionLocal", _DummySession)
+    monkeypatch.setattr("app.bot.admin.diagnostics.build_cross_source_dedupe_shadow_report", _fake_report)
 
     asyncio.run(handlers_admin.cmd_admin(up, _ctx("dedupe", "shadow")))
     assert calls["hours"] == 24 and calls["limit"] == 20
