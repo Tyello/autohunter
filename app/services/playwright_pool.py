@@ -51,6 +51,7 @@ class _PlaywrightCore:
         self._contexts: Dict[Tuple[str, str], Any] = {}    # (proxy_key, source) -> BrowserContext
         self._ctx_last_used: Dict[Tuple[str, str], float] = {}
         self._evicted_contexts: int = 0
+        self._driver_pid: Optional[int] = None
 
     def start(self) -> None:
         if self._booted:
@@ -61,8 +62,64 @@ class _PlaywrightCore:
             raise RuntimeError(
                 "Playwright not installed. Run: pip install playwright && python -m playwright install chromium"
             ) from e
+
+        before: set = set()
+        try:
+            import psutil
+            before = {p.pid for p in psutil.Process(os.getpid()).children(recursive=True)}
+        except Exception:
+            pass
+
         self._p = sync_playwright().start()
         self._booted = True
+
+        try:
+            import psutil
+            after = {p.pid for p in psutil.Process(os.getpid()).children(recursive=True)}
+            new_pids = after - before
+            if new_pids:
+                # The Node driver process is spawned first; its subtree covers the
+                # browser and every child process (gpu/utility/zygote/renderer).
+                self._driver_pid = min(new_pids)
+        except Exception:
+            self._driver_pid = None
+
+    def kill_process_tree(self) -> int:
+        """Force-kill this core's driver process and everything under it.
+
+        Used when the worker thread that owns this core is wedged inside a
+        blocking Playwright call and can never process a graceful stop: without
+        this, the browser (and its gpu/utility/zygote/renderer children) is
+        simply abandoned and leaks for the lifetime of the host process.
+        """
+        if not self._driver_pid:
+            return 0
+        try:
+            import psutil
+        except Exception:
+            return 0
+        try:
+            root = psutil.Process(self._driver_pid)
+        except psutil.NoSuchProcess:
+            return 0
+        procs = []
+        try:
+            procs = root.children(recursive=True)
+        except Exception:
+            pass
+        procs.append(root)
+        killed = 0
+        for p in procs:
+            try:
+                p.kill()
+                killed += 1
+            except Exception:
+                pass
+        try:
+            psutil.wait_procs(procs, timeout=5)
+        except Exception:
+            pass
+        return killed
 
     def close(self) -> None:
         if not self._booted:
@@ -916,11 +973,23 @@ class PlaywrightPool:
             if not self._worker or not self._worker.is_alive():
                 return
             job = _Job("__stop__", kwargs={}, done=threading.Event())
+            worker = self._worker
             self._worker.q.put(job)
-        job.done.wait(timeout=15)
+        stopped_cleanly = job.done.wait(timeout=15)
         with self._lock:
+            if not stopped_cleanly:
+                # The worker thread never reached the __stop__ job, which means
+                # it's wedged inside a blocking Playwright call. It will never
+                # close its own browser, so force-kill its process tree here
+                # instead of silently forgetting the reference (that was the
+                # leak: an orphaned worker keeps its Chromium instance alive
+                # forever, once per hard-timeout/reset cycle).
+                try:
+                    worker._core.kill_process_tree()
+                except Exception:
+                    pass
             try:
-                self._worker.join(timeout=10)
+                worker.join(timeout=10)
             except Exception:
                 pass
             self._worker = None
