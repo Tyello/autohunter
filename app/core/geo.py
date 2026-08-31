@@ -12,3 +12,16 @@ STATE_NAME_TO_UF: dict[str, str] = {
 }
 
 KNOWN_STATES_UF: frozenset[str] = frozenset(STATE_NAME_TO_UF.values())
+
+# Capital city per UF. Used as a proxy location when a wishlist only specifies
+# a state (no city) and a source needs a concrete city to search by.
+UF_TO_CAPITAL: dict[str, str] = {
+    "AC": "Rio Branco", "AL": "Maceio", "AP": "Macapa", "AM": "Manaus",
+    "BA": "Salvador", "CE": "Fortaleza", "DF": "Brasilia", "ES": "Vitoria",
+    "GO": "Goiania", "MA": "Sao Luis", "MT": "Cuiaba", "MS": "Campo Grande",
+    "MG": "Belo Horizonte", "PA": "Belem", "PB": "Joao Pessoa", "PR": "Curitiba",
+    "PE": "Recife", "PI": "Teresina", "RJ": "Rio de Janeiro",
+    "RN": "Natal", "RS": "Porto Alegre", "RO": "Porto Velho",
+    "RR": "Boa Vista", "SC": "Florianopolis", "SP": "Sao Paulo",
+    "SE": "Aracaju", "TO": "Palmas",
+}

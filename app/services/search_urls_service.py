@@ -254,12 +254,46 @@ def icarros_url(query: str) -> str:
     return f"https://www.icarros.com.br/busca?anunciante=concessionaria&produto=carro&palavra-chave={q}"
 
 
-def facebook_marketplace_url(query: str) -> str:
+_FB_DEFAULT_CITY = "Sao Paulo"  # Brazil-wide base when the wishlist has no city/state.
+
+
+def _fb_city_slug(name: str) -> str:
+    """Facebook Marketplace city slug: lowercase, no accents, no separators.
+
+    Confirmed by live testing: 'São Paulo' -> 'saopaulo', 'Rio de Janeiro' ->
+    'riodejaneiro', 'Belo Horizonte' -> 'belohorizonte'.
+    """
+    s = unicodedata.normalize("NFKD", name or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = re.sub(r"[^a-zA-Z0-9]", "", s)
+    return s.lower()
+
+
+def facebook_marketplace_url(query: str, location: str | None = None) -> str:
+    """Facebook Marketplace URL builder.
+
+    `/marketplace/search/` requires an authenticated session and redirects to
+    the login wall for anonymous/headless traffic. `/marketplace/<city-slug>/vehicles`
+    with a `query` filter avoids that redirect AND scopes results to the given
+    Brazilian city/region. When the wishlist has no city/state, `_FB_DEFAULT_CITY`
+    is used as a Brazil-wide base (no country-level Marketplace endpoint exists).
+    """
+    from app.core.geo import STATE_NAME_TO_UF, UF_TO_CAPITAL
+
     q = quote_plus((query or "").strip())
-    # `/marketplace/search/` requires an authenticated session and redirects to
-    # the login wall for anonymous/headless traffic. `/marketplace/category/vehicles`
-    # with a `query` filter returns the same public listings without that redirect.
-    return f"https://www.facebook.com/marketplace/category/vehicles?exact=false&query={q}"
+
+    loc = (location or "").strip()
+    if loc.upper() in UF_TO_CAPITAL:
+        city_name = UF_TO_CAPITAL[loc.upper()]
+    elif _slugify(loc).replace("-", " ") in STATE_NAME_TO_UF:
+        city_name = UF_TO_CAPITAL[STATE_NAME_TO_UF[_slugify(loc).replace("-", " ")]]
+    elif loc:
+        city_name = loc
+    else:
+        city_name = _FB_DEFAULT_CITY
+
+    slug = _fb_city_slug(city_name) or _fb_city_slug(_FB_DEFAULT_CITY)
+    return f"https://www.facebook.com/marketplace/{slug}/vehicles?exact=false&query={q}"
 
 
 def turboclass_url(query: str) -> str:
