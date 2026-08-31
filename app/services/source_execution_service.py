@@ -648,6 +648,7 @@ def _run_source_for_all_wishlists_locked(
                 base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
                 http_status=res.get("status_code"),
                 url=res.get("url") or url,
+                max_backoff_minutes=(10080 if (src or '').lower()=='mercadolivre' else None),
             )
             payload = build_run_payload(
                 run_summary=run_summary_err,
