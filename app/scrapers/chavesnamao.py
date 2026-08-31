@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from decimal import Decimal
 from typing import Optional
 from urllib.parse import quote_plus, urlparse
 
@@ -15,17 +13,6 @@ from app.scrapers.parsing import parse_brl_price
 from app.scrapers.utils import normalize_asset_url, pick_from_srcset
 from app.scrapers.contract import finalize_listings
 from app.sources.types import ScrapeContext
-
-
-@dataclass
-class ChavesNaMaoItem:
-    external_id: str
-    title: str
-    url: str
-    thumbnail_url: Optional[str]
-    price: Optional[Decimal]
-    currency: str = "BRL"
-    location: Optional[str] = None
 
 
 # ---- URL resolver (SSR pages) ----

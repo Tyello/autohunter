@@ -106,12 +106,6 @@ def list_source_config_snapshots(db: Session) -> List[SourceConfigSnapshot]:
     return snapshots
 
 
-@dataclass
-class UpdateResult:
-    ok: bool
-    error: Optional[str] = None
-
-
 _FIELD_ALIASES = {
     "enabled": "is_enabled",
     "enable": "is_enabled",

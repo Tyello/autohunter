@@ -132,36 +132,6 @@ def _clean_title_and_extract_km(title: str) -> tuple[str, str | None]:
 
     return _clean_spaces(t) or "Novo anúncio", km
 
-def _clean_location(loc: str) -> str:
-    s = _clean_spaces(loc or "")
-    if not s:
-        return ""
-
-    # Se vier poluído, tenta recuperar "Cidade-UF" no final
-    noise = {"km", "gasolina", "mecânico", "mecanico"}
-
-    # padrão "Curitiba , PR"
-    matches = list(re.finditer(r"([A-Za-zÀ-ÿ\s]+)\s*,\s*([A-Z]{2})\b", s))
-    if matches:
-        m = matches[-1]
-        city_raw = " ".join((m.group(1) or "").split())
-        uf = m.group(2)
-        toks = [t for t in city_raw.split() if t.lower() not in noise]
-        city = " ".join(toks[-4:])
-        return f"{city}-{uf}" if city else uf
-
-    # padrão "Curitiba-PR"
-    m2 = re.search(r"(.+)-([A-Z]{2})\b\s*$", s)
-    if m2:
-        city_raw = " ".join((m2.group(1) or "").split())
-        uf = m2.group(2)
-        toks = [t for t in city_raw.split() if t.lower() not in noise]
-        city = " ".join(toks[-4:])
-        return f"{city}-{uf}" if city else uf
-
-    return s
-
-
 
 def _extract_year(title: str) -> int | None:
     t = title or ""
@@ -177,30 +147,6 @@ def _extract_year(title: str) -> int | None:
     return None
 
 
-def _score_from_text(text: str) -> int:
-    # Score simples, imediato e 100% offline.
-    t = (text or "").lower()
-
-    score = 50
-    plus = [
-        ("turbo", 10), ("manual", 8), ("si", 8), ("vti", 8), ("vtec", 6),
-        ("hatch", 5), ("hatchback", 5), ("jdm", 7), ("swap", 8),
-        ("k20", 6), ("b16", 6), ("track", 4),
-    ]
-    minus = [
-        ("batido", -20), ("sinistr", -20), ("leil", -15),
-        ("sucata", -30), ("recuperad", -20), ("multa", -8),
-        ("documento", -8),
-    ]
-
-    for k, w in plus:
-        if k in t:
-            score += w
-    for k, w in minus:
-        if k in t:
-            score += w
-
-    return max(0, min(100, int(score)))
 
 
 def _build_text(listing, notification=None) -> str:

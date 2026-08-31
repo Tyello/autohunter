@@ -59,10 +59,4 @@ async def mercadopago_webhook(request: Request, db: Session = Depends(get_db)):
         },
     )
 
-    manifest = f"id:{data_id.lower()};request-id:{x_request_id or ''};ts:{ts};"
-    computed = hmac.new(secret.encode("utf-8"), manifest.encode("utf-8"), hashlib.sha256).hexdigest()
-    logger.warning("mp_debug manifest=%r computed=%s received_v1=%s x_request_id=%r", manifest, computed, v1,
-                   x_request_id)
-    return hmac.compare_digest(computed, v1)
-
     return {"ok": True}

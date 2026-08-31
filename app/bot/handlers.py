@@ -157,24 +157,6 @@ class _AdView:
         return getattr(self._listing, item)
 
 
-def _get_active_subscription_and_plan(db, user: User):
-    if not user.account_id:
-        return None, None
-
-    row = (
-        db.query(Subscription, Plan)
-        .join(Plan, Plan.id == Subscription.plan_id)
-        .filter(Subscription.account_id == user.account_id)
-        .filter(Subscription.status == "active")
-        .order_by(Subscription.created_at.desc())
-        .first()
-    )
-    if not row:
-        return None, None
-    sub, plan = row
-    return sub, plan
-
-
 def _get_known_sources() -> set[str]:
     try:
         return {p.name.lower() for p in list_sources()}

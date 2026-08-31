@@ -21,10 +21,6 @@ MERCADOPAGO_API_BASE = "https://api.mercadopago.com"
 _KV_KEY_PREFIX = "mercadopago_webhook_payment"
 
 
-class InvalidSignatureError(Exception):
-    pass
-
-
 def build_checkout_url_with_reference(url: str, chat_id: int, plan_period: str) -> str:
     """Anexa external_reference='{chat_id}:{plan_period}' a um link de checkout do Mercado Pago."""
     parsed = urlsplit(url)

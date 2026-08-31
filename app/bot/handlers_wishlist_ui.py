@@ -440,18 +440,6 @@ async def cmd_wishlist_track_alert_off(update: Update, context: ContextTypes.DEF
     await reply_text(update, msg)
 
 
-def _extract_slot_from_message(msg: str) -> int | None:
-    import re
-
-    m = re.search(r"slot\s+(\d+)", str(msg or ""), flags=re.I)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except Exception:
-        return None
-
-
 async def _safe_edit_message_text(q, text: str) -> None:
     try:
         await q.edit_message_text(text)

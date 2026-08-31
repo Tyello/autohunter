@@ -12,12 +12,6 @@ from app.utils.fingerprint import compute_fingerprint
 from app.core.settings import settings
 
 
-def _truthy(v: str | None) -> bool:
-    if not v:
-        return False
-    return v.strip().lower() in ("1", "true", "yes", "y", "on")
-
-
 def _log_stdout_enabled() -> bool:
     return bool(settings.log_stdout)
 

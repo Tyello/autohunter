@@ -245,24 +245,6 @@ def _extract_dbimg_from_raw_html(html_text: str, base_url: str) -> Optional[str]
     return None
 
 
-def _is_tiny_image(url: str) -> bool:
-    u = (url or "").lower()
-    if "thumb" in u:
-        return True
-    m = re.search(r"[?&](?:w|width)=(\d+)", u)
-    if m:
-        try:
-            return int(m.group(1)) <= 420
-        except Exception:
-            return False
-    m2 = re.search(r"(\d{2,4})x(\d{2,4})\.(?:jpe?g|png|webp)\b", u)
-    if m2:
-        try:
-            return int(m2.group(1)) <= 420
-        except Exception:
-            return False
-    return False
-
 
 def _extract_thumbnail_any(node, base_url: str) -> Optional[str]:
     candidates: list[str] = []

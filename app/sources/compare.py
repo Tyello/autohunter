@@ -12,16 +12,6 @@ DEFAULT_THRESHOLDS = {
 }
 
 
-def _index_by(items: list[NormalizedAd], key_fn) -> dict[Any, NormalizedAd]:
-    out: dict[Any, NormalizedAd] = {}
-    for ad in items:
-        key = key_fn(ad)
-        if key is None:
-            continue
-        out[key] = ad
-    return out
-
-
 def _match(v1: list[NormalizedAd], v2: list[NormalizedAd]) -> dict[int, int]:
     matches: dict[int, int] = {}
     used_v2: set[int] = set()
