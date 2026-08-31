@@ -137,10 +137,13 @@ def _is_ml_shell_without_results(html: str) -> bool:
 def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext], timeout: int = 25) -> str:
     """Busca HTML da listagem ML priorizando HTTP e fallback browser networkidle."""
     html = _fetch_html_ml(url, ctx, timeout=timeout)
-    if not _is_ml_shell_without_results(html):
+    is_blocked = _is_ml_security_or_captcha_page(html)
+    if not is_blocked and not _is_ml_shell_without_results(html):
         return html
 
     if not (settings.enable_playwright and ctx and getattr(ctx, "browser_fallback_enabled", False)):
+        if is_blocked:
+            raise FetchBlocked(200, url, reason="ml_security_or_captcha_page")
         return html
 
     def _browser_fetch_once() -> tuple[str, str]:
