@@ -48,6 +48,31 @@ def _compile_array_sqlite(type_, compiler, **kw):
     return "TEXT"
 
 
+# Postgres accepts a plain string for a UUID column bind (e.g. an id parsed straight out of
+# Telegram callback_data). SQLite's fallback Uuid processor requires an actual uuid.UUID
+# instance, so code paths comparing a UUID column to a raw string can't be exercised against
+# the test DB without this. Widen the bind processor to accept both, matching Postgres behavior.
+_orig_uuid_bind_processor = UUID.bind_processor
+
+
+def _uuid_bind_processor_accepting_str(self, dialect):
+    inner = _orig_uuid_bind_processor(self, dialect)
+    if dialect.name == "postgresql" or not self.as_uuid or inner is None:
+        return inner
+
+    import uuid as _uuid_mod
+
+    def process(value):
+        if value is not None and not isinstance(value, _uuid_mod.UUID):
+            value = _uuid_mod.UUID(str(value))
+        return inner(value)
+
+    return process
+
+
+UUID.bind_processor = _uuid_bind_processor_accepting_str
+
+
 from app.db.base import Base
 from app.db.deps import get_db
 from app.db.session import SessionLocalHTTP, engine
