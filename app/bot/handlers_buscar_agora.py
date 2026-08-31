@@ -341,6 +341,14 @@ async def cmd_buscar_agora(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return BUSCAR_AGORA_TERM
 
 
+async def cb_buscar_agora_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point via botão de menu (MENU:SEARCH) — mesmo fluxo do comando /buscar_agora."""
+    q = update.callback_query
+    if q:
+        await q.answer()
+    return await cmd_buscar_agora(update, context)
+
+
 async def buscar_agora_on_term(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Processa termo digitado, calcula facetas e renderiza."""
     term = (update.message.text or "").strip()
@@ -631,6 +639,7 @@ def buscar_agora_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
             CommandHandler("buscar_agora", cmd_buscar_agora),
+            CallbackQueryHandler(cb_buscar_agora_start, pattern=r"^MENU:SEARCH$"),
         ],
         states={
             BUSCAR_AGORA_TERM: [

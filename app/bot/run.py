@@ -12,7 +12,7 @@ from app.bot.handlers_core import (
     cmd_help, cmd_start, cmd_status, cmd_version, cmd_wishlist_help, cmd_menu, cb_menu, cmd_digest,
     menu_create_wishlist_conversation, menu_filter_conversation, cb_session_guard,
 )
-from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit, cb_upgrade_plan_choice, quick_search_conversation
+from app.bot.handlers import cmd_buscar, cmd_wishlist, cmd_alertas, cmd_plan, cmd_upgrade, cmd_setplan, cmd_setlimit, cb_upgrade_plan_choice
 from app.bot.handlers_buscar_agora import buscar_agora_conversation
 from app.bot.handlers_debug import cmd_debug
 from app.bot.handlers_admin import cmd_admin
@@ -132,7 +132,10 @@ def main():
     app.add_handler(CommandHandler("wishlist_track_alert_on", cmd_wishlist_track_alert_on))
     app.add_handler(CommandHandler("wishlist_track_alert_off", cmd_wishlist_track_alert_off))
     app.add_handler(CallbackQueryHandler(cb_track_add, pattern=r"^(TRACK:ADD:[^:]+|TRACK:ADDWL:[^:]+:[^:]+|TRACK:ADDT:[^:]+|TRACK:CHOOSE:[^:]+)$"))
-    app.add_handler(quick_search_conversation())
+    # O botão de menu "Buscar agora" (MENU:SEARCH) agora entra pelo fluxo novo
+    # (busca facetada no banco, sem scraping ao vivo) — ver buscar_agora_conversation().
+    # quick_search_conversation() não é mais registrada: seu único entry point era
+    # MENU:SEARCH, que ficaria sombreado (primeiro registro vence) e nunca seria alcançado.
     app.add_handler(buscar_agora_conversation())
     app.add_handler(CallbackQueryHandler(cb_session_guard, pattern=r"^SESSION:(RESUME|DISCARD:MENU)$"))
     app.add_handler(CallbackQueryHandler(cb_menu, pattern=r"^MENU:[A-Z_]+$"))
