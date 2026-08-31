@@ -95,17 +95,6 @@ def get_source_config_snapshot(db: Session, source: str) -> SourceConfigSnapshot
     return snap
 
 
-def list_source_config_snapshots(db: Session) -> List[SourceConfigSnapshot]:
-    global _CACHE_LIST
-    now = _cache_now()
-    if _CACHE_LIST and now <= _CACHE_LIST[0]:
-        return list(_CACHE_LIST[1])
-    rows = list(db.execute(select(SourceConfig).order_by(SourceConfig.source.asc())).scalars().all())
-    snapshots = [_to_snapshot(r) for r in rows if r is not None]
-    _CACHE_LIST = (now + timedelta(seconds=_cache_ttl_seconds()), snapshots)
-    return snapshots
-
-
 _FIELD_ALIASES = {
     "enabled": "is_enabled",
     "enable": "is_enabled",

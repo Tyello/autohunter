@@ -39,17 +39,6 @@ def mark_failed(db: Session, notification_id, error_message: str):
     db.commit()
 
 
-def mark_failed_reason(db: Session, notification_id, reason: str, error_message: str | None = None):
-    """Marca como failed com um motivo curto e, opcionalmente, uma mensagem detalhada."""
-    row = db.query(Notification).filter(Notification.id == notification_id).one()
-    row.status = "failed"
-    row.reason = reason
-    row.error_message = (error_message or reason)[:5000]
-    row.processing_started_at = None
-    row.processing_owner = None
-    db.commit()
-
-
 def mark_suppressed_reason(db: Session, notification_id, reason: str):
     """Marca como suppressed (politica/regra de negocio), sem contar como erro."""
     row = db.query(Notification).filter(Notification.id == notification_id).one()
@@ -72,17 +61,3 @@ def notification_exists(db: Session, user_id, wishlist_id, car_listing_id) -> bo
     )
 
 
-def create_queued_if_absent(db: Session, user_id, wishlist_id, car_listing_id) -> bool:
-    if notification_exists(db, user_id, wishlist_id, car_listing_id):
-        return False
-
-    row = Notification(
-        user_id=user_id,
-        wishlist_id=wishlist_id,
-        car_listing_id=car_listing_id,
-        status="queued",
-        next_attempt_at=datetime.now(timezone.utc),
-    )
-    db.add(row)
-    db.commit()
-    return True

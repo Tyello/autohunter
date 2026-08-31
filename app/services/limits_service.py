@@ -94,11 +94,3 @@ def count_notifications_sent_last_n_days(db: Session, user_id, days: int = 7) ->
         .scalar()
     )
     return int(count or 0)
-
-def can_send_more_today(db: Session, user_id) -> bool:
-    """
-    True se ainda pode enviar hoje.
-    """
-    sent = count_sent_today(db, user_id)
-    limit = get_active_subscription_limit_for_user(db, user_id)
-    return sent < limit

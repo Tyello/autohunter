@@ -42,16 +42,6 @@ class TrackedListingResult:
     price: Decimal | None = None
 
 
-@dataclass
-class TrackingCapacitySnapshot:
-    wishlist_id: str
-    used_slots: list[int]
-    free_slots: list[int]
-    used_count: int
-    max_slots: int
-    can_add: bool
-
-
 def _build_tracked_result(
     *,
     ok: bool,
@@ -355,26 +345,6 @@ def add_tracked_listing_result(
 def add_tracked_listing(db: Session, *, user_id, wishlist_index: int, listing_ref: str) -> tuple[bool, str]:
     result = add_tracked_listing_result(db, user_id=user_id, wishlist_index=wishlist_index, listing_ref=listing_ref)
     return result.ok, result.message
-
-
-def get_tracking_capacity_snapshot(db: Session, wishlist_id) -> TrackingCapacitySnapshot:
-    rows = (
-        db.query(WishlistTrackedListing.slot)
-        .filter(WishlistTrackedListing.wishlist_id == wishlist_id)
-        .filter(WishlistTrackedListing.is_active.is_(True))
-        .order_by(WishlistTrackedListing.slot.asc())
-        .all()
-    )
-    used_slots = sorted({int(r[0]) for r in rows if r and r[0] is not None})
-    free_slots = [s for s in range(1, MAX_TRACKED_PER_WISHLIST + 1) if s not in used_slots]
-    return TrackingCapacitySnapshot(
-        wishlist_id=str(wishlist_id),
-        used_slots=used_slots,
-        free_slots=free_slots,
-        used_count=len(used_slots),
-        max_slots=MAX_TRACKED_PER_WISHLIST,
-        can_add=bool(free_slots),
-    )
 
 
 def list_tracked_listings(db: Session, *, user_id, wishlist_index: int) -> tuple[bool, str]:

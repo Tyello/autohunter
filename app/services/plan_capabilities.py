@@ -56,10 +56,6 @@ def resolve_plan_capabilities(db: Session, plan_code: str | None) -> PlanCapabil
     )
 
 
-def premium_upgrade_cta() -> str:
-    return "Use /upgrade para ver os benefícios."
-
-
 def wishlist_limit_message(max_w: int) -> str:
     return (
         "Você atingiu o limite do plano Free.\n\n"

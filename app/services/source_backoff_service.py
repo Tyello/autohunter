@@ -174,20 +174,3 @@ def mark_bug(
     st.last_payload = {"url": url, "bug": True, "backoff_minutes": minutes}
     db.add(st)
     return minutes
-
-
-def clear_backoff(db: Session, source: str, *, clear_last_effective: bool = False) -> None:
-    """Manually clear backoff counters/state for a source.
-
-    Use when a source is stuck skipping due to a long backoff window.
-    """
-    st = _get_or_create_state(db, source)
-    st.next_allowed_at = None
-    st.consecutive_blocks = 0
-    st.consecutive_failures = 0
-    if clear_last_effective:
-        st.last_effective_run_at = None
-    st.last_status = "unpaused"
-    st.last_error = None
-    st.last_payload = {"unpaused": True, "clear_last_effective": bool(clear_last_effective)}
-    db.add(st)

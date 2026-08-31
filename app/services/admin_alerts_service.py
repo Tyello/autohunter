@@ -33,18 +33,6 @@ def iter_admin_chat_ids() -> Iterable[int]:
     return _parse_admins(settings.autohunter_admins)
 
 
-def admin_alerts_diagnostic_snapshot() -> dict:
-    chats = list(iter_admin_chat_ids())
-    return {
-        "admin_alerts_enabled": bool(getattr(settings, "admin_alerts_enabled", True)),
-        "has_telegram_token": bool(settings.telegram_bot_token),
-        "configured_alert_chats": chats,
-        "configured_alert_chats_count": len(chats),
-        "raw_autohunter_admin_alert_chats": getattr(settings, "autohunter_admin_alert_chats", None),
-        "raw_autohunter_admins": getattr(settings, "autohunter_admins", None),
-    }
-
-
 def send_admin_text_with_report(text: str) -> dict:
     report = {
         "enabled": bool(getattr(settings, "admin_alerts_enabled", True)),
