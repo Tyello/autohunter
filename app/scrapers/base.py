@@ -81,7 +81,11 @@ def _ensure_session_fingerprint(sess: requests.Session) -> None:
     Rotating User-Agent on every request is a strong bot signal. We keep a
     consistent UA (and a few related headers) attached to the Session.
     """
-    if not sess.headers.get("User-Agent"):
+    ua = sess.headers.get("User-Agent") or ""
+    # requests.Session() already pre-populates User-Agent with "python-requests/x.y.z",
+    # so `not sess.headers.get("User-Agent")` never fires and this rotation was dead
+    # code. Some sites (e.g. turboclass) WAF-block that literal UA string with a 403.
+    if not ua or ua.startswith("python-requests"):
         sess.headers["User-Agent"] = random.choice(_DEFAULT_UAS)
 
     # Keep these stable too (requests will merge per-request headers on top).
