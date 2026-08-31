@@ -387,27 +387,6 @@ async def quick_search_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
-def quick_search_conversation() -> ConversationHandler:
-    return ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(cb_quick_search_start, pattern=r"^MENU:SEARCH$")
-        ],
-        states={
-            QUICK_SEARCH_QUERY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, quick_search_on_text),
-                MessageHandler(filters.COMMAND, quick_search_cancel),
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancelar", quick_search_cancel),
-            CommandHandler("cancel", quick_search_cancel),
-        ],
-        name="quick_search",
-        persistent=False,
-        per_chat=True,
-        per_user=True,
-        per_message=False,
-    )
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await maybe_guard_active_session_command(update, context, target="search"):

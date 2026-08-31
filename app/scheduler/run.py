@@ -21,7 +21,6 @@ from sqlalchemy import select
 
 from app.models.source_config import SourceConfig
 from app.models.source_state import SourceState
-from app.services.source_execution_service import run_source_for_all_wishlists as _exec_source_for_all_wishlists
 from app.services.source_backoff_service import is_source_allowed
 from app.services.source_configs_service import ensure_source_configs, get_source_config_snapshot
 from app.services.scrape_jobs_service import enqueue_job, count_active_jobs

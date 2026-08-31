@@ -113,11 +113,6 @@ def is_auction_source_user_eligible(db: Session, source_key: str) -> bool:
     return bool(getattr(cfg, "is_enabled", False) and getattr(cfg, "user_eligible", False))
 
 
-def list_enabled_auction_sources(db: Session) -> set[str]:
-    ensure_auction_source_configs(db)
-    return {item.key for item in list_auction_sources() if is_auction_source_enabled(db, item.key)}
-
-
 def list_user_eligible_auction_sources(db: Session) -> set[str]:
     ensure_auction_source_configs(db)
     return {item.key for item in list_auction_sources() if is_auction_source_user_eligible(db, item.key)}

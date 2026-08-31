@@ -112,10 +112,3 @@ def is_auction_source_user_eligible(source: str) -> bool:
     return bool(definition and definition.status in {"active", "production_ready"})
 
 
-def list_user_eligible_auction_source_keys() -> set[str]:
-    return {item.key for item in _AUCTION_SOURCES if item.status in {"active", "production_ready"}}
-
-
-def render_user_eligible_auction_sources_hint() -> str:
-    labels = [item.aliases[0] for item in _AUCTION_SOURCES if item.status in {"active", "production_ready"}]
-    return f"Sources elegíveis: {'|'.join(labels)}"

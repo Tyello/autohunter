@@ -169,12 +169,6 @@ class OlxItem:
     location: Optional[str] = None
 
 
-def build_olx_search_url(query: str, page: int = 1) -> str:
-    q = quote_plus(query.strip())
-    #return f"https://www.olx.com.br/brasil?q={q}&o={page}"
-    return f"https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q={q}&o={page}"
-
-
 def _walk(obj: Any) -> Iterable[Any]:
     """Percorre estrutura JSON (dict/list) produzindo todos os nós."""
     if isinstance(obj, dict):

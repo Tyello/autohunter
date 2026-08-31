@@ -3,7 +3,6 @@ from app.services.auction_source_config_service import (
     reconcile_auction_source_config_metadata,
     is_auction_source_enabled,
     is_auction_source_user_eligible,
-    list_enabled_auction_sources,
     list_user_eligible_auction_sources,
 )
 from app.models.source_config import SourceConfig
@@ -15,7 +14,6 @@ def test_bootstrap_defaults(db):
     assert is_auction_source_user_eligible(db, "mega_auctions") is False
     assert is_auction_source_enabled(db, "copart_auctions") is False
     assert "vip_auctions" in list_user_eligible_auction_sources(db)
-    assert "copart_auctions" not in list_enabled_auction_sources(db)
 
 
 def test_existing_auction_row_retypes_without_overwriting_operational_decisions(db):

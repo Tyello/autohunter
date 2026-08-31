@@ -55,12 +55,3 @@ def normalize_listing_url(url: str, source: str | None = None, external_id: str 
             pass
 
     return strip_query_fragment(u)
-
-
-def open_ad_reply_markup_json(url: str, button_text: str = "Abrir anúncio") -> str:
-    """Return reply_markup JSON for Telegram HTTP API."""
-    u = (url or "").strip()
-    if not u:
-        return ""
-    payload = {"inline_keyboard": [[{"text": button_text, "url": u}]]}
-    return json.dumps(payload, ensure_ascii=False)

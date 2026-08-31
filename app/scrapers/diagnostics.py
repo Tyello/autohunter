@@ -49,20 +49,6 @@ class ScrapeDiagnostics:
             return
         self.notes[key] = value
 
-    def count_status(self, prefix: str, status_code: int | None) -> None:
-        if not prefix or status_code is None:
-            return
-        try:
-            sc = int(status_code)
-        except Exception:
-            return
-        m = self.notes.get(f"{prefix}_statuses")
-        if not isinstance(m, dict):
-            m = {}
-            self.notes[f"{prefix}_statuses"] = m
-        k = str(sc)
-        m[k] = int(m.get(k, 0)) + 1
-
     def snapshot(self) -> Dict[str, Any]:
         # Flat keys make admin formatting trivial.
         snap: Dict[str, Any] = {}
@@ -107,45 +93,3 @@ def using_diagnostics(diag: ScrapeDiagnostics):
         _CURRENT.reset(token)
 
 
-def merge_snapshots(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Merge two snapshot dicts.
-
-    - ints are summed
-    - bools are ORed
-    - *_statuses dicts are merged by summing counts
-    - everything else prefers `a` unless missing
-    """
-
-    out: Dict[str, Any] = dict(a or {})
-    if not b:
-        return out
-
-    for k, v in b.items():
-        if v is None:
-            continue
-        if isinstance(v, bool):
-            out[k] = bool(out.get(k, False)) or v
-            continue
-        if isinstance(v, int):
-            if isinstance(out.get(k), int):
-                out[k] = int(out.get(k, 0)) + v
-            else:
-                out[k] = v
-            continue
-        if k.endswith("_statuses") and isinstance(v, dict):
-            cur = out.get(k)
-            if not isinstance(cur, dict):
-                cur = {}
-                out[k] = cur
-            for sk, sv in v.items():
-                try:
-                    cur[sk] = int(cur.get(sk, 0)) + int(sv)
-                except Exception:
-                    pass
-            continue
-
-        # default: keep existing unless missing
-        if k not in out or out.get(k) in (None, ""):
-            out[k] = v
-
-    return out

@@ -117,24 +117,3 @@ def build_preset_rule(wishlist_name: str) -> MatchRule:
         exclude_any=tuple(dict.fromkeys(exclude_any)),
         min_score=min_score,
     )
-
-
-def explain(title: str, rule: MatchRule) -> dict:
-    """Explain matching decisions (useful for debugging false positives)."""
-    t = normalize(title)
-    tok = set(t.split())
-    return {
-        "title_norm": t,
-        "tokens": sorted(tok),
-        "include_all_ok": _contains_all(tok, rule.include_all) if rule.include_all else True,
-        "include_any_ok": _contains_any(tok, rule.include_any) if rule.include_any else True,
-        "excluded": [w for w in rule.exclude_any if w in tok],
-        "score": match_score(title, rule),
-        "min_score": rule.min_score,
-        "rule": {
-            "name": rule.name,
-            "include_all": rule.include_all,
-            "include_any": rule.include_any,
-            "exclude_any": rule.exclude_any,
-        },
-    }

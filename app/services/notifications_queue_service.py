@@ -361,8 +361,57 @@ def queue_notifications_for_matches_diag(
 
     to_queue = new_listings if cap is None else new_listings[:cap]
 
+    # Score v2: batch fetch cohort market stats (cheap)
+    stats_map = {}
+    try:
+        stats_map = batch_get_market_stats(db, to_queue)
+    except Exception:
+        # Never let stats retrieval break queuing (table may not exist yet in some envs).
+        stats_map = {}
+
+    ref_month = current_reference_month()
+    fipe_rows = {}
+    try:
+        keys = []
+        for l in to_queue:
+            keys.extend(listing_vehicle_keys(l))
+        if keys:
+            with db.begin_nested():
+                rows = db.query(FipePrice).filter(FipePrice.reference_month == ref_month).filter(FipePrice.vehicle_key.in_(list(dict.fromkeys(keys)))).all()
+                fipe_rows = {str(r.vehicle_key): r.fipe_price for r in (rows or [])}
+    except SQLAlchemyError:
+        fipe_rows = {}
+    except Exception:
+        fipe_rows = {}
+
     queued = 0
     for listing in to_queue:
+        ms = None
+        try:
+            k = cohort_key_for_listing(listing)
+            if k:
+                ms = stats_map.get(k)
+        except Exception:
+            ms = None
+
+        # Compute score breakdown (wishlist-specific), incl. FIPE fallback + reactive enqueue
+        try:
+            lkeys = listing_vehicle_keys(listing)
+            fipe = next((fipe_rows.get(k) for k in lkeys if k in fipe_rows), None)
+            if fipe is None:
+                fipe = _fallback_fipe_price_via_catalog(db, listing)
+                # Enqueue reactive FIPE lookup if catalog fallback returned None
+                if fipe is None:
+                    _enqueue_reactive_fipe_lookup(db, wishlist, listing)
+            rarity_ratio = None
+            rarity_sample = int(ms.sample_size or 0) if ms else None
+            if rarity_sample and rarity_sample > 0:
+                rarity_ratio = 1.0 / float(rarity_sample)
+            sres = score_ad(listing, wishlist, ms, fipe_price=fipe, rarity_ratio=rarity_ratio, rarity_sample_size=rarity_sample)
+        except Exception:
+            # Never block queueing due to scoring errors; fall back to minimal breakdown
+            sres = None
+
         try:
             with db.begin_nested():
                 db.add(
@@ -372,6 +421,8 @@ def queue_notifications_for_matches_diag(
                         car_listing_id=listing.id,
                         status="queued",
                         error_message=None,
+                        score_v2=(sres.total if sres else None),
+                        score_breakdown=(sres.to_dict() if sres else None),
                         next_attempt_at=datetime.now(timezone.utc),
                         max_attempts=int(getattr(settings, "notification_max_attempts", 3) or 3),
                     )

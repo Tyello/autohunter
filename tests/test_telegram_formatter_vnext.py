@@ -364,12 +364,35 @@ def test_missing_price_shows_explicit_not_informed_badge():
 
 
 def test_fipe_badge_when_delta_exists_in_breakdown():
+    """Regression: score_v2.py (app/scoring/score_v2.py) nests the FIPE delta at
+    market_context["fipe"]["delta_vs_fipe_pct"] — it never writes a top-level
+    delta_vs_fipe_pct key. The formatter must read from that real shape, not a
+    flattened one that score_v2 never actually produces.
+    """
     from app.notifications.telegram_formatter import format_ad_message
 
-    payload_below = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": -12, "reasons": ["ok"]}))
-    payload_above = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": 15, "reasons": ["ok"]}))
+    payload_below = format_ad_message(_base_ad(score_breakdown={
+        "total": 80, "reasons": ["ok"],
+        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": -12}},
+    }))
+    payload_above = format_ad_message(_base_ad(score_breakdown={
+        "total": 80, "reasons": ["ok"],
+        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": 15}},
+    }))
     assert "12% abaixo da FIPE" in payload_below.text
     assert "15% acima da FIPE" in payload_above.text
+
+
+def test_fipe_badge_absent_with_legacy_flat_breakdown_shape():
+    """A flat top-level delta_vs_fipe_pct (the shape score_v2 never produces) must not
+    be picked up by accident — guards against silently reintroducing the old bug where
+    the formatter read the wrong key and the badge always rendered nothing in production.
+    """
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": -12, "reasons": ["ok"]}))
+    assert "abaixo da FIPE" not in payload.text
+    assert "acima da FIPE" not in payload.text
 
 
 def test_long_title_truncates_intelligently():

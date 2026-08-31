@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
 
 from sqlalchemy.orm import Session, selectinload
 
@@ -158,11 +157,3 @@ def mark_notification_failed_no_destination(row: Notification) -> None:
     row.processing_started_at = None
     row.processing_owner = None
     row.next_attempt_at = None
-
-
-def summarize_statuses(rows: Iterable[Notification]) -> dict[str, int]:
-    out = {"queued": 0, "processing": 0, "sent": 0, "failed": 0, "suppressed": 0, "discarded": 0}
-    for row in rows:
-        if row.status in out:
-            out[row.status] += 1
-    return out

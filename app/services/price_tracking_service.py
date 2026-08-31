@@ -78,23 +78,3 @@ def sync_tracked_listing_price(
     )
 
     return PriceTrackingResult(str(tracked.id) if tracked.id else None, str(listing.id), tracked.listing_status or "active", direction, True, should_alert)
-
-
-def sync_price_tracking_for_listings(db: Session, listings: list[CarListing], now: datetime | None = None) -> list[PriceTrackingResult]:
-    if not listings:
-        return []
-    listing_map = {row.id: row for row in listings if getattr(row, "id", None)}
-    if not listing_map:
-        return []
-
-    tracked_rows = (
-        db.query(WishlistTrackedListing)
-        .filter(WishlistTrackedListing.car_listing_id.in_(list(listing_map.keys())))
-        .all()
-    )
-
-    out: list[PriceTrackingResult] = []
-    for tracked in tracked_rows:
-        listing = listing_map.get(tracked.car_listing_id)
-        out.append(sync_tracked_listing_price(db, tracked, listing, now=now))
-    return out

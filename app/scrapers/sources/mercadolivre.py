@@ -16,7 +16,7 @@ import json
 import time
 
 from bs4 import BeautifulSoup
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 from app.scrapers.scraper_base import BaseScraper
 from app.scrapers.scraper_base.fetcher import FetchResult
@@ -55,13 +55,6 @@ class MercadoLivreScraper(BaseScraper):
             slug = "carro"
 
         return f"{self.BASE_URL}{self.VEHICLES_PREFIX}{slug}"
-
-    def build_api_search_url(self, query: str) -> str:
-        """Mantém endpoint da API pública para compatibilidade/fallback explícito."""
-        return (
-            "https://api.mercadolibre.com/sites/MLB/search"
-            f"?q={quote_plus(query or '')}&category=MLB1743"
-        )
 
     def _fetch_content(self, search_url: str, ctx):
         """Fetch V2 alinhado ao V1: HTML + fallback browser networkidle."""

@@ -40,16 +40,3 @@ def source_audit_dir() -> Path:
 
 def playwright_browsers_dir() -> Path:
     return _norm(settings.playwright_browsers_dir)
-
-
-def ensure_runtime_dirs() -> None:
-    for fn in (
-        state_dir,
-        cache_dir,
-        log_dir,
-        playwright_storage_dir,
-        health_dir,
-        source_audit_dir,
-        playwright_browsers_dir,
-    ):
-        _ensure(fn())

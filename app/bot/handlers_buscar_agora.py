@@ -97,7 +97,6 @@ def _bucket_to_condition(facet: str, bucket: str | None) -> list:
 
     elif facet == "price":
         # Normaliza vírgulas/pontos para parsing
-        bucket_clean = bucket.replace(".", "").replace(",", "")
         try:
             if bucket == "< 20.000":
                 return [CarListing.price < 20000]
@@ -117,7 +116,6 @@ def _bucket_to_condition(facet: str, bucket: str | None) -> list:
             return []
 
     elif facet == "mileage_km":
-        bucket_clean = bucket.replace(".", "").replace(",", "").replace(" km", "")
         try:
             if bucket == "< 20.000 km":
                 return [CarListing.mileage_km < 20000]

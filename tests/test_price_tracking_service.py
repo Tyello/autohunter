@@ -8,7 +8,7 @@ from app.models.car_listing import CarListing
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
-from app.services.price_tracking_service import sync_price_tracking_for_listings, sync_tracked_listing_price
+from app.services.price_tracking_service import sync_tracked_listing_price
 
 
 def _mk(db, *, tracked_price=Decimal('100000'), listing_price=Decimal('100000')):
@@ -73,14 +73,3 @@ def test_dedupe_same_alert_price(db):
     tracked.last_price_drop_alert_price = Decimal('95000')
     res = sync_tracked_listing_price(db, tracked, listing)
     assert res.should_alert_price_drop is False
-
-
-def test_batch_sync_only_known_tracking(db):
-    listing, tracked = _mk(db)
-    extra = CarListing(id=uuid.uuid4(), source='olx', external_id='y', title='Y', url='https://y', price=Decimal('120000'), location='SP', currency='BRL', extras={})
-    db.add(extra)
-    db.commit()
-    listing.price = Decimal('99000')
-    out = sync_price_tracking_for_listings(db, [listing, extra])
-    assert len(out) == 1
-    assert out[0].tracked_id == str(tracked.id)

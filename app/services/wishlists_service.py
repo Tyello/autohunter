@@ -416,23 +416,6 @@ def numeric_filter_match(value: Optional[int], operator: str, target: Optional[i
     return False
 
 
-def year_in_directive_range(year: Optional[int], year_min: Optional[int], year_max: Optional[int]) -> bool:
-    """Valida um ano contra as diretivas extraídas.
-
-    **INCLUSIVO nas bordas**:
-      - year_min => year >= year_min
-      - year_max => year <= year_max
-    """
-    if year is None:
-        return False
-
-    if year_min is not None and not numeric_filter_match(year, "gte", year_min):
-        return False
-    if year_max is not None and not numeric_filter_match(year, "lte", year_max):
-        return False
-    return True
-
-
 def _as_utc_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None

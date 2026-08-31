@@ -517,3 +517,115 @@ def test_enqueue_reactive_fipe_lookup_never_raises_on_db_error(db, monkeypatch):
     from app.models.fipe_lookup_request import FipeLookupRequest
     reqs = db.query(FipeLookupRequest).filter(FipeLookupRequest.wishlist_id == wishlist.id).all()
     assert len(reqs) == 0
+
+
+def test_queue_notifications_diag_sets_score_breakdown(db, monkeypatch):
+    """Regression: queue_notifications_for_matches_diag is the variant actually called by
+    app/scheduler/jobs.py in production. It must compute score_v2/score_breakdown just like
+    queue_notifications_for_matches, otherwise the Telegram FIPE comparison badge
+    (delta_vs_fipe_pct) never renders for real notifications.
+    """
+    user = _make_user(db)
+    wishlist = _make_wishlist(db, user)
+    listing = _make_listing(db, make="Audi", model="A4", year=2019)
+
+    def mock_resolve(db_arg, listing=None, reference_month=None, limit=None):
+        return {"status": "insufficient_data"}
+
+    def mock_score_ad(*args, **kwargs):
+        class MockResult:
+            total = 50
+            def to_dict(self):
+                return {"delta_vs_fipe_pct": -12.5}
+        return MockResult()
+
+    monkeypatch.setattr("app.services.notifications_queue_service.resolve_listing_to_fipe_candidates", mock_resolve)
+    monkeypatch.setattr("app.services.notifications_queue_service.score_ad", mock_score_ad)
+
+    result = svc.queue_notifications_for_matches_diag(db, wishlist, [listing])
+
+    assert result["queued"] == 1
+    from app.models.notification import Notification
+    notif = db.query(Notification).filter(Notification.wishlist_id == wishlist.id).first()
+    assert notif is not None
+    assert notif.score_v2 == 50
+    assert notif.score_breakdown == {"delta_vs_fipe_pct": -12.5}
+
+
+def test_queue_notifications_diag_enqueues_reactive_fipe_lookup(db, monkeypatch):
+    """Regression: the reactive FIPE bootstrap (spec 010) must fire from the diag variant
+    too, since that is the path the scheduler actually calls.
+    """
+    user = _make_user(db)
+    wishlist = _make_wishlist(db, user)
+    listing = _make_listing(db, make="Audi", model="A4", year=None)
+    listing.title = "Audi A4 2019"
+    db.add(listing)
+    db.commit()
+
+    def mock_resolve(db_arg, listing=None, reference_month=None, limit=None):
+        return {"status": "insufficient_data"}
+
+    def mock_score_ad(*args, **kwargs):
+        class MockResult:
+            total = 50
+            def to_dict(self):
+                return {}
+        return MockResult()
+
+    monkeypatch.setattr("app.services.notifications_queue_service.resolve_listing_to_fipe_candidates", mock_resolve)
+    monkeypatch.setattr("app.services.notifications_queue_service.score_ad", mock_score_ad)
+
+    result = svc.queue_notifications_for_matches_diag(db, wishlist, [listing])
+
+    assert result["queued"] == 1
+    from app.models.fipe_lookup_request import FipeLookupRequest
+    reqs = db.query(FipeLookupRequest).filter(FipeLookupRequest.wishlist_id == wishlist.id).all()
+    assert len(reqs) == 1
+    assert reqs[0].listing_make == "Audi"
+    assert reqs[0].listing_model == "A4"
+    assert reqs[0].target_year == 2019
+
+
+def test_e2e_fipe_price_flows_from_queue_to_telegram_badge(db):
+    """True end-to-end: real score_ad (no mocking) + real format_ad_message.
+
+    Wishlist match -> queue_notifications_for_matches_diag (production scheduler path)
+    -> Notification.score_breakdown -> telegram_formatter badge text. Exercises the exact
+    chain a real user would see, with no shortcuts on either end. This is the pair of bugs
+    a purely unit-level test suite missed: (1) the diag queueing path never computed FIPE/
+    score at all, and (2) even when it did, the formatter read delta_vs_fipe_pct from the
+    wrong (flat) location while score_v2 nests it under market_context["fipe"].
+    """
+    from app.models.fipe_price import FipePrice
+    from app.models.notification import Notification
+    from app.services.fipe_service import current_reference_month, listing_vehicle_keys
+    from app.notifications.telegram_formatter import format_ad_message
+
+    user = _make_user(db)
+    wishlist = _make_wishlist(db, user)
+    listing = _make_listing(db, make="Audi", model="A4", year=2019)
+
+    key = listing_vehicle_keys(listing)[0]
+    db.add(FipePrice(
+        vehicle_key=key,
+        reference_month=current_reference_month(),
+        fipe_price=Decimal("32000.00"),
+    ))
+    db.commit()
+
+    result = svc.queue_notifications_for_matches_diag(db, wishlist, [listing])
+    assert result["queued"] == 1
+
+    notif = db.query(Notification).filter(Notification.wishlist_id == wishlist.id).first()
+    assert notif is not None
+    assert notif.score_breakdown is not None
+    fipe_ctx = (notif.score_breakdown.get("market_context") or {}).get("fipe") or {}
+    assert fipe_ctx.get("fipe_price") == 32000.0
+    assert fipe_ctx.get("delta_vs_fipe_pct") is not None
+
+    # notification_delivery_service attaches score_breakdown onto the listing object
+    # before calling format_ad_message; replicate that here.
+    listing.score_breakdown = notif.score_breakdown
+    payload = format_ad_message(listing)
+    assert "FIPE" in payload.text

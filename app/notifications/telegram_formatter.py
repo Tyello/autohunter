@@ -181,7 +181,9 @@ def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
     if dtxt:
         return f"💰 {dtxt}"
 
-    delta_vs_fipe_pct = breakdown.get("delta_vs_fipe_pct")
+    fipe_context = market_context.get("fipe")
+    fipe_context = fipe_context if isinstance(fipe_context, dict) else {}
+    delta_vs_fipe_pct = fipe_context.get("delta_vs_fipe_pct")
     if delta_vs_fipe_pct is not None:
         try:
             fipe_delta = float(delta_vs_fipe_pct)

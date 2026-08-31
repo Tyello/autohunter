@@ -41,13 +41,6 @@ def normalize_title(value: str | None) -> str | None:
     return cleaned or None
 
 
-def parse_mileage(value: str | None) -> int | None:
-    if not value:
-        return None
-    hit = re.search(r"(\d[\d\.,\s]{1,15})\s*(?:km|quil[oô]metros?)", value, flags=re.I)
-    return parse_int_br(hit.group(1) if hit else value)
-
-
 def absolute_url(base_url: str, url: str | None) -> str | None:
     if not url:
         return None

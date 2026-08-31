@@ -43,21 +43,6 @@ def _row_to_stats(row: MarketStatsCohort) -> MarketStats:
     )
 
 
-def get_market_stats(db: Session, listing) -> MarketStats | None:
-    k = cohort_key_for_listing(listing)
-    if not k:
-        return None
-    mk, md, y = k
-    row = (
-        db.query(MarketStatsCohort)
-        .filter(MarketStatsCohort.make == mk)
-        .filter(MarketStatsCohort.model == md)
-        .filter(MarketStatsCohort.year == y)
-        .one_or_none()
-    )
-    return _row_to_stats(row) if row else None
-
-
 def batch_get_market_stats(db: Session, listings: Iterable) -> dict[tuple[str, str, int], MarketStats]:
     """Fetch MarketStats for many listings with 1 query."""
     keys: list[tuple[str, str, int]] = []

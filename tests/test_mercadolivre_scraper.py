@@ -31,11 +31,6 @@ def test_build_search_url(scraper):
     assert "api.mercadolibre.com" not in url
 
 
-def test_build_api_search_url_compat(scraper):
-    url = scraper.build_api_search_url("civic si")
-    assert "api.mercadolibre.com" in url
-
-
 def test_is_vehicle_listing(scraper):
     """Testa detecção de anúncios de veículos."""
     # Veículo

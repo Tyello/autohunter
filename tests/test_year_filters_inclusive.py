@@ -3,8 +3,15 @@ import pytest
 from app.services.wishlists_service import (
     _extract_year_directives,
     numeric_filter_match,
-    year_in_directive_range,
 )
+
+
+def _in_range(year, ymin, ymax) -> bool:
+    if ymin is not None and not numeric_filter_match(year, "gte", ymin):
+        return False
+    if ymax is not None and not numeric_filter_match(year, "lte", ymax):
+        return False
+    return True
 
 
 @pytest.mark.parametrize(
@@ -29,11 +36,11 @@ def test_extract_year_range_between_is_inclusive_on_bounds():
     assert ymax == 2015
 
     # INCLUSIVO: 2014 e 2015 entram
-    assert year_in_directive_range(2014, ymin, ymax) is True
-    assert year_in_directive_range(2015, ymin, ymax) is True
+    assert _in_range(2014, ymin, ymax) is True
+    assert _in_range(2015, ymin, ymax) is True
     # fora do range não entra
-    assert year_in_directive_range(2013, ymin, ymax) is False
-    assert year_in_directive_range(2016, ymin, ymax) is False
+    assert _in_range(2013, ymin, ymax) is False
+    assert _in_range(2016, ymin, ymax) is False
 
 
 def test_extract_year_range_ate_is_inclusive():
@@ -42,8 +49,8 @@ def test_extract_year_range_ate_is_inclusive():
     assert ymin is None
     assert ymax == 2015
 
-    assert year_in_directive_range(2015, ymin, ymax) is True  # INCLUSIVO
-    assert year_in_directive_range(2016, ymin, ymax) is False
+    assert _in_range(2015, ymin, ymax) is True  # INCLUSIVO
+    assert _in_range(2016, ymin, ymax) is False
 
 
 def test_extract_year_range_ate_without_accent_is_inclusive():
@@ -52,8 +59,8 @@ def test_extract_year_range_ate_without_accent_is_inclusive():
     assert ymin is None
     assert ymax == 2015
 
-    assert year_in_directive_range(2015, ymin, ymax) is True  # INCLUSIVO
-    assert year_in_directive_range(2014, ymin, ymax) is True
+    assert _in_range(2015, ymin, ymax) is True  # INCLUSIVO
+    assert _in_range(2014, ymin, ymax) is True
 
 
 def test_extract_year_range_hyphen_is_inclusive():
@@ -62,8 +69,8 @@ def test_extract_year_range_hyphen_is_inclusive():
     assert ymin == 2014
     assert ymax == 2015
 
-    assert year_in_directive_range(2014, ymin, ymax) is True
-    assert year_in_directive_range(2015, ymin, ymax) is True
+    assert _in_range(2014, ymin, ymax) is True
+    assert _in_range(2015, ymin, ymax) is True
 
 
 def test_extract_year_range_swapped_is_normalized():
@@ -72,5 +79,5 @@ def test_extract_year_range_swapped_is_normalized():
     assert ymin == 2014
     assert ymax == 2015
 
-    assert year_in_directive_range(2014, ymin, ymax) is True
-    assert year_in_directive_range(2015, ymin, ymax) is True
+    assert _in_range(2014, ymin, ymax) is True
+    assert _in_range(2015, ymin, ymax) is True
