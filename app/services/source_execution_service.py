@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.settings import settings
 from app.db.session import SessionLocal, session_scope
@@ -332,7 +332,54 @@ def run_source_for_all_wishlists(
     - admin runall (force=True)
 
     It is DB-driven: enable/schedule/cooldown/rate-limit/proxy/browser flags come from `source_configs`.
+
+    Guarded by a per-source Postgres advisory lock (session-scoped, non-blocking): the
+    in-process `source_concurrency.get_source_semaphore` only protects against overlap
+    within one OS process, but the scheduler and the bot run as separate processes, so the
+    same source could be scraped/ingested/reconciled by both at once, holding SourceState
+    and telemetry rows locked for the whole pipeline duration (this showed up as the
+    highest-cost `UPDATE source_states` / `DELETE telemetry_events` queries in
+    pg_stat_statements). If another process already holds the lock for this source, skip
+    immediately instead of blocking or racing.
     """
+    src = (source_name or "").strip().lower()
+    is_pg = db.bind.dialect.name == "postgresql" if db.bind is not None else False
+    lock_key = f"source_exec:{src}"
+    got_lock = True
+    if is_pg:
+        got_lock = bool(
+            db.execute(text("SELECT pg_try_advisory_lock(hashtext(:key))"), {"key": lock_key}).scalar()
+        )
+    if not got_lock:
+        return {
+            "ok": True,
+            "status": "skipped",
+            "reason": "already_running",
+            "run_reason": (run_reason or kind or "scheduler").strip().lower(),
+        }
+    try:
+        return _run_source_for_all_wishlists_locked(
+            db,
+            source_name,
+            kind=kind,
+            force=force,
+            ignore_backoff=ignore_backoff,
+            run_reason=run_reason,
+        )
+    finally:
+        if is_pg:
+            db.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": lock_key})
+
+
+def _run_source_for_all_wishlists_locked(
+    db: Session,
+    source_name: str,
+    *,
+    kind: str = "scheduler",
+    force: bool = False,
+    ignore_backoff: bool = False,
+    run_reason: str | None = None,
+) -> Dict[str, Any]:
     src = (source_name or "").strip().lower()
     plugin = get_source(src)
     component = f"{kind}_{src}"

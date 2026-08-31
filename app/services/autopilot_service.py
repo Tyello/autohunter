@@ -255,6 +255,22 @@ def _candidate_blocked_spike(db: Session, now: datetime) -> List[FindingCandidat
         .all()
     )
 
+    # Baseline blocked rate for all sources at once (was N+1: one query per source
+    # in the loop below, which alone accounted for ~42% of total DB time in prod —
+    # see pg_stat_statements). Sources with no baseline runs simply default to (0, 0).
+    baseline_rows = (
+        db.query(
+            SourceRun.source.label("source"),
+            func.count(SourceRun.id).label("total"),
+            func.sum(case((SourceRun.status == "blocked", 1), else_=0)).label("blocked"),
+        )
+        .filter(SourceRun.created_at >= b_start)
+        .filter(SourceRun.created_at < b_end)
+        .group_by(SourceRun.source)
+        .all()
+    )
+    baseline_by_source = {r.source: (int(r.total or 0), int(r.blocked or 0)) for r in baseline_rows}
+
     out: List[FindingCandidate] = []
     for row in window:
         src = row.source
@@ -264,19 +280,7 @@ def _candidate_blocked_spike(db: Session, now: datetime) -> List[FindingCandidat
             continue
         blocked_rate = _calc_rates(total, blocked)
 
-        # Baseline blocked rate for this source
-        b = (
-            db.query(
-                func.count(SourceRun.id).label("total"),
-                func.sum(case((SourceRun.status == "blocked", 1), else_=0)).label("blocked"),
-            )
-            .filter(SourceRun.source == src)
-            .filter(SourceRun.created_at >= b_start)
-            .filter(SourceRun.created_at < b_end)
-            .first()
-        )
-        b_total = int((b.total if b else 0) or 0)
-        b_blocked = int((b.blocked if b else 0) or 0)
+        b_total, b_blocked = baseline_by_source.get(src, (0, 0))
         b_rate = _calc_rates(b_total, b_blocked)
 
         # Trigger: blocked >= 30% and significantly above baseline
