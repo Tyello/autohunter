@@ -256,8 +256,10 @@ def icarros_url(query: str) -> str:
 
 def facebook_marketplace_url(query: str) -> str:
     q = quote_plus((query or "").strip())
-    # Location will be resolved by Facebook itself; Playwright will return final_url after redirects.
-    return f"https://www.facebook.com/marketplace/search/?query={q}"
+    # `/marketplace/search/` requires an authenticated session and redirects to
+    # the login wall for anonymous/headless traffic. `/marketplace/category/vehicles`
+    # with a `query` filter returns the same public listings without that redirect.
+    return f"https://www.facebook.com/marketplace/category/vehicles?exact=false&query={q}"
 
 
 def turboclass_url(query: str) -> str:
