@@ -402,18 +402,6 @@ class TestCbBuscarAgoraCreateAlert:
         import inspect
         assert inspect.iscoroutinefunction(cb_buscar_agora_create_alert)
 
-    def test_create_alert_context_keys_initialized(self):
-        """Testa que contexto de buscar_agora mantém estrutura esperada."""
-        context_user_data = {
-            "buscar_agora_term": "civic si até 120000 sp",
-            "buscar_agora_extra_filters_struct": [],
-        }
-        # Verifica que as chaves esperadas estão presentes
-        assert "buscar_agora_term" in context_user_data
-        assert "buscar_agora_extra_filters_struct" in context_user_data
-        # Verifica que extra_filters_struct é lista
-        assert isinstance(context_user_data["buscar_agora_extra_filters_struct"], list)
-
 
 # ============================================================================
 # Classes de mock para testes de handlers assíncronos (Etapa 2)
