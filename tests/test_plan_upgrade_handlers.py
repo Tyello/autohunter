@@ -37,6 +37,8 @@ def test_cmd_upgrade_uses_current_commercial_values(monkeypatch):
     async def _reply(_update, text, **_kwargs):
         sent.append(text)
     monkeypatch.setattr(handlers, "reply_text", _reply)
+    monkeypatch.setattr(handlers.settings, "mercado_pago_monthly_payment_link", None)
+    monkeypatch.setattr(handlers.settings, "mercado_pago_annual_payment_link", None)
     asyncio.run(handlers.cmd_upgrade(_Update(), types.SimpleNamespace()))
     text = sent[-1]
     assert "Mensal" in text

@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import pytest
 
 from app.bot.admin import deploy as admin_handlers_deploy
+from app.core.settings import settings
 from app.models.admin_deploy_audit import AdminDeployAudit
 
 
@@ -17,6 +18,8 @@ class DummyMsg:
 
 
 def test_deploy_history_renders(db, monkeypatch):
+    monkeypatch.setattr(settings, "autohunter_admins", None)
+    monkeypatch.setattr(settings, "autohunter_admin_chat_ids", None)
     now = datetime.now(timezone.utc)
     db.add(AdminDeployAudit(operation_id="op1", chat_id=1, requested_at=now - timedelta(minutes=2), started_at=now - timedelta(minutes=2), finished_at=now - timedelta(minutes=1), status="succeeded", branch="main", before_commit="a", after_commit="b", services_json={"bot": "ok"}, summary="done"))
     db.add(AdminDeployAudit(operation_id="op2", chat_id=1, requested_at=now - timedelta(minutes=1), started_at=now - timedelta(minutes=1), finished_at=now, status="failed", branch="main", before_commit="b", after_commit="c", services_json=["api"], error_message="boom", summary="err"))
@@ -33,6 +36,8 @@ def test_deploy_history_renders(db, monkeypatch):
 
 
 def test_deploy_status_includes_last_deploy(db, monkeypatch):
+    monkeypatch.setattr(settings, "autohunter_admins", None)
+    monkeypatch.setattr(settings, "autohunter_admin_chat_ids", None)
     now = datetime.now(timezone.utc)
     db.add(AdminDeployAudit(operation_id="ok", chat_id=1, requested_at=now - timedelta(minutes=3), started_at=now - timedelta(minutes=3), finished_at=now - timedelta(minutes=2), status="succeeded", branch="main", before_commit="a1", after_commit="a2", summary="ok"))
     db.add(AdminDeployAudit(operation_id="bad", chat_id=1, requested_at=now - timedelta(minutes=1), started_at=now - timedelta(minutes=1), finished_at=now, status="failed", branch="main", before_commit="a2", after_commit="a3", error_type="exit_1", error_message="x", summary="err"))

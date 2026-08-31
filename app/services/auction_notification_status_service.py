@@ -59,7 +59,10 @@ def build_auction_notification_status(db) -> dict:
         return out
 
     payload = row.payload or {}
-    out["last_run_at"] = row.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if row.created_at else "-"
+    row_created_at = row.created_at
+    if row_created_at and row_created_at.tzinfo is None:
+        row_created_at = row_created_at.replace(tzinfo=timezone.utc)
+    out["last_run_at"] = row_created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if row_created_at else "-"
     out["last_reason"] = str(payload.get("reason") or "-")
     out["last_sent"] = int(payload.get("sent", 0) or 0)
     out["last_previews"] = int(payload.get("previews", 0) or 0)
@@ -89,7 +92,10 @@ def build_auction_notification_status(db) -> dict:
     )
     if manual:
         mp = manual.payload or {}
-        out["last_manual_real_run_at"] = manual.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if manual.created_at else "-"
+        manual_created_at = manual.created_at
+        if manual_created_at and manual_created_at.tzinfo is None:
+            manual_created_at = manual_created_at.replace(tzinfo=timezone.utc)
+        out["last_manual_real_run_at"] = manual_created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if manual_created_at else "-"
         out["last_manual_real_sent"] = int(mp.get("sent", 0) or 0)
         out["last_manual_real_duplicates"] = int(mp.get("skipped_duplicate", 0) or 0)
         out["last_manual_real_errors"] = int(mp.get("errors", 0) or 0)

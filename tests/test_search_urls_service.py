@@ -53,7 +53,7 @@ def test_url_builders_handle_empty_queries(query):
     )
     assert (
         search_urls_service.facebook_marketplace_url(query)
-        == "https://www.facebook.com/marketplace/search/?query="
+        == "https://www.facebook.com/marketplace/saopaulo/vehicles?exact=false&query="
     )
 
     assert (

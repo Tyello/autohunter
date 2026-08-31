@@ -34,6 +34,20 @@ def _seed_base(db):
     return user, wl, listing, n
 
 
+def _add_listing(db, external_id="OLX2"):
+    listing = CarListing(
+        source="olx",
+        external_id=external_id,
+        title="Honda Civic SI 1994",
+        url=f"https://www.olx.com.br/{external_id}",
+        price=Decimal("33000"),
+        currency="BRL",
+    )
+    db.add(listing)
+    db.commit()
+    return listing
+
+
 def test_sender_marks_sent_when_allowed(db, monkeypatch):
     _user, _wl, listing, n = _seed_base(db)
 
@@ -88,7 +102,8 @@ def test_sender_suppresses_when_daily_limit_reached_and_sends_notice_once(db, mo
 
 def test_sender_uses_per_user_budget_cache_within_batch(db, monkeypatch):
     _user, _wl, _listing, _n1 = _seed_base(db)
-    n2 = Notification(user_id=_user.id, wishlist_id=_wl.id, car_listing_id=_listing.id, status="queued")
+    listing2 = _add_listing(db)
+    n2 = Notification(user_id=_user.id, wishlist_id=_wl.id, car_listing_id=listing2.id, status="queued")
     db.add(n2)
     db.commit()
 
@@ -216,7 +231,8 @@ def test_send_daily_limit_notice_http_includes_upgrade_button(monkeypatch):
 
 def test_sender_applies_pacing_between_real_sends(db, monkeypatch):
     _user, _wl, _listing, _n1 = _seed_base(db)
-    n2 = Notification(user_id=_user.id, wishlist_id=_wl.id, car_listing_id=_listing.id, status="queued")
+    listing2 = _add_listing(db)
+    n2 = Notification(user_id=_user.id, wishlist_id=_wl.id, car_listing_id=listing2.id, status="queued")
     db.add(n2)
     db.commit()
 
@@ -250,7 +266,8 @@ def test_sender_does_not_sleep_with_single_success(db, monkeypatch):
 
 def test_sender_does_not_sleep_when_first_send_fails_before_any_success(db, monkeypatch):
     user, wl, listing, n1 = _seed_base(db)
-    n2 = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="queued")
+    listing2 = _add_listing(db)
+    n2 = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing2.id, status="queued")
     db.add(n2)
     db.commit()
 
@@ -275,7 +292,8 @@ def test_sender_does_not_sleep_when_first_send_fails_before_any_success(db, monk
 
 def test_sender_does_not_sleep_for_blocked_or_no_destination(db, monkeypatch):
     user, wl, listing, _ = _seed_base(db)
-    blocked_n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing.id, status="queued")
+    listing2 = _add_listing(db)
+    blocked_n = Notification(user_id=user.id, wishlist_id=wl.id, car_listing_id=listing2.id, status="queued")
     db.add(blocked_n)
     db.commit()
 
@@ -283,8 +301,8 @@ def test_sender_does_not_sleep_for_blocked_or_no_destination(db, monkeypatch):
         id = "nodest-1"
         user = None
         user_id = uuid.uuid4()
-        car_listing = listing
-        car_listing_id = listing.id
+        car_listing = listing2
+        car_listing_id = listing2.id
 
     monkeypatch.setattr("app.scheduler.jobs_send.count_sent_today", lambda *_: 10)
     monkeypatch.setattr("app.scheduler.jobs_send.get_active_subscription_limit_for_user", lambda *_: 10)

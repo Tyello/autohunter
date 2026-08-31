@@ -13,7 +13,10 @@ class Notification(TimestampMixin, Base):
     __tablename__ = "notifications"
 
     __table_args__ = (
-        UniqueConstraint("wishlist_id", "car_listing_id", name="uq_notifications_wishlist_listing"),
+        UniqueConstraint(
+            "wishlist_id", "car_listing_id", "reason", "score_v2",
+            name="uq_notifications_wishlist_listing_reason_score",
+        ),
         Index("ix_notifications_status_created_at", "status", "created_at"),
         Index("ix_notifications_user_status_created_at", "user_id", "status", "created_at"),
         Index("ix_notifications_reason", "reason"),

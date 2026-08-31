@@ -18,7 +18,7 @@ def upgrade():
     op.create_table(
         "fipe_lookup_requests",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("wishlist_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("wishlists.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("wishlist_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("wishlists.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("last_error", sa.Text(), nullable=True),

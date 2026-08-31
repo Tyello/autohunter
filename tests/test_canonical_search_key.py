@@ -19,9 +19,10 @@ from app.services.search_deduplication_service import canonical_search_key
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_plugin(prefix: str = "https://example.com/search?q="):
+def _make_plugin(prefix: str = "https://example.com/search?q=", name: str = "generic_source"):
     """SourcePlugin mínimo com build_url determinístico."""
     return SimpleNamespace(
+        name=name,
         build_url=lambda query: f"{prefix}{query.strip().lower().replace(' ', '+')}"
     )
 

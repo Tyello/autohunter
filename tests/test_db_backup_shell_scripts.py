@@ -99,6 +99,7 @@ def test_backup_script_uses_env_file_for_backup_dir_and_retention(tmp_path):
         )
         + "\n",
         encoding="utf-8",
+        newline="",
     )
 
     fake_bin = tmp_path / "bin"

@@ -13,7 +13,7 @@ class FipeLookupRequest(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     wishlist_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("wishlists.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("wishlists.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

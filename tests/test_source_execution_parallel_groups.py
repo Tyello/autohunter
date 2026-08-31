@@ -108,6 +108,7 @@ def test_req003_each_group_opens_and_closes_its_own_session(db, monkeypatch):
 
     opened: list[int] = []
     closed: list[int] = []
+    kept_alive = []  # prevent CPython from recycling a closed session's id()
     lock = threading.Lock()
     real_session_local = svc.SessionLocal
 
@@ -115,6 +116,7 @@ def test_req003_each_group_opens_and_closes_its_own_session(db, monkeypatch):
     def _tracking_session_scope():
         session = real_session_local()
         with lock:
+            kept_alive.append(session)
             opened.append(id(session))
         try:
             yield session
