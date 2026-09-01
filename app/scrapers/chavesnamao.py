@@ -143,7 +143,7 @@ def _extract_location_from_anchor_text(text: str) -> Optional[str]:
 
 
 
-DETAIL_THUMB_MAX = 3
+DETAIL_THUMB_MAX = 20
 
 
 def scrape_chavesnamao(
@@ -156,7 +156,9 @@ def scrape_chavesnamao(
             search_url,
             ctx=ctx,
             referer=_CHAVES_BASE + "/",
-            wait_until="domcontentloaded",
+            # Cards renderizam via JS/hidratação client-side; "domcontentloaded"
+            # dispara antes das imagens dos cards serem populadas.
+            wait_until="networkidle",
         )
     else:
         html = fetch_html(search_url)
