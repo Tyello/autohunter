@@ -155,7 +155,7 @@ def _bootstrap_fipe_catalog_entries_for_year(
     reference_code: int,
     year: int,
     model_years_cache: dict[str, list[dict]],
-) -> int:
+) -> tuple[int, dict | None]:
     """
     Bootstrap FIPE catalog entries for a given year across all model candidates.
 
@@ -164,11 +164,13 @@ def _bootstrap_fipe_catalog_entries_for_year(
       2. For each year variant matching the target year (may be multiple fuel types — PREM-03),
          fetch price and create a catalog entry.
 
-    Returns count of entries created/upserted.
+    Returns tuple of (count of entries created/upserted, first_entry dict or None).
+    first_entry is the normalized dict from the first entry created, or None if no entries were created.
 
     Propagates FipeApiError from client calls without catching (fail-fast, PREM-02).
     """
     created = 0
+    first_entry = None
     current_month = datetime.now(timezone.utc).strftime("%Y-%m")
 
     for model_item in model_candidates:
@@ -219,11 +221,15 @@ def _bootstrap_fipe_catalog_entries_for_year(
             if normalized is None:
                 raise FipeApiError("resposta da API FIPE não pôde ser normalizada durante bootstrap")
 
+            # Capture first entry before incrementing created
+            if created == 0:
+                first_entry = normalized
+
             # Upsert
             upsert_fipe_catalog_entries(db, [normalized], reference_month=current_month, source="on_demand_bootstrap")
             created += 1
 
-    return created
+    return (created, first_entry)
 
 
 def _extract_year_bounds(filters: list[WishlistFilter]) -> tuple[int | None, int | None]:
@@ -568,7 +574,7 @@ def _process_one_reactive_fipe_lookup(db: Session, client: FipeApiClient, reques
 
     # Tentar bootstrap pra o ano específico
     try:
-        created = _bootstrap_fipe_catalog_entries_for_year(
+        created, _ = _bootstrap_fipe_catalog_entries_for_year(
             db, client, brand=brand, model_candidates=candidates,
             reference_code=reference_code, year=request.target_year,
             model_years_cache=model_years_cache,
@@ -656,7 +662,7 @@ def _process_one_fipe_lookup(db: Session, client: FipeApiClient, request: FipeLo
             if bootstrap_resolved:
                 brand, model_candidates, reference_code = bootstrap_resolved
                 try:
-                    created_count = _bootstrap_fipe_catalog_entries_for_year(
+                    created_count, _ = _bootstrap_fipe_catalog_entries_for_year(
                         db, client, brand=brand, model_candidates=model_candidates,
                         reference_code=reference_code, year=year, model_years_cache=model_years_cache,
                     )

@@ -299,7 +299,12 @@ def test_bootstrap_creates_entries_for_all_matching_candidates(db, monkeypatch):
     )
 
     # Assert return value (2 entries created)
-    assert result == 2
+    created, first_entry = result
+    assert created == 2
+    assert first_entry is not None
+    # First entry should be the Fit model from the first model candidate
+    from decimal import Decimal
+    assert first_entry["price"] == Decimal("65000.00")
 
     # Assert both entries were created
     fit_entry = db.query(FipeCatalogEntry).filter(
@@ -359,7 +364,12 @@ def test_bootstrap_creates_entry_per_fuel_variant(db, monkeypatch):
     )
 
     # Assert return value (2 entries created for 2 fuel variants)
-    assert result == 2
+    created, first_entry = result
+    assert created == 2
+    assert first_entry is not None
+    # First entry should be Gasolina (first fuel variant with fuel_code "1")
+    from decimal import Decimal
+    assert first_entry["price"] == Decimal("65000.00")
 
     # Assert both fuel variant entries were created
     gasolina_entry = db.query(FipeCatalogEntry).filter(
@@ -414,7 +424,9 @@ def test_bootstrap_returns_zero_when_no_candidate_has_year(db, monkeypatch):
     )
 
     # Assert return value
-    assert result == 0
+    created, first_entry = result
+    assert created == 0
+    assert first_entry is None
 
     # Assert get_price was never called
     assert call_count["get_price"] == 0
@@ -476,8 +488,16 @@ def test_bootstrap_caches_model_years_across_years_within_request(db, monkeypatc
     )
 
     # Assert return values
-    assert result_2019 == 1
-    assert result_2020 == 1
+    from decimal import Decimal
+    created_2019, first_entry_2019 = result_2019
+    assert created_2019 == 1
+    assert first_entry_2019 is not None
+    assert first_entry_2019["price"] == Decimal("65000.00")
+
+    created_2020, first_entry_2020 = result_2020
+    assert created_2020 == 1
+    assert first_entry_2020 is not None
+    assert first_entry_2020["price"] == Decimal("65000.00")
 
     # Assert get_model_years was called only ONCE for this model, not twice
     # (because cache reused between year calls)
