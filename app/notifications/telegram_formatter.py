@@ -170,6 +170,32 @@ def _delta_badge_text(delta_pct: float | None) -> str | None:
         return f"+{pct_i}% vs mediana"
     return "0% vs mediana"
 
+_DIMENSION_LABELS_PT = {
+    "market_price": "preço de mercado",
+    "fipe_price": "FIPE",
+    "mileage": "km/ano",
+    "rarity": "raridade",
+}
+
+
+def _partial_score_badge(breakdown: dict) -> str | None:
+    """Return partial score badge if 2+ dimensions are defaulted, else None."""
+    if not isinstance(breakdown, dict):
+        return None
+
+    defaulted_dimensions = breakdown.get("defaulted_dimensions")
+    if not isinstance(defaulted_dimensions, list):
+        return None
+
+    if len(defaulted_dimensions) >= 2:
+        labels = ", ".join(
+            _DIMENSION_LABELS_PT.get(dim, dim) for dim in defaulted_dimensions
+        )
+        return f"⚠️ Score parcial — sem dados reais de: {labels}"
+
+    return None
+
+
 def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
     market_context = breakdown.get("market_context") if isinstance(breakdown, dict) else None
     market_context = market_context if isinstance(market_context, dict) else {}
@@ -473,6 +499,11 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
         badges.append(f"⚙️ {gb}")
 
     breakdown = _get_breakdown(ad, score_result) or {}
+
+    partial_badge = _partial_score_badge(breakdown)
+    if partial_badge:
+        badges.append(partial_badge)
+
     price_badge = _price_context_badge(ad, breakdown)
     if price_badge:
         badges.append(price_badge)
@@ -498,7 +529,12 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
 
     compact: list[str] = []
     for b in badges[:_MAX_BADGES]:
-        item = _clip(b, 34)
+        # The partial-score badge must retain its full list of dimensions
+        # (REQ-009); the generic 34-char clip would truncate it away.
+        # Worst case (4 dimensions) is 79 chars, so 120 gives a safe margin
+        # without affecting any other badge, which stay clipped at 34.
+        limit = 120 if b == partial_badge else 34
+        item = _clip(b, limit)
         if item:
             compact.append(item)
     return compact

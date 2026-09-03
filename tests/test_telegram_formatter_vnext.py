@@ -702,3 +702,68 @@ def test_tracked_price_drop_formatter_invalid_dates_do_not_break():
     payload = format_tracked_price_drop_message(n, ad)
     assert "Mudança detectada em" not in payload.text
     assert "Rastreando há" not in payload.text
+
+
+def test_partial_score_badge_zero_dimensions():
+    """No badge when 0 dimensions are defaulted."""
+    from app.notifications.telegram_formatter import _partial_score_badge
+
+    breakdown = {"defaulted_dimensions": []}
+    result = _partial_score_badge(breakdown)
+    assert result is None
+
+
+def test_partial_score_badge_one_dimension():
+    """No badge when 1 dimension is defaulted (below threshold)."""
+    from app.notifications.telegram_formatter import _partial_score_badge
+
+    breakdown = {"defaulted_dimensions": ["market_price"]}
+    result = _partial_score_badge(breakdown)
+    assert result is None
+
+
+def test_partial_score_badge_two_dimensions():
+    """Badge shown when exactly 2 dimensions are defaulted."""
+    from app.notifications.telegram_formatter import _partial_score_badge
+
+    breakdown = {"defaulted_dimensions": ["market_price", "fipe_price"]}
+    result = _partial_score_badge(breakdown)
+    assert result == "⚠️ Score parcial — sem dados reais de: preço de mercado, FIPE"
+
+
+def test_partial_score_badge_four_dimensions():
+    """Badge shown when 4 dimensions are defaulted."""
+    from app.notifications.telegram_formatter import _partial_score_badge
+
+    breakdown = {"defaulted_dimensions": ["market_price", "fipe_price", "mileage", "rarity"]}
+    result = _partial_score_badge(breakdown)
+    assert (
+        result
+        == "⚠️ Score parcial — sem dados reais de: preço de mercado, FIPE, km/ano, raridade"
+    )
+
+
+def test_partial_score_badge_integration_with_score_result():
+    """Integration test: badge appears in message when 2+ defaulted_dimensions."""
+    from types import SimpleNamespace
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(title="Civic", price=85000, year=2019)
+    score_result = SimpleNamespace(
+        score=75,
+        debug_score_components={},
+        defaulted_dimensions=["market_price", "fipe_price"],
+        to_dict=lambda: {
+            "score": 75,
+            "defaulted_dimensions": ["market_price", "fipe_price"],
+        }
+    )
+
+    payload = format_ad_message(ad, score_result)
+    # The partial-score badge is exempt from build_badges' 34-char clip
+    # (REQ-009), so the full dimension list must survive in the final
+    # message text, not just a truncated prefix.
+    assert (
+        "⚠️ Score parcial — sem dados reais de: preço de mercado, FIPE"
+        in payload.text
+    )
