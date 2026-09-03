@@ -134,3 +134,121 @@ def test_neutral_base_score_no_inflation():
     res = score_ad(ad, _Wishlist(query="civic"), None, now=_now())
     # canonical neutral base (sem caps): match 35 + market 12 + fipe 5 + mileage 8 + rarity 2 + quality 6
     assert res.total == 68
+
+
+def test_market_price_defaulted_when_no_stats():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), None, now=_now())
+    assert "market_price" in res.defaulted_dimensions
+
+
+def test_market_price_defaulted_when_low_sample():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(sample=3), now=_now())
+    assert "market_price" in res.defaulted_dimensions
+
+
+def test_market_price_not_defaulted_when_sufficient_sample():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(sample=42), now=_now())
+    assert "market_price" not in res.defaulted_dimensions
+
+
+def test_fipe_price_defaulted_when_missing():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), now=_now())
+    assert "fipe_price" in res.defaulted_dimensions
+
+
+def test_fipe_price_defaulted_when_zero_or_negative():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), fipe_price=Decimal("0"), now=_now())
+    assert "fipe_price" in res.defaulted_dimensions
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), fipe_price=Decimal("-100"), now=_now())
+    assert "fipe_price" in res.defaulted_dimensions
+
+
+def test_fipe_price_not_defaulted_when_present():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), fipe_price=Decimal("100000"), now=_now())
+    assert "fipe_price" not in res.defaulted_dimensions
+
+
+def test_mileage_defaulted_when_missing():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(km=None), _Wishlist(query="civic"), _stats(), now=_now())
+    assert "mileage" in res.defaulted_dimensions
+
+
+def test_mileage_defaulted_when_year_missing():
+    from app.scoring.score_v2 import score_ad
+
+    ad = _Ad(title="Honda Civic SI", url="https://x", make="Honda", model="Civic", version="SI", year=None, price=Decimal("95000"), mileage_km=50000, location="São Paulo-SP", transmission="Manual", thumbnail_url="https://img")
+    res = score_ad(ad, _Wishlist(query="civic"), _stats(), now=_now())
+    assert "mileage" in res.defaulted_dimensions
+
+
+def test_mileage_not_defaulted_when_complete():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(km=70000), _Wishlist(query="civic"), _stats(), now=_now())
+    assert "mileage" not in res.defaulted_dimensions
+
+
+def test_rarity_defaulted_when_missing():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), now=_now())
+    assert "rarity" in res.defaulted_dimensions
+
+
+def test_rarity_defaulted_when_low_sample():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), rarity_ratio=0.02, rarity_sample_size=2, now=_now())
+    assert "rarity" in res.defaulted_dimensions
+
+
+def test_rarity_not_defaulted_when_sufficient():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), _stats(), rarity_ratio=0.02, rarity_sample_size=30, now=_now())
+    assert "rarity" not in res.defaulted_dimensions
+
+
+def test_multiple_defaulted_dimensions():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(price=None, km=None), _Wishlist(query="civic"), None, now=_now())
+    assert "market_price" in res.defaulted_dimensions
+    assert "mileage" in res.defaulted_dimensions
+    assert "fipe_price" in res.defaulted_dimensions
+    assert "rarity" in res.defaulted_dimensions
+
+
+def test_defaulted_dimensions_roundtrip_to_dict():
+    from app.scoring.score_v2 import score_ad
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), None, now=_now())
+    res_dict = res.to_dict()
+    assert "defaulted_dimensions" in res_dict
+    assert isinstance(res_dict["defaulted_dimensions"], list)
+    assert "market_price" in res_dict["defaulted_dimensions"]
+
+
+def test_defaulted_dimensions_roundtrip_from_dict():
+    from app.scoring.score_v2 import score_ad
+    from app.scoring.types import ScoreResult
+
+    res = score_ad(_base_ad(), _Wishlist(query="civic"), None, now=_now())
+    res_dict = res.to_dict()
+    res_restored = ScoreResult.from_dict(res_dict)
+    assert res_restored.defaulted_dimensions == res.defaulted_dimensions

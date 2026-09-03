@@ -136,7 +136,9 @@ def score_ad(
     delta_pct: float | None = None
     market_price_score = 12
     market_context: dict[str, Any] | None = None
+    market_price_defaulted = True
     if price_dec is not None and market_stats is not None and int(market_stats.sample_size or 0) >= int(min_market_sample):
+        market_price_defaulted = False
         med = market_stats.median_price
         if med and med > 0:
             delta_pct = float((price_dec - med) / med)
@@ -148,7 +150,9 @@ def score_ad(
     delta_vs_fipe_pct: float | None = None
     fipe_score = 5
     fipe_ctx: dict[str, Any] | None = None
+    fipe_defaulted = True
     if price_dec is not None and fipe_price is not None and fipe_price > 0:
+        fipe_defaulted = False
         delta_vs_fipe_pct = float((price_dec - fipe_price) / fipe_price)
         d = _clamp(delta_vs_fipe_pct, -0.25, 0.25)
         fipe_score = int(round(((-d + 0.25) / 0.5) * 10.0))
@@ -162,7 +166,9 @@ def score_ad(
         km = None
     mileage_score = 8
     km_per_year: int | None = None
+    mileage_defaulted = True
     if km is not None and km >= 0 and year is not None and year <= now.year:
+        mileage_defaulted = False
         age = max(1, now.year - year)
         km_per_year = int(round(km / age))
         if km_per_year <= 8000:
@@ -178,7 +184,9 @@ def score_ad(
         mileage_score = max(0, min(15, mileage_score))
 
     rarity_score = 2
+    rarity_defaulted = True
     if rarity_ratio is not None and int(rarity_sample_size or 0) >= int(min_market_sample):
+        rarity_defaulted = False
         rarity_score = 4 if rarity_ratio <= 0.03 else 3 if rarity_ratio <= 0.06 else 2
 
     quality = 8
@@ -254,4 +262,14 @@ def score_ad(
     merged_ctx["fipe"] = fipe_ctx
     merged_ctx["rarity"] = {"ratio": rarity_ratio, "sample_size": rarity_sample_size}
 
-    return ScoreResult(total=int(max(0, min(100, total))), components=components, caps_applied=caps_applied, reasons=reasons, delta_vs_median_pct=delta_pct, market_context=merged_ctx)
+    defaulted_dimensions = []
+    if market_price_defaulted:
+        defaulted_dimensions.append("market_price")
+    if fipe_defaulted:
+        defaulted_dimensions.append("fipe_price")
+    if mileage_defaulted:
+        defaulted_dimensions.append("mileage")
+    if rarity_defaulted:
+        defaulted_dimensions.append("rarity")
+
+    return ScoreResult(total=int(max(0, min(100, total))), components=components, caps_applied=caps_applied, reasons=reasons, delta_vs_median_pct=delta_pct, market_context=merged_ctx, defaulted_dimensions=defaulted_dimensions)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -31,6 +31,7 @@ class ScoreResult:
     reasons: list[str]
     delta_vs_median_pct: float | None = None
     market_context: dict[str, Any] | None = None
+    defaulted_dimensions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -40,6 +41,7 @@ class ScoreResult:
             "reasons": list(self.reasons or []),
             "delta_vs_median_pct": self.delta_vs_median_pct,
             "market_context": self.market_context,
+            "defaulted_dimensions": list(self.defaulted_dimensions or []),
         }
 
     @staticmethod
@@ -53,4 +55,5 @@ class ScoreResult:
             reasons=list(d.get("reasons") or []),
             delta_vs_median_pct=d.get("delta_vs_median_pct"),
             market_context=d.get("market_context"),
+            defaulted_dimensions=list(d.get("defaulted_dimensions") or []),
         )
