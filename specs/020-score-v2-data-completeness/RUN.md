@@ -14,3 +14,19 @@ Append-only. Uma linha por evento (etapa concluída, escalação, reprovação+D
   `grep -n "score_ad("` como critério de localização em vez de número de linha fixo, e para citar
   ambas as funções nominalmente. Nenhuma re-execução necessária — implementação já presente
   satisfaz a intenção corrigida. Etapa 1 RE-APROVADA.
+- 2026-09-03: Etapa 1 commitada (d8d6c82) — `settings.score_min_market_sample` e propagação nos
+  2 call sites de `score_ad(`.
+- 2026-09-03: Etapa 2 (REQ-003 a REQ-008, `defaulted_dimensions` em `ScoreResult`) executada,
+  aprovada pelo spec-reviewer sem defeitos (4 flags booleanos explícitos por dimensão, round-trip
+  to_dict/from_dict validado, PREM-01 respeitada — match_score fora do tracking). Commitada
+  (4277397).
+- 2026-09-03: Etapa 3 (REQ-009, badge "⚠️ Score parcial" no Telegram) executada. Reprovada 2x:
+  DVG-001 (major, causa execução) — `_partial_score_badge()` retornava só o texto fixo sem a
+  lista de dimensões em português exigida pela spec; corrigido com mapa `_DIMENSION_LABELS_PT`.
+  DVG-002 (major, causa execução) — `build_badges()` aplicava `_clip(text, 34)` genérico em toda
+  badge, truncando a lista de dimensões na mensagem final do Telegram e esvaziando o propósito do
+  REQ-009; corrigido com limite de 120 chars específico para a badge de score parcial, preservando
+  clip de 34 nas demais badges. 3ª revisão: APROVADO. Commitada (fc19ad7).
+- 2026-09-03: Spec 020 fechada — 3/3 etapas aprovadas e commitadas (d8d6c82, 4277397, fc19ad7).
+  Sem etapas `[sensível]`; sem exigência de spec-verifier independente (aplica-se só a T2 com
+  passos sensíveis). Suíte completa de testes do repositório confirmada verde durante o processo.
