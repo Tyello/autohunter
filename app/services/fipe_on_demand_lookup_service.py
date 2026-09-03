@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
@@ -9,12 +10,14 @@ from sqlalchemy.orm import Session
 from app.core.settings import settings
 from app.models.fipe_catalog_entry import FipeCatalogEntry
 from app.models.fipe_lookup_request import FipeLookupRequest
+from app.models.fipe_price import FipePrice
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
 from app.services.fipe_api_client import FipeApiClient, FipeApiError
 from app.services.fipe_catalog_resolver_service import _ensure_month, resolve_listing_to_fipe_candidates, important_vehicle_tokens
 from app.services.fipe_external_pipeline_adapter import normalize_external_fipe_row
 from app.services.fipe_monthly_sync_service import upsert_fipe_catalog_entries
+from app.services.fipe_service import _normalize_key_token
 from app.services import system_logs_service
 
 # Sentinel para distinguir "parâmetro year não passado" de "year=None"
@@ -574,13 +577,32 @@ def _process_one_reactive_fipe_lookup(db: Session, client: FipeApiClient, reques
 
     # Tentar bootstrap pra o ano específico
     try:
-        created, _ = _bootstrap_fipe_catalog_entries_for_year(
+        created, first_entry = _bootstrap_fipe_catalog_entries_for_year(
             db, client, brand=brand, model_candidates=candidates,
             reference_code=reference_code, year=request.target_year,
             model_years_cache=model_years_cache,
         )
     except FipeApiError as exc:
         return _apply_bootstrap_api_error(db, request, wishlist, [], request.target_year, exc)
+
+    # Write-through FipePrice entry (REQ-002, REQ-003)
+    if created > 0 and first_entry is not None:
+        vehicle_key = f"{_normalize_key_token(request.listing_make)}|{_normalize_key_token(request.listing_model)}|{request.target_year}"
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+
+        existing = db.query(FipePrice).filter(
+            FipePrice.vehicle_key == vehicle_key,
+            FipePrice.reference_month == current_month
+        ).first()
+
+        if existing:
+            existing.fipe_price = Decimal(str(first_entry["price"]))
+        else:
+            db.add(FipePrice(
+                vehicle_key=vehicle_key,
+                fipe_price=Decimal(str(first_entry["price"])),
+                reference_month=current_month
+            ))
 
     # Decidir outcome
     if created > 0:

@@ -9,6 +9,7 @@ import pytest
 from app.core.settings import settings
 from app.models.fipe_catalog_entry import FipeCatalogEntry
 from app.models.fipe_lookup_request import FipeLookupRequest
+from app.models.fipe_price import FipePrice
 from app.models.user import User
 from app.models.wishlist import Wishlist
 from app.models.wishlist_filter import WishlistFilter
@@ -1596,6 +1597,153 @@ def test_process_one_reactive_fipe_lookup_returns_skipped_when_brand_not_found(d
         FipeCatalogEntry.brand_code == "22"
     ).all()
     assert len(entries) == 0
+
+
+def test_process_one_reactive_fipe_lookup_writes_fipe_price(db, monkeypatch):
+    """Teste: request reativa; FakeClient com uma marca/modelo/ano batendo; assert FipePrice criada com vehicle_key e fipe_price corretos."""
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "9"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            return {
+                "Marca": "Honda",
+                "Modelo": "Civic",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": "R$ 135.500,00",
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Criar uma wishlist
+    wishlist = _make_wishlist(db)
+
+    # Criar a request reativa
+    request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+
+    # Chamar a função
+    client = svc.FipeApiClient()
+    result = svc._process_one_reactive_fipe_lookup(db, client, request)
+
+    # Assert resultado
+    assert result == "bootstrapped"
+
+    # Assert que FipePrice foi criada com os valores corretos
+    from app.services.fipe_service import _normalize_key_token
+    expected_vehicle_key = f"{_normalize_key_token('Honda')}|{_normalize_key_token('Civic')}|2019"
+
+    fipe_price = db.query(FipePrice).filter(
+        FipePrice.vehicle_key == expected_vehicle_key
+    ).first()
+    assert fipe_price is not None, f"FipePrice not found with vehicle_key={expected_vehicle_key}"
+    assert fipe_price.fipe_price == Decimal("135500.00")
+    assert fipe_price.reference_month == datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def test_process_one_reactive_fipe_lookup_upserts_fipe_price_on_rerun(db, monkeypatch):
+    """Teste: rodar a função duas vezes para o mesmo wishlist_id/make/model/year com preços diferentes; assert sem erro de unique constraint e valor final é da segunda chamada."""
+    call_count = [0]
+
+    class FakeClient:
+        def get_latest_reference_table(self):
+            return {"Codigo": 320, "Mes": "agosto/2026"}
+
+        def get_brands(self, reference_code):
+            return [{"Label": "Honda", "Value": "22"}]
+
+        def get_models(self, reference_code, brand_code):
+            return [{"Label": "Civic", "Value": "9"}]
+
+        def get_model_years(self, reference_code, brand_code, model_code):
+            return [{"Label": "2019 Gasolina", "Value": "2019-1"}]
+
+        def get_price(self, reference_code, brand_code, model_code, model_year, fuel_code):
+            call_count[0] += 1
+            price = "R$ 100.000,00" if call_count[0] == 1 else "R$ 110.000,00"
+            return {
+                "Marca": "Honda",
+                "Modelo": "Civic",
+                "AnoModelo": 2019,
+                "Combustivel": "Gasolina",
+                "CodigoFipe": "001004-9",
+                "Valor": price,
+            }
+
+    monkeypatch.setattr(svc, "FipeApiClient", FakeClient)
+
+    # Criar uma wishlist
+    wishlist = _make_wishlist(db)
+
+    # Criar a request reativa
+    request = FipeLookupRequest(
+        id=uuid.uuid4(),
+        wishlist_id=wishlist.id,
+        listing_make="Honda",
+        listing_model="Civic",
+        target_year=2019,
+        status="pending"
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+
+    # Primeira chamada
+    client = svc.FipeApiClient()
+    result1 = svc._process_one_reactive_fipe_lookup(db, client, request)
+    assert result1 == "bootstrapped"
+
+    # Verificar que FipePrice foi criada com valor da primeira chamada
+    from app.services.fipe_service import _normalize_key_token
+    expected_vehicle_key = f"{_normalize_key_token('Honda')}|{_normalize_key_token('Civic')}|2019"
+
+    fipe_price = db.query(FipePrice).filter(
+        FipePrice.vehicle_key == expected_vehicle_key
+    ).first()
+    assert fipe_price is not None
+    assert fipe_price.fipe_price == Decimal("100000.00")
+
+    # Reset request para segunda chamada
+    request.status = "pending"
+    request.processed_at = None
+    db.commit()
+
+    # Segunda chamada (com mesmo wishlist_id/make/model/year)
+    result2 = svc._process_one_reactive_fipe_lookup(db, client, request)
+    assert result2 == "bootstrapped"
+
+    # Verificar que FipePrice foi atualizada com valor da segunda chamada (sem erro de unique constraint)
+    fipe_price_updated = db.query(FipePrice).filter(
+        FipePrice.vehicle_key == expected_vehicle_key
+    ).first()
+    assert fipe_price_updated is not None
+    assert fipe_price_updated.fipe_price == Decimal("110000.00")
+
+    # Verificar que há apenas um registro (não dois)
+    all_fipe_prices = db.query(FipePrice).filter(
+        FipePrice.vehicle_key == expected_vehicle_key
+    ).all()
+    assert len(all_fipe_prices) == 1
 
 
 def test_process_pending_fipe_lookups_routes_reactive_request_to_reactive_path(db, monkeypatch):
