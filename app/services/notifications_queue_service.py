@@ -43,24 +43,108 @@ def _fallback_fipe_price_via_catalog(db: Session, listing):
         )
 
         if result.get("status") == "insufficient_data":
+            log(
+                db,
+                "info",
+                "fipe_score_bridge",
+                "fipe catalog fallback candidate",
+                payload={
+                    "listing_id": str(listing.id),
+                    "status": result.get("status"),
+                    "confidence_score": None,
+                    "confidence_label": None,
+                    "threshold": settings.fipe_lookup_min_confidence,
+                    "decision": "rejected_insufficient_data",
+                },
+            )
             return None
 
         best_candidate = result.get("best_candidate")
         if best_candidate is None:
+            log(
+                db,
+                "info",
+                "fipe_score_bridge",
+                "fipe catalog fallback candidate",
+                payload={
+                    "listing_id": str(listing.id),
+                    "status": result.get("status"),
+                    "confidence_score": None,
+                    "confidence_label": None,
+                    "threshold": settings.fipe_lookup_min_confidence,
+                    "decision": "rejected_no_candidate",
+                },
+            )
             return None
 
         confidence = best_candidate.get("confidence_score")
         if confidence is None or confidence < settings.fipe_lookup_min_confidence:
+            log(
+                db,
+                "info",
+                "fipe_score_bridge",
+                "fipe catalog fallback candidate",
+                payload={
+                    "listing_id": str(listing.id),
+                    "status": result.get("status"),
+                    "confidence_score": confidence,
+                    "confidence_label": best_candidate.get("confidence_label"),
+                    "threshold": settings.fipe_lookup_min_confidence,
+                    "decision": "rejected_low_confidence",
+                },
+            )
             return None
 
         catalog_entry_id = best_candidate.get("catalog_entry_id")
         if catalog_entry_id is None:
+            log(
+                db,
+                "info",
+                "fipe_score_bridge",
+                "fipe catalog fallback candidate",
+                payload={
+                    "listing_id": str(listing.id),
+                    "status": result.get("status"),
+                    "confidence_score": confidence,
+                    "confidence_label": best_candidate.get("confidence_label"),
+                    "threshold": settings.fipe_lookup_min_confidence,
+                    "decision": "rejected_entry_not_found",
+                },
+            )
             return None
 
         entry = db.query(FipeCatalogEntry).filter(FipeCatalogEntry.id == catalog_entry_id).first()
         if entry is None:
+            log(
+                db,
+                "info",
+                "fipe_score_bridge",
+                "fipe catalog fallback candidate",
+                payload={
+                    "listing_id": str(listing.id),
+                    "status": result.get("status"),
+                    "confidence_score": confidence,
+                    "confidence_label": best_candidate.get("confidence_label"),
+                    "threshold": settings.fipe_lookup_min_confidence,
+                    "decision": "rejected_entry_not_found",
+                },
+            )
             return None
 
+        log(
+            db,
+            "info",
+            "fipe_score_bridge",
+            "fipe catalog fallback candidate",
+            payload={
+                "listing_id": str(listing.id),
+                "status": result.get("status"),
+                "confidence_score": confidence,
+                "confidence_label": best_candidate.get("confidence_label"),
+                "threshold": settings.fipe_lookup_min_confidence,
+                "decision": "used",
+            },
+        )
         return entry.price
     except Exception:
         return None
