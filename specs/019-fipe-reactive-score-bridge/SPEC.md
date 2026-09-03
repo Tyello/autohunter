@@ -31,7 +31,8 @@ sem depender do fallback.
   `system_logs_service.log` (level="info", component="fipe_score_bridge") o `status`, e — se
   houver `best_candidate` — seu `confidence_score`, `confidence_label`, o threshold
   (`settings.fipe_lookup_min_confidence`) e a decisão final (`used` ou motivo de rejeição) —
-  verificado por: `pytest tests/test_notifications_queue_service.py -k diagnostic_log -q`
+  verificado por: `pytest tests/test_notifications_queue_service.py -k logs_diagnostic -q`
+  (nome real do teste usa a ordem `logs_diagnostic`, não `diagnostic_log`)
 - REQ-002: QUANDO `_process_one_reactive_fipe_lookup` cria com sucesso ao menos 1
   `FipeCatalogEntry` (created > 0) E a primeira entrada normalizada criada tem preço válido,
   O SISTEMA DEVE gravar/atualizar uma linha em `FipePrice` com
@@ -112,8 +113,10 @@ sem depender do fallback.
   função (se `created == 0`, `first_entry` permanece `None`). Atualizar a docstring da função para
   refletir o novo retorno.
 - TOCA: `app/services/fipe_on_demand_lookup_service.py`, `tests/test_fipe_on_demand_lookup_service.py`
-- VALIDA COM: `pytest tests/test_fipe_on_demand_lookup_service.py -k bootstrap_fipe_catalog_entries_for_year -q`
-  → verde; teste confere que, com client mockado retornando 1 ano/combustível, o retorno é
+- VALIDA COM: `pytest tests/test_fipe_on_demand_lookup_service.py -k test_bootstrap -q`
+  → verde (nomes reais dos testes usam o prefixo `test_bootstrap_*`, não a substring
+  `bootstrap_fipe_catalog_entries_for_year` por extenso); teste confere que, com client mockado
+  retornando 1 ano/combustível, o retorno é
   `(1, {...})` com `first_entry["price"]` igual ao valor mockado; e que sem matches o retorno é
   `(0, None)`.
 - ESCALA SE: grep por `_bootstrap_fipe_catalog_entries_for_year(` no repo revelar outro caller
