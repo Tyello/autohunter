@@ -348,7 +348,7 @@ def queue_notifications_for_matches(
             rarity_sample = int(ms.sample_size or 0) if ms else None
             if rarity_sample and rarity_sample > 0:
                 rarity_ratio = 1.0 / float(rarity_sample)
-            sres = score_ad(listing, wishlist, ms, fipe_price=fipe, rarity_ratio=rarity_ratio, rarity_sample_size=rarity_sample)
+            sres = score_ad(listing, wishlist, ms, fipe_price=fipe, rarity_ratio=rarity_ratio, rarity_sample_size=rarity_sample, min_market_sample=settings.score_min_market_sample)
         except Exception:
             # Never block queueing due to scoring errors; fall back to minimal breakdown
             sres = None
@@ -492,7 +492,7 @@ def queue_notifications_for_matches_diag(
             rarity_sample = int(ms.sample_size or 0) if ms else None
             if rarity_sample and rarity_sample > 0:
                 rarity_ratio = 1.0 / float(rarity_sample)
-            sres = score_ad(listing, wishlist, ms, fipe_price=fipe, rarity_ratio=rarity_ratio, rarity_sample_size=rarity_sample)
+            sres = score_ad(listing, wishlist, ms, fipe_price=fipe, rarity_ratio=rarity_ratio, rarity_sample_size=rarity_sample, min_market_sample=settings.score_min_market_sample)
         except Exception:
             # Never block queueing due to scoring errors; fall back to minimal breakdown
             sres = None

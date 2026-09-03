@@ -32,8 +32,12 @@ redesenha nenhuma dimensão.
 ## Requisitos
 - REQ-001: `settings.py` DEVE expor `score_min_market_sample: int = 4` — verificado por:
   `python -c "from app.core.settings import settings; assert settings.score_min_market_sample == 4"`
-- REQ-002: QUANDO `queue_notifications_for_matches` (ambos os call sites, linhas 267 e 411 de
-  `notifications_queue_service.py`) chama `score_ad`, O SISTEMA DEVE passar
+- REQ-002: QUANDO `notifications_queue_service.py` chama `score_ad` — nos 2 call sites reais do
+  arquivo, dentro de `queue_notifications_for_matches` e de `queue_notifications_for_matches_diag`
+  (este último é o caminho usado pelo scheduler de produção via `app/scheduler/jobs.py`, não um
+  resquício de diagnóstico morto; localizar por `grep -n "score_ad("
+  app/services/notifications_queue_service.py`, não por número de linha fixo — arquivo sujeito a
+  deslocamento por specs anteriores da mesma fila) —, O SISTEMA DEVE passar
   `min_market_sample=settings.score_min_market_sample` explicitamente (em vez de usar o default
   implícito de `score_ad`) — verificado por: `grep -n "min_market_sample=settings" app/services/notifications_queue_service.py` retorna 2 ocorrências
 - REQ-003: QUANDO `score_ad` calcula `market_price_score` usando o valor de fallback (12) por
@@ -98,6 +102,13 @@ redesenha nenhuma dimensão.
 - `settings.score_min_market_sample` é passado explicitamente nos 2 call sites de `score_ad` em
   vez de depender do parâmetro default da função — torna a configuração visível e testável sem
   depender de mock do default de `score_ad`.
+- Os 2 call sites de `score_ad` em `notifications_queue_service.py` são identificados por conteúdo
+  (`grep -n "score_ad("`), não por número de linha fixo: números de linha citados em specs ficam
+  obsoletos quando outra spec da mesma fila (019, commit b212c90) já modificou o mesmo arquivo
+  antes desta etapa rodar. Confirmado por leitura do código atual (2026-09-03): os 2 call sites
+  reais estão em `queue_notifications_for_matches` (~linha 351) e
+  `queue_notifications_for_matches_diag` (~linha 495) — este último é o caminho chamado pelo
+  scheduler de produção (`app/scheduler/jobs.py`), não um resquício de diagnóstico não usado.
 - A linha de aviso no Telegram é adicionada como uma badge adicional, seguindo o padrão já
   existente de `_price_context_badge` (`telegram_formatter.py:214` e vizinhança) — nova função
   `_partial_score_badge(breakdown: dict) -> str | None`, chamada no ponto de montagem de badges
@@ -105,12 +116,15 @@ redesenha nenhuma dimensão.
 
 ## Etapas
 
-### Etapa 1: Config `score_min_market_sample` e propagação nos call sites (REQ-001, REQ-002)
+### Etapa 1: Config `score_min_market_sample` e propagação nos call sites (REQ-001, REQ-002) [RESOLVIDO — ver RUN.md]
 - FAZ: em `app/core/settings.py`, adicionar `score_min_market_sample: int = 4` próximo aos outros
   campos `fipe_lookup_*`/`score_*` existentes. Em `app/services/notifications_queue_service.py`,
-  nos dois call sites de `score_ad(...)` (linhas 267 e 411), adicionar o argumento
-  `min_market_sample=settings.score_min_market_sample` (import de `settings` já existe na linha
-  11).
+  localizar os call sites de `score_ad(...)` via `grep -n "score_ad(" app/services/notifications_queue_service.py`
+  (não usar número de linha fixo — arquivo já deslocado por specs anteriores da mesma fila) — são
+  2, um em `queue_notifications_for_matches` e outro em `queue_notifications_for_matches_diag`
+  (caminho de produção do scheduler) — e em ambos adicionar o argumento
+  `min_market_sample=settings.score_min_market_sample` (import de `settings` já existe no topo do
+  arquivo).
 - TOCA: `app/core/settings.py`, `app/services/notifications_queue_service.py`
 - VALIDA COM: `python -c "from app.core.settings import settings; assert settings.score_min_market_sample == 4"`
   → sem erro; `grep -c "min_market_sample=settings.score_min_market_sample" app/services/notifications_queue_service.py`

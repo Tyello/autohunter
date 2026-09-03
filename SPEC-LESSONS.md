@@ -40,3 +40,11 @@
   teste que importa `settings` SEM monkeypatch e afirma o valor literal do contrato — e o
   `spec-verifier` deve sempre conferir defaults de produção linha a linha contra a spec, mesmo
   quando a suíte de testes está 100% verde.
+- [020] Specs que citam número de linha absoluto de um arquivo tocado por outra spec anterior da
+  MESMA fila ficam obsoletas assim que a spec anterior roda: 019 adicionou ~84 linhas de logging
+  em `notifications_queue_service.py` (commit b212c90) e deslocou os 2 call sites de `score_ad(`
+  citados pela 020 de 267/411 para ~351/~495 — reprovado pelo spec-reviewer como "Causa provável:
+  spec" (DVG-002) mesmo com o executor já tendo localizado os call sites corretos via grep. Specs
+  que referenciam localização em arquivo sujeito a edição por spec anterior da fila devem usar
+  critério buscável (nome de função, `grep -n "padrão("`) em vez de número de linha fixo — linha
+  fixa só é segura quando nada mais na mesma sessão/fila toca o arquivo antes da etapa rodar.
