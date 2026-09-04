@@ -450,7 +450,7 @@ def test_recency_badge_fallback_created_at_new():
         created_at=datetime.now(timezone.utc) - timedelta(minutes=30),
         extras={},
     )
-    assert build_recency_badge(ad) == "🆕 Novo"
+    assert build_recency_badge(ad) == "🆕 Anúncio novo no feed"
 
 
 def test_recency_badge_fallback_created_at_recent():
@@ -494,7 +494,7 @@ def test_format_ad_message_includes_created_at_fallback_badge():
         extras={"trim": "SI"},
     )
     payload = format_ad_message(ad)
-    assert "🆕 Novo" in payload.text or "🕐 Recente" in payload.text
+    assert "🆕 Anúncio novo no feed" in payload.text or "🕐 Recente" in payload.text
 
 
 def test_detect_leilao_positive():

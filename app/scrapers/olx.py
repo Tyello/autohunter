@@ -474,6 +474,25 @@ def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
     return unique
 
 
+def _extract_year_from_title(title: str) -> Optional[str]:
+    """Extrai o ano (1900-2099) do título usando regex.
+
+    Retorna o último ano encontrado, ou None se nenhum encontrado.
+    """
+    matches = re.findall(r"\b(19\d{2}|20\d{2})\b", title)
+    return matches[-1] if matches else None
+
+
+def _extract_mileage_from_title(title: str) -> Optional[str]:
+    """Extrai a quilometragem do título usando regex.
+
+    Suporta formatos como "45.000 km" ou "45000 km".
+    Retorna a string encontrada, ou None se nenhuma encontrada.
+    """
+    m = re.search(r"\d{1,3}(?:\.\d{3})+\s*[Kk][Mm]\b|\b\d{4,6}\s*[Kk][Mm]\b", title)
+    return m.group(0) if m else None
+
+
 def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
     out: list[dict] = []
     for it in items:
@@ -487,6 +506,8 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
                 "price": it.price,
                 "currency": "BRL",
                 "location": it.location,
+                "year": _extract_year_from_title(it.title),
+                "km": _extract_mileage_from_title(it.title),
             }
         )
     return finalize_listings("olx", out)

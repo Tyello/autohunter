@@ -374,7 +374,7 @@ def build_recency_badge(ad: Any) -> str | None:
     diff = now - created_at
     hours = diff.total_seconds() / 3600
     if hours < 2:
-        return "🆕 Novo"
+        return "🆕 Anúncio novo no feed"
     if hours < 6:
         return "🕐 Recente"
     return None
