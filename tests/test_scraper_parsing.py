@@ -72,8 +72,8 @@ def test_olx_extracts_year_and_mileage_from_title():
     result = _items_to_dicts([item])
     assert len(result) == 1
     d = result[0]
-    assert d["year"] == "2007"
-    assert d["km"] == "45.000 km"
+    assert d["year"] == 2007
+    assert d["km"] == 45000
 
 
 def test_olx_missing_year_or_mileage_returns_none():
@@ -91,7 +91,7 @@ def test_olx_missing_year_or_mileage_returns_none():
     assert len(result1) == 1
     d1 = result1[0]
     assert d1.get("km") is None
-    assert d1["year"] == "2007"
+    assert d1["year"] == 2007
 
     # Case 2: missing both year and km
     item2 = OlxItem(
