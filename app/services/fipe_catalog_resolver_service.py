@@ -36,7 +36,7 @@ def important_vehicle_tokens(value: str | None) -> set[str]:
             continue
         if len(tok) <= 1 and not tok.isdigit():
             continue
-        if len(tok) == 2 and tok not in _IMPORTANT_SHORT_TOKENS and not tok.isdigit():
+        if len(tok) == 2 and tok not in _IMPORTANT_SHORT_TOKENS and not any(ch.isdigit() for ch in tok):
             continue
         out.add(tok)
     return out
