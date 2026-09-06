@@ -41,6 +41,10 @@ _MAX_FILTER_VALUE = 36
 _MAX_BADGES = 8
 _MAX_REASONS = 3
 _NON_ACTIONABLE_REASONS = {"anuncio completo", "anúncio completo"}
+# Reasons que descrevem um atributo desfavorável (preço acima da FIPE/mediana,
+# km alto, preço ausente) nunca viram "motivo principal" — não são critério de
+# busca nem coisa boa. Continuam visíveis, mas como aviso de negociação à parte.
+_NEGATIVE_REASON_MARKERS = ("acima da", "alto para o ano", "ausente")
 
 
 def _clean(s: str | None) -> str:
@@ -139,23 +143,6 @@ def _format_location_badge(location: str | None, *, city: str | None = None, sta
 
 
 
-def _score_label(score_i: int) -> str | None:
-    try:
-        score_value = int(score_i)
-    except Exception:
-        return None
-
-    if score_value >= 85:
-        return "Excelente oportunidade"
-    if score_value >= 70:
-        return "Forte oportunidade"
-    if score_value >= 50:
-        return "Boa compatibilidade"
-    if score_value >= 30:
-        return "Compatível"
-    if score_value > 0:
-        return "Baixa prioridade"
-    return None
 def _delta_badge_text(delta_pct: float | None) -> str | None:
     if delta_pct is None:
         return None
@@ -169,32 +156,6 @@ def _delta_badge_text(delta_pct: float | None) -> str | None:
     if p > 0:
         return f"+{pct_i}% vs mediana"
     return "0% vs mediana"
-
-_DIMENSION_LABELS_PT = {
-    "market_price": "preço de mercado",
-    "fipe_price": "FIPE",
-    "mileage": "km/ano",
-    "rarity": "raridade",
-}
-
-
-def _partial_score_badge(breakdown: dict) -> str | None:
-    """Return partial score badge if 2+ dimensions are defaulted, else None."""
-    if not isinstance(breakdown, dict):
-        return None
-
-    defaulted_dimensions = breakdown.get("defaulted_dimensions")
-    if not isinstance(defaulted_dimensions, list):
-        return None
-
-    if len(defaulted_dimensions) >= 2:
-        labels = ", ".join(
-            _DIMENSION_LABELS_PT.get(dim, dim) for dim in defaulted_dimensions
-        )
-        return f"⚠️ Score parcial — sem dados reais de: {labels}"
-
-    return None
-
 
 def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
     market_context = breakdown.get("market_context") if isinstance(breakdown, dict) else None
@@ -216,10 +177,12 @@ def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
         except Exception:
             fipe_delta = None
         if fipe_delta is not None:
-            if fipe_delta < -10:
-                return f"💰 {abs(fipe_delta):.0f}% abaixo da FIPE"
-            if fipe_delta > 10:
-                return f"📈 {fipe_delta:.0f}% acima da FIPE"
+            # delta_vs_fipe_pct chega como fração (0.20 == 20%), igual ao
+            # threshold usado em score_v2.py para os reasons de FIPE.
+            if fipe_delta < -0.08:
+                return f"💰 {abs(fipe_delta) * 100:.0f}% abaixo da FIPE"
+            if fipe_delta > 0.12:
+                return f"📈 {fipe_delta * 100:.0f}% acima da FIPE"
             return "💰 Próximo da FIPE"
 
     price = getattr(ad, "price", None)
@@ -500,10 +463,6 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
 
     breakdown = _get_breakdown(ad, score_result) or {}
 
-    partial_badge = _partial_score_badge(breakdown)
-    if partial_badge:
-        badges.append(partial_badge)
-
     price_badge = _price_context_badge(ad, breakdown)
     if price_badge:
         badges.append(price_badge)
@@ -529,12 +488,7 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
 
     compact: list[str] = []
     for b in badges[:_MAX_BADGES]:
-        # The partial-score badge must retain its full list of dimensions
-        # (REQ-009); the generic 34-char clip would truncate it away.
-        # Worst case (4 dimensions) is 79 chars, so 120 gives a safe margin
-        # without affecting any other badge, which stay clipped at 34.
-        limit = 120 if b == partial_badge else 34
-        item = _clip(b, limit)
+        item = _clip(b, 34)
         if item:
             compact.append(item)
     return compact
@@ -618,6 +572,11 @@ def _compact_filters(ad: Any) -> list[str]:
     return out[:2]
 
 
+def _is_negative_reason(reason: str) -> bool:
+    norm = _norm_text(reason)
+    return any(marker in norm for marker in _NEGATIVE_REASON_MARKERS)
+
+
 def _main_reason(reasons: list[str]) -> str | None:
     if not reasons:
         return None
@@ -627,7 +586,17 @@ def _main_reason(reasons: list[str]) -> str | None:
             continue
         if _norm_text(candidate) in _NON_ACTIONABLE_REASONS:
             continue
+        if _is_negative_reason(candidate):
+            continue
         return candidate
+    return None
+
+
+def _negative_price_reason(reasons: list[str]) -> str | None:
+    for reason in reasons:
+        candidate = _clean(reason)
+        if candidate and _is_negative_reason(candidate):
+            return candidate
     return None
 
 
@@ -681,10 +650,7 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
         score_i = 0
 
     title = build_title(ad)
-    label = _score_label(score_i)
-    if score_i > 0 and label:
-        line1 = f"🔥 {score_i}/100 — {label} — {title}"
-    elif score_i > 0:
+    if score_i > 0:
         line1 = f"🔥 {score_i}/100 — {title}"
     else:
         line1 = title
@@ -699,6 +665,7 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
 
     reasons = build_reasons(ad, score_result, score_i)
     main_reason = _main_reason(reasons)
+    negative_reason = _negative_price_reason(reasons)
     matched_filters = _compact_filters(ad)
 
     lines = [line1]
@@ -708,6 +675,9 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
     if rarity_context:
         lines.append(rarity_context)
     lines.append(line3)
+
+    if negative_reason:
+        lines.append(f"⚠️ {negative_reason} — vale negociar")
 
     context_lines = _build_context_lines(ad, main_reason, matched_filters)
     if context_lines:
@@ -721,6 +691,8 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
             if not clean or clean == _clean(main_reason):
                 continue
             if _norm_text(clean) in _NON_ACTIONABLE_REASONS:
+                continue
+            if _is_negative_reason(clean):
                 continue
             extra_reasons.append(r)
     for r in extra_reasons[:2]:

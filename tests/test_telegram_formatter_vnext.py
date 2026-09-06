@@ -70,7 +70,7 @@ def test_complete_score_gt_zero_snapshot_and_order():
     payload = format_ad_message(ad)
     lines = payload.text.splitlines()
 
-    assert lines[0] == "🔥 87/100 — Excelente oportunidade — Honda Civic 2019 SI"
+    assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
     assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
     assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
     assert lines[3] == "Por que você recebeu:"
@@ -85,36 +85,40 @@ def test_score_92_shows_excellent_opportunity_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=92, score_breakdown={"total": 92, "reasons": ["ok"]}))
-    assert "🔥 92/100 — Excelente oportunidade" in payload.text
-    assert "Honda Civic 2019 SI" in payload.text
+    assert "🔥 92/100 — Honda Civic 2019 SI" in payload.text
+    assert "Excelente oportunidade" not in payload.text
 
 
-def test_score_77_shows_strong_opportunity_label():
+def test_score_77_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=77, score_breakdown={"total": 77, "reasons": ["ok"]}))
-    assert "🔥 77/100 — Forte oportunidade" in payload.text
+    assert "🔥 77/100 — Honda Civic 2019 SI" in payload.text
+    assert "Forte oportunidade" not in payload.text
 
 
-def test_score_58_shows_good_compatibility_label():
+def test_score_58_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=58, score_breakdown={"total": 58, "reasons": ["ok"]}))
-    assert "🔥 58/100 — Boa compatibilidade" in payload.text
+    assert "🔥 58/100 — Honda Civic 2019 SI" in payload.text
+    assert "Boa compatibilidade" not in payload.text
 
 
-def test_score_35_shows_compatible_label():
+def test_score_35_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=35, score_breakdown={"total": 35, "reasons": ["ok"]}))
-    assert "🔥 35/100 — Compatível" in payload.text
+    assert "🔥 35/100 — Honda Civic 2019 SI" in payload.text
+    assert "Compatível" not in payload.text
 
 
-def test_score_12_shows_low_priority_label():
+def test_score_12_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=12, score_breakdown={"total": 12, "reasons": ["ok"]}))
-    assert "🔥 12/100 — Baixa prioridade" in payload.text
+    assert "🔥 12/100 — Honda Civic 2019 SI" in payload.text
+    assert "Baixa prioridade" not in payload.text
 
 
 def test_score_zero_or_missing_has_no_score_label():
@@ -138,7 +142,7 @@ def test_score_zero_or_missing_has_no_score_label():
             assert label not in payload.text
 
 
-def test_score_label_keeps_badges_and_context_block():
+def test_score_header_keeps_badges_and_context_block():
     from app.notifications.telegram_formatter import format_ad_message
 
     ad = _base_ad(
@@ -151,7 +155,7 @@ def test_score_label_keeps_badges_and_context_block():
 
     payload = format_ad_message(ad)
 
-    assert "Forte oportunidade" in payload.text
+    assert "🔥 77/100 — Honda Civic 2019 SI" in payload.text
     assert "📍 São Paulo-SP" in payload.text or "🛞 75.352 km" in payload.text
     assert "Por que você recebeu:" in payload.text
 
@@ -373,11 +377,11 @@ def test_fipe_badge_when_delta_exists_in_breakdown():
 
     payload_below = format_ad_message(_base_ad(score_breakdown={
         "total": 80, "reasons": ["ok"],
-        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": -12}},
+        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": -0.12}},
     }))
     payload_above = format_ad_message(_base_ad(score_breakdown={
         "total": 80, "reasons": ["ok"],
-        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": 15}},
+        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": 0.15}},
     }))
     assert "12% abaixo da FIPE" in payload_below.text
     assert "15% acima da FIPE" in payload_above.text
@@ -704,66 +708,3 @@ def test_tracked_price_drop_formatter_invalid_dates_do_not_break():
     assert "Rastreando há" not in payload.text
 
 
-def test_partial_score_badge_zero_dimensions():
-    """No badge when 0 dimensions are defaulted."""
-    from app.notifications.telegram_formatter import _partial_score_badge
-
-    breakdown = {"defaulted_dimensions": []}
-    result = _partial_score_badge(breakdown)
-    assert result is None
-
-
-def test_partial_score_badge_one_dimension():
-    """No badge when 1 dimension is defaulted (below threshold)."""
-    from app.notifications.telegram_formatter import _partial_score_badge
-
-    breakdown = {"defaulted_dimensions": ["market_price"]}
-    result = _partial_score_badge(breakdown)
-    assert result is None
-
-
-def test_partial_score_badge_two_dimensions():
-    """Badge shown when exactly 2 dimensions are defaulted."""
-    from app.notifications.telegram_formatter import _partial_score_badge
-
-    breakdown = {"defaulted_dimensions": ["market_price", "fipe_price"]}
-    result = _partial_score_badge(breakdown)
-    assert result == "⚠️ Score parcial — sem dados reais de: preço de mercado, FIPE"
-
-
-def test_partial_score_badge_four_dimensions():
-    """Badge shown when 4 dimensions are defaulted."""
-    from app.notifications.telegram_formatter import _partial_score_badge
-
-    breakdown = {"defaulted_dimensions": ["market_price", "fipe_price", "mileage", "rarity"]}
-    result = _partial_score_badge(breakdown)
-    assert (
-        result
-        == "⚠️ Score parcial — sem dados reais de: preço de mercado, FIPE, km/ano, raridade"
-    )
-
-
-def test_partial_score_badge_integration_with_score_result():
-    """Integration test: badge appears in message when 2+ defaulted_dimensions."""
-    from types import SimpleNamespace
-    from app.notifications.telegram_formatter import format_ad_message
-
-    ad = _base_ad(title="Civic", price=85000, year=2019)
-    score_result = SimpleNamespace(
-        score=75,
-        debug_score_components={},
-        defaulted_dimensions=["market_price", "fipe_price"],
-        to_dict=lambda: {
-            "score": 75,
-            "defaulted_dimensions": ["market_price", "fipe_price"],
-        }
-    )
-
-    payload = format_ad_message(ad, score_result)
-    # The partial-score badge is exempt from build_badges' 34-char clip
-    # (REQ-009), so the full dimension list must survive in the final
-    # message text, not just a truncated prefix.
-    assert (
-        "⚠️ Score parcial — sem dados reais de: preço de mercado, FIPE"
-        in payload.text
-    )
