@@ -50,9 +50,9 @@ def test_telegram_message_contract_vnext_formatting():
     text = _build_text(listing, notification=n)
     lines = text.splitlines()
 
-    assert lines[0].startswith("🔥 82/100 — Honda Civic Hatch 1994")
+    assert lines[0].startswith("🔥 82/100 · Honda Civic Hatch 1994")
     assert any("R$ 32.000,00" in l for l in lines)
-    assert any("Fonte: chavesnamao" in l for l in lines)
+    assert any("chavesnamao" in l for l in lines)
 
     # URL não deve aparecer no corpo da mensagem
     assert all("http" not in line for line in lines)

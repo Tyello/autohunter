@@ -70,14 +70,10 @@ def test_complete_score_gt_zero_snapshot_and_order():
     payload = format_ad_message(ad)
     lines = payload.text.splitlines()
 
-    assert lines[0] == "🔥 87/100 — Honda Civic 2019 SI"
-    assert lines[1].startswith("📍 São Paulo-SP | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 💰 -8% vs mediana | 👤 Particular")
-    assert lines[2] == "R$ 98.900,00 • Fonte: webmotors"
-    assert lines[3] == "Por que você recebeu:"
-    assert lines[4] == "• Motivo principal: Preço 8% abaixo da mediana"
-    assert lines[5:] == [
-        "• Match forte com sua wishlist",
-    ]
+    assert lines[0] == "🔥 87/100 · Honda Civic 2019 SI"
+    assert lines[1] == "📍 São Paulo-SP · R$ 98.900,00 · webmotors | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 👤 Particular"
+    assert lines[2] == "💰 FIPE —"
+    assert len(lines) == 3
     assert payload.inline_keyboard == [[{"text": "Abrir anúncio", "url": "https://www.webmotors.com.br/comprar/1"}]]
 
 
@@ -85,7 +81,7 @@ def test_score_92_shows_excellent_opportunity_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=92, score_breakdown={"total": 92, "reasons": ["ok"]}))
-    assert "🔥 92/100 — Honda Civic 2019 SI" in payload.text
+    assert "🔥 92/100 · Honda Civic 2019 SI" in payload.text
     assert "Excelente oportunidade" not in payload.text
 
 
@@ -93,7 +89,7 @@ def test_score_77_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=77, score_breakdown={"total": 77, "reasons": ["ok"]}))
-    assert "🔥 77/100 — Honda Civic 2019 SI" in payload.text
+    assert "🔥 77/100 · Honda Civic 2019 SI" in payload.text
     assert "Forte oportunidade" not in payload.text
 
 
@@ -101,7 +97,7 @@ def test_score_58_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=58, score_breakdown={"total": 58, "reasons": ["ok"]}))
-    assert "🔥 58/100 — Honda Civic 2019 SI" in payload.text
+    assert "🔥 58/100 · Honda Civic 2019 SI" in payload.text
     assert "Boa compatibilidade" not in payload.text
 
 
@@ -109,7 +105,7 @@ def test_score_35_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=35, score_breakdown={"total": 35, "reasons": ["ok"]}))
-    assert "🔥 35/100 — Honda Civic 2019 SI" in payload.text
+    assert "🔥 35/100 · Honda Civic 2019 SI" in payload.text
     assert "Compatível" not in payload.text
 
 
@@ -117,7 +113,7 @@ def test_score_12_shows_no_textual_label():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_v2=12, score_breakdown={"total": 12, "reasons": ["ok"]}))
-    assert "🔥 12/100 — Honda Civic 2019 SI" in payload.text
+    assert "🔥 12/100 · Honda Civic 2019 SI" in payload.text
     assert "Baixa prioridade" not in payload.text
 
 
@@ -155,9 +151,9 @@ def test_score_header_keeps_badges_and_context_block():
 
     payload = format_ad_message(ad)
 
-    assert "🔥 77/100 — Honda Civic 2019 SI" in payload.text
+    assert "🔥 77/100 · Honda Civic 2019 SI" in payload.text
     assert "📍 São Paulo-SP" in payload.text or "🛞 75.352 km" in payload.text
-    assert "Por que você recebeu:" in payload.text
+    assert "✓ civic si" in payload.text
 
 
 def test_score_zero_with_query_shows_minimum_context():
@@ -169,8 +165,7 @@ def test_score_zero_with_query_shows_minimum_context():
 
     assert payload.text.splitlines()[0] == "Honda Civic 2019 SI"
     assert "🔥" not in payload.text
-    assert "Por que você recebeu:" in payload.text
-    assert "• Busca: civic si" in payload.text
+    assert "✓ civic si" in payload.text
 
 
 def test_score_zero_with_filters_shows_criteria_context():
@@ -180,8 +175,7 @@ def test_score_zero_with_filters_shows_criteria_context():
     ad.wishlist_filters = [{"field": "year", "operator": "gte", "value": "2018"}]
     payload = format_ad_message(ad)
 
-    assert "Por que você recebeu:" in payload.text
-    assert "• Critério: ano ≥ 2018" in payload.text
+    assert "✓ ano ≥ 2018" in payload.text
 
 
 def test_year_filters_single_year_are_consolidated():
@@ -194,9 +188,9 @@ def test_year_filters_single_year_are_consolidated():
     ]
     payload = format_ad_message(ad)
 
-    assert "• Critério: ano = 2019" in payload.text
-    assert "• Critério: ano ≥ 2019" not in payload.text
-    assert "• Critério: ano ≤ 2019" not in payload.text
+    assert "✓ ano = 2019" in payload.text
+    assert "✓ ano ≥ 2019" not in payload.text
+    assert "✓ ano ≤ 2019" not in payload.text
 
 
 def test_year_filters_range_are_consolidated():
@@ -209,9 +203,9 @@ def test_year_filters_range_are_consolidated():
     ]
     payload = format_ad_message(ad)
 
-    assert "• Critério: ano 2019 a 2021" in payload.text
-    assert "• Critério: ano ≥ 2019" not in payload.text
-    assert "• Critério: ano ≤ 2021" not in payload.text
+    assert "✓ ano 2019 a 2021" in payload.text
+    assert "✓ ano ≥ 2019" not in payload.text
+    assert "✓ ano ≤ 2021" not in payload.text
 
 
 def test_year_filters_only_min_keeps_gte_format():
@@ -221,7 +215,7 @@ def test_year_filters_only_min_keeps_gte_format():
     ad.wishlist_filters = [{"field": "year", "operator": "gte", "value": "2019"}]
     payload = format_ad_message(ad)
 
-    assert "• Critério: ano ≥ 2019" in payload.text
+    assert "✓ ano ≥ 2019" in payload.text
 
 
 def test_year_filters_only_max_keeps_lte_format():
@@ -231,7 +225,7 @@ def test_year_filters_only_max_keeps_lte_format():
     ad.wishlist_filters = [{"field": "year", "operator": "lte", "value": "2021"}]
     payload = format_ad_message(ad)
 
-    assert "• Critério: ano ≤ 2021" in payload.text
+    assert "✓ ano ≤ 2021" in payload.text
 
 
 def test_without_context_does_not_add_empty_context_block():
@@ -239,7 +233,7 @@ def test_without_context_does_not_add_empty_context_block():
 
     ad = _base_ad(score_v2=0, score_breakdown={"total": 0, "reasons": []})
     payload = format_ad_message(ad)
-    assert "Por que você recebeu:" not in payload.text
+    assert "✓ " not in payload.text
 
 
 def test_missing_km_omits_badge():
@@ -260,49 +254,7 @@ def test_missing_price_shows_dash_and_no_invented_data():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(price=None))
-    assert "— • Fonte: webmotors" in payload.text
-
-
-def test_missing_delta_shows_conservative_price_context_badge():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "reasons": ["ok"]}))
-    assert "💰 Preço informado — sem base de" in payload.text
-
-
-def test_delta_badge_below_median_kept_when_delta_exists():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_median_pct": -0.18, "reasons": ["ok"]}))
-    assert "-18% vs mediana" in payload.text
-    assert "sem base de mercado" not in payload.text
-    assert "base de mercado pequena" not in payload.text
-
-
-def test_delta_badge_above_median_kept_when_delta_exists():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_median_pct": 0.12, "reasons": ["ok"]}))
-    assert "+12% vs mediana" in payload.text
-    assert "Preço informado" not in payload.text
-
-
-def test_price_context_without_market_context():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "reasons": ["ok"]}))
-    assert "Preço informado" in payload.text
-    assert "sem base de" in payload.text
-
-
-def test_price_context_with_small_market_sample():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload = format_ad_message(
-        _base_ad(score_breakdown={"total": 80, "reasons": ["ok"], "market_context": {"sample_size": 3, "delta_pct": None}})
-    )
-    assert "Preço informado" in payload.text
-    assert "Preço informado — base de" in payload.text
+    assert "— · webmotors" in payload.text
 
 
 def test_rarity_context_shows_only_with_enough_sample():
@@ -349,54 +301,47 @@ def test_rarity_context_can_show_common_model():
     assert "aparece com frequência" in payload.text
 
 
-def test_price_context_with_enough_sample_but_missing_delta():
+def test_fipe_line_shows_absolute_value_when_present():
+    """REQ-009a: valor absoluto da FIPE, nunca percentual de desvio."""
     from app.notifications.telegram_formatter import format_ad_message
 
-    payload = format_ad_message(
-        _base_ad(score_breakdown={"total": 80, "reasons": ["ok"], "market_context": {"sample_size": 10, "delta_pct": None}})
-    )
-    assert "Preço informado — comparação" in payload.text
-
-
-def test_missing_price_shows_explicit_not_informed_badge():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload = format_ad_message(_base_ad(price=None, score_breakdown={"total": 80, "reasons": ["ok"]}))
-    assert "Preço informado" not in payload.text
-    assert "sem base de mercado" not in payload.text
-    assert "Preço não informado pela fonte" in payload.text
-
-
-def test_fipe_badge_when_delta_exists_in_breakdown():
-    """Regression: score_v2.py (app/scoring/score_v2.py) nests the FIPE delta at
-    market_context["fipe"]["delta_vs_fipe_pct"] — it never writes a top-level
-    delta_vs_fipe_pct key. The formatter must read from that real shape, not a
-    flattened one that score_v2 never actually produces.
-    """
-    from app.notifications.telegram_formatter import format_ad_message
-
-    payload_below = format_ad_message(_base_ad(score_breakdown={
+    payload = format_ad_message(_base_ad(score_breakdown={
         "total": 80, "reasons": ["ok"],
-        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": -0.12}},
+        "market_context": {"fipe": {"fipe_price": 36500, "delta_vs_fipe_pct": -0.12}},
     }))
-    payload_above = format_ad_message(_base_ad(score_breakdown={
-        "total": 80, "reasons": ["ok"],
-        "market_context": {"fipe": {"fipe_price": 100000, "delta_vs_fipe_pct": 0.15}},
-    }))
-    assert "12% abaixo da FIPE" in payload_below.text
-    assert "15% acima da FIPE" in payload_above.text
+    assert "💰 FIPE R$ 36.500,00" in payload.text
+    assert "%" not in payload.text
 
 
-def test_fipe_badge_absent_with_legacy_flat_breakdown_shape():
-    """A flat top-level delta_vs_fipe_pct (the shape score_v2 never produces) must not
-    be picked up by accident — guards against silently reintroducing the old bug where
-    the formatter read the wrong key and the badge always rendered nothing in production.
+def test_fipe_line_shows_dash_when_absent():
+    """REQ-009b: sem breakdown de FIPE, mostra travessão em vez de inventar dado."""
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "reasons": ["ok"]}))
+    assert "💰 FIPE —" in payload.text
+
+
+def test_fipe_line_ignores_legacy_flat_breakdown_shape():
+    """A flat top-level delta_vs_fipe_pct/fipe_price (shape score_v2 never produces) must not
+    be picked up by accident — guards against silently reading the wrong key.
     """
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": -12, "reasons": ["ok"]}))
+    assert "💰 FIPE —" in payload.text
+
+
+def test_criteria_lines_list_only_user_filters_never_price_reason():
+    """REQ-009c: motivo deriva só de wishlist_filters, nunca do desvio de preço/FIPE."""
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_breakdown={"total": 70, "reasons": ["Preço 11% abaixo da FIPE"]})
+    ad.wishlist_filters = [{"field": "year", "operator": "lte", "value": "2008"}]
+    payload = format_ad_message(ad)
+
+    assert "✓ ano ≤ 2008" in payload.text
     assert "abaixo da FIPE" not in payload.text
-    assert "acima da FIPE" not in payload.text
+    assert "Motivo principal" not in payload.text
 
 
 def test_long_title_truncates_intelligently():
@@ -454,7 +399,7 @@ def test_recency_badge_fallback_created_at_new():
         created_at=datetime.now(timezone.utc) - timedelta(minutes=30),
         extras={},
     )
-    assert build_recency_badge(ad) == "🆕 Anúncio novo no feed"
+    assert build_recency_badge(ad) is None
 
 
 def test_recency_badge_fallback_created_at_recent():
@@ -465,7 +410,7 @@ def test_recency_badge_fallback_created_at_recent():
         created_at=datetime.now(timezone.utc) - timedelta(hours=4),
         extras={},
     )
-    assert build_recency_badge(ad) == "🕐 Recente"
+    assert build_recency_badge(ad) is None
 
 
 def test_recency_badge_fallback_created_at_old_returns_none():
@@ -498,7 +443,8 @@ def test_format_ad_message_includes_created_at_fallback_badge():
         extras={"trim": "SI"},
     )
     payload = format_ad_message(ad)
-    assert "🆕 Anúncio novo no feed" in payload.text or "🕐 Recente" in payload.text
+    assert "🆕 Anúncio novo no feed" not in payload.text
+    assert "🕐 Recente" not in payload.text
 
 
 def test_detect_leilao_positive():
@@ -556,9 +502,8 @@ def test_explainability_includes_compact_wishlist_filters():
 
     payload = format_ad_message(ad)
 
-    assert "Por que você recebeu:" in payload.text
-    assert "• Critério: cor = prata" in payload.text
-    assert "• Critério: estado = SP" in payload.text
+    assert "✓ cor = prata" in payload.text
+    assert "✓ estado = SP" in payload.text
 
 
 def test_formatter_caps_extreme_fields_and_prioritizes_core_content():
@@ -592,8 +537,7 @@ def test_formatter_caps_extreme_fields_and_prioritizes_core_content():
 
     assert len(lines) <= 8
     assert lines[0].startswith("🔥 91/100")
-    assert "Por que você recebeu:" in payload.text
-    assert payload.text.count("• Critério:") <= 2
+    assert payload.text.count("✓ ") <= 2
 
 
 def test_non_actionable_reason_not_used_as_main_reason_when_query_exists():
@@ -606,16 +550,9 @@ def test_non_actionable_reason_not_used_as_main_reason_when_query_exists():
     ad.wishlist_query = "civic si"
     payload = format_ad_message(ad)
 
-    assert "• Motivo principal:" not in payload.text
-    assert "• Busca: civic si" in payload.text
-
-
-def test_positive_score_with_reason_keeps_main_reason():
-    from app.notifications.telegram_formatter import format_ad_message
-
-    ad = _base_ad(score_v2=75, score_breakdown={"total": 75, "reasons": ["preço abaixo da mediana"]})
-    payload = format_ad_message(ad)
-    assert "• Motivo principal: preço abaixo da mediana" in payload.text
+    assert "Motivo principal" not in payload.text
+    assert "anuncio completo" not in payload.text
+    assert "✓ civic si" in payload.text
 
 
 def test_tracked_price_drop_formatter_full_payload():

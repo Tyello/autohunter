@@ -36,15 +36,8 @@ class ListingFlags:
 
 _RE_WS = re.compile(r"\s+")
 _MAX_LINE = 220
-_MAX_REASON = 88
 _MAX_FILTER_VALUE = 36
 _MAX_BADGES = 8
-_MAX_REASONS = 3
-_NON_ACTIONABLE_REASONS = {"anuncio completo", "anúncio completo"}
-# Reasons que descrevem um atributo desfavorável (preço acima da FIPE/mediana,
-# km alto, preço ausente) nunca viram "motivo principal" — não são critério de
-# busca nem coisa boa. Continuam visíveis, mas como aviso de negociação à parte.
-_NEGATIVE_REASON_MARKERS = ("acima da", "alto para o ano", "ausente")
 
 
 def _clean(s: str | None) -> str:
@@ -143,67 +136,18 @@ def _format_location_badge(location: str | None, *, city: str | None = None, sta
 
 
 
-def _delta_badge_text(delta_pct: float | None) -> str | None:
-    if delta_pct is None:
-        return None
-    try:
-        p = float(delta_pct)
-    except Exception:
-        return None
-    pct_i = int(round(abs(p) * 100.0))
-    if p < 0:
-        return f"-{pct_i}% vs mediana"
-    if p > 0:
-        return f"+{pct_i}% vs mediana"
-    return "0% vs mediana"
-
-def _price_context_badge(ad: Any, breakdown: dict) -> str | None:
+def _fipe_price(breakdown: dict) -> float | None:
     market_context = breakdown.get("market_context") if isinstance(breakdown, dict) else None
     market_context = market_context if isinstance(market_context, dict) else {}
-
-    delta_pct = breakdown.get("delta_vs_median_pct")
-    if delta_pct is None:
-        delta_pct = market_context.get("delta_pct")
-    dtxt = _delta_badge_text(delta_pct)
-    if dtxt:
-        return f"💰 {dtxt}"
-
     fipe_context = market_context.get("fipe")
     fipe_context = fipe_context if isinstance(fipe_context, dict) else {}
-    delta_vs_fipe_pct = fipe_context.get("delta_vs_fipe_pct")
-    if delta_vs_fipe_pct is not None:
-        try:
-            fipe_delta = float(delta_vs_fipe_pct)
-        except Exception:
-            fipe_delta = None
-        if fipe_delta is not None:
-            # delta_vs_fipe_pct chega como fração (0.20 == 20%), igual ao
-            # threshold usado em score_v2.py para os reasons de FIPE.
-            if fipe_delta < -0.08:
-                return f"💰 {abs(fipe_delta) * 100:.0f}% abaixo da FIPE"
-            if fipe_delta > 0.12:
-                return f"📈 {fipe_delta * 100:.0f}% acima da FIPE"
-            return "💰 Próximo da FIPE"
-
-    price = getattr(ad, "price", None)
+    value = fipe_context.get("fipe_price")
+    if value is None:
+        return None
     try:
-        price_value = float(price)
+        return float(value)
     except Exception:
-        return "💰 Preço não informado pela fonte"
-    if price_value <= 0:
-        return "💰 Preço não informado pela fonte"
-
-    sample_size = market_context.get("sample_size")
-    try:
-        sample_size_i = int(sample_size) if sample_size is not None else None
-    except Exception:
-        sample_size_i = None
-
-    if not sample_size_i:
-        return "💰 Preço informado — sem base de mercado"
-    if sample_size_i < 8:
-        return "💰 Preço informado — base de mercado pequena"
-    return "💰 Preço informado — comparação indisponível"
+        return None
 
 
 def _rarity_context_line(breakdown: dict) -> str | None:
@@ -331,15 +275,6 @@ def build_recency_badge(ad: Any) -> str | None:
             return None
         return None
 
-    if not created_at or created_at > now:
-        return None
-
-    diff = now - created_at
-    hours = diff.total_seconds() / 3600
-    if hours < 2:
-        return "🆕 Anúncio novo no feed"
-    if hours < 6:
-        return "🕐 Recente"
     return None
 
 
@@ -441,14 +376,6 @@ def build_title(ad: Any, *, max_len: int = 90) -> str:
 def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags) -> list[str]:
     badges: list[str] = []
 
-    loc_badge = _format_location_badge(
-        getattr(ad, "location", None),
-        city=getattr(ad, "city", None),
-        state=getattr(ad, "state", None),
-    )
-    if loc_badge:
-        badges.append(f"📍 {loc_badge}")
-
     recency = build_recency_badge(ad)
     if recency:
         badges.append(recency)
@@ -460,12 +387,6 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
     gb = _short_gearbox(getattr(ad, "transmission", None))
     if gb:
         badges.append(f"⚙️ {gb}")
-
-    breakdown = _get_breakdown(ad, score_result) or {}
-
-    price_badge = _price_context_badge(ad, breakdown)
-    if price_badge:
-        badges.append(price_badge)
 
     seller = build_seller_type_badge(ad)
     if seller:
@@ -492,29 +413,6 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
         if item:
             compact.append(item)
     return compact
-
-
-def build_reasons(ad: Any, score_result: Any | None, score_i: int) -> list[str]:
-    if score_i <= 0:
-        return []
-
-    breakdown = _get_breakdown(ad, score_result) or {}
-    reasons = breakdown.get("reasons") or getattr(ad, "reasons", None) or []
-    if isinstance(reasons, list):
-        clean: list[str] = []
-        seen: set[str] = set()
-        for r in reasons:
-            item = _clip(str(r), _MAX_REASON)
-            key = _norm_text(item)
-            if not item or key in seen:
-                continue
-            clean.append(item)
-            seen.add(key)
-        if clean:
-            return clean[:_MAX_REASONS]
-
-    fallback: list[str] = []
-    return fallback[:3]
 
 
 def _compact_filters(ad: Any) -> list[str]:
@@ -572,42 +470,10 @@ def _compact_filters(ad: Any) -> list[str]:
     return out[:2]
 
 
-def _is_negative_reason(reason: str) -> bool:
-    norm = _norm_text(reason)
-    return any(marker in norm for marker in _NEGATIVE_REASON_MARKERS)
-
-
-def _main_reason(reasons: list[str]) -> str | None:
-    if not reasons:
-        return None
-    for reason in reasons:
-        candidate = _clean(reason)
-        if not candidate:
-            continue
-        if _norm_text(candidate) in _NON_ACTIONABLE_REASONS:
-            continue
-        if _is_negative_reason(candidate):
-            continue
-        return candidate
-    return None
-
-
-def _negative_price_reason(reasons: list[str]) -> str | None:
-    for reason in reasons:
-        candidate = _clean(reason)
-        if candidate and _is_negative_reason(candidate):
-            return candidate
-    return None
-
-
-def _build_context_lines(ad: Any, main_reason: str | None, matched_filters: list[str]) -> list[str]:
-    lines: list[str] = []
-
-    if main_reason:
-        lines.append(f"• Motivo principal: {main_reason}")
-
-    for ftxt in matched_filters[:2]:
-        lines.append(f"• Critério: {ftxt}")
+def _build_criteria_lines(ad: Any) -> list[str]:
+    matched_filters = _compact_filters(ad)
+    if matched_filters:
+        return [f"✓ {ftxt}" for ftxt in matched_filters]
 
     wishlist_query = _clip(
         getattr(ad, "wishlist_query", None)
@@ -615,10 +481,10 @@ def _build_context_lines(ad: Any, main_reason: str | None, matched_filters: list
         or "",
         64,
     )
-    if wishlist_query and not lines:
-        lines.append(f"• Busca: {wishlist_query}")
+    if wishlist_query:
+        return [f"✓ {wishlist_query}"]
 
-    return lines[:3]
+    return []
 
 def build_open_button(ad: Any) -> list[list[dict[str, str]]]:
     url = normalize_listing_url(
@@ -651,22 +517,24 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
 
     title = build_title(ad)
     if score_i > 0:
-        line1 = f"🔥 {score_i}/100 — {title}"
+        line1 = f"🔥 {score_i}/100 · {title}"
     else:
         line1 = title
 
     flags = extract_listing_flags(ad)
     badges = build_badges(ad, score_result, flags)
-    line2 = " | ".join(badges) if badges else ""
 
+    loc_badge = _format_location_badge(
+        getattr(ad, "location", None),
+        city=getattr(ad, "city", None),
+        state=getattr(ad, "state", None),
+    )
     price_txt = _format_price_brl(getattr(ad, "price", None))
     source = _clean(getattr(ad, "source", None))
-    line3 = f"{price_txt} • Fonte: {source}" if source else price_txt
+    core = " · ".join(p for p in (f"📍 {loc_badge}" if loc_badge else None, price_txt, source or None) if p)
+    line2 = " | ".join(p for p in (core, *badges) if p)
 
-    reasons = build_reasons(ad, score_result, score_i)
-    main_reason = _main_reason(reasons)
-    negative_reason = _negative_price_reason(reasons)
-    matched_filters = _compact_filters(ad)
+    line3 = f"💰 FIPE {_format_price_brl(_fipe_price(breakdown))}"
 
     lines = [line1]
     if line2:
@@ -675,28 +543,7 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
     if rarity_context:
         lines.append(rarity_context)
     lines.append(line3)
-
-    if negative_reason:
-        lines.append(f"⚠️ {negative_reason} — vale negociar")
-
-    context_lines = _build_context_lines(ad, main_reason, matched_filters)
-    if context_lines:
-        lines.append("Por que você recebeu:")
-        lines.extend(context_lines)
-
-    extra_reasons = []
-    if not matched_filters:
-        for r in reasons:
-            clean = _clean(r)
-            if not clean or clean == _clean(main_reason):
-                continue
-            if _norm_text(clean) in _NON_ACTIONABLE_REASONS:
-                continue
-            if _is_negative_reason(clean):
-                continue
-            extra_reasons.append(r)
-    for r in extra_reasons[:2]:
-        lines.append(f"• {r}")
+    lines.extend(_build_criteria_lines(ad))
 
     compact_lines = [_clip(line, _MAX_LINE) for line in lines if _clean(line)]
     return TelegramMessagePayload(text="\n".join(compact_lines).strip(), inline_keyboard=build_open_button(ad))

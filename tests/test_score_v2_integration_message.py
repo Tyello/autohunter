@@ -64,7 +64,9 @@ def test_integration_score_to_message_contains_badges_and_reasons():
     stats = MarketStats(make="honda", model="civic", year=2019, median_price=Decimal("100000"), sample_size=50)
 
     sres = score_ad(ad, w, stats, now=now)
-    payload = format_ad_message(_View(ad, sres.total, sres.to_dict()))
+    view = _View(ad, sres.total, sres.to_dict())
+    view.wishlist_query = w.query
+    payload = format_ad_message(view)
 
     # badges
     assert "📍" in payload.text
@@ -72,9 +74,8 @@ def test_integration_score_to_message_contains_badges_and_reasons():
     assert "⚙️" in payload.text
     assert "💰" in payload.text
 
-    # reasons
-    assert "•" in payload.text
-    assert any("mediana" in line for line in payload.text.splitlines() if line.startswith("•"))
+    # critério (derivado do wishlist do usuário, nunca dos reasons do score)
+    assert "✓ civic si 2019" in payload.text
 
     # URL no corpo não deve existir
     assert "http" not in payload.text
