@@ -5,7 +5,10 @@ from zoneinfo import ZoneInfo
 
 import functools
 import threading
+import time
 from datetime import datetime, timezone, timedelta
+
+from sqlalchemy.exc import OperationalError
 
 from app.core.settings import settings
 from app.core.shutdown import is_shutdown_requested
@@ -57,6 +60,28 @@ def _log_suppressed_exception(*, stage: str, exc: Exception, impact: str, fallba
 
 def _get_state(db, source: str):
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
+
+
+def _add_job_with_retry(sched, *args, attempts: int = 3, delay_seconds: float = 2.0, **kwargs):
+    """sched.add_job com retry: o jobstore do APScheduler grava no Postgres (Supabase) via
+    conexão de rede, e um statement_timeout transitório aqui derruba o boot inteiro do
+    scheduler antes que o loop principal comece a rodar."""
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return sched.add_job(*args, **kwargs)
+        except OperationalError as exc:
+            last_exc = exc
+            _log_suppressed_exception(
+                stage="boot.add_job",
+                exc=exc,
+                impact=f"retry {attempt}/{attempts} job_id={kwargs.get('id')}",
+                fallback="retrying_with_backoff",
+                worker="boot",
+            )
+            if attempt < attempts:
+                time.sleep(delay_seconds)
+    raise last_exc
 
 
 def _print_throttled_scheduler_error(stage: str, exc: Exception) -> None:
@@ -267,7 +292,7 @@ def start_scheduler() -> BackgroundScheduler:
         if not plugin.supports_wishlist_monitoring:
             continue
         job_id = f"{plugin.name}_tick"
-        sched.add_job(
+        _add_job_with_retry(sched,
             job_run_source_for_all_wishlists,
             "interval",
             seconds=tick_seconds,
@@ -276,7 +301,7 @@ def start_scheduler() -> BackgroundScheduler:
             args=(plugin.name,),
         )
 
-    sched.add_job(job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
+    _add_job_with_retry(sched, job_heartbeat, "interval", seconds=10, id="heartbeat", replace_existing=True)
 
     from app.scheduler.sender_job import job_send_notifications
     from app.scheduler.auction_notification_job import job_scheduled_auction_notification
@@ -284,7 +309,7 @@ def start_scheduler() -> BackgroundScheduler:
     from app.bot.sender import telegram_sender
     with session_scope() as db:
         auction_cfg = get_auction_notification_runtime_settings(db)
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_send_notifications,
         "interval",
         seconds=settings.sched_sender_seconds,
@@ -292,7 +317,7 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
         executor="sender",
     )
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_scheduled_auction_notification,
         "interval",
         minutes=max(15, int(auction_cfg.get("scheduler_minutes", 60) or 60)),
@@ -306,7 +331,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     if bool(getattr(settings, "tracking_price_alerts_enabled", False)):
         from app.scheduler.tracking_alerts_job import job_tracking_price_alerts
-        sched.add_job(
+        _add_job_with_retry(sched,
             job_tracking_price_alerts,
             "interval",
             minutes=max(5, int(getattr(settings, "tracking_price_alerts_interval_minutes", 60) or 60)),
@@ -317,7 +342,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     # Digest semanal para usuários (sábado 10:00 no timezone padrão do produto)
     from app.scheduler.weekly_wishlist_digest_job import job_weekly_wishlist_digest
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_weekly_wishlist_digest,
         "cron",
         day_of_week="sat",
@@ -331,7 +356,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     # Digest semanal opt-in (controlado por prefs por usuário)
     from app.scheduler.weekly_digest_job import job_weekly_digest
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_weekly_digest,
         "cron",
         day_of_week="sat",
@@ -346,7 +371,7 @@ def start_scheduler() -> BackgroundScheduler:
     # Admin monitor (erro/bloqueio -> alerta no Telegram)
     if getattr(settings, "admin_monitor_enabled", True):
         from app.scheduler.admin_monitor_job import job_admin_monitor
-        sched.add_job(
+        _add_job_with_retry(sched,
             job_admin_monitor,
             "interval",
             seconds=int(getattr(settings, "admin_monitor_seconds", 60) or 60),
@@ -359,7 +384,7 @@ def start_scheduler() -> BackgroundScheduler:
         from app.scheduler.jobs_fb_sessions import job_fb_sessions_healthcheck
         fb_hours = int(getattr(settings, "fb_healthcheck_hours", 6) or 6)
         fb_hours = max(1, min(fb_hours, 24))
-        sched.add_job(
+        _add_job_with_retry(sched,
             job_fb_sessions_healthcheck,
             "interval",
             hours=fb_hours,
@@ -379,7 +404,7 @@ def start_scheduler() -> BackgroundScheduler:
     # Autopilot (detecta regressões/bloqueios e manda alertas compactos)
     if getattr(settings, "autopilot_enabled", True):
         from app.scheduler.autopilot_job import job_autopilot_scan, job_autopilot_daily_digest
-        sched.add_job(
+        _add_job_with_retry(sched,
             job_autopilot_scan,
             "interval",
             seconds=int(getattr(settings, "autopilot_scan_seconds", 60) or 60),
@@ -391,7 +416,7 @@ def start_scheduler() -> BackgroundScheduler:
         if getattr(settings, "autopilot_daily_digest_enabled", True):
             h = int(getattr(settings, "autopilot_daily_digest_hour_utc", 12) or 12)
             h = max(0, min(h, 23))
-            sched.add_job(
+            _add_job_with_retry(sched,
                 job_autopilot_daily_digest,
                 "cron",
                 hour=h,
@@ -402,7 +427,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     # Limpeza leve: mantem notifications enxutas (evita crescimento infinito) (evita crescimento infinito)
     from app.scheduler.cleanup_job import job_cleanup_notifications
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_cleanup_notifications,
         "interval",
         hours=24,
@@ -410,7 +435,7 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
     from app.scheduler.filesystem_cleanup_job import job_filesystem_cleanup_daily
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_filesystem_cleanup_daily,
         "cron",
         hour=3,
@@ -423,7 +448,7 @@ def start_scheduler() -> BackgroundScheduler:
     # NUNCA entram aqui — são protegidas pelo guardrail e só podem ser apagadas via
     # scripts/cleanup_operational_data.py (break-glass explícito).
     from app.scheduler.operational_data_cleanup_job import job_operational_data_cleanup
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_operational_data_cleanup,
         "interval",
         hours=6,
@@ -431,7 +456,7 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
     from app.scheduler.fipe_update_job import job_monthly_fipe_update
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_monthly_fipe_update,
         "cron",
         day=max(1, min(28, int(getattr(settings, "fipe_monthly_update_day", 5) or 5))),
@@ -445,7 +470,7 @@ def start_scheduler() -> BackgroundScheduler:
     )
 
     from app.scheduler.fipe_lookup_job import job_process_fipe_lookups
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_process_fipe_lookups,
         "interval",
         seconds=settings.fipe_lookup_poll_interval_s,
@@ -457,7 +482,7 @@ def start_scheduler() -> BackgroundScheduler:
     )
 
     from app.scheduler.premium_expiration_job import job_expire_premium_subscriptions
-    sched.add_job(
+    _add_job_with_retry(sched,
         job_expire_premium_subscriptions,
         "cron",
         hour=12,
