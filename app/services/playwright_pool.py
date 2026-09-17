@@ -1225,9 +1225,13 @@ def sweep_orphan_playwright_processes(*, min_age_seconds: int = 120) -> dict:
 
     now = time.time()
     killed: list[int] = []
+    # System-wide scan, not just children of this process: a genuinely orphaned
+    # process (its original parent already died) gets reparented to init and is
+    # no longer a descendant of the current scheduler process at all, so
+    # `psutil.Process(os.getpid()).children(recursive=True)` would silently miss
+    # exactly the case this sweep exists for.
     try:
-        me = psutil.Process(os.getpid())
-        candidates = me.children(recursive=True)
+        candidates = list(psutil.process_iter(["pid"]))
     except Exception:
         candidates = []
 

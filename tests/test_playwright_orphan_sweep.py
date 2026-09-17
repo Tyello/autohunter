@@ -40,23 +40,19 @@ def test_sweep_kills_only_old_orphans_outside_live_pids(monkeypatch):
     old_orphan = _FakeProc(12, name="headless_shell", create_time=now - 500)  # should be killed
     unrelated = _FakeProc(13, name="bash", create_time=now - 500)  # not a playwright process
 
-    class _FakeMe:
-        def children(self, recursive=True):
-            return [live, young_orphan, old_orphan, unrelated]
-
     class _FakePsutil:
-        Process = staticmethod(lambda pid=None: _FakeMe())
+        process_iter = staticmethod(lambda attrs=None: [live, young_orphan, old_orphan, unrelated])
         pid_exists = staticmethod(lambda pid: False)
         wait_procs = staticmethod(lambda procs, timeout=5: None)
 
     monkeypatch.setitem(__import__("sys").modules, "psutil", _FakePsutil())
-    monkeypatch.setattr(pw_pool, "_POOL", None)  # no live pool tracked -> live_pids empty, but we simulate via os pid filter below
+    monkeypatch.setattr(pw_pool, "_POOL", None)  # no live pool tracked -> live_pids empty
 
-    # Simulate live_pids by making psutil.Process(driver_pid) resolve to a fake root
-    # whose children() returns just the "live" proc; _POOL is None here so live_pids
-    # naturally ends up empty and `live` will also be treated as a candidate. To keep
-    # the test focused on age + type filtering (the sweep's core contract), assert only
-    # on the age/type behavior for young_orphan/old_orphan/unrelated.
+    # System-wide scan (not just children of this process), so a truly orphaned
+    # process reparented to init is still found. With _POOL=None, live_pids is
+    # empty and `live` would also be a candidate; the test focuses on age + type
+    # filtering (the sweep's core contract), asserting only on young_orphan/
+    # old_orphan/unrelated.
     result = sweep_orphan_playwright_processes(min_age_seconds=120)
 
     assert result["ok"] is True
