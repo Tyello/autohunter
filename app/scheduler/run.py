@@ -507,6 +507,34 @@ def start_scheduler() -> BackgroundScheduler:
 
     sched.start()
 
+    # Orphan Chromium/Playwright process sweep (defense-in-depth against leaks
+    # from hard-timeout recovery misses — see browser_queue_job.py).
+    if getattr(settings, "enable_playwright", False):
+        from app.scheduler.browser_watchdog_job import job_browser_process_watchdog
+        _add_job_with_retry(sched,
+            job_browser_process_watchdog,
+            "interval",
+            minutes=max(1, int(getattr(settings, "browser_watchdog_interval_minutes", 5) or 5)),
+            id="browser_process_watchdog",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        # Proactive wedge detection: resets the Playwright worker as soon as its
+        # heartbeat shows it's stuck, instead of waiting for a caller to time out
+        # and trigger the reactive reset in browser_fetcher.py.
+        from app.scheduler.browser_watchdog_job import job_browser_worker_heartbeat_watchdog
+        _add_job_with_retry(sched,
+            job_browser_worker_heartbeat_watchdog,
+            "interval",
+            minutes=max(1, int(getattr(settings, "browser_worker_heartbeat_interval_minutes", 1) or 1)),
+            id="browser_worker_heartbeat_watchdog",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
     # Browser queue worker: moved to dedicated thread
     try:
         from app.scheduler.browser_queue_job import job_browser_queue_worker

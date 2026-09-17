@@ -16,21 +16,45 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
-def _reset_playwright_pool_best_effort() -> None:
+def _reset_playwright_pool_best_effort(job_id: int, source: str) -> None:
     """Discard a possibly-wedged Playwright worker thread and start a fresh one.
 
     Best-effort: never raises. Used when a job run exceeds its hard wall-clock
     budget, which usually means the dedicated Playwright worker thread is stuck
     inside a blocking browser call (frozen/zombie Chromium process) and would
     otherwise starve every future execution forever.
+
+    The outcome is always logged (never silently swallowed): if the orphaned
+    process tree couldn't be force-killed, that's exactly the condition that
+    leaks Chromium processes/RAM across hard-timeout cycles, so it must be
+    visible in system_logs/journalctl instead of vanishing into a bare except.
     """
     try:
         if getattr(settings, "playwright_endpoint", None):
             return  # external browser service: nothing local to reset
         from app.services.playwright_pool import get_playwright_pool
-        get_playwright_pool().reset()
-    except Exception:
-        pass
+        result = get_playwright_pool().reset()
+        if not result.get("stopped_cleanly", True) and result.get("force_killed", 0) <= 0:
+            _log_best_effort_with_scope(
+                "error",
+                "browser_queue_worker",
+                "playwright_reset_kill_failed",
+                {"job_id": job_id, "source": source, **result},
+            )
+        elif result.get("force_killed", 0) > 0:
+            _log_best_effort_with_scope(
+                "warn",
+                "browser_queue_worker",
+                "playwright_reset_force_killed",
+                {"job_id": job_id, "source": source, **result},
+            )
+    except Exception as e:
+        _log_best_effort_with_scope(
+            "error",
+            "browser_queue_worker",
+            "playwright_reset_raised",
+            {"job_id": job_id, "source": source, "exc_type": type(e).__name__, "message": str(e)[:240]},
+        )
 
 
 def _handle_hard_timeout(job_id: int, source: str, dur_ms: int, hard_timeout_s: int) -> None:
@@ -38,7 +62,7 @@ def _handle_hard_timeout(job_id: int, source: str, dur_ms: int, hard_timeout_s: 
     brand-new session so we never touch the (possibly still in-use) session
     owned by the wedged worker thread.
     """
-    _reset_playwright_pool_best_effort()
+    _reset_playwright_pool_best_effort(job_id, source)
     try:
         with session_scope() as db2:
             job2 = db2.get(ScrapeJob, job_id)
@@ -51,8 +75,17 @@ def _handle_hard_timeout(job_id: int, source: str, dur_ms: int, hard_timeout_s: 
                 "job_hard_timeout",
                 {"job_id": job_id, "source": source, "dur_ms": dur_ms, "hard_timeout_s": hard_timeout_s},
             )
-    except Exception:
-        pass
+    except Exception as e:
+        # This is the path that previously left jobs stuck in status='running'
+        # forever whenever mark_failed/commit failed here: surface it instead of
+        # swallowing it, since the row will now only be recovered by the stale-job
+        # sweep in requeue_stale_running_jobs (up to scrape_job_running_ttl_seconds later).
+        _log_best_effort_with_scope(
+            "error",
+            "browser_queue_worker",
+            "hard_timeout_recovery_failed",
+            {"job_id": job_id, "source": source, "dur_ms": dur_ms, "exc_type": type(e).__name__, "message": str(e)[:240]},
+        )
 
 
 def _log_best_effort(db, level: str, component: str, message: str, payload: dict) -> None:

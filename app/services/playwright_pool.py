@@ -173,21 +173,23 @@ class _PlaywrightCore:
         """Block heavy resources to reduce RAM/CPU on small machines.
 
         IMPORTANT: Some anti-bot challenges rely on fetching images or other
-        resources. For a small allowlist of "hostile" sources we do NOT block.
+        resources. For a small allowlist of "hostile" sources we do NOT block
+        images/fonts. "media" (video/audio) is always blocked regardless: no
+        known anti-bot challenge on these sources depends on autoplaying
+        video, and it's the single heaviest resource type on a Pi-class host.
         """
         if not block_resources:
-            return
+            return  # explicit opt-out (e.g. mercadolivre anti-bot probing): block nothing
 
         src = (source or "").strip().lower()
         allow_heavy = src in {"mobiauto", "icarros", "facebook_marketplace"}
-        if allow_heavy:
-            return
+        blocked_types = ("media",) if allow_heavy else ("image", "media", "font")
 
         # Best-effort: some page impls might not support route
         try:
             def _route(route):
                 rtype = route.request.resource_type
-                if rtype in ("image", "media", "font"):
+                if rtype in blocked_types:
                     return route.abort()
                 return route.continue_()
             page.route("**/*", _route)
@@ -602,14 +604,16 @@ class _PlaywrightCore:
         # BUT: for some anti-bot challenges, blocking images/fonts can prevent the
         # challenge from completing. Keep them for these sources.
         try:
-            heavy_ok_sources = {"mobiauto", "icarros", "facebook_marketplace"}
-            should_block = bool(block_resources)
-            if src in heavy_ok_sources and bool(block_resources):
-                should_block = False
-            if should_block:
+            if block_resources:
+                heavy_ok_sources = {"mobiauto", "icarros", "facebook_marketplace"}
+                # "media" (video/audio) is always blocked for these: no known
+                # anti-bot challenge needs autoplay, and it's the heaviest
+                # resource type on a Pi-class host.
+                blocked_types = ("media",) if src in heavy_ok_sources else ("image", "media", "font")
+
                 def _route(route):
                     rtype = route.request.resource_type
-                    if rtype in ("image", "media", "font"):
+                    if rtype in blocked_types:
                         return route.abort()
                     return route.continue_()
                 ctx.route("**/*", _route)
@@ -902,6 +906,13 @@ class _PlaywrightWorker(threading.Thread):
         self._boot_ok = False
         self._last_error: Optional[str] = None
         self._core = _PlaywrightCore()
+        # Heartbeat: set while a job is actively being processed, cleared when
+        # it finishes. A watchdog polls this to detect a thread wedged inside
+        # a blocking Playwright call (job never times out on its own end since
+        # it's not waiting on anything) instead of waiting for a caller's
+        # job.done.wait() to expire and react after the fact.
+        self.job_started_at: Optional[float] = None
+        self.current_job_name: Optional[str] = None
 
     def run(self) -> None:
         # boot
@@ -924,6 +935,8 @@ class _PlaywrightWorker(threading.Thread):
                     job.done.set()
                 break
 
+            self.job_started_at = time.time()
+            self.current_job_name = job.name
             try:
                 if job.name == "stats":
                     st = self._core.stats()
@@ -944,6 +957,8 @@ class _PlaywrightWorker(threading.Thread):
                 job.exc = e
                 self._last_error = traceback.format_exc()
             finally:
+                self.job_started_at = None
+                self.current_job_name = None
                 job.done.set()
 
 
@@ -968,14 +983,15 @@ class PlaywrightPool:
                 err = w._last_error or "Playwright worker failed to start."
                 raise RuntimeError(err)
 
-    def close(self) -> None:
+    def close(self) -> dict:
         with self._lock:
             if not self._worker or not self._worker.is_alive():
-                return
+                return {"stopped_cleanly": True, "force_killed": 0}
             job = _Job("__stop__", kwargs={}, done=threading.Event())
             worker = self._worker
             self._worker.q.put(job)
         stopped_cleanly = job.done.wait(timeout=15)
+        force_killed = 0
         with self._lock:
             if not stopped_cleanly:
                 # The worker thread never reached the __stop__ job, which means
@@ -985,28 +1001,32 @@ class PlaywrightPool:
                 # leak: an orphaned worker keeps its Chromium instance alive
                 # forever, once per hard-timeout/reset cycle).
                 try:
-                    worker._core.kill_process_tree()
+                    force_killed = worker._core.kill_process_tree()
                 except Exception:
-                    pass
+                    force_killed = -1  # signal: kill attempt itself raised
             try:
                 worker.join(timeout=10)
             except Exception:
                 pass
             self._worker = None
+        return {"stopped_cleanly": stopped_cleanly, "force_killed": force_killed}
 
 
-    def reset(self) -> None:
+    def reset(self) -> dict:
         """Hard reset for recovery (TargetClosed/ContextClosed).
 
         Stops the worker thread (closing all browsers/contexts) and starts a fresh one.
-        Best-effort: never raises during the close phase.
+        Best-effort on the close phase, but the outcome is returned (not swallowed) so
+        callers can log/alert when a process tree could not be confirmed killed.
         """
+        close_result = {"stopped_cleanly": True, "force_killed": 0, "close_error": None}
         try:
-            self.close()
-        except Exception:
-            pass
+            close_result = self.close()
+        except Exception as e:
+            close_result = {"stopped_cleanly": False, "force_killed": -1, "close_error": f"{type(e).__name__}: {e}"}
         # Start will raise if Playwright isn't installed, which is the desired signal.
         self.start()
+        return close_result
 
     def stats(self) -> dict:
         self.start()
@@ -1017,6 +1037,23 @@ class PlaywrightPool:
         if job.exc:
             raise job.exc
         return job.result
+
+    def check_wedged(self, *, threshold_seconds: float) -> dict:
+        """Non-blocking heartbeat check: is the worker stuck inside a job?
+
+        Reads the worker's job_started_at without touching the job queue, so
+        this never itself waits behind a wedged call.
+        """
+        with self._lock:
+            w = self._worker
+            if not w or not w.is_alive():
+                return {"wedged": False, "alive": bool(w and w.is_alive()), "job_name": None, "elapsed_seconds": None}
+            started_at = w.job_started_at
+            job_name = w.current_job_name
+        if started_at is None:
+            return {"wedged": False, "alive": True, "job_name": None, "elapsed_seconds": None}
+        elapsed = time.time() - started_at
+        return {"wedged": elapsed > threshold_seconds, "alive": True, "job_name": job_name, "elapsed_seconds": elapsed}
 
     def _call(self, name: str, *, hard_timeout_s: float, **kwargs):
         self.start()
@@ -1138,3 +1175,106 @@ def get_playwright_pool() -> PlaywrightPool:
     if _POOL is None:
         _POOL = PlaywrightPool()
     return _POOL
+
+
+_ORPHAN_PROCESS_MARKERS = ("headless_shell", "ms-playwright", "playwright")
+
+
+def _is_playwright_process(proc: Any) -> bool:
+    try:
+        name = (proc.name() or "").lower()
+        if "headless_shell" in name or "chrome" in name:
+            return True
+        cmdline = " ".join(proc.cmdline() or []).lower()
+        return any(marker in cmdline for marker in _ORPHAN_PROCESS_MARKERS)
+    except Exception:
+        return False
+
+
+def sweep_orphan_playwright_processes(*, min_age_seconds: int = 120) -> dict:
+    """Kill Chromium/Playwright-driver processes that don't belong to the live pool.
+
+    Defense-in-depth against leaks: the hard-timeout recovery path is supposed to
+    kill an entire wedged process tree (see PlaywrightPool.close/reset), tracked by
+    a single `_driver_pid` captured at boot time. If that tracking ever misses a
+    process (timing race, unexpected respawn, a reset that raised before the kill
+    step), the orphan would otherwise live forever, since Chromium's own zygote/gpu
+    children don't self-terminate when their parent driver dies unexpectedly.
+
+    `min_age_seconds` avoids racing a process tree that is still being spawned by
+    a fresh, legitimate `pool.start()`.
+    """
+    try:
+        import psutil
+    except Exception:
+        return {"ok": False, "reason": "psutil_unavailable"}
+
+    live_pids: set[int] = set()
+    pool = _POOL
+    if pool is not None:
+        with pool._lock:
+            worker = pool._worker
+            driver_pid = worker._core._driver_pid if (worker is not None and worker.is_alive()) else None
+        if driver_pid:
+            live_pids.add(driver_pid)
+            try:
+                root = psutil.Process(driver_pid)
+                live_pids.update(p.pid for p in root.children(recursive=True))
+            except Exception:
+                pass
+
+    now = time.time()
+    killed: list[int] = []
+    try:
+        me = psutil.Process(os.getpid())
+        candidates = me.children(recursive=True)
+    except Exception:
+        candidates = []
+
+    for proc in candidates:
+        try:
+            if proc.pid in live_pids:
+                continue
+            if not _is_playwright_process(proc):
+                continue
+            age = now - proc.create_time()
+            if age < min_age_seconds:
+                continue
+            proc.kill()
+            killed.append(proc.pid)
+        except Exception:
+            continue
+
+    if killed:
+        try:
+            psutil.wait_procs([psutil.Process(pid) for pid in killed if psutil.pid_exists(pid)], timeout=5)
+        except Exception:
+            pass
+
+    return {"ok": True, "killed_pids": killed, "killed_count": len(killed), "live_pids": sorted(live_pids)}
+
+
+def recover_if_wedged(*, threshold_seconds: float = 150.0) -> dict:
+    """Proactively reset the pool if its worker has been stuck inside a single
+    job for longer than any legitimate fetch should take.
+
+    Without this, recovery only happens reactively: a caller's own fetch()
+    call has to queue behind the wedged job, wait out its own timeout, and
+    then trigger backend.reset() from browser_fetcher.py. That means every
+    fetch queued behind a wedge fails once before recovery kicks in, and the
+    reset can tear down work that was never actually stuck. Polling the
+    worker's heartbeat lets us reset before any caller even notices.
+    """
+    pool = _POOL
+    if pool is None:
+        return {"ok": True, "wedged": False, "action": "none"}
+
+    check = pool.check_wedged(threshold_seconds=threshold_seconds)
+    if not check["wedged"]:
+        return {"ok": True, "action": "none", **check}
+
+    try:
+        close_result = pool.reset()
+        return {"ok": True, "action": "reset", "close_result": close_result, **check}
+    except Exception as e:
+        return {"ok": False, "action": "reset_failed", "error": f"{type(e).__name__}: {e}", **check}

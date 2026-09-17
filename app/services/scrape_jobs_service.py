@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Any, Dict
 
 from sqlalchemy.orm import Session
@@ -300,6 +301,24 @@ def dequeue_next_job(
     return job
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively coerce values that psycopg2's JSONB adapter can't serialize.
+
+    result_payload often carries raw datetime objects (e.g. next_allowed_at from
+    a backoff skip); without this, the UPDATE raises StatementError and a normal
+    "done: skipped" outcome gets reported as job_failed.
+    """
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def mark_done(
     job: ScrapeJob,
     *,
@@ -311,7 +330,7 @@ def mark_done(
     job.status = "done"
     job.finished_at = now
     job.result_status = result_status
-    job.result_payload = payload
+    job.result_payload = _json_safe(payload) if payload is not None else None
     if duration_ms is not None:
         job.duration_ms = int(duration_ms)
 

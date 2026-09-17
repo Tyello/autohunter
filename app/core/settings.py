@@ -148,6 +148,19 @@ class Settings(BaseSettings):
     # above that and below scrape_job_running_ttl_seconds (900s default).
     browser_queue_job_hard_timeout_seconds: int = 780
 
+    # Orphan Chromium/Playwright process sweep (defense-in-depth; see
+    # app/scheduler/browser_watchdog_job.py and playwright_pool.sweep_orphan_playwright_processes).
+    browser_watchdog_interval_minutes: int = 5
+    browser_watchdog_min_age_seconds: int = 120
+
+    # Proactive Playwright worker wedge detection (defense-in-depth; see
+    # app/scheduler/browser_watchdog_job.py and playwright_pool.recover_if_wedged).
+    # Threshold must comfortably exceed the slowest legitimate single fetch()
+    # call (page.goto timeout + up to ~10x1.2s challenge-recheck loop), so it
+    # only fires on a genuinely wedged worker, not a slow-but-alive one.
+    browser_worker_heartbeat_interval_minutes: int = 1
+    browser_worker_wedge_threshold_seconds: int = 150
+
     # Smoke test no boot (scheduler/bot)
     playwright_smoke_on_boot: bool = True
 
