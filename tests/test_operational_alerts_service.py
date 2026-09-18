@@ -95,6 +95,33 @@ def test_resource_alerts_ram_disk_cache_and_throttle(db, monkeypatch, tmp_path):
     assert "disk_cache_pressure" in keys3
 
 
+def test_fd_pressure_alert_and_throttle(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.commit()
+
+    fake_proc = types.SimpleNamespace(
+        rlimit=lambda _which: (1024, 1024),
+        num_fds=lambda: 900,
+    )
+    monkeypatch.setattr("app.services.operational_alerts_service.psutil.Process", lambda _pid: fake_proc)
+    monkeypatch.setattr("app.services.operational_alerts_service.psutil.RLIMIT_NOFILE", 7, raising=False)
+    monkeypatch.setattr("app.services.operational_alerts_service.settings.fd_alert_threshold_pct", 80.0)
+    monkeypatch.setattr("app.services.operational_alerts_service.settings.resource_alert_throttle_seconds", 1800)
+
+    a1 = collect_operational_alerts(db, now=now)
+    keys1 = {a.key for a in a1}
+    assert "fd_pressure" in keys1
+    fd_alert = next(a for a in a1 if a.key == "fd_pressure")
+    assert "900/1024" in fd_alert.message
+
+    a2 = collect_operational_alerts(db, now=now + timedelta(minutes=10))
+    assert "fd_pressure" not in {a.key for a in a2}
+
+    a3 = collect_operational_alerts(db, now=now + timedelta(minutes=31))
+    assert "fd_pressure" in {a.key for a in a3}
+
+
 def _add_mercadolivre_config(db, *, canary_enabled=False, browser_fallback_enabled=True):
     db.add(
         SourceConfig(

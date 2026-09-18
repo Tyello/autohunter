@@ -15,5 +15,8 @@ RestartSec=3
 StandardOutput=journal
 StandardError=journal
 
+# See autohunter-scheduler.service for why this is needed.
+LimitNOFILE=65536
+
 [Install]
 WantedBy=multi-user.target

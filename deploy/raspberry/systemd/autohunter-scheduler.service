@@ -16,6 +16,11 @@ KillSignal=SIGTERM
 TimeoutStopSec=180
 KillMode=mixed
 
+# Default soft limit (1024) is exhausted by parallel scraping + Playwright
+# (sockets, pidfds, epoll instances per browser context) and shows up as
+# spurious "Too many open files" errors that then trigger source backoff.
+LimitNOFILE=65536
+
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

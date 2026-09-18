@@ -381,6 +381,18 @@ def collect_operational_alerts(
         pass
 
     try:
+        if hasattr(psutil, "RLIMIT_NOFILE"):  # POSIX only (production runs on Linux)
+            proc = psutil.Process(os.getpid())
+            soft_limit = proc.rlimit(psutil.RLIMIT_NOFILE)[0]
+            open_fds = proc.num_fds()
+            fd_pct = (float(open_fds) / float(soft_limit)) * 100 if soft_limit else 0.0
+            fd_threshold = float(getattr(settings, "fd_alert_threshold_pct", 80.0) or 80.0)
+            if fd_pct >= fd_threshold:
+                alerts.append(OperationalAlert("fd_pressure", f"🚨 File descriptors em {open_fds}/{soft_limit} ({fd_pct:.1f}%, threshold {fd_threshold:.1f}%). Risco de 'Too many open files' cascatear em backoff de várias sources. Próximo passo: /admin health e considerar restart do scheduler.", _resource_cooldown_minutes()))
+    except Exception:
+        pass
+
+    try:
         cache_limit_bytes = int(getattr(settings, "filesystem_cleanup_cache_max_bytes", 3 * (1024 ** 3)) or 3 * (1024 ** 3))
         cache_dir = Path(getattr(settings, "runtime_cache_dir", "/var/cache/autohunter")).expanduser().resolve()
         cache_size_bytes = _dir_size_bytes(cache_dir)

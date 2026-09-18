@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     mercadopago_access_token: str | None = None
     mercadopago_webhook_secret: str | None = None
 
+    # Kill switch para /termos: mantém o comando registrado no bot, mas fora do
+    # ar até docs/PRIVACY_TERMS.md ser revisado/preenchido e habilitado de propósito.
+    privacy_terms_command_enabled: bool = False
+
     autohunter_admin_user_ids: str | None = None
     autohunter_admin_chat_ids: str | None = None
 
@@ -401,6 +405,11 @@ class Settings(BaseSettings):
     disk_alert_cache_limit_gb: float = 5.0
     ram_alert_threshold: float = 85.0
     resource_alert_throttle_seconds: int = 1800
+
+    # File descriptor pressure alert (% of the process' own soft RLIMIT_NOFILE).
+    # Catches fd exhaustion (leaked Playwright contexts, subprocess handles) before
+    # it cascades into spurious "Too many open files" errors across every source.
+    fd_alert_threshold_pct: float = 80.0
 
     def model_post_init(self, __context) -> None:
         self._per_source_scraper_flags: dict[str, bool] = {}

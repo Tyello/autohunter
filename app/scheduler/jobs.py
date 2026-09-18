@@ -28,8 +28,8 @@ from app.services.source_audit_capture_service import source_audit_capture_servi
 from app.core.settings import settings
 
 
-def _is_bug_type(exc_type: str) -> bool:
-    return exc_type in {
+def _is_bug_type(exc_type: str, exc: BaseException | None = None) -> bool:
+    if exc_type in {
         "AttributeError",
         "ImportError",
         "ModuleNotFoundError",
@@ -37,7 +37,16 @@ def _is_bug_type(exc_type: str) -> bool:
         "NameError",
         "TypeError",
         "PlaywrightInitError",
-    }
+    }:
+        return True
+    # Resource exhaustion (EMFILE/ENFILE: "Too many open files") is a local
+    # infra fault, not a signal that the remote source is degraded or
+    # blocking us. Treating it as a normal error triggers the same
+    # exponential backoff as a real network failure, which punishes healthy
+    # sources for a problem that has nothing to do with them.
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) in (24, 23):
+        return True
+    return False
 
 
 # ---- Matching/Queue strategy -------------------------------------------------
@@ -205,7 +214,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             "error": err,
             "url": search_url,
             "exc_type": exc_type,
-            "is_bug": _is_bug_type(exc_type),
+            "is_bug": _is_bug_type(exc_type, e),
             "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="parse_or_runtime_error", stage="scrape_exception", parse_error=True),
             **_ctx_fetch_diag(ctx),
         }
@@ -485,7 +494,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             "error": err,
             "url": search_url,
             "exc_type": exc_type,
-            "is_bug": _is_bug_type(exc_type),
+            "is_bug": _is_bug_type(exc_type, e),
             "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="parse_or_runtime_error", stage="scrape_exception", parse_error=True),
             **_runtime_fields(),
             **_ctx_fetch_diag(ctx),
