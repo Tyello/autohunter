@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
@@ -37,6 +38,57 @@ def _get_backend():
         return get_playwright_client()
     from app.services.playwright_pool import get_playwright_pool
     return get_playwright_pool()
+
+
+_DISPATCH_LOCK = threading.Lock()
+_DISPATCH_SEMAPHORE: Optional[threading.Semaphore] = None
+_DISPATCH_SEMAPHORE_SIZE: Optional[int] = None
+
+
+def _get_dispatch_semaphore() -> threading.Semaphore:
+    """Global gate on concurrent Playwright fetch/fetch_json dispatches.
+
+    Multiple scraper groups/sources can call fetch_html_browser concurrently
+    (source_group_max_workers, multiple parallel sources), but the pool has a
+    single worker thread. Without this gate, every caller submits at once and
+    queues invisibly inside the pool, each racing its own hard-timeout against
+    however many others are ahead of it. Serializing dispatch here makes the
+    wait explicit (and cheap: no ctx/page created yet) and keeps each fetch's
+    own timeout meaningful again.
+    """
+    global _DISPATCH_SEMAPHORE, _DISPATCH_SEMAPHORE_SIZE
+    size = max(1, int(getattr(settings, "playwright_max_inflight_dispatches", 1) or 1))
+    with _DISPATCH_LOCK:
+        if _DISPATCH_SEMAPHORE is None or _DISPATCH_SEMAPHORE_SIZE != size:
+            _DISPATCH_SEMAPHORE = threading.Semaphore(size)
+            _DISPATCH_SEMAPHORE_SIZE = size
+        return _DISPATCH_SEMAPHORE
+
+
+def _should_reset_after_failure(backend, err: Exception) -> bool:
+    """Decide whether a fetch failure warrants tearing down the whole pool.
+
+    - target_closed errors mean the browser/context actually died: always worth resetting.
+    - timeout errors are ambiguous: they can mean a genuinely wedged worker, but with
+      dispatch now serialized (see _get_dispatch_semaphore) they usually just mean the one
+      in-flight call was slow. The proactive heartbeat watchdog
+      (browser_watchdog_job.job_browser_worker_heartbeat_watchdog) already resets a
+      genuinely wedged worker within browser_worker_wedge_threshold_seconds independently
+      of any caller, so only reset here if the worker is *currently* wedged past that same
+      threshold -- otherwise this reactive path just adds a redundant, disruptive reset
+      (killing every source's contexts) on top of an ordinary slow fetch.
+    """
+    if _is_target_closed_error(err):
+        return True
+    if not _is_timeout_error(err):
+        return False
+    if not hasattr(backend, "check_wedged"):
+        return True  # can't tell (e.g. external browser_service client): fail safe
+    try:
+        threshold = float(getattr(settings, "browser_worker_wedge_threshold_seconds", 150) or 150)
+        return bool(backend.check_wedged(threshold_seconds=threshold).get("wedged"))
+    except Exception:
+        return True
 
 
 if TYPE_CHECKING:
@@ -189,8 +241,20 @@ def fetch_html_browser(
     backend = _get_backend()
 
     last_exc: Optional[Exception] = None
+    dispatch_timeout_s = max(10.0, (timeout_ms / 1000.0) + 20.0)
+    sem = _get_dispatch_semaphore()
     # One retry on timeout helps unstable sources (e.g., Webmotors) without burning Pi resources.
     for attempt in range(2):
+        if not sem.acquire(timeout=dispatch_timeout_s):
+            last_exc = TimeoutError(
+                f"Playwright dispatch semaphore timed out waiting for a free slot (source={ctx.source})."
+            )
+            if diag is not None:
+                diag.inc("br_err")
+                diag.note("br_last_error", type(last_exc).__name__)
+            if attempt == 0:
+                continue
+            raise last_exc
         try:
             r = backend.fetch(
                 url,
@@ -208,12 +272,7 @@ def fetch_html_browser(
             if diag is not None:
                 diag.inc("br_err")
                 diag.note("br_last_error", type(e).__name__)
-            if (_is_target_closed_error(e) or _is_timeout_error(e)) and hasattr(backend, 'reset'):
-                # A timeout at this layer usually means the dedicated Playwright
-                # worker thread is wedged on a blocking browser call (e.g. a
-                # frozen/zombie Chromium process). Reset the pool so it spins up
-                # a fresh worker thread instead of every future call queueing
-                # behind the permanently stuck one.
+            if _should_reset_after_failure(backend, e) and hasattr(backend, 'reset'):
                 try:
                     backend.reset()
                 except Exception:
@@ -223,6 +282,8 @@ def fetch_html_browser(
                     time.sleep(0.35 + random.random() * 0.65)
                 continue
             raise
+        finally:
+            sem.release()
 
     if last_exc is not None and 'r' not in locals():
         raise last_exc
@@ -306,7 +367,19 @@ def fetch_json_browser(
 
     backend = _get_backend()
     last_exc: Optional[Exception] = None
+    dispatch_timeout_s = max(10.0, (timeout_ms / 1000.0) + 20.0)
+    sem = _get_dispatch_semaphore()
     for attempt in range(2):
+        if not sem.acquire(timeout=dispatch_timeout_s):
+            last_exc = TimeoutError(
+                f"Playwright dispatch semaphore timed out waiting for a free slot (source={ctx.source})."
+            )
+            if diag is not None:
+                diag.inc("br_err")
+                diag.note("br_last_error", type(last_exc).__name__)
+            if attempt == 0:
+                continue
+            raise last_exc
         try:
             r = backend.fetch_json(
                 url,
@@ -327,7 +400,7 @@ def fetch_json_browser(
             if diag is not None:
                 diag.inc("br_err")
                 diag.note("br_last_error", type(e).__name__)
-            if (_is_target_closed_error(e) or _is_timeout_error(e)) and hasattr(backend, 'reset'):
+            if _should_reset_after_failure(backend, e) and hasattr(backend, 'reset'):
                 try:
                     backend.reset()
                 except Exception:
@@ -337,6 +410,8 @@ def fetch_json_browser(
                     time.sleep(0.35 + random.random() * 0.65)
                 continue
             raise
+        finally:
+            sem.release()
 
     if last_exc is not None and 'r' not in locals():
         raise last_exc

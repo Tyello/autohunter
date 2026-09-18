@@ -353,6 +353,42 @@ def collect_operational_alerts(
                 continue
             alerts.append(OperationalAlert(f"source_error:{src}:{b}", f"⚠️ Source {src} com recorrência {b} ({n}x/90m). Próximo passo: /admin audit e revisar /admin sources show {src}.", 60))
 
+    # Playwright pool contention (worker timeout / failed-to-start). These failures
+    # happen at per-URL-group granularity inside run_source_for_all_wishlists and can be
+    # swallowed into an overall "success" SourceRun when other groups for the same
+    # source succeeded, so the SourceRun-based `source_error` check above can miss a
+    # source that is timing out constantly on some of its groups. Read system_logs
+    # directly instead, which records every group-level scrape_failed regardless of
+    # the aggregate outcome.
+    pw_window_minutes = 30
+    pw_threshold = 5
+    pw_rows = (
+        db.query(SystemLog.source, func.count(SystemLog.id))
+        .filter(
+            SystemLog.message == "scrape_failed",
+            SystemLog.created_at >= now - timedelta(minutes=pw_window_minutes),
+            SystemLog.payload["error"].astext.ilike("%Playwright worker%"),
+        )
+        .group_by(SystemLog.source)
+        .all()
+    )
+    for src, n in pw_rows:
+        if not src or int(n or 0) < pw_threshold:
+            continue
+        _add_once(
+            alerts,
+            emitted_source_alerts,
+            f"source_pw_contention:{src}",
+            OperationalAlert(
+                f"source_pw_contention:{src}",
+                f"⚠️ Source {src} com {n}x falha de Playwright (timeout/worker failed to start) em {pw_window_minutes}m. "
+                f"Provável contenção na fila do pool (single worker) ou worker realmente wedged. "
+                f"Próximo passo: /admin health, checar playwright_max_inflight_dispatches e considerar reduzir "
+                f"source_group_max_workers para {src}.",
+                60,
+            ),
+        )
+
     for queue in ("http", "browser"):
         running_old = db.query(func.count(ScrapeJob.id)).filter(ScrapeJob.queue == queue, ScrapeJob.status == "running", ScrapeJob.started_at < now - timedelta(minutes=45)).scalar() or 0
         queued = db.query(func.count(ScrapeJob.id)).filter(ScrapeJob.queue == queue, ScrapeJob.status == "queued").scalar() or 0

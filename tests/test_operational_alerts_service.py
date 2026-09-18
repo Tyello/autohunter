@@ -122,6 +122,74 @@ def test_fd_pressure_alert_and_throttle(db, monkeypatch):
     assert "fd_pressure" in {a.key for a in a3}
 
 
+def test_playwright_contention_alert_ignores_isolated_failures(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    for _ in range(4):
+        db.add(
+            SystemLog(
+                source="kavak",
+                component="scraper_kavak",
+                message="scrape_failed",
+                created_at=now - timedelta(minutes=5),
+                payload={"error": "TimeoutError: Playwright worker timed out waiting for job 'fetch'."},
+            )
+        )
+    db.commit()
+    keys = {a.key for a in collect_operational_alerts(db, now=now)}
+    assert "source_pw_contention:kavak" not in keys
+
+
+def test_playwright_contention_alert_fires_above_threshold(db):
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    for _ in range(6):
+        db.add(
+            SystemLog(
+                source="kavak",
+                component="scraper_kavak",
+                message="scrape_failed",
+                created_at=now - timedelta(minutes=5),
+                payload={"error": "TimeoutError: Playwright worker timed out waiting for job 'fetch'."},
+            )
+        )
+    # Outside the 30m window: must not count towards the threshold.
+    for _ in range(6):
+        db.add(
+            SystemLog(
+                source="kavak",
+                component="scraper_kavak",
+                message="scrape_failed",
+                created_at=now - timedelta(minutes=45),
+                payload={"error": "TimeoutError: Playwright worker timed out waiting for job 'fetch'."},
+            )
+        )
+    db.commit()
+    a1 = collect_operational_alerts(db, now=now)
+    keys1 = {a.key for a in a1}
+    assert "source_pw_contention:kavak" in keys1
+    alert = next(a for a in a1 if a.key == "source_pw_contention:kavak")
+    assert "6x" in alert.message
+
+    a2 = collect_operational_alerts(db, now=now + timedelta(minutes=10))
+    assert "source_pw_contention:kavak" not in {a.key for a in a2}
+
+    later = now + timedelta(minutes=61)
+    for _ in range(6):
+        db.add(
+            SystemLog(
+                source="kavak",
+                component="scraper_kavak",
+                message="scrape_failed",
+                created_at=later - timedelta(minutes=5),
+                payload={"error": "TimeoutError: Playwright worker timed out waiting for job 'fetch'."},
+            )
+        )
+    db.commit()
+    a3 = collect_operational_alerts(db, now=later)
+    assert "source_pw_contention:kavak" in {a.key for a in a3}
+
+
 def _add_mercadolivre_config(db, *, canary_enabled=False, browser_fallback_enabled=True):
     db.add(
         SourceConfig(

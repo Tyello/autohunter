@@ -165,6 +165,16 @@ class Settings(BaseSettings):
     browser_worker_heartbeat_interval_minutes: int = 1
     browser_worker_wedge_threshold_seconds: int = 150
 
+    # Caps how many Playwright fetch/fetch_json calls may be dispatched to the
+    # pool at once. The pool itself has a single dedicated worker thread, so
+    # any concurrency above 1 here just means callers queue behind each other
+    # inside the pool's job queue with no visibility into why they're slow,
+    # and can time out before ever being dequeued (see browser_fetcher.py).
+    # Gating concurrency here, before dispatch, makes the wait explicit and
+    # keeps each individual fetch's own hard-timeout meaningful. Raise this
+    # only after also increasing the pool's real worker count.
+    playwright_max_inflight_dispatches: int = 1
+
     # Smoke test no boot (scheduler/bot)
     playwright_smoke_on_boot: bool = True
 
