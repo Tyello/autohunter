@@ -210,3 +210,78 @@ def test_run_source_for_all_wishlists_uses_config_snapshot_cache(db, monkeypatch
     # First call includes 1 SELECT for get_source_config_snapshot (plus others for state, runs, etc.)
     # Second call should have fewer or equal execute calls due to cache hit
     assert second_call_count < first_call_count
+
+
+def test_mercadolivre_skips_run_when_daily_request_budget_exceeded(db, monkeypatch):
+    _add_cfg(
+        db,
+        extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True, "daily_request_budget": 100},
+    )
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="blocked",
+            groups=100,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+    )
+    db.commit()
+    _setup_run(monkeypatch)
+
+    res = svc.run_source_for_all_wishlists(db, "mercadolivre", kind="scheduler")
+
+    assert res["status"] == "skipped"
+    assert res["reason"] == "daily_budget_exceeded"
+
+
+def test_mercadolivre_daily_budget_ignored_when_forced(db, monkeypatch):
+    _add_cfg(
+        db,
+        extra={"impl": "v1", "mercadolivre_v2_canary_enabled": True, "daily_request_budget": 100},
+    )
+    db.add(
+        SourceRun(
+            source="mercadolivre",
+            kind="scheduler",
+            status="blocked",
+            groups=100,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+    )
+    db.commit()
+    _setup_run(monkeypatch)
+
+    res = svc.run_source_for_all_wishlists(db, "mercadolivre", kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["status"] == "success"
+
+
+def test_mercadolivre_first_block_backoff_starts_high(db, monkeypatch):
+    _add_cfg(db)
+    db.commit()
+    _setup_run(
+        monkeypatch,
+        scrape_result={"ok": False, "reason": "blocked", "status_code": 200, "url": "https://example.test/search?q=civic+si", "error": "blocked"},
+    )
+
+    res = svc.run_source_for_all_wishlists(db, "mercadolivre", kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["status"] == "blocked"
+    assert res["backoff_minutes"] >= 240
+
+
+def test_other_source_first_block_backoff_stays_low(db, monkeypatch):
+    source = f"other_{uuid.uuid4().hex[:8]}"
+    _add_cfg(db, source=source, extra={})
+    db.commit()
+    _setup_run(
+        monkeypatch,
+        source=source,
+        scrape_result={"ok": False, "reason": "blocked", "status_code": 200, "url": "https://example.test/search?q=civic+si", "error": "blocked"},
+    )
+
+    res = svc.run_source_for_all_wishlists(db, source, kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["status"] == "blocked"
+    assert res["backoff_minutes"] == 1

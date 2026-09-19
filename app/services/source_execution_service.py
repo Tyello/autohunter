@@ -202,6 +202,23 @@ def _record_skipped_run(
     )
 
 
+def _base_cooldown_minutes_for(src: str, cfg: SourceConfig) -> int:
+    """First-block backoff floor, per source.
+
+    mercadolivre blocks are IP-reputation based (not a short-lived rate limit),
+    so retrying every few minutes just keeps hammering a still-flagged IP and
+    delays the natural cooldown. Start the exponential backoff (see
+    `_compute_backoff_minutes`) much higher than the generic 1-minute floor so
+    the first block already backs off for hours, not minutes.
+    """
+    name = (src or "").lower()
+    if name == "mercadolivre":
+        return max(int(cfg.cooldown_minutes or 0), 240)
+    if name == "webmotors":
+        return max(int(cfg.cooldown_minutes or 0), 15)
+    return max(int(cfg.cooldown_minutes or 0), 1)
+
+
 def _get_state(db: Session, source: str) -> Optional[SourceState]:
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
 
@@ -509,6 +526,45 @@ def _run_source_for_all_wishlists_locked(
             else:
                 g["wishlists"].append(w)
 
+        # Proactive request budget: sources with a single-IP anti-bot fingerprint
+        # (mercadolivre) get flagged for repeated bursts of distinct search URLs
+        # every scheduler tick, which is itself a signal that gets them blocked —
+        # independent of the reactive backoff applied *after* a block happens. Cap
+        # total group-requests attempted in a rolling window regardless of backoff
+        # state, using `groups` already recorded on source_runs (no new counters).
+        daily_budget = int((cfg.extra or {}).get("daily_request_budget") or 0) if (src or "").lower() == "mercadolivre" else 0
+        if daily_budget > 0 and not (force or ignore_backoff):
+            window_start = datetime.now(timezone.utc) - timedelta(hours=24)
+            recent_groups = int(
+                db.execute(
+                    text(
+                        "SELECT COALESCE(SUM(groups), 0) FROM source_runs "
+                        "WHERE source = :src AND created_at > :window_start"
+                    ),
+                    {"src": src, "window_start": window_start},
+                ).scalar()
+                or 0
+            )
+            if recent_groups + len(groups) > daily_budget:
+                _record_skipped_run(
+                    db,
+                    source=src,
+                    kind=kind,
+                    cfg=cfg,
+                    reason="daily_budget_exceeded",
+                    run_reason=reason,
+                    payload={"recent_groups_24h": recent_groups, "daily_budget": daily_budget, "would_add": len(groups)},
+                )
+                db.commit()
+                return {
+                    "ok": True,
+                    "status": "skipped",
+                    "reason": "daily_budget_exceeded",
+                    "run_reason": reason,
+                    "recent_groups_24h": recent_groups,
+                    "daily_budget": daily_budget,
+                }
+
         if not groups:
             _record_skipped_run(
                 db,
@@ -558,19 +614,41 @@ def _run_source_for_all_wishlists_locked(
     job_name = f"scraper_{src}"
     ordered_urls = list(groups.keys())
     max_workers = max(1, min(int(settings.source_group_max_workers or 1), len(ordered_urls) or 1))
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [
-            pool.submit(
-                _process_group_isolated,
+
+    # Sources with a single-IP anti-bot fingerprint (mercadolivre) get blocked at the
+    # IP level: once one group comes back blocked, every remaining group in this run
+    # would hit the same wall. Firing all of them anyway just burns more requests
+    # against an IP that's already flagged, deepening the fingerprint for no benefit.
+    stop_remaining_on_block = (src or "").lower() == "mercadolivre"
+
+    if stop_remaining_on_block:
+        results_in_order = []
+        for u in ordered_urls:
+            entry = _process_group_isolated(
                 url=u,
                 g=groups[u],
                 src=src,
                 job_name=job_name,
                 scrape_dispatch=_scrape_dispatch,
             )
-            for u in ordered_urls
-        ]
-        results_in_order = [f.result() for f in futures]
+            results_in_order.append(entry)
+            res = entry.get("res") or {}
+            if not res.get("ok") and str(res.get("reason") or "").lower() == "blocked":
+                break
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [
+                pool.submit(
+                    _process_group_isolated,
+                    url=u,
+                    g=groups[u],
+                    src=src,
+                    job_name=job_name,
+                    scrape_dispatch=_scrape_dispatch,
+                )
+                for u in ordered_urls
+            ]
+            results_in_order = [f.result() for f in futures]
 
     first_failure: dict | None = None
     for entry in results_in_order:
@@ -645,7 +723,7 @@ def _run_source_for_all_wishlists_locked(
             minutes = mark_blocked(
                 db,
                 src,
-                base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
+                base_cooldown_minutes=_base_cooldown_minutes_for(src, cfg),
                 http_status=res.get("status_code"),
                 url=res.get("url") or url,
                 max_backoff_minutes=(10080 if (src or '').lower()=='mercadolivre' else None),
@@ -754,7 +832,7 @@ def _run_source_for_all_wishlists_locked(
         minutes = mark_error(
             db,
             src,
-            base_cooldown_minutes=(max(int(cfg.cooldown_minutes or 0), 15) if (src or '').lower()=='webmotors' else max(int(cfg.cooldown_minutes or 0), 1)),
+            base_cooldown_minutes=_base_cooldown_minutes_for(src, cfg),
             error=err,
             url=res.get("url") or url,
         )

@@ -229,6 +229,58 @@ def test_req005_per_source_semaphore_serializes_concurrent_calls(monkeypatch):
     assert e1 <= s2, "the per-source semaphore must serialize concurrent scrape calls for the same source"
 
 
+def test_mercadolivre_stops_remaining_groups_after_first_block(db, monkeypatch):
+    plugin = _plugin("mercadolivre")
+    wishlists = _wishlists(4)
+    urls = _urls_for(plugin, wishlists)
+    _add_cfg(db)
+    db.commit()
+    _setup_run(monkeypatch, wishlists=wishlists, plugin=plugin)
+
+    calls = []
+
+    def _scrape(_db, _job_name, _dispatch, url, *, ctx, wishlist=None, health=None):
+        calls.append(url)
+        if url == urls[1]:
+            return {"ok": False, "reason": "blocked", "status_code": 200, "url": url, "error": "blocked"}
+        return _ok_result()
+
+    monkeypatch.setattr(svc, "scrape_ingest_match", _scrape)
+
+    res = svc.run_source_for_all_wishlists(db, "mercadolivre", kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["ok"] is False
+    assert res["status"] == "blocked"
+    assert calls == urls[:2], "groups after the first block must not be dispatched for mercadolivre"
+
+
+def test_non_mercadolivre_keeps_dispatching_all_groups_after_a_block(db, monkeypatch):
+    source = f"other_{uuid.uuid4().hex[:8]}"
+    plugin = _plugin(source)
+    wishlists = _wishlists(4)
+    urls = _urls_for(plugin, wishlists)
+    _add_cfg(db, source=source)
+    db.commit()
+    _setup_run(monkeypatch, source=source, wishlists=wishlists, plugin=plugin)
+
+    calls = []
+    lock = threading.Lock()
+
+    def _scrape(_db, _job_name, _dispatch, url, *, ctx, wishlist=None, health=None):
+        with lock:
+            calls.append(url)
+        if url == urls[1]:
+            return {"ok": False, "reason": "blocked", "status_code": 200, "url": url, "error": "blocked"}
+        return _ok_result()
+
+    monkeypatch.setattr(svc, "scrape_ingest_match", _scrape)
+
+    res = svc.run_source_for_all_wishlists(db, source, kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["ok"] is False
+    assert set(calls) == set(urls), "non-mercadolivre sources must keep dispatching all groups"
+
+
 def test_req007_aggregation_across_groups_matches_sequential_sum(db, monkeypatch):
     plugin = _plugin("mercadolivre")
     wishlists = _wishlists(4)
