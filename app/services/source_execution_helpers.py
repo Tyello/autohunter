@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from app.core.settings import settings
+from app.scrapers.base import FetchBlocked
 from app.sources.adapters.v1 import adapt_v1
 from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
@@ -55,6 +56,14 @@ def build_scrape_dispatch(
                     "attempted": True,
                 },
             )
+            if bool(getattr(meta, "blocked", False)):
+                # The v2 pipeline (BaseScraper.scrape) swallows FetchBlocked internally
+                # and reports it as `result.blocked` instead of raising, so it never
+                # reaches the v1-era backoff/alerting path below (which only reacts to
+                # a raised FetchBlocked or `ok=False`). Re-raise here to plug back into
+                # that existing machinery instead of silently reporting found=0.
+                detail = result.metrics.fetch_error or (result.warnings[0] if result.warnings else "blocked")
+                raise FetchBlocked(200, search_url, reason=detail)
             return [ad_to_listing(ad) for ad in ads if ad.external_id]
 
         if flags.impl == "dual" and v2_scraper is not None:
