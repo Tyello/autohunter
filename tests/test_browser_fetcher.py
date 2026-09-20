@@ -44,6 +44,20 @@ def _ctx():
     return ScrapeContext(source="kavak")
 
 
+def test_effective_timeout_ms_bumps_webmotors_floor():
+    assert browser_fetcher._effective_timeout_ms("webmotors", 25000) == 60000
+    assert browser_fetcher._effective_timeout_ms("webmotors", 90000) == 90000
+
+
+def test_effective_timeout_ms_bumps_chavesnamao_floor():
+    assert browser_fetcher._effective_timeout_ms("chavesnamao", 25000) == 40000
+    assert browser_fetcher._effective_timeout_ms("chavesnamao", 50000) == 50000
+
+
+def test_effective_timeout_ms_leaves_other_sources_unchanged():
+    assert browser_fetcher._effective_timeout_ms("icarros", 25000) == 25000
+
+
 def test_should_reset_after_failure_target_closed_always_resets():
     backend = _FakeBackendNoWedge(Exception("target closed"))
     assert browser_fetcher._should_reset_after_failure(backend, Exception("Target page, context or browser has been closed")) is True

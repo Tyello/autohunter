@@ -163,6 +163,11 @@ def _effective_timeout_ms(source: str, timeout_ms: int) -> int:
     s = (source or "").strip().lower()
     if s == "webmotors":
         return max(int(timeout_ms or 0), 60000)
+    if s == "chavesnamao":
+        # networkidle raramente é atingido em 25s (scripts de ads/analytics
+        # mantêm requisições em background); 40s reduz falso-positivo de
+        # timeout sem mudar wait_until (cards hidratam client-side).
+        return max(int(timeout_ms or 0), 40000)
     return int(timeout_ms or 0)
 
 
