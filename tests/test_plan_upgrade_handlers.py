@@ -101,6 +101,26 @@ def test_upgrade_callback_admin_notify_failure_does_not_block_user(monkeypatch):
     assert "Garagem Alvo Premium Anual" in q.messages[-1]["text"]
 
 
+def test_cmd_termos_silent_when_disabled(monkeypatch):
+    sent = []
+    async def _reply(_update, text, **_kwargs):
+        sent.append(text)
+    monkeypatch.setattr(handlers, "reply_text", _reply)
+    monkeypatch.setattr(handlers.settings, "privacy_terms_command_enabled", False)
+    asyncio.run(handlers.cmd_termos(_Update(), types.SimpleNamespace()))
+    assert sent == []
+
+
+def test_cmd_termos_replies_when_enabled(monkeypatch):
+    sent = []
+    async def _reply(_update, text, **_kwargs):
+        sent.append(text)
+    monkeypatch.setattr(handlers, "reply_text", _reply)
+    monkeypatch.setattr(handlers.settings, "privacy_terms_command_enabled", True)
+    asyncio.run(handlers.cmd_termos(_Update(), types.SimpleNamespace()))
+    assert "Privacidade e Termos" in sent[-1]
+
+
 def test_cmd_plan_uses_db_capabilities(db, monkeypatch):
     acc = Account(id=uuid.uuid4(), type="personal", name="acc", is_active=True)
     user = User(id=uuid.uuid4(), telegram_chat_id=123, username="tester", is_active=True, account_id=acc.id)

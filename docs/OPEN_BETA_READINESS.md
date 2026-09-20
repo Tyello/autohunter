@@ -37,6 +37,8 @@ Sair de MVP/uso controlado para um beta aberto gradual, mantendo foco em:
 | Migração V1/V2 de sources | Coberto | `docs/V1_TO_V2_MIGRATION.md` |
 | Variáveis de ambiente e configuração operacional | Agora coberto | `docs/ENVIRONMENT.md` |
 | Limitações conhecidas para beta aberto | Agora coberto | `docs/KNOWN_LIMITATIONS.md` |
+| Privacidade e termos mínimos | Rascunho pronto, falta revisão legal | `docs/PRIVACY_TERMS.md` |
+| Ferramental de teste de carga | Pronto, falta execução real | `scripts/load_test_seed.py`, `scripts/load_test_report.py`, `scripts/load_test_teardown.py`, `docs/OPERATIONS_RUNBOOK.md` §14 |
 
 ## 3. Prontidão atual por frente
 
@@ -45,28 +47,25 @@ Sair de MVP/uso controlado para um beta aberto gradual, mantendo foco em:
 | Produto Telegram-first | Alta para beta | `/start`, `/menu`, busca, wishlist, tracking, plano e upgrade já são tratados como jornada principal. |
 | Runtime técnico | Média/alta | Scheduler, filas, workers, source execution, dedupe, matching e sender já existem, mas precisam de validação de carga antes de abertura maior. |
 | Observabilidade admin | Alta para beta técnico | Existem health/source diagnostics/admin metrics, mas a operação de beta precisa rotina disciplinada. |
-| Fontes tradicionais | Média | Algumas fontes são úteis; outras têm bloqueios ou papel despriorizado. Não prometer cobertura ampla sem evidência. |
+| Fontes tradicionais | Média | Algumas fontes são úteis; outras têm bloqueios ou papel despriorizado. Mercado Livre está desabilitada até 2026-10-10 por bloqueio anti-bot de IP (ver `docs/OPERATIONS_RUNBOOK.md` §7). Não prometer cobertura ampla sem evidência. |
 | Leilões | Controlada | Deve continuar em piloto, com gates e comunicação obrigatória de que lance não é preço final. |
-| Pagamento Premium | Baixa para público amplo | O fluxo ainda depende de webhook Mercado Pago ou aprovação admin em 1 clique para não virar gargalo. |
-| Carga/infra barata | Pendente | Falta teste controlado com 30–50 usuários/50 wishlists ativas por 24h. |
-| Jurídico/comunicação | Pendente | Falta política simples de privacidade, termos mínimos e copy pública honesta sobre fontes e scraping. |
+| Pagamento Premium | Alta | Webhook Mercado Pago já ativa Premium automaticamente (`app/web/routes_mercadopago_webhook.py`), com fallback admin mantido. |
+| Carga/infra barata | Pendente (ferramental pronto) | Ferramental de teste de carga existe (`scripts/load_test_seed.py`/`load_test_report.py`/`load_test_teardown.py` + `pi_load_probe.sh`); falta rodar o ciclo de 30–50 usuários/24h de verdade. |
+| Jurídico/comunicação | Pendente (rascunho pronto) | `docs/PRIVACY_TERMS.md` cobre o mínimo, mas está em rascunho — falta revisão legal e publicação. |
 
 ## 4. Bloqueadores antes de abertura pública ampla
 
 ### P0 — não abrir público amplo sem resolver
 
-1. **Pagamento/ativação Premium sem operação manual frágil**
-   - Caminho ideal: Mercado Pago webhook.
-   - Fallback aceitável para beta: comprovante no Telegram + aprovação admin em 1 clique.
+1. ~~**Pagamento/ativação Premium sem operação manual frágil**~~ — Resolvido: webhook Mercado Pago ativa Premium automaticamente, com fallback admin mantido.
 
 2. **Teste de carga mínimo**
-   - Simular 30–50 usuários com buscas ativas por 24h.
-   - Verificar RAM, CPU, `scrape_jobs`, sender, browser/processos e crescimento de disco.
+   - Simular 30–50 usuários com buscas ativas por 24h usando `scripts/load_test_seed.py`.
+   - Verificar RAM, CPU, `scrape_jobs`, sender, browser/processos e crescimento de disco com `scripts/pi_load_probe.sh` e `scripts/load_test_report.py`.
+   - Remover dados sintéticos ao final com `scripts/load_test_teardown.py --apply`.
 
 3. **Política simples de privacidade e termos mínimos**
-   - Explicar quais dados são guardados: chat_id, username quando disponível, buscas, filtros, interações operacionais e dados de assinatura.
-   - Explicar que fontes externas podem mudar, bloquear ou remover anúncios.
-   - Explicar que o bot não garante compra, reserva, disponibilidade ou preço final.
+   - Rascunho pronto em `docs/PRIVACY_TERMS.md`; falta revisão legal, preenchimento dos campos pendentes e publicação (ex.: comando `/termos` no bot ou link no onboarding).
 
 ### P1 — resolver antes de crescimento
 
@@ -96,8 +95,8 @@ Antes de convidar usuários fora do círculo próximo:
 - [ ] Sender drenando notificações sem atraso crescente.
 - [ ] Limite diário de alertas validado.
 - [ ] Backup/restore validado pelo menos uma vez.
-- [ ] Teste de carga curto executado e registrado.
-- [ ] Política de privacidade e termos mínimos publicados ou enviados no onboarding.
+- [ ] Teste de carga curto executado (`scripts/load_test_seed.py` + `pi_load_probe.sh` + `load_test_report.py`) e registrado.
+- [ ] `docs/PRIVACY_TERMS.md` revisado, preenchido e publicado/enviado no onboarding.
 - [ ] Copy pública alinhada com as limitações reais.
 
 ## 6. Prompt curto para Claude/Codex usar este material

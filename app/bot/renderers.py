@@ -536,6 +536,28 @@ def render_upgrade_text(has_payment_links: bool) -> str:
     return text
 
 
+def render_privacy_terms_text() -> str:
+    """Versão condensada de docs/PRIVACY_TERMS.md para o comando /termos.
+
+    Mantida em sincronia manual com docs/PRIVACY_TERMS.md — ao preencher os
+    campos pendentes lá (empresa/contato/prazo/reembolso), atualizar aqui também.
+    Só é exibida quando settings.privacy_terms_command_enabled=True.
+    """
+    return (
+        "📄 Privacidade e Termos — Garagem Alvo\n\n"
+        "Dados que guardamos: chat_id e username do Telegram, suas buscas/filtros, "
+        "anúncios rastreados manualmente e dados do seu plano/assinatura.\n\n"
+        "Fontes monitoradas são sites de terceiros: podem mudar, bloquear ou remover "
+        "anúncios sem aviso. O Garagem Alvo não garante disponibilidade, preço final "
+        "nem existência do vendedor.\n\n"
+        "Leilões: lance não é preço final. Participação e vistoria são de responsabilidade "
+        "do usuário.\n\n"
+        "Pagamento: processado pelo Mercado Pago; não guardamos dados de cartão.\n\n"
+        "Para pedir a exclusão dos seus dados, fale com o admin por aqui.\n\n"
+        "Documento completo: docs/PRIVACY_TERMS.md."
+    )
+
+
 def build_upgrade_choice_keyboard(monthly_link: str | None, annual_link: str | None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 

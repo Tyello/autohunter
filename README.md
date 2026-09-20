@@ -10,7 +10,7 @@ Garagem Alvo é uma plataforma **Telegram-first** para entusiastas monitorarem o
 
 ## Estado atual em uma frase
 
-O produto já opera como bot Telegram com criação/gestão de buscas, filtros, busca manual, tracking de anúncios, alertas, planos Free/Premium, digest semanal v2, source health/admin, `/admin metrics`, scheduler com filas persistentes e piloto controlado de leilões. O próximo bloco crítico para lançamento público é menos “fazer o produto existir” e mais **fechar operação comercial, validação de carga e operação beta/growth**.
+O produto já opera como bot Telegram com criação/gestão de buscas, filtros, busca manual, tracking de anúncios, alertas, planos Free/Premium com ativação automática via webhook Mercado Pago, digest semanal v2, source health/admin, `/admin metrics`, scheduler com filas persistentes e piloto controlado de leilões. O próximo bloco crítico para lançamento público é menos "fazer o produto existir" ou "fechar operação comercial" e mais **validação de carga e operação beta/growth**.
 
 ## O que o produto é hoje
 
@@ -74,8 +74,8 @@ O estado efetivo de operação é runtime/DB-driven:
 - Planos Free/Premium existem no produto.
 - `/plan` mostra uso e limites.
 - `/upgrade` apresenta oferta Premium e links configuráveis do Mercado Pago.
-- A ativação Premium ainda é operacional/manual pelo admin após validação de pagamento/comprovante.
-- Para lançamento público, o principal bloqueador comercial é automatizar pagamento via webhook ou criar aprovação manual de 1 clique no Telegram.
+- A ativação Premium já é automática via webhook Mercado Pago (`app/web/routes_mercadopago_webhook.py`), com fallback manual/admin mantido para falhas operacionais.
+- Para lançamento público, os bloqueadores restantes não são mais comerciais: teste de carga mínimo (`scripts/load_test_seed.py`/`load_test_report.py`/`load_test_teardown.py`, ver `docs/OPERATIONS_RUNBOOK.md`) e revisão/publicação de `docs/PRIVACY_TERMS.md`.
 
 ## Leitura recomendada
 
@@ -91,3 +91,4 @@ O estado efetivo de operação é runtime/DB-driven:
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — roadmap oficial consolidado do produto e prioridades de execução.
 - [`docs/LAUNCH_PLAN.md`](docs/LAUNCH_PLAN.md) — plano de lançamento e lacunas de go-to-market.
 - [`docs/BACKUP_RESTORE.md`](docs/BACKUP_RESTORE.md) — backup/restore operacional mínimo.
+- [`docs/PRIVACY_TERMS.md`](docs/PRIVACY_TERMS.md) — rascunho de privacidade/termos mínimos, pendente de revisão legal antes de publicar.

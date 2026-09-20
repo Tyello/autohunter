@@ -4,9 +4,22 @@ Atualizado em: 2026-08-08.
 
 ## 1. Resumo executivo
 
+**Atualização 2026-09-18:** os três bloqueadores críticos descritos originalmente nesta auditoria (thumbnails OLX, job mensal FIPE auditável, cleanup operacional agendado) **já foram resolvidos no código** — confirmado por leitura direta do runtime, não só de docs:
+
+- OLX: fallback completo implementado em `app/scrapers/olx.py` (`_pick_olx_image_from_obj`, `_extract_olx_detail_thumbnail` com og:image/twitter:image/JSON-LD/galeria).
+- FIPE: `fipe_update_runs` (migration `p0_02_fipe_update_runs.py` + model `app/models/fipe_update_run.py`), job `monthly_fipe_update` registrado em `app/scheduler/run.py`, comando `/admin fipe update_status` implementado.
+- Supabase IO: `job_operational_data_cleanup` agendado em `app/scheduler/run.py`, além de `cleanup_notifications` e `filesystem_cleanup_daily`.
+- Billing: diferente do que a seção 2.2 abaixo ainda registra como "Atenção", o webhook Mercado Pago (`app/web/routes_mercadopago_webhook.py` → `app/services/mercadopago_webhook_service.py`) já ativa Premium automaticamente, com fallback manual/admin mantido.
+
+O texto original abaixo (seções 2–6) é mantido como registro histórico do diagnóstico e da metodologia de auditoria — mas não deve mais ser lido como "pendente". Os itens que **de fato restam** para lançamento são: executar o teste de carga mínimo (ferramental pronto em `scripts/load_test_seed.py`/`load_test_report.py`/`load_test_teardown.py`, ver `docs/OPERATIONS_RUNBOOK.md` §14) e revisar/publicar `docs/PRIVACY_TERMS.md` (rascunho pronto, pendente de revisão legal).
+
+---
+
+*Diagnóstico original (2026-08-08), mantido como histórico:*
+
 A auditoria confirma que o Garagem Alvo já tem a espinha dorsal de um produto Telegram-first: bot, criação e gestão de buscas, scheduler, filas persistentes, workers, ingestão, matching, notificações, sender, tracking, planos Free/Premium e piloto controlado de leilões. O principal risco para lançamento público não é a ausência do runtime, mas a confiabilidade operacional em três pontos: qualidade visual dos alertas OLX, atualização FIPE auditável e controle de churn/IO no banco Supabase.
 
-Classificação geral de lançamento:
+Classificação geral de lançamento (na época da auditoria original, hoje resolvida — ver atualização acima):
 
 - **Crítico:** thumbnails OLX sem fallback de detalhe/OG/JSON-LD/galeria; atualização FIPE mensal sem job automático registrado no scheduler; ausência de auditoria dedicada `fipe_update_runs`; ausência de política explícita de retenção para `car_listings`/histórico de atividade de alta cardinalidade.
 - **Atenção:** sources v1/v2/dual e browser fallback exigem operação cuidadosa; sender e notifications têm hardening, mas precisam de métrica de backlog em go-live; leilões devem permanecer em piloto/dry-run; billing automático ainda não é fonte de verdade.

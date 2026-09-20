@@ -333,6 +333,17 @@ Bloqueios 403/429/challenge podem ser estruturais da origem.
 - Monitorar volume, duplicidade, qualidade de normalização e ingest incremental.
 - Se gerar ruído, rebaixar operacionalmente antes de alterar arquitetura.
 
+### Mercado Livre
+
+- 2026-09-19: bloqueio anti-bot ao nível de IP confirmado (`blocked_captcha`/`ml_security_or_captcha_page`), consistente em runs sucessivas, não um bloqueio transitório de rate-limit.
+- Source **desabilitada** em produção (`source_configs.is_enabled=false`) por 3 semanas para deixar a reputação do IP esfriar. Reativação automática via crontab do usuário `autohunter` no Pi (`/opt/autohunter/reenable_ml.sh`, marcador `# AUTOHUNTER_ML_REENABLE`), agendada para 2026-10-10 13:26 UTC — o script religa `is_enabled` e remove a própria linha de crontab depois de rodar.
+- Hardening aplicado em `app/services/source_execution_service.py` (commit `b587fa7`), escopado só para `mercadolivre`:
+  - Backoff do primeiro bloqueio começa em 4h (`_base_cooldown_minutes_for`) em vez do piso genérico de 1min — bloqueio de reputação de IP não se resolve em minutos.
+  - Orçamento diário opt-in de requisições: `source_configs.extra.daily_request_budget` (em produção: 150 grupos/24h), checado contra `source_runs.groups` antes de disparar qualquer grupo do run — permite pular um run proativamente mesmo fora do backoff reativo.
+  - Early-stop por run: assim que um grupo do run volta bloqueado, os grupos restantes daquele run não são mais disparados.
+- Antes de reativar manualmente antes do prazo, confirmar que os bloqueios pararam de aparecer nos runs de outras sources/IPs equivalentes e considerar reduzir `daily_request_budget` ainda mais no primeiro dia de volta.
+- Não aumentar agressividade nem tentar burlar captcha/challenge. Rotação de proxy foi cogitada e **não implementada** (exige infraestrutura paga nova); só avançar com aprovação explícita.
+
 ## 8) Premium manual
 
 Fluxo atual:
@@ -431,14 +442,19 @@ Nunca rodar restore real sem dry-run, validação e janela operacional.
 
 ## 14) Teste de carga pré-beta
 
-Antes de abrir para 30–50 beta users:
+Antes de abrir para 30–50 beta users, rodar o ciclo completo com o ferramental em `scripts/`:
 
-- simular 50 usuários com wishlist ativa;
-- monitorar RAM/CPU;
-- acompanhar `scrape_jobs` por status;
-- medir idade da notificação queued mais antiga;
-- observar processos Playwright;
-- registrar relatório.
+```bash
+python scripts/load_test_seed.py --users 50          # cria usuários sintéticos + wishlist ativa cada
+./scripts/pi_load_probe.sh 15 load_test_$(date +%Y%m%d).csv   # rodar em paralelo, por 24h
+python scripts/load_test_report.py                    # rodar a cada poucas horas durante a janela
+python scripts/load_test_teardown.py                   # dry-run: confere quantos registros seriam removidos
+python scripts/load_test_teardown.py --apply           # remove os usuários/wishlists sintéticos ao final
+```
+
+- `load_test_seed.py` usa `telegram_chat_id` numa faixa negativa reservada (nunca colide com chat_id real do Telegram) e é idempotente.
+- `load_test_report.py` é leitura pura: mostra `scrape_jobs` por queue/status com idade, notificações mais antigas em queued/processing, falhas recentes de `source_runs` e contagem de processos Playwright/Chromium vivos.
+- `load_test_teardown.py` é dry-run por padrão; `--apply` remove de forma reversível apenas os dados sintéticos, usando o mesmo padrão break-glass (`SET LOCAL app.allow_core_data_delete='on'`) já usado em `scripts/cleanup_operational_data.py`.
 
 Critério: fila drena, sender não atrasa de forma crescente, RAM estabiliza e browser não acumula zumbis.
 

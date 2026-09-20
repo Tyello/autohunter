@@ -1,7 +1,7 @@
 """admin kv + alert fields
 
 Revision ID: d1a7c0f6b2aa
-Revises: ec4a5f769526
+Revises: 00667b84d001
 Create Date: 2026-01-27
 
 """
@@ -13,9 +13,17 @@ from sqlalchemy.dialects import postgresql
 
 
 revision: str = "d1a7c0f6b2aa"
-down_revision: Union[str, Sequence[str], None] = "ec4a5f769526"
+# Reancorada em 00667b84d001 (que já cria "subscriptions", usada abaixo) em vez
+# de ec4a5f769526 diretamente. ec4a5f769526 tinha 3 filhos diretos
+# (0009_source_metrics, a branch que leva a 00667b84d001, e esta); um
+# depends_on cruzado nesse branchpoint de 3 vias disparava um bug interno do
+# Alembic (KeyError no head tracking). Encadear aqui reduz para um branchpoint
+# de 2 vias, que já é o padrão usado no resto do histórico.
+down_revision: Union[str, Sequence[str], None] = "00667b84d001"
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+# source_states só existe a partir de 0009_source_metrics; sem esta dependência
+# explícita, o Alembic pode aplicar este branch antes daquele em um banco novo.
+depends_on: Union[str, Sequence[str], None] = "0009_source_metrics"
 
 
 def upgrade() -> None:

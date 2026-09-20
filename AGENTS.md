@@ -77,7 +77,7 @@ Já existem:
 - listagem/pausa/reativação/remoção de buscas;
 - busca manual/pontual (`/buscar` e menu);
 - tracking de anúncios por wishlist;
-- plano Free/Premium, `/plan`, `/upgrade` e ativação Premium manual/admin;
+- plano Free/Premium, `/plan`, `/upgrade`, webhook Mercado Pago com ativação Premium automática (`app/web/routes_mercadopago_webhook.py` → `app/services/mercadopago_webhook_service.py`) e fallback manual/admin mantido;
 - alertas com score, contexto mínimo, recência, contexto conservador de preço e contexto conservador de raridade/frequência quando há amostra mínima;
 - digest semanal v2 comunicando monitoramento mesmo sem anúncios ativos;
 - scheduler, filas persistentes, workers e sender;
@@ -89,8 +89,8 @@ Já existem:
 
 Lacunas principais para lançamento público:
 
-- billing automático Mercado Pago/webhook ou aprovação manual em 1 clique;
-- teste de carga mínimo para beta/lançamento;
+- executar o teste de carga mínimo antes do beta (ferramental pronto em `scripts/load_test_seed.py`, `scripts/load_test_report.py`, `scripts/load_test_teardown.py`; ver `docs/OPERATIONS_RUNBOOK.md` §14);
+- revisar e publicar `docs/PRIVACY_TERMS.md` (hoje é rascunho técnico com campos pendentes de preenchimento);
 - operação beta/founders/growth.
 
 ## Estado atual de leilões
@@ -134,7 +134,7 @@ Lacunas principais para lançamento público:
 - Integrações operacionais auxiliares (admin deploy, autopilot, Facebook Agent).
 - `source_configs.extra` e `AppKV`: são flexíveis, mas exigem validação rigorosa e testes.
 - Scheduler de leilões: nunca liberar envio real automático sem decisão explícita e nova trava/revisão.
-- Billing/Premium: hoje ainda é operacional/manual; não documentar como automático sem webhook implementado.
+- Billing/Premium: ativação automática via webhook Mercado Pago já está implementada e é o caminho principal; o fluxo manual/admin (`activate_manual_premium`) continua existindo como fallback operacional, não como caminho primário.
 
 ## Ordem de leitura recomendada
 

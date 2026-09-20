@@ -13,6 +13,7 @@ from app.bot.renderers import (
     render_user_wishlists,
     render_upgrade_text,
     render_plan_text,
+    render_privacy_terms_text,
     build_upgrade_choice_keyboard,
     build_upgrade_payment_link_keyboard,
 )
@@ -541,6 +542,18 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_period_end=snap.get("current_period_end"),
     )
     await reply_text(update, text)
+
+
+async def cmd_termos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /termos: estrutura pronta, mas desligada por padrão.
+
+    Fica invisível de propósito (não está em app/bot/commands.py, então não
+    aparece no autopreenchimento do Telegram) até privacy_terms_command_enabled
+    ser ligado depois que docs/PRIVACY_TERMS.md for revisado e preenchido.
+    """
+    if not settings.privacy_terms_command_enabled:
+        return
+    await reply_text(update, render_privacy_terms_text())
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):

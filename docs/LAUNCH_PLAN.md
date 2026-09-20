@@ -18,17 +18,17 @@ O produto já possui:
 - alertas com contexto mínimo, score, recência, preço e raridade/frequência quando há amostra confiável;
 - plano Free/Premium;
 - upgrade com link Mercado Pago configurável;
-- ativação Premium manual/admin;
+- ativação Premium automática via webhook Mercado Pago, com fallback manual/admin;
 - scheduler, filas persistentes, workers e sender;
 - `/admin metrics` de produto/comercial;
 - source health/admin;
 - digest semanal v2;
 - leilões em piloto controlado.
 
-A lacuna de lançamento não é mais “falta produto”. É:
+A lacuna de lançamento não é mais “falta produto”, nem mais depende da ativação de Premium (já automática via webhook). É:
 
-1. ativar Premium sem operação manual frágil;
-2. validar carga/estabilidade no Raspberry;
+1. validar carga/estabilidade no Raspberry (ferramental pronto em `scripts/load_test_seed.py`/`load_test_report.py`/`load_test_teardown.py`);
+2. revisar e publicar `docs/PRIVACY_TERMS.md`;
 3. operar beta com feedback real usando `/admin metrics`;
 4. adquirir os primeiros usuários sem prometer cobertura que ainda não existe.
 
@@ -44,7 +44,7 @@ Sequência recomendada:
 pré-beta técnico -> beta fechado 30–50 pessoas -> founders -> abertura gradual
 ```
 
-Não abrir público amplo antes de resolver pagamento/ativação ou, no mínimo, fallback operacional de aprovação em 1 clique.
+Pagamento/ativação já resolvido (webhook automático + fallback). Não abrir público amplo antes de rodar o teste de carga mínimo e publicar `docs/PRIVACY_TERMS.md`.
 
 ---
 
@@ -111,30 +111,30 @@ O alerta já entrega score, label humanizado, recência, preço, fonte, motivo/c
 
 ### 1.4 Pagamento funcionando sem intervenção manual frágil
 
-**Estado atual:** bloqueador crítico.
+**Estado atual:** resolvido.
 
-O fluxo atual usa link Mercado Pago configurável, mas a ativação Premium ainda é manual/admin após validação.
+O fluxo usa link Mercado Pago com referência vinculada ao `chat_id`/período do plano. O webhook (`app/web/routes_mercadopago_webhook.py` → `app/services/mercadopago_webhook_service.py`) valida o evento, verifica status `approved`, ativa Premium via `activate_manual_premium` e faz dedupe por `payment_id` (evita processar o mesmo pagamento duas vezes).
 
-**Opção A — caminho principal:** Mercado Pago com webhook.
+A aprovação manual/admin (Opção B abaixo) continua existindo como fallback operacional para falhas do webhook ou pagamentos fora do fluxo padrão, não como caminho principal.
 
-- Criar referência de pagamento vinculada ao usuário/chat_id.
-- Receber webhook.
-- Validar evento.
-- Ativar Premium via serviço interno.
-- Notificar usuário.
-- Notificar admin.
-- Registrar auditoria.
+**Caminho principal (implementado):** Mercado Pago com webhook.
 
-**Opção B — fallback aceitável para beta:** aprovação em 1 clique.
+- Referência de pagamento vinculada ao usuário/chat_id. ✅
+- Recebe webhook, valida evento. ✅
+- Ativa Premium via serviço interno. ✅
+- Registra auditoria (dedupe por `payment_id` em `AppKV`). ✅
+- Notificação de usuário/admin: confirmar se já está completa ou se falta enriquecer a mensagem pós-ativação.
+
+**Fallback operacional:** aprovação em 1 clique.
 
 - Usuário envia comprovante.
 - Bot notifica admin com botões:
   - aprovar mensal;
   - aprovar anual;
   - recusar.
-- Aprovação chama o mesmo serviço de ativação Premium.
+- Aprovação chama o mesmo serviço de ativação Premium (`activate_manual_premium`).
 
-**Regra de lançamento:** não abrir público amplo sem uma das duas opções.
+**Regra de lançamento:** resolvida — o caminho principal automático já existe, com fallback mantido.
 
 ---
 
@@ -343,8 +343,8 @@ Exemplo de meta:
 
 ```text
 Semana 0 — Pré-beta técnico
-├── Pagamento webhook ou aprovação admin 1 clique
-├── Teste de carga 50 usuários/24h
+├── Teste de carga 50 usuários/24h (scripts/load_test_seed.py + pi_load_probe.sh + load_test_report.py)
+├── Revisar e publicar docs/PRIVACY_TERMS.md
 └── Ajustar copy pública de cobertura real das sources
 
 Semana 1 — Beta fechado
@@ -391,8 +391,9 @@ Após 30 dias do lançamento público:
 
 ### P0
 
-- `LAUNCH-PAY-01`: Mercado Pago webhook ou aprovação admin 1 clique.
-- `LAUNCH-LOAD-01`: teste de carga 50 usuários/24h.
+- ~~`LAUNCH-PAY-01`: Mercado Pago webhook ou aprovação admin 1 clique.~~ Resolvido — webhook automático implementado, fallback admin mantido.
+- `LAUNCH-LOAD-01`: teste de carga 50 usuários/24h (ferramental pronto, falta execução real).
+- `LAUNCH-PRIVACY-01`: revisar e publicar `docs/PRIVACY_TERMS.md`.
 
 ### P1
 
