@@ -26,7 +26,6 @@ from app.services.wishlists_service import (
     get_max_wishlists_for_user,
 )
 from app.services.wishlist_tracking_service import (
-    add_tracked_listing,
     add_tracked_listing_result,
     TrackedListingResult,
     list_tracked_listings,

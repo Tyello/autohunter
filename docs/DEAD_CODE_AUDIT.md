@@ -1,7 +1,29 @@
 # Auditoria de Código Não Utilizado (READ-ONLY)
 
-**Status:** Análise apenas. Nenhum código, migration ou config foi alterado ou removido.
-**Data:** 2026-08-31
+**Status:** Análise original de 2026-08-31 (abaixo, inalterada). Revalidada em 2026-09-21: todos os
+itens de "alta confiança" (1-2, 4-8) já haviam sido removidos em commits anteriores a esta revisão —
+confirmado por grep símbolo-a-símbolo no repo atual, sem necessidade de nova remoção. Exceção: o item 3
+(`app/scheduler/scraper_adapter.py`) está **desatualizado** — hoje é importado por
+`scripts/compare_scrapers.py` e `scripts/migrate_source.py`; não é mais código morto e não deve ser
+removido. Os itens de "confiança média" (`clear_backoff`, `create_queued_if_absent`,
+`mark_failed_reason`, `list_source_config_snapshots`, `get_tracking_capacity_snapshot`,
+`premium_upgrade_cta`, `get_fipe_price`, `get_source_proxy_server`, `get_source_rate_limit_seconds`,
+`admin_alerts_diagnostic_snapshot`, `can_send_more_today`) também já não existem mais no código —
+removidos anteriormente. Nesta revisão, uma nova checagem com `vulture --min-confidence 80` encontrou
+6 imports não utilizados adicionais (`send_listing_message` em `app/bot/handlers.py`,
+`add_tracked_listing` em `app/bot/handlers_wishlist_ui.py`, `match_listings_for_wishlist` em
+`app/scheduler/jobs.py`, `scrape_ingest_match_many` em `app/services/source_execution_service.py`,
+`tracking_slots_full_message` em `app/services/wishlist_tracking_service.py`, `delete` em
+`app/services/wishlists_service.py`) — verificados individualmente (zero referências fora da própria
+linha de import) e removidos. Os demais achados do vulture nesta passada (`__context` em
+`core/settings.py`, `_` em `mercadolivre_strategy_probe.py`, `url_` em `playwright_pool.py`) são falsos
+positivos: parâmetros exigidos por assinatura/contrato de interface (Pydantic `model_post_init`,
+`Callable` de predicado, idiom de feature-detection de import) — não removidos.
+`scrape_ingest_match_many` inicialmente removido de `app/services/source_execution_service.py` por
+não ter caller em `app/`, mas revertido: `pytest` (`tests/test_search_dedup_routing.py::test_tick_calls_scrape_ingest_match_not_many`)
+faz `monkeypatch.setattr(svc, "scrape_ingest_match_many", ...)` como guarda de regressão explícita
+("NÃO deve ser chamado pelo tick") — precisa do atributo importado no módulo mesmo sem call site em
+produção. **Lição:** a checagem de "unused import" precisa incluir `tests/`, não só `app/`.
 
 ---
 
@@ -188,7 +210,7 @@ repo inteiro) descrito na metodologia.
 
 ---
 
-## Plano consolidado (não executado — aguardando aprovação)
+## Plano consolidado (JÁ EXECUTADO — ver nota de revalidação 2026-09-21 no topo)
 
 ```bash
 # 1. Migrations órfãs fora da cadeia do Alembic

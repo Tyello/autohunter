@@ -22,7 +22,6 @@ from app.services.wishlists_service import get_user_plan_snapshot, list_wishlist
 from app.services.plan_capabilities import (
     get_plan_capabilities,
     tracking_limit_message,
-    tracking_slots_full_message,
 )
 
 MAX_TRACKED_PER_WISHLIST = 3

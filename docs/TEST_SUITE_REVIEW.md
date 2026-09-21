@@ -1,3 +1,12 @@
+**Nota de revalidação (2026-09-21):** os dois itens de baixo risco já sinalizados como "seguro
+remover" — duplicação em `test_fb_pairing.py` (`test_pairing_one_time_and_ttl`) e o teste morto em
+`test_handlers_buscar_agora.py` — já haviam sido removidos em commits anteriores a esta revisão
+(confirmado: `test_fb_pairing.py` hoje só contém `test_pairing_code_format`; `test_auction_readiness_service.py`
+e o serviço correspondente também não existem mais no repo). Restou apenas um resquício de linhas em
+branco no ponto onde o teste morto foi cortado em `test_handlers_buscar_agora.py`, removido nesta
+revisão. Nenhuma outra remoção foi feita — as oportunidades de consolidação/`parametrize` listadas
+abaixo continuam sendo refactors opcionais, não remoções de cobertura.
+
 # Revisão da suíte de testes (256 arquivos)
 
 Revisão completa da suíte, feita em 5 blocos temáticos por agentes independentes (mesma

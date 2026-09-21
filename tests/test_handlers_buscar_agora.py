@@ -200,9 +200,6 @@ class TestRenderFacetsKeyboard:
 
 
 
-
-
-
 class TestBuscarAgoraConversation:
     """Testes para buscar_agora_conversation."""
 

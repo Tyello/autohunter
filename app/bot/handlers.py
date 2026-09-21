@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
-from app.bot.listing_sender import send_listing_message
 from app.notifications.telegram_formatter import format_ad_message
 from app.scoring.score_v2 import score_ad
 from app.services.market_stats_service import batch_get_market_stats, cohort_key_for_listing

@@ -16,7 +16,7 @@ from app.services.notifications_queue_service import (
     queue_notifications_for_matches_diag,
 )
 from app.services.listing_activity_service import build_seen_identity
-from app.services.matching_service import match_listings_for_wishlist, match_listings_for_wishlists, match_listings_for_active_wishlists
+from app.services.matching_service import match_listings_for_wishlists, match_listings_for_active_wishlists
 from app.services.listings_service import ingest_listings, ingest_listings_stats
 from app.services.source_url_cursors_service import get_cursor, touch_cursor
 
