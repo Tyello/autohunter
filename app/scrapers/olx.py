@@ -658,7 +658,11 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
     min_http_delay = 1200
     max_http_delay = 4200
 
-    force_browser_mode = bool(getattr(settings, "olx_force_browser", False)) or _runtime_force_browser_active()
+    force_browser_mode = (
+        bool(getattr(settings, "olx_force_browser", False))
+        or bool(getattr(ctx, "force_browser", False))
+        or _runtime_force_browser_active()
+    )
 
     def _fetch_browser_html() -> str:
         res = fetch_html_browser(
