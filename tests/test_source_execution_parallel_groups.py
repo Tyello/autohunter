@@ -254,6 +254,61 @@ def test_mercadolivre_stops_remaining_groups_after_first_block(db, monkeypatch):
     assert calls == urls[:2], "groups after the first block must not be dispatched for mercadolivre"
 
 
+def test_olx_stops_remaining_groups_after_first_block(db, monkeypatch):
+    """OLX shares the same single-IP anti-bot fingerprint problem as mercadolivre:
+    firing the remaining groups after one comes back blocked just burns more
+    requests against an IP that's already flagged (see stop_remaining_on_block)."""
+    plugin = _plugin("olx")
+    wishlists = _wishlists(4)
+    urls = _urls_for(plugin, wishlists)
+    _add_cfg(db, source="olx")
+    db.commit()
+    _setup_run(monkeypatch, source="olx", wishlists=wishlists, plugin=plugin)
+
+    calls = []
+
+    def _scrape(_db, _job_name, _dispatch, url, *, ctx, wishlist=None, health=None):
+        calls.append(url)
+        if url == urls[1]:
+            return {"ok": False, "reason": "blocked", "status_code": 200, "url": url, "error": "blocked"}
+        return _ok_result()
+
+    monkeypatch.setattr(svc, "scrape_ingest_match", _scrape)
+
+    res = svc.run_source_for_all_wishlists(db, "olx", kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["ok"] is False
+    assert res["status"] == "blocked"
+    assert calls == urls[:2], "groups after the first block must not be dispatched for olx"
+
+
+def test_webmotors_stops_remaining_groups_after_first_block(db, monkeypatch):
+    """Webmotors shares the same single-IP anti-bot fingerprint problem (PerimeterX)
+    as mercadolivre/olx (see stop_remaining_on_block)."""
+    plugin = _plugin("webmotors")
+    wishlists = _wishlists(4)
+    urls = _urls_for(plugin, wishlists)
+    _add_cfg(db, source="webmotors")
+    db.commit()
+    _setup_run(monkeypatch, source="webmotors", wishlists=wishlists, plugin=plugin)
+
+    calls = []
+
+    def _scrape(_db, _job_name, _dispatch, url, *, ctx, wishlist=None, health=None):
+        calls.append(url)
+        if url == urls[1]:
+            return {"ok": False, "reason": "blocked", "status_code": 200, "url": url, "error": "blocked"}
+        return _ok_result()
+
+    monkeypatch.setattr(svc, "scrape_ingest_match", _scrape)
+
+    res = svc.run_source_for_all_wishlists(db, "webmotors", kind="scheduler", force=True, ignore_backoff=True)
+
+    assert res["ok"] is False
+    assert res["status"] == "blocked"
+    assert calls == urls[:2], "groups after the first block must not be dispatched for webmotors"
+
+
 def test_non_mercadolivre_keeps_dispatching_all_groups_after_a_block(db, monkeypatch):
     source = f"other_{uuid.uuid4().hex[:8]}"
     plugin = _plugin(source)

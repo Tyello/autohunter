@@ -616,11 +616,12 @@ def _run_source_for_all_wishlists_locked(
     ordered_urls = list(groups.keys())
     max_workers = max(1, min(int(settings.source_group_max_workers or 1), len(ordered_urls) or 1))
 
-    # Sources with a single-IP anti-bot fingerprint (mercadolivre) get blocked at the
-    # IP level: once one group comes back blocked, every remaining group in this run
-    # would hit the same wall. Firing all of them anyway just burns more requests
-    # against an IP that's already flagged, deepening the fingerprint for no benefit.
-    stop_remaining_on_block = (src or "").lower() == "mercadolivre"
+    # Sources with a single-IP anti-bot fingerprint (mercadolivre, olx, webmotors) get
+    # blocked at the IP level: once one group comes back blocked, every remaining group
+    # in this run would hit the same wall. Firing all of them anyway just burns more
+    # requests against an IP that's already flagged, deepening the fingerprint for no
+    # benefit.
+    stop_remaining_on_block = (src or "").lower() in ("mercadolivre", "olx", "webmotors")
 
     if stop_remaining_on_block:
         results_in_order = []

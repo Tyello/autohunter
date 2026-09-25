@@ -756,9 +756,11 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
             except Exception:
                 pass
 
-            # Retry HTTP once
+            # Retry HTTP once. Use a delay at least as long as the first attempt --
+            # retrying fast right after a block looks more bot-like, not less, and
+            # risks deepening the anti-bot flag instead of recovering from it.
             try:
-                html = _fetch_http_hybrid(search_url, ctx, min_delay_ms=400, max_delay_ms=1200)
+                html = _fetch_http_hybrid(search_url, ctx, min_delay_ms=min_http_delay, max_delay_ms=max_http_delay)
             except FetchBlocked:
                 # Still blocked -> enter runtime force browser for a while
                 olx_health_force_browser()
