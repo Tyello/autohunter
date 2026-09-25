@@ -249,7 +249,7 @@ def _image_from_tag(tag: Any, base_url: str) -> str | None:
 
 
 def _extract_olx_detail_thumbnail(html: str, detail_url: str) -> str | None:
-    soup = BeautifulSoup(html or "", "html.parser")
+    soup = BeautifulSoup(html or "", "lxml")
     for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]', 'meta[property="twitter:image"]'):
         tag = soup.select_one(selector)
         if tag:
@@ -360,7 +360,9 @@ def _extract_next_data_json(html: str) -> Optional[dict]:
     Tenta extrair o JSON do <script id="__NEXT_DATA__" type="application/json">...</script>
     (padrão Next.js). Se não achar, tenta fallback por regex.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    if "__NEXT_DATA__" not in html:
+        return None
+    soup = BeautifulSoup(html, "lxml")
 
     tag = soup.find("script", id="__NEXT_DATA__")
     if tag and tag.string:
