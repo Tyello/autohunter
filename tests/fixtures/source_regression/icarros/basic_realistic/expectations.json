@@ -18,24 +18,24 @@
       "expected": {
         "price": 98900,
         "title_contains": [
-          "Honda Civic EXL",
-          "2020",
-          "45.000 km"
+          "Honda Civic EXL"
         ],
-        "location": "Sao Paulo-SP"
+        "location": "Sao Paulo-SP",
+        "year": 2020,
+        "km": 45000
       },
-      "must_have": []
+      "must_have": ["km", "year"]
     },
     "52934718": {
       "expected": {
         "price": 79900,
         "title_contains": [
-          "Toyota Corolla GLi",
-          "2018"
+          "Toyota Corolla GLi"
         ],
-        "location": "Campinas-SP"
+        "location": "Campinas-SP",
+        "year": 2018
       },
-      "must_have": [],
+      "must_have": ["year"],
       "optional_absent": [
         "km"
       ]

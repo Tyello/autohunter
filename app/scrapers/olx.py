@@ -167,6 +167,8 @@ class OlxItem:
     price: Optional[Decimal]
     currency: str = "BRL"
     location: Optional[str] = None
+    year: Optional[int] = None
+    km: Optional[int] = None
 
 
 def _walk(obj: Any) -> Iterable[Any]:
@@ -411,6 +413,36 @@ def _extract_rsc_json_chunks(html: str) -> list[Any]:
     return chunks
 
 
+def _year_km_from_properties(node: dict) -> tuple[Optional[int], Optional[int]]:
+    """OLX embute specs estruturadas em node['properties'], uma lista de
+    {"name": <chave>, "value": <string>, "label": <rótulo pt-br>}. Ano vem em
+    name="regdate" (label "Ano") e quilometragem em name="mileage" (label
+    "Quilometragem") -- confirmado em captura real (tests/fixtures/olx/
+    search_rsc_price_nodes.html). Mais confiável que regex sobre o título."""
+    props = node.get("properties")
+    if not isinstance(props, list):
+        return None, None
+
+    year = None
+    km = None
+    for p in props:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name")
+        value = p.get("value")
+        if name == "regdate" and value is not None:
+            try:
+                year = int(str(value).strip())
+            except Exception:
+                year = None
+        elif name == "mileage" and value is not None:
+            try:
+                km = int(re.sub(r"\D", "", str(value)))
+            except Exception:
+                km = None
+    return year, km
+
+
 def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
     """
     Os itens aparecem com chaves como:
@@ -453,6 +485,8 @@ def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
                 elif uf:
                     loc = uf
 
+            year, km = _year_km_from_properties(node)
+
             items.append(
                 OlxItem(
                     external_id=str(list_id),
@@ -461,6 +495,8 @@ def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
                     thumbnail_url=thumb,
                     price=price,
                     location=loc,
+                    year=year,
+                    km=km,
                 )
             )
 
@@ -515,8 +551,8 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
                 "price": it.price,
                 "currency": "BRL",
                 "location": it.location,
-                "year": _extract_year_from_title(it.title),
-                "km": _extract_mileage_from_title(it.title),
+                "year": it.year if it.year is not None else _extract_year_from_title(it.title),
+                "km": it.km if it.km is not None else _extract_mileage_from_title(it.title),
             }
         )
     return finalize_listings("olx", out)

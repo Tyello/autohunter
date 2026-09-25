@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 from urllib.parse import urljoin
@@ -23,6 +24,86 @@ def _external_id_from_url(url: str) -> str:
         return m.group(1)
     # fallback: last path segment
     return (url.split("?")[0].rstrip("/").split("/")[-1] or url)
+
+
+_RSC_CHUNK_RE = re.compile(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)</script>', re.S)
+_RSC_KM_RE = re.compile(r"([\d.]+)\s*km", re.IGNORECASE)
+
+
+def _extract_rsc_cars(html_text: str) -> dict[str, dict]:
+    """O HTML da Kavak (Next.js App Router, streaming) ja embute o payload
+    RSC com a lista completa de carros (price/km/ano/local) em scripts
+    `self.__next_f.push(...)`, mesmo apos renderizacao via browser (ver
+    docs/spikes/scraping-efetividade-audit.md secao 4). Retorna um dict
+    `url -> {price, km, year, location}` para enriquecer o que o parser de
+    DOM ja extraiu, sem requisicao extra."""
+    out: dict[str, dict] = {}
+
+    for raw in _RSC_CHUNK_RE.findall(html_text):
+        if "cars" not in raw:
+            continue
+        try:
+            unescaped = json.loads('"' + raw + '"')
+        except Exception:
+            continue
+
+        idx = unescaped.find('"cars":[')
+        if idx == -1:
+            continue
+        start = idx + len('"cars":')
+
+        depth = 0
+        end = None
+        for i in range(start, len(unescaped)):
+            ch = unescaped[i]
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end is None:
+            continue
+
+        try:
+            cars = json.loads(unescaped[start:end])
+        except Exception:
+            continue
+
+        for car in cars:
+            if not isinstance(car, dict):
+                continue
+            url = car.get("url")
+            if not url:
+                continue
+
+            analytics = car.get("analytics") if isinstance(car.get("analytics"), dict) else {}
+
+            km = None
+            m = _RSC_KM_RE.search(car.get("subtitle") or "")
+            if m:
+                try:
+                    km = int(m.group(1).replace(".", ""))
+                except Exception:
+                    km = None
+
+            price = None
+            car_price = analytics.get("car_price")
+            if car_price is not None:
+                try:
+                    price = int(str(car_price))
+                except Exception:
+                    price = None
+
+            out[url] = {
+                "price": price,
+                "km": km,
+                "year": analytics.get("car_year"),
+                "location": analytics.get("car_location"),
+            }
+
+    return out
 
 
 def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
@@ -222,5 +303,21 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 "thumbnail_url": None,
                 "location": None,
             }
+
+    # Enrich price/km/year/location from the RSC payload already embedded in
+    # the page HTML (no extra request).
+    rsc_cars = _extract_rsc_cars(html_text)
+    for cur in by_url.values():
+        car = rsc_cars.get(cur["url"])
+        if not car:
+            continue
+        if cur.get("price") is None and car.get("price") is not None:
+            cur["price"] = car["price"]
+        if cur.get("location") is None and car.get("location"):
+            cur["location"] = car["location"]
+        if car.get("km") is not None:
+            cur["km"] = car["km"]
+        if car.get("year") is not None:
+            cur["year"] = car["year"]
 
     return finalize_listings("kavak", list(by_url.values()))

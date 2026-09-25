@@ -47,6 +47,10 @@ def test_icarros_listing_and_detail_regression_with_realistic_fixtures(monkeypat
         assert int(item["price"]) == cfg["expected"]["price"]
         if "location" in cfg["expected"]:
             assert item.get("location") == cfg["expected"]["location"]
+        if "year" in cfg["expected"]:
+            assert item.get("year") == cfg["expected"]["year"]
+        if "km" in cfg["expected"]:
+            assert item.get("km") == cfg["expected"]["km"]
         for token in cfg["expected"]["title_contains"]:
             assert token in (item.get("title") or "")
 

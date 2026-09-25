@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urljoin, urlencode, urlsplit, urlunsplit
 
 from lxml import html as lxml_html
 
@@ -164,10 +165,64 @@ def _pick_thumb_from_element(el, base_url: str) -> Optional[str]:
     return out[0] if out else None
 
 
+def _extract_next_data_deals(html_text: str) -> dict[str, dict]:
+    """A pagina de busca do mobiauto e SSR via Next.js e ja embute os
+    resultados completos (id/price/km/ano) em `__NEXT_DATA__`, sem precisar
+    de browser/JS (ver docs/spikes/scraping-efetividade-audit.md secao 4).
+    Retorna um dict `external_id -> {price, km, year}` para enriquecer o que
+    o parser CSS/heuristico ja extraiu."""
+    m = re.search(
+        r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.S
+    )
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(1))
+    except Exception:
+        return {}
+
+    results = (
+        data.get("props", {})
+        .get("pageProps", {})
+        .get("deals", {})
+        .get("results", [])
+    )
+    if not isinstance(results, list):
+        return {}
+
+    out: dict[str, dict] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        ext_id = str(item.get("id") or "").strip()
+        if not ext_id:
+            continue
+
+        trim = item.get("trim") if isinstance(item.get("trim"), dict) else {}
+        year = trim.get("productionYear") or (trim.get("model") or {}).get("year")
+
+        out[ext_id] = {
+            "price": item.get("price"),
+            "km": item.get("km"),
+            "year": year,
+        }
+    return out
+
+
+def _strip_disallowed_detail_query(url: str) -> str:
+    """robots.txt do mobiauto.com.br bloqueia `*?*page=detail` (ver
+    docs/spikes/scraping-efetividade-audit.md secao 4.1). O link mostrado ao
+    usuario mantem esse `?page=detail`, mas o proprio scraper nao pode
+    requisitar essa forma exata de URL."""
+    parts = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "page"]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
 def _detail_enrich(url: str, ctx: ScrapeContext) -> dict:
     """Extrai title + thumb direto da página de detalhe (fallback)."""
     html_text = fetch_html_with_browser_fallback(
-        url,
+        _strip_disallowed_detail_query(url),
         ctx=ctx,
         timeout=25,
         proxy=ctx.proxy_server,
@@ -391,6 +446,20 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 "location": None,
             }
 
+
+    # Enrich price/km/year from the __NEXT_DATA__ JSON already embedded in the
+    # SSR HTML (no extra request, no browser needed).
+    next_data_deals = _extract_next_data_deals(html_text)
+    for cur in by_url.values():
+        deal = next_data_deals.get(cur["external_id"])
+        if not deal:
+            continue
+        if cur.get("price") is None and deal.get("price") is not None:
+            cur["price"] = deal["price"]
+        if deal.get("km") is not None:
+            cur["km"] = deal["km"]
+        if deal.get("year") is not None:
+            cur["year"] = deal["year"]
 
     # Enrich a few items missing title/thumbnail (cheap backfill)
     needs = [x for x in by_url.values() if not x.get("thumbnail_url") or not x.get("title")]

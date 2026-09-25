@@ -335,6 +335,40 @@ def _guess_price(blob: str) -> Optional[Decimal]:
 
 
 
+def _extract_card_meta_fields(card_el) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+    """Le ano/km/localizacao dos cards de busca do GoGarage.
+
+    Confirmado por sondagem ao vivo (2026-09) que os cards ja vem com esses campos
+    prontos no HTML server-renderizado (spans '.bc-meta-item' com icones
+    bi-calendar3/bi-speedometer2/bi-geo-alt), ao contrario do que o comentario antigo
+    'GoGarage e 100% JS na listagem' presumia. Mais confiavel que regex sobre o blob
+    do card inteiro, e evita gastar orcamento de fetch_details so por causa do ano.
+    """
+    if card_el is None:
+        return None, None, None
+    year: Optional[int] = None
+    km: Optional[int] = None
+    location: Optional[str] = None
+    try:
+        for item in card_el.xpath(".//span[contains(@class,'bc-meta-item')]"):
+            icon_cls = " ".join(item.xpath(".//i/@class"))
+            texts = item.xpath(".//span[contains(@class,'bc-meta-text')]/text()")
+            text = texts[0].strip() if texts else ""
+            if "bi-calendar3" in icon_cls:
+                m = re.search(r"(19\d{2}|20\d{2})", text)
+                if m:
+                    year = int(m.group(1))
+            elif "bi-speedometer2" in icon_cls:
+                digits = re.sub(r"\D", "", text)
+                if digits:
+                    km = int(digits)
+            elif "bi-geo-alt" in icon_cls:
+                location = text or None
+    except Exception:
+        return year, km, location
+    return year, km, location
+
+
 def _guess_thumb(doc_el, card_el=None) -> Optional[str]:
     """Tenta encontrar uma thumbnail no card.
 
@@ -558,7 +592,8 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
     q_hint = _extract_query_from_url(search_url)
     q_hint_l = q_hint.lower().strip()
 
-    # GoGarage é 100% JS na listagem. Se forçado, tenta renderizar primeiro.
+    # A listagem em si é HTML server-renderizado (confirmado por sondagem ao vivo,
+    # 2026-09); só forçamos o browser aqui quando o caller pedir explicitamente.
     if getattr(ctx, "force_browser", False) and settings.enable_playwright:
         try:
             html = _fetch_browser(search_url)
@@ -656,6 +691,7 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
         anchor_text = ""
         blob = ""
         thumb = None
+        card = None
 
         if doc is not None:
             # tenta achar a âncora exata e seu "card" pai
@@ -664,7 +700,19 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
             except Exception:
                 a_nodes = []
             if a_nodes:
+                # Vários <a href="/ads/..."> apontam pro mesmo anúncio (foto, título,
+                # botão "ver mais"); o primeiro em ordem de documento costuma ser o da
+                # foto, cujo texto é só ruído de UI ("11 Visto"). Prefere o primeiro
+                # candidato com texto que não pareça ruído (ex: o <a> dentro de
+                # '.bc-title'); cai pro primeiro nó se nenhum servir.
                 a = a_nodes[0]
+                for cand in a_nodes:
+                    cand_text = " ".join(
+                        [t.strip() for t in cand.xpath('.//text()') if t and t.strip()]
+                    ).strip()
+                    if cand_text and not _is_bad_title(cand_text):
+                        a = cand
+                        break
                 anchor_text = " ".join([t.strip() for t in a.xpath('.//text()') if t and t.strip()]).strip()
                 card = a
                 for _ in range(6):
@@ -687,16 +735,13 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
             title = ''
         price = _guess_price(blob)
 
-        # Se existir ano no card/HTML, garante que ele apareça no título (ajuda filtros por ano).
-        y = _extract_best_year(blob or '')
-        if y and title and str(y) not in title:
-            title = (title + f" {y}").strip()
-
-        # GoGarage muitas vezes não coloca ano/preço no card. Se o ano não aparece, tenta details.
-        has_year = bool(_extract_best_year(title) or y)
+        meta_year, meta_km, meta_location = _extract_card_meta_fields(card)
+        year = meta_year or _extract_best_year(blob or '')
+        km = meta_km
+        location = meta_location
 
         # Se faltou coisa crítica ou ano, gasta "orçamento" com details (bem limitado)
-        if details_budget > 0 and (not title or price is None or thumb is None or not has_year):
+        if details_budget > 0 and (not title or price is None or thumb is None or not year):
             try:
                 d = fetch_details(url, ctx=ctx)
                 details_budget -= 1
@@ -708,13 +753,10 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
                     title = dt
                 price = price or d.get("price")
                 thumb = thumb or d.get("thumbnail_url")
-                dy = d.get("year")
-                if dy and title and str(dy) not in title:
-                    title = (title + f" {dy}").strip()
+                year = year or d.get("year")
             except Exception:
                 details_budget -= 1
 
-        
         # Não persiste lixo: se ainda não temos título útil, ignora o item (evita '6 Visto' no DB).
         if not title or _is_bad_title(title):
             continue
@@ -728,7 +770,9 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
                 "thumbnail_url": thumb,
                 "price": price,
                 "currency": "BRL",
-                "location": None,
+                "location": location,
+                "year": year,
+                "km": km,
             }
         )
 

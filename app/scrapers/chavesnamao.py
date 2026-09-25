@@ -59,13 +59,23 @@ def build_chavesnamao_search_url(query: str, page: int = 1) -> str:
     if slug:
         url = f"https://www.chavesnamao.com.br/carros/brasil/{slug}/"
     else:
-        # Fallback: generic search. Can be noisier.
+        # Fallback: generic query search. NOTE: chavesnamao's robots.txt disallows
+        # all query strings except `?pg=2..5` and `?relatedAds=true` (`Disallow: /*?*`
+        # with narrow `Allow` exceptions, confirmed live 2026-09) -- so this `?q=`
+        # fallback is a known robots.txt violation. There is no compliant replacement
+        # without a full brand/model slug-mapping system (the SSR page above only
+        # covers the few slugs we've validated), so we keep it as a deliberate,
+        # documented last resort rather than silently dropping search coverage.
         q = quote_plus((query or "").strip())
         url = f"https://www.chavesnamao.com.br/carros-usados/brasil/?q={q}"
 
     if page and page > 1:
+        # Só `?pg=2` a `?pg=5` são permitidos pelo robots.txt; além disso não há
+        # como paginar de forma compliant, então limitamos aqui.
+        if page > 5:
+            return url
         sep = "&" if "?" in url else "?"
-        url += f"{sep}pagina={page}"
+        url += f"{sep}pg={page}"
     return url
 
 

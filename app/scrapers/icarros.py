@@ -489,8 +489,11 @@ def _extract_price_from_structured(doc) -> Optional[Decimal]:
 def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int = 35000) -> dict:
     """Fetch detail page to improve title/price/thumb/km/location.
 
-    NOTE: Do NOT add non-column keys (year/km) to the listing dict here to avoid DB insert crashes.
-    If we find year/km, we append them to the title (the bot can render them nicely).
+    year/km are set as extra dict keys (same convention as mobiauto/kavak/olx),
+    not appended to the title: `finalize_listings` passes non-core keys through
+    as extras (app/scrapers/contract.py), and `_decorate_title_with_year_km`
+    (app/repositories/car_listings_repo.py) already encodes them into the
+    persisted title, so appending them here too would just duplicate that step.
     """
     url = listing.get("url") or ""
     if not url:
@@ -573,17 +576,17 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         else:
             price = _best_price(_clean_text(doc.text_content() or ""))
 
-    # 6) year/km hints (append to title; do NOT add keys)
+    # 6) year/km hints (set as extra keys; repo layer decorates the title)
     y = _extract_year_from_url(final_url) or _extract_year_from_url(url)
-    km = _extract_km(doc.text_content() or "")
+    km_raw = _extract_km(doc.text_content() or "")
+    km = None
+    if km_raw:
+        try:
+            km = int(re.sub(r"\D", "", km_raw))
+        except Exception:
+            km = None
 
-    title_out = title or listing.get("title")
-    if title_out:
-        if y and str(y) not in title_out:
-            title_out = f"{title_out} {y}"
-        if km and ("km" not in title_out.lower()):
-            title_out = f"{title_out} {km} km"
-        title_out = _clean_text(title_out)
+    title_out = _clean_text(title) if title else listing.get("title")
 
     # 7) apply back
     if title_out and not _looks_generic_title(title_out):
@@ -594,6 +597,10 @@ def _detail_enrich(listing: dict, ctx: ScrapeContext, *, limit_timeout_ms: int =
         listing["thumbnail_url"] = thumb
     if location:
         listing["location"] = location
+    if y:
+        listing["year"] = y
+    if km:
+        listing["km"] = km
 
     return listing
 
