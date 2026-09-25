@@ -72,6 +72,23 @@ def test_send_admin_text_with_report_without_admin_chats(monkeypatch):
     assert report["failed"] == 0
 
 
+def test_send_admin_text_with_report_dedupes_repeated_chat_id(monkeypatch):
+    """A chat id repeated in AUTOHUNTER_ADMIN_ALERT_CHATS (e.g. "123,123")
+    used to fan out one send per occurrence, delivering the same admin
+    alert multiple times to the same chat. iter_admin_chat_ids must
+    de-duplicate so each alert is sent at most once per chat."""
+    monkeypatch.setattr(svc.settings, "telegram_bot_token", "token")
+    monkeypatch.setattr(svc.settings, "autohunter_admin_alert_chats", "123,123, 123")
+    monkeypatch.setattr(svc.settings, "autohunter_admins", None)
+    monkeypatch.setattr(svc, "get_shared_session", lambda _: _Session(_Resp(200, {"ok": True})))
+
+    report = svc.send_admin_text_with_report("hello")
+
+    assert report["target_chats"] == [123]
+    assert report["attempted"] == 1
+    assert report["sent"] == 1
+
+
 def test_send_admin_text_keeps_compat_wrapper(monkeypatch):
     called = []
 

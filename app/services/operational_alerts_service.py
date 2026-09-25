@@ -233,6 +233,67 @@ def _add_once(
     alerts.append(alert)
 
 
+_FIELD_COVERAGE_WINDOW_MINUTES = 180
+_FIELD_COVERAGE_MIN_SAMPLE = 20
+_FIELD_COVERAGE_THRESHOLD = 0.2
+
+
+def _field_coverage_alerts(db: Session, src: str, now: datetime) -> List[OperationalAlert]:
+    """Detect a source whose scraped listings are missing a critical field
+    (year/mileage_km/price) far more often than expected.
+
+    Reuses the field_coverage data already computed per-run in
+    app.services.source_execution_helpers.compute_field_coverage and stored
+    in SourceRun.payload (see build_run_payload) -- no extra scraping/queries
+    needed. Would have caught a historical bug class where a source silently
+    started returning listings with a field always empty (e.g. year=None)
+    within one alert cycle instead of going unnoticed for weeks.
+    """
+    window_start = now - timedelta(minutes=_FIELD_COVERAGE_WINDOW_MINUTES)
+    runs = (
+        db.query(SourceRun)
+        .filter(
+            SourceRun.source == src,
+            SourceRun.status == "success",
+            SourceRun.created_at >= window_start,
+            SourceRun.created_at < now,
+        )
+        .all()
+    )
+    totals: dict[str, dict[str, int]] = {}
+    for r in runs:
+        payload = getattr(r, "payload", None)
+        fc = payload.get("field_coverage") if isinstance(payload, dict) else None
+        if not isinstance(fc, dict):
+            continue
+        found = int(getattr(r, "items_found", 0) or 0)
+        if found <= 0:
+            continue
+        for field, stats in fc.items():
+            present = int((stats or {}).get("present") or 0)
+            t = totals.setdefault(field, {"present": 0, "found": 0})
+            t["present"] += present
+            t["found"] += found
+
+    out: List[OperationalAlert] = []
+    for field, t in totals.items():
+        if t["found"] < _FIELD_COVERAGE_MIN_SAMPLE:
+            continue
+        rate = t["present"] / t["found"]
+        if rate < _FIELD_COVERAGE_THRESHOLD:
+            out.append(
+                OperationalAlert(
+                    f"field_coverage:{src}:{field}",
+                    f"🚨 Source {src} com cobertura de campo '{field}' em {rate * 100:.0f}% "
+                    f"(amostra={t['found']} itens, limiar={_FIELD_COVERAGE_THRESHOLD * 100:.0f}%). "
+                    f"Provável bug de parsing zerando esse campo. "
+                    f"Próximo passo: /admin sources show {src} e revisar o scraper.",
+                    60,
+                )
+            )
+    return out
+
+
 def _impl_drift_alert_message(src: str, alignment: dict[str, Any]) -> str:
     lines = [
         f"⚠️ Source {src} impl drift",
@@ -288,6 +349,9 @@ def collect_operational_alerts(
                     60,
                 ),
             )
+        for fc_alert in _field_coverage_alerts(db, src, now):
+            _add_once(alerts, emitted_source_alerts, fc_alert.key, fc_alert)
+
         if not should_include_in_critical_stale(plugin, cfg):
             continue
         eval_ = evaluate_source_staleness(now=now, last_run_at=getattr(st, "last_effective_run_at", None) or getattr(st, "last_run_at", None), sched_minutes=int(cfg.sched_minutes or 0), factor=float(getattr(settings, "source_stale_factor", 2.0) or 2.0), min_global_minutes=int(getattr(settings, "source_stale_min_minutes", 180) or 180))

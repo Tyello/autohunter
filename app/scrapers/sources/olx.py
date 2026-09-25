@@ -28,30 +28,30 @@ class OLXScraper(BaseScraper):
     """
     
     BASE_URL = "https://www.olx.com.br"
-    API_URL = "https://www.olx.com.br/api/v1/search/listings"
-    
+
     def __init__(self):
         super().__init__(source_name="olx")
-    
+
     def build_search_url(self, query: str, **kwargs) -> str:
         """Constrói URL de busca para OLX.
-        
-        OLX tem API v1 pública (quando não bloqueia).
-        
+
+        NOTE: a OLX bloqueia `/api/` inteiro no robots.txt (`Disallow: /api/`,
+        confirmado ao vivo, 2026-09), então a busca precisa ser feita via página
+        de busca HTML (mesmo path usado pelo v1 em `search_urls_service.olx_url`),
+        não via API interna. `extract_raw_data` já sabe parsear o HTML retornado
+        (`_extract_from_html`), então esta troca não exige mudança no parsing.
+
         Args:
             query: Termo de busca
             **kwargs: category (default: "autos-e-pecas/carros-vans-e-utilitarios")
-        
+
         Returns:
-            URL da API ou do site
+            URL da página de busca HTML da OLX
         """
         q = quote_plus(query.strip())
         category = kwargs.get("category", "autos-e-pecas/carros-vans-e-utilitarios")
-        
-        # Tenta API primeiro (mais limpo)
-        url = f"{self.API_URL}?q={q}&category={category}&limit=50"
-        
-        return url
+
+        return f"{self.BASE_URL}/{category}?q={q}"
     
     def extract_raw_data(self, raw_content: str, ctx) -> List[Dict]:
         """Extrai items do JSON ou HTML (fallback).

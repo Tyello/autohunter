@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 def _parse_admins(raw: str | None) -> List[int]:
     raw = raw or ""
     out: List[int] = []
+    seen: set[int] = set()
     for part in raw.split(","):
         part = (part or "").strip()
         if part.isdigit():
-            out.append(int(part))
+            chat_id = int(part)
+            if chat_id not in seen:
+                seen.add(chat_id)
+                out.append(chat_id)
     return out
 
 

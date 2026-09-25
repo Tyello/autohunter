@@ -603,6 +603,7 @@ def _run_source_for_all_wishlists_locked(
     total_already_notified = 0
     total_reason_buckets: dict[str, int] = {}
     total_thumb_present = 0
+    total_field_present: dict[str, int] = {}
     seen_identities_by_wishlist: dict[str, list] = {}
     any_hybrid_browser = False
     any_hybrid_blocked = False
@@ -696,6 +697,8 @@ def _run_source_for_all_wishlists_locked(
         for k, v in (res.get("reason_buckets") or {}).items():
             total_reason_buckets[k] = int(total_reason_buckets.get(k, 0)) + int(v or 0)
         total_thumb_present += int(res.get("thumb_present") or 0)
+        for field, stats in (res.get("field_coverage") or {}).items():
+            total_field_present[field] = total_field_present.get(field, 0) + int((stats or {}).get("present") or 0)
         for wid, seen_items in (res.get("seen_identities_by_wishlist") or {}).items():
             bucket = seen_identities_by_wishlist.setdefault(str(wid), [])
             bucket.extend(seen_items or [])
@@ -931,6 +934,13 @@ def _run_source_for_all_wishlists_locked(
             hybrid_blocked_status=last_hybrid_blocked_status,
             thumb_present=total_thumb_present,
             thumb_rate=(float(total_thumb_present) / float(total_found)) if total_found else 0.0,
+            field_coverage={
+                field: {
+                    "present": present,
+                    "rate": (float(present) / float(total_found)) if total_found else 0.0,
+                }
+                for field, present in total_field_present.items()
+            },
             runtime_impl=last_runtime_impl,
             adapter_meta=last_adapter_meta,
         ),

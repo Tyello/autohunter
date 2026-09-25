@@ -9,6 +9,27 @@ from app.sources.adapters.v2 import adapt_v2
 from app.sources.dual_run import execute_dual_run
 
 
+CRITICAL_LISTING_FIELDS = ("year", "mileage_km", "price")
+
+
+def compute_field_coverage(listings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Fill rate per critical field for a scrape's normalized listings.
+
+    Mirrors the existing thumb_present/thumb_rate pattern so it can flow
+    through the same run payload/alerting plumbing (see build_run_payload,
+    operational_alerts_service).
+    """
+    total = len(listings or [])
+    coverage: dict[str, dict[str, Any]] = {}
+    for field in CRITICAL_LISTING_FIELDS:
+        present = sum(1 for it in (listings or []) if (it or {}).get(field) is not None)
+        coverage[field] = {
+            "present": present,
+            "rate": (present / total) if total else 0.0,
+        }
+    return coverage
+
+
 def build_scrape_dispatch(
     *,
     src: str,
@@ -117,6 +138,7 @@ def build_run_payload(
     hybrid_blocked_status: int | None,
     thumb_present: int | None = None,
     thumb_rate: float | None = None,
+    field_coverage: dict[str, Any] | None = None,
     backoff_minutes: int | None = None,
     retry_minutes: int | None = None,
     is_bug: bool | None = None,
@@ -136,6 +158,8 @@ def build_run_payload(
         payload["thumb_present"] = int(thumb_present)
     if thumb_rate is not None:
         payload["thumb_rate"] = float(thumb_rate)
+    if isinstance(field_coverage, dict):
+        payload["field_coverage"] = field_coverage
     if backoff_minutes is not None:
         payload["backoff_minutes"] = int(backoff_minutes)
     if retry_minutes is not None:

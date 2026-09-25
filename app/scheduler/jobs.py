@@ -19,6 +19,7 @@ from app.services.listing_activity_service import build_seen_identity
 from app.services.matching_service import match_listings_for_wishlists, match_listings_for_active_wishlists
 from app.services.listings_service import ingest_listings, ingest_listings_stats
 from app.services.source_url_cursors_service import get_cursor, touch_cursor
+from app.services.source_execution_helpers import compute_field_coverage
 
 from app.models.wishlist import Wishlist
 from app.models.car_listing import CarListing
@@ -247,6 +248,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     thumb_present = sum(1 for it in listings_all if (it or {}).get("thumbnail_url"))
     thumb_rate = (thumb_present / found) if found else 0.0
+    field_coverage = compute_field_coverage(listings_all)
 
     # Incremental mode (per source+url) - default OFF unless enabled via source_configs.extra
     inc_enabled = bool((getattr(ctx, "extra", None) or {}).get("incremental_enabled", False))
@@ -445,7 +447,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     db.commit()
 
     return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": matched,
-        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "seen_identities_by_wishlist": seen_identities_by_wishlist, **_ctx_fetch_diag(ctx)}
+        "matching": getattr(ctx, "_matching_stats", None), "queued": queued, "already_notified": already_notified, "reason_buckets": reason_buckets, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "field_coverage": field_coverage, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "seen_identities_by_wishlist": seen_identities_by_wishlist, **_ctx_fetch_diag(ctx)}
 
 
 def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishlists: list[Wishlist], health: HealthCollector | None = None) -> dict:
@@ -530,6 +532,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     thumb_present = sum(1 for it in listings_all if (it or {}).get("thumbnail_url"))
     thumb_rate = (thumb_present / found) if found else 0.0
+    field_coverage = compute_field_coverage(listings_all)
 
     inc_enabled = bool((getattr(ctx, "extra", None) or {}).get("incremental_enabled", False))
     inc_max_new_i = _parse_incremental_max_new(ctx)
@@ -694,4 +697,4 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
 
     db.commit()
 
-    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, "seen_identities_by_wishlist": seen_identities_by_wishlist, **_runtime_fields(), **_ctx_fetch_diag(ctx)}
+    return {"ok": True, "found": found, "inserted": inserted_new, "updated": updated, "upserted": upserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": reason_buckets, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "field_coverage": field_coverage, "incremental": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "audit_artifacts": audit_artifacts, "seen_identities_by_wishlist": seen_identities_by_wishlist, **_runtime_fields(), **_ctx_fetch_diag(ctx)}
