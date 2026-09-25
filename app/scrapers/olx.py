@@ -756,7 +756,7 @@ def _parse_olx_listing_items(html: str) -> list[OlxItem]:
 
 def _fallback_parse_from_cards(html: str) -> list[OlxItem]:
     """Fallback se __NEXT_DATA__ não estiver disponível."""
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     out: list[OlxItem] = []
 
     for a in soup.select('a[data-testid="adcard-link"]'):

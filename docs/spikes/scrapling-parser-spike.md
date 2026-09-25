@@ -91,7 +91,34 @@ Campos comparados por fixture: `image_og_meta`, `title_og_meta`, `price_og_meta`
 
 **Nenhuma divergência.** Em todas as 5 fixtures, todo campo comparado tem valor idêntico entre (a) BS4 `html.parser` e (c) `scrapling.Selector` (ex.: `image_og_meta` e `title_og_meta` batem byte a byte nas 4 fixtures de detalhe; `rsc_chunk_count=1` em ambas as variantes na fixture de busca). Nenhuma exceção foi lançada pela variante (c) em nenhuma fixture.
 
-**Limitação metodológica registrada:** `card_count` ficou `None`/vazio nas 5 fixtures em ambas as variantes — as fixtures de "detail" não contêm cards de listagem (são páginas de anúncio único) e a fixture de busca usa RSC (não HTML de cards clássico com `data-testid="adcard-link"`), então o seletor de fallback de cards (`app/scrapers/olx.py:757`) não tem, nestas fixtures específicas, nenhum card real para casar. Isso não invalida a equivalência semântica medida (ambas as variantes concordam em "zero cards" nestas fixtures), mas significa que o caminho de fallback de cards não foi exercitado com dados positivos nesta spike — recomendação: se a migração avançar, validar esse caminho especificamente com uma fixture que contenha `data-testid="adcard-link"` real antes de promover.
+**Limitação metodológica registrada (resolvida):** `card_count` ficou `None`/vazio nas 5 fixtures em ambas as variantes — as fixtures de "detail" não contêm cards de listagem (são páginas de anúncio único) e a fixture de busca usa RSC (não HTML de cards clássico com `data-testid="adcard-link"`), então o seletor de fallback de cards (`app/scrapers/olx.py:757`) não tinha, nestas fixtures específicas, nenhum card real para casar.
+
+Resolvido com `tests/fixtures/olx/search_cards_fallback.html` (nova fixture, ver docstring do próprio arquivo): casca de DOM com `data-testid="adcard-link"`/`.olx-adcard__price` construída para casar com os seletores reais de `app/scrapers/olx.py:762-786`, reaproveitando os dois anúncios reais já commitados em `search_rsc_price_nodes.html` (mesmos título/preço/`listId`/URL/imagem). `tests/test_olx_price_extraction.py::test_fallback_card_parser_extracts_real_cards` e `::test_fallback_card_parser_html_parser_vs_lxml_equivalence` provam extração correta e equivalência `html.parser`↔`lxml` byte a byte (href, título, texto de preço) nesse caminho. Com essa evidência, a troca de parser foi **aplicada** em `_fallback_parse_from_cards` (ver seção 7).
+
+### 3.1. Mesma lacuna nos outros sources (análise, sem fixture nova aplicada)
+
+A mesma pergunta — "a fixture usada tem card/listing real com dado positivo, ou só concorda em '0 resultados' nas duas variantes?" — foi verificada nos demais pontos `html.parser` do inventário (seção 1):
+
+| Arquivo:linha | Tem fixture com card/listing real e positivo? | Situação |
+|---|---|---|
+| `app/scrapers/olx.py:757` | **Sim, agora** | Resolvido acima com `search_cards_fallback.html`. |
+| `app/scrapers/chavesnamao.py:165` (quente, `href`→`external_id`) | **Não** | Não existe nenhum arquivo `tests/test_chavesnamao*.py` nem fixture HTML de ChavesNaMão no repo (`find tests -iname "*chavesnamao*"` não retorna nada). Não é uma lacuna só do benchmark de parser — é ausência total de teste automatizado para o parsing desse scraper, pré-existente e independente desta spike. |
+| `app/scrapers/chavesnamao.py:242` (frio, `og:image`) | **Não** | Mesma causa: sem fixture nenhuma para o scraper. |
+| `app/scrapers/turboclass.py:179` (quente, `href`→`external_id`) | **Parcial** | `tests/test_turboclass_scraper.py::test_scrape_turboclass_parses_cards` já exercita o parsing com HTML sintético inline (2 cards, `href`/preço/ano/local/thumbnail asserted) — cobre a lógica do scraper, mas não é uma fixture de arquivo `.html` dedicada nem foi usada em benchmark de parser. Suficiente para provar equivalência `html.parser`↔`lxml` se essa troca for considerada; não teve prioridade nesta rodada porque o veredito geral já é NO-GO (seção 6) e o ganho de troca de parser isolado, sem scrapling, tende a ser pequeno (mesmo padrão visto no ponto 7.5). |
+
+**Conclusão da análise:** só o ponto do OLX (`:757`) tinha o combo "quente + alimenta `external_id`/dedupe + zero cobertura positiva" que justificava fechar agora (é exatamente o padrão de maior risco ADR-0001 do inventário). ChavesNaMão tinha uma lacuna maior (nenhum teste, não específico do parser) — fechada em seguida (ver 3.2), fora do escopo original da spike de parser.
+
+### 3.2. ChavesNaMão: cobertura de teste criada (achado fechado)
+
+`tests/test_chavesnamao_scraper.py` (novo, 6 testes): HTML sintético inline, mesmo padrão de `test_turboclass_scraper.py`, construído a partir dos seletores reais de `app/scrapers/chavesnamao.py` (`a[href]` com `/id-` + `"R$"` no texto, regra de localização via URL/texto, thumbnail via img/srcset/background, enriquecimento por `og:image` na página de detalhe). Cobre: parsing de cards válidos, filtro de links institucionais/sem preço, dedupe por `external_id`, respeito ao `limit`, e o caminho frio de enriquecimento de thumbnail (`chavesnamao.py:233-253`) — nenhum desses caminhos tinha teste antes. Não é uma fixture `.html` capturada de produção (não existe nenhuma no repo para essa fonte) — é sintética, documentada como tal na docstring do arquivo, no mesmo grau de confiança já aceito para TurboClass.
+
+### 3.3. Robustez a HTML malformado nos pontos já trocados para lxml (achado fechado)
+
+Dúvida registrada na revisão anterior: `lxml` é mais estrito que `html.parser` por padrão — havia risco teórico de exceção não tratada em produção (resposta de rede truncada, encoding quebrado) nos 3 pontos de `app/scrapers/olx.py` já trocados para `lxml` (`:252`, `:358`, `:759`).
+
+`tests/test_olx_malformed_html_robustness.py` (novo, 5 testes) roda os 3 pontos e o parser cru (`BeautifulSoup(html, "lxml")` vs `"html.parser"`) contra 8 inputs adversários: tag truncada no meio, 5000 `<div>` não fechados, bytes nulos embutidos, atributos sem aspas, `<`/`>` soltos no texto, string vazia, binário não-HTML, e JSON truncado dentro de `__NEXT_DATA__`. **Nenhuma exceção em nenhum caso** — a libxml2 usada por trás do BS4 `"lxml"` roda em modo de recuperação por padrão e tolera todos os casos testados. Teste adicional (não-raso) confirma que a recuperação não é silenciosa: HTML com atributos sem aspas e tags mal fechadas ainda produz o card extraído corretamente (`external_id`, `price`) via `_fallback_parse_from_cards`, igual ao que `html.parser` faria.
+
+**Conclusão:** não há divergência de comportamento de crash-safety entre `html.parser` e `lxml` para os casos testados. A troca de parser já aplicada não introduziu esse risco.
 
 ## 4. Modo adaptive (exploratório)
 
@@ -137,14 +164,30 @@ Critérios do prompt original aplicados aos números da seção 2:
 
 Não há plano de migração incremental a detalhar (seção 6 do prompt original), dado o veredito NO-GO.
 
+## 7.5. Ponto em aberto: tamanho real de página vs. fixture de teste (resolvido)
+
+**Dúvida registrada:** a fixture `search_rsc_price_nodes.html` (~15 KB, 2 anúncios) é bem menor que uma página de busca real da OLX (que lista ~40 anúncios por página, ver contagem padrão observada em produção). Como o ganho de scrapling na fixture pequena já era marginal (~1.1-1.49x, seção 2), ficou em aberto se esse número é representativo do caminho quente em produção ou é um artefato de fixture pequena demais.
+
+**Teste:** `scripts/spikes/bench_scrapling_parser_scaled.py`. Não inventa HTML novo — duplica o `<script>self.__next_f.push(...)</script>` real da fixture N vezes (sufixando os `listId` reais 1503037487/1512208902 por cópia para não colidir no dedupe), simulando páginas com 2, 20, 40 e 80 anúncios (o mesmo par de anúncios reais repetido). Rodado localmente (mesma máquina de dev da seção 2), 30 iterações por variante/tamanho:
+
+| Anúncios simulados | Tamanho | (a) BS4 html.parser | (b) BS4 lxml | (c) Scrapling |
+|---|---|---|---|---|
+| 2 | 14.7 KB | 4.35 ms (1.00x) | 3.93 ms (1.11x) | 2.92 ms (1.49x) |
+| 20 | 146.4 KB | 29.77 ms (1.00x) | 29.50 ms (1.01x) | 28.65 ms (1.04x) |
+| 40 | 292.6 KB | 57.57 ms (1.00x) | 60.05 ms (0.96x) | 56.07 ms (1.03x) |
+| 80 | 585.1 KB | 113.01 ms (1.00x) | 118.43 ms (0.95x) | 112.29 ms (1.01x) |
+
+**Conclusão: o ponto está resolvido, e na direção que reforça o NO-GO.** A vantagem de scrapling não é apenas "pequena" no tamanho real de produção — ela **desaparece** conforme a página cresce: cai de 1.49x com 2 anúncios (tamanho artificialmente pequeno) para ~1.0-1.04x com 40-80 anúncios (tamanho realista de página de busca). `lxml` chega a ficar **mais lento** que `html.parser` em 40 e 80 anúncios (0.95-0.96x), confirmando o padrão já visto na fixture RSC original (seção 2): quando o volume de dados cresce, o custo domina é a extração via regex/JSON sobre o blob RSC (que é igual nas 3 variantes), não a escolha do parser de árvore — e nesse regime a diferença de parser vira ruído. Isso fecha a lacuna: a fixture pequena não superestimava o ganho de forma relevante para a decisão (o NO-GO já valia com ela), mas confirma que extrapolar otimisticamente da fixture pequena para produção seria errado — o ganho real em escala tende a **zero**, não a manter os ~1.1-1.49x medidos na fixture de 15 KB.
+
 ## 7. Otimizações implementadas (fora do escopo original da spike, pós-decisão)
 
 Com o veredito NO-GO para scrapling, mas com dados de equivalência já coletados, duas otimizações **sem adicionar dependências novas** (`lxml` já é dependência do projeto) foram implementadas e validadas em `app/scrapers/olx.py`:
 
-1. **Troca de parser `html.parser` → `lxml`** em `_extract_olx_detail_thumbnail` (linha ~252, frio) e `_extract_next_data_json` (linha ~363, quente) — equivalência de saída confirmada empiricamente nas 5 fixtures (og:image, `__NEXT_DATA__`, cards) antes da mudança. **Não** aplicada em `_fallback_parse_from_cards` (linha ~757) — sem cobertura de teste com HTML real de card para provar equivalência, e é o ponto que alimenta `external_id`/dedupe (risco ADR-0001).
+1. **Troca de parser `html.parser` → `lxml`** em `_extract_olx_detail_thumbnail` (linha ~252, frio) e `_extract_next_data_json` (linha ~363, quente) — equivalência de saída confirmada empiricamente nas 5 fixtures (og:image, `__NEXT_DATA__`, cards) antes da mudança.
 2. **Short-circuit em `_extract_next_data_json`**: `if "__NEXT_DATA__" not in html: return None` antes de instanciar o parser — estritamente equivalente (o regex de fallback também exige essa substring literal), pois a OLX migrou para RSC streaming e a tag `__NEXT_DATA__` não aparece mais nas páginas de busca atuais (confirmado: 0 ocorrências em `search_rsc_price_nodes.html`).
+3. **Troca de parser `html.parser` → `lxml`** em `_fallback_parse_from_cards` (linha ~757, quente, risco ADR-0001) — antes deixada de fora por falta de cobertura com HTML real de card (ver seção 3). Fechada com a nova fixture `tests/fixtures/olx/search_cards_fallback.html` + 2 testes novos em `tests/test_olx_price_extraction.py` provando extração correta e equivalência `html.parser`↔`lxml` (href/título/preço idênticos) antes da troca.
 
-Validação: `pytest tests/ -k olx` → 25 passed (suíte completa relacionada a OLX, sem alteração de asserção). Validação em hardware real (seção 2): short-circuit isolado mede **~248x** de ganho na operação que ele evita, medido na Pi de produção via SSH em venv isolada fora do checkout de produção.
+Validação: `pytest tests/ -k olx` → 27 passed (suíte completa relacionada a OLX, incluindo os 2 testes novos da fixture de fallback de cards; nenhuma asserção pré-existente alterada). Validação em hardware real (seção 2): short-circuit isolado mede **~248x** de ganho na operação que ele evita, medido na Pi de produção via SSH em venv isolada fora do checkout de produção.
 
 Diff aplicado (`app/scrapers/olx.py`):
 ```diff
