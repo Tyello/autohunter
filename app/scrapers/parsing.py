@@ -49,6 +49,35 @@ def _to_decimal_brl(num: str) -> Optional[Decimal]:
         return v
 
 
+_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_MILEAGE_KM_RE = re.compile(r"\d{1,3}(?:\.\d{3})+\s*[Kk][Mm]\b|\b\d{4,6}\s*[Kk][Mm]\b")
+
+
+def extract_year_from_text(text: str) -> Optional[int]:
+    """Extrai o ano (1900-2099) de texto livre (ex.: titulo de anuncio).
+
+    Retorna o ultimo ano encontrado como int, ou None se nenhum encontrado.
+    Compartilhado entre scrapers cujo card/titulo embute o ano como texto
+    solto (ex.: "Honda Civic 2018"), sem campo estruturado dedicado.
+    """
+    matches = _YEAR_RE.findall(text or "")
+    return int(matches[-1]) if matches else None
+
+
+def extract_mileage_km_from_text(text: str) -> Optional[int]:
+    """Extrai a quilometragem de texto livre (ex.: "45.000 km" ou "45000 km").
+
+    Retorna int (sem separadores/sufixo "km"), ou None se nenhuma encontrada.
+    Compartilhado entre scrapers cujo card/titulo embute a quilometragem como
+    texto solto, sem campo estruturado dedicado.
+    """
+    m = _MILEAGE_KM_RE.search(text or "")
+    if not m:
+        return None
+    digits = re.sub(r"\D", "", m.group(0))
+    return int(digits) if digits else None
+
+
 def parse_brl_price(text: str) -> Optional[Decimal]:
     """
     Recebe algo tipo "R$ 85.900" ou "85.900" e converte para Decimal.

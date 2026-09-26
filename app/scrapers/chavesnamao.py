@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from app.core.text_norm import normalize
 from app.scrapers.base import fetch_html
 from app.scrapers.fetching import fetch_html_with_browser_fallback
-from app.scrapers.parsing import parse_brl_price
+from app.scrapers.parsing import extract_mileage_km_from_text, extract_year_from_text, parse_brl_price
 from app.scrapers.utils import normalize_asset_url, pick_from_srcset
 from app.scrapers.contract import finalize_listings
 from app.sources.types import ScrapeContext
@@ -202,6 +202,12 @@ def scrape_chavesnamao(
 
         price = parse_brl_price(text)
 
+        # Ano e quilometragem vem embutidos no texto do card (ex.: "Honda Civic
+        # 2.0 EXL 2018 R$ 89.900 45.000 km ..."), sem campo estruturado dedicado
+        # -- mesmo padrao do titulo da OLX (app/scrapers/parsing.py).
+        year = extract_year_from_text(text)
+        km = extract_mileage_km_from_text(text)
+
         # location: primeiro tenta pela URL (mais confiável); fallback pro texto
         location = _extract_location_from_url(url) or _extract_location_from_anchor_text(text)
 
@@ -223,6 +229,8 @@ def scrape_chavesnamao(
                 "price": price,
                 "currency": "BRL",
                 "location": location,
+                "year": year,
+                "km": km,
             }
         )
 

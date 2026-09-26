@@ -65,10 +65,14 @@ def test_scrape_chavesnamao_parses_cards(monkeypatch):
     assert civic["thumbnail_url"] == "https://www.chavesnamao.com.br/img/civic.jpg"
     assert civic["url"] == "https://www.chavesnamao.com.br/carro/pr-curitiba/honda-civic-2018/id-9988776/"
     assert "Honda Civic 2.0 EXL 2018" in civic["title"]
+    assert civic["year"] == 2018
+    assert civic["km"] == 45000
 
     corolla = by_id["1122334"]
     assert corolla["price"] == Decimal("62500.00")
     assert corolla["location"] == "Sao Paulo-SP"
+    assert corolla["year"] == 2015
+    assert corolla["km"] == 120000
 
 
 def test_scrape_chavesnamao_dedupes_by_external_id(monkeypatch):

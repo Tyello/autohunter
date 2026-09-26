@@ -237,6 +237,20 @@ _FIELD_COVERAGE_WINDOW_MINUTES = 180
 _FIELD_COVERAGE_MIN_SAMPLE = 20
 _FIELD_COVERAGE_THRESHOLD = 0.2
 
+# (source, field) pairs that are structurally, permanently absent by design --
+# not a parsing regression. turboclass's listing cards have no km/quilometragem
+# row at all (app/scrapers/turboclass.py); facebook_marketplace only extracts
+# external_id/url from item-link regex matches, title/price/location are always
+# None (app/scrapers/facebook_marketplace.py docstring). Keep this list exact
+# and reviewed -- it silences a real signal for these pairs, so anything not
+# listed here still alerts normally.
+_FIELD_COVERAGE_STRUCTURAL_EXEMPTIONS = {
+    ("turboclass", "mileage_km"),
+    ("facebook_marketplace", "year"),
+    ("facebook_marketplace", "price"),
+    ("facebook_marketplace", "mileage_km"),
+}
+
 
 def _field_coverage_alerts(db: Session, src: str, now: datetime) -> List[OperationalAlert]:
     """Detect a source whose scraped listings are missing a critical field
@@ -277,6 +291,8 @@ def _field_coverage_alerts(db: Session, src: str, now: datetime) -> List[Operati
 
     out: List[OperationalAlert] = []
     for field, t in totals.items():
+        if (src, field) in _FIELD_COVERAGE_STRUCTURAL_EXEMPTIONS:
+            continue
         if t["found"] < _FIELD_COVERAGE_MIN_SAMPLE:
             continue
         rate = t["present"] / t["found"]

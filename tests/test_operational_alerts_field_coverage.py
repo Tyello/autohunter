@@ -58,6 +58,23 @@ def test_no_alert_below_minimum_sample_size(db):
     assert "field_coverage:olx:year" not in keys
 
 
+def test_no_alert_for_known_structural_field_gaps(db):
+    """turboclass:mileage_km and facebook_marketplace:{year,price,mileage_km} are
+    permanently absent by design (no km row on turboclass cards; facebook_marketplace
+    only extracts external_id/url) -- not a parsing regression, so they must not fire."""
+    now = datetime.now(timezone.utc)
+    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
+    db.add(SourceConfig(source="turboclass", is_enabled=True, sched_minutes=30))
+    db.add(SourceConfig(source="facebook_marketplace", is_enabled=True, sched_minutes=30))
+    for i in range(5):
+        _add_success_run(db, source="turboclass", created_at=now - timedelta(minutes=10 + i), items_found=10, year_present=8)
+        _add_success_run(db, source="facebook_marketplace", created_at=now - timedelta(minutes=10 + i), items_found=10, year_present=0)
+    db.commit()
+
+    keys = {a.key for a in collect_operational_alerts(db, now=now)}
+    assert "field_coverage:facebook_marketplace:year" not in keys
+
+
 def test_field_coverage_alert_respects_cooldown(db):
     now = datetime.now(timezone.utc)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
