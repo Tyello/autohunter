@@ -15,7 +15,7 @@ Para decisões de Mercado Livre, consulte `docs/MERCADOLIVRE_STRATEGY_MATRIX.md`
 
 | Source | Modo | Papel | Estado atual |
 |---|---|---|---|
-| `mercadolivre` | HTTP + browser fallback | primary | ⚠️ Em diagnóstico de estratégia de fetch |
+| `mercadolivre` | HTTP + browser fallback | deprioritized | 🔴 Bloqueado (exige login) |
 | `olx` | HTTP + browser fallback | primary | ⚠️ Intermitente |
 | `chavesnamao` | Browser-first | primary | ✅ Estável |
 | `webmotors` | Browser-first | deprioritized | 🔴 Bloqueado |
@@ -79,11 +79,28 @@ Notas operacionais rápidas:
 - Efeito esperado: não tratar bloqueio da Webmotors como falha crítica global; manter visível como blocked/deprioritized no detalhamento admin.
 - Próximas tentativas (ex.: Patchright/sessão assistida) exigem POC isolada e decisão explícita antes de qualquer rollout.
 
+## Mercado Livre — decisão operacional atual (28/09/2026)
+
+- Bloqueio de acesso anônimo confirmado ao vivo: mesmo em Chrome comum, IP residencial, janela anônima, a busca redireciona para `/gz/account-verification` ("Olá! Para continuar, acesse sua conta"), `path=/security/suspicious_traffic`.
+- Reconfirmado com cookies reais de produção (Playwright, 9 dias de uso normal do scheduler): mesmo bloqueio, HTML de ~39 KB, sem nenhum `"polycard"` (fixture em `tests/fixtures/source_regression/mercadolivre/2026-09-28_civic/listing_shell_com_cookies_bloqueado.html`).
+- API pública já descartada — ver `docs/MERCADOLIVRE_STRATEGY_MATRIX.md:58-60`.
+- Login com conta pessoal **descartado**: o risco cairia sobre a conta usada (pode estar ligada ao Mercado Pago dos pagamentos do produto) e violaria os termos de uso do site.
+- Decisão: Mercado Livre vira `operational_role=deprioritized` e `default_enabled=false`, mesmo tratamento da Webmotors. Extração de `year`/`km` não será implementada enquanto esse status se mantiver.
+- ⚠️ Importante: `default_enabled=false` no plugin afeta apenas seed de novas linhas em `source_configs`. Em ambientes já existentes, desative manualmente:
+  - `/admin sources disable mercadolivre`
+  - ou SQL: `UPDATE source_configs SET is_enabled = false WHERE source = 'mercadolivre';`
+- Antes de desabilitar em produção, cheque quantas wishlists ativas dependem *só* de mercadolivre (nenhuma outra source habilitada) — essas wishlists ficariam sem nenhuma fonte ativa até o usuário adicionar outra. Consulta sugerida (rodar manualmente, não incluída neste PR):
+  ```sql
+  -- placeholder: ajustar ao schema real de wishlist_filters/allowed_sources antes de rodar
+  -- objetivo: contar wishlists ativas cujo único source habilitado seja mercadolivre
+  ```
+- Efeito esperado: bloqueio do ML não deve mais contar como falha crítica de saúde global (ver seção seguinte).
+
 ## Sources despriorizadas e saúde global
 
 - Sources com `operational_role=deprioritized` permanecem visíveis no admin (`/admin sources` e `/admin sources show`).
 - Bloqueios/erros dessas sources devem aparecer no detalhamento, mas não devem ser tratados como falha crítica global do produto.
-- Caso atual: Webmotors permanece bloqueada por PerimeterX/fingerprint e mantida para execução manual/investigação via `/admin runall webmotors`.
+- Casos atuais: Webmotors (PerimeterX/fingerprint) e Mercado Livre (exige login mesmo anônimo, 28/09/2026) permanecem bloqueadas e mantidas para execução manual/investigação via `/admin runall <source>`.
 - Sources `primary` (e `fragile`, quando explicitamente classificadas como críticas) continuam sendo o principal sinal de saúde operacional global.
 
 ## Webmotors — Plano de desbloqueio

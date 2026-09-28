@@ -122,14 +122,33 @@ def test_telegram_renderer_contains_fields_and_order():
     assert out.index("olx — candidate") < out.index("mercadolivre — done")
 
 
+# NOTA (Fase 1B, prompt v2): mercadolivre agora e
+# operational_role="deprioritized" (app/sources/builtins.py), entao
+# classify_v2_readiness (source_v2_readiness.py:264-265) forca
+# status="deprioritized" pra ela antes de qualquer outra checagem.
+#
+# test_build_report_covers_all_registered_sources_and_uses_recent_runs
+# usava mercadolivre so como exemplo generico de fonte primary/v2 --
+# trocado pra chavesnamao (tambem primary), sem perda de cobertura.
+#
+# test_build_report_extracts_zero_result_suspect_from_run_summary
+# PERMANECE com mercadolivre: a recomendacao
+# "rollback_to_canary_then_validate" e especifica de
+# mercadolivre+configured_impl=v2 (_recommendation, :220), entao nao da
+# pra trocar de fonte sem perder a cobertura real dessa branch. Achado:
+# _recommendation checa zero_result_suspect (:219) ANTES de checar
+# status=="deprioritized" (:232), entao mesmo com role=deprioritized o
+# relatorio ainda recomenda "rollback_to_canary_then_validate" -- par
+# inconsistente (status diz despriorizada, recomendacao sugere acao),
+# nao corrigido nesta fase (fora de escopo).
 def test_build_report_covers_all_registered_sources_and_uses_recent_runs(db):
     now = datetime.now(timezone.utc)
     ensure_source_configs(db)
-    cfg = db.query(SourceConfig).filter(SourceConfig.source == "mercadolivre").one()
+    cfg = db.query(SourceConfig).filter(SourceConfig.source == "chavesnamao").one()
     cfg.extra = {**(cfg.extra or {}), "impl": "v2"}
     db.add(
         SourceRun(
-            source="mercadolivre",
+            source="chavesnamao",
             kind="scheduler",
             status="success",
             created_at=now - timedelta(minutes=5),
@@ -144,10 +163,10 @@ def test_build_report_covers_all_registered_sources_and_uses_recent_runs(db):
     rows = build_source_v2_readiness_report(db, now=now)
     by_source = {row["source"]: row for row in rows}
 
-    assert {"mercadolivre", "olx", "webmotors", "facebook_marketplace"}.issubset(by_source)
-    assert by_source["mercadolivre"]["v2_readiness_status"] == "done"
-    assert by_source["mercadolivre"]["last_found"] == 12
-    assert by_source["mercadolivre"]["last_matched"] == 3
+    assert {"chavesnamao", "olx", "webmotors", "facebook_marketplace"}.issubset(by_source)
+    assert by_source["chavesnamao"]["v2_readiness_status"] == "done"
+    assert by_source["chavesnamao"]["last_found"] == 12
+    assert by_source["chavesnamao"]["last_matched"] == 3
 
 
 def test_v2_zero_result_suspect_is_not_done_and_recommends_rollback_for_mercadolivre():
@@ -284,5 +303,5 @@ def test_build_report_extracts_zero_result_suspect_from_run_summary(db):
     assert mercadolivre["zero_result_baseline_found"] == 185
     assert mercadolivre["zero_result_reason"] == "found_zero_with_recent_positive_baseline"
     assert mercadolivre["zero_result_runtime_impl"] == "v2"
-    assert mercadolivre["v2_readiness_status"] == "blocked_or_unstable"
+    assert mercadolivre["v2_readiness_status"] == "deprioritized"
     assert mercadolivre["recommendation"] == "rollback_to_canary_then_validate"

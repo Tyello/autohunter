@@ -63,8 +63,23 @@ register_source(
         # Browser fallback is a safety net (rarely used), but prevents the source
         # from silently dying on anti-bot waves.
         default_browser_fallback_enabled=True,
+        # 2026-09-28: a busca do ML exige login/verificacao mesmo pra visitante
+        # anonimo -- confirmado ao vivo (Chrome comum, IP residencial, janela
+        # anonima) e reconfirmado com cookies reais de producao (9 dias,
+        # tests/fixtures/source_regression/mercadolivre/2026-09-28_civic/),
+        # sempre redirecionando pra /gz/account-verification
+        # (suspicious_traffic). API publica ja descartada (ver
+        # docs/MERCADOLIVRE_STRATEGY_MATRIX.md:58-60). Login de conta pessoal
+        # descartado por risco (conta pode estar ligada ao Mercado Pago dos
+        # pagamentos) e por violar termos do site. Despriorizado, mesmo
+        # tratamento da Webmotors -- nao conta pra saude critica global
+        # (app/services/source_operational_policy.py: CRITICAL_ROLES nao
+        # inclui "deprioritized"). So afeta o seed (source_configs ja
+        # existente em producao nao muda sozinho, ver
+        # app/services/source_configs_service.py:ensure_source_configs).
+        default_enabled=False,
         default_extra={
-            "operational_role": "primary",
+            "operational_role": "deprioritized",
             "http_connect_timeout_s": 5,
             "http_read_timeout_s": 20,
             "http_min_delay_ms": 120,

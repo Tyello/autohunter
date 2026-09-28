@@ -115,8 +115,15 @@ def test_admin_health_stale_filters_and_sections(monkeypatch, db):
     old = now - timedelta(minutes=500)
     user, wishlist, listing = _mk_user_and_listing(db)
     # enabled + wishlist -> stale
-    db.add(SourceConfig(source="mercadolivre", is_enabled=True, sched_minutes=60))
-    db.add(SourceRun(source="mercadolivre", kind="scheduler", status="success", created_at=old))
+    # NOTA (Fase 1B, prompt v2): era mercadolivre; trocado pra gogarage porque
+    # mercadolivre agora e operational_role="deprioritized"
+    # (app/sources/builtins.py) e nao conta mais como stale critico
+    # (app/services/source_operational_policy.py: CRITICAL_ROLES). kavak nao
+    # serve de substituto porque e "experimental" (ja usado mais abaixo neste
+    # mesmo arquivo pra testar exatamente esse caso); gogarage e "fragile",
+    # que CRITICAL_ROLES ja inclui junto com "primary".
+    db.add(SourceConfig(source="gogarage", is_enabled=True, sched_minutes=60))
+    db.add(SourceRun(source="gogarage", kind="scheduler", status="success", created_at=old))
 
     # disabled should not be stale critical
     db.add(SourceConfig(source="turboclass", is_enabled=False, sched_minutes=60))
@@ -147,7 +154,7 @@ def test_admin_health_stale_filters_and_sections(monkeypatch, db):
     text = _run_health(monkeypatch, _Update(), ["verbose"])
 
     assert "Sources stale:" in text
-    assert "- mercadolivre: stale" in text
+    assert "- gogarage: stale" in text
     assert "- turboclass: stale" not in text
     assert "Sources disabled:" in text and "turboclass: disabled" in text
     assert "Sources paused (backoff/throttle):" in text
