@@ -110,7 +110,7 @@ Fonte primária destas citações: leitura direta do código nesta sessão + `do
 
 ## 2. Rede: log de requisições desta fase
 
-Todas as requisições HTTP feitas nesta fase, em ordem, com status HTTP. Total: **16 requisições** (limite: 40), intervalo ≥2.5s entre cada uma (Kavak respeitando `Crawl-delay: 20` do seu robots.txt — só 1 requisição feita naquele domínio).
+Todas as requisições HTTP feitas nesta fase, em ordem, com status HTTP. Total: **15 requisições** (limite: 40), intervalo ≥2.5s entre cada uma (Kavak respeitando `Crawl-delay: 20` do seu robots.txt — só 1 requisição feita naquele domínio).
 
 | # | Requisição | Status | Observação |
 |---|---|---|---|
@@ -148,7 +148,7 @@ TurboClass reaproveitou um fixture já capturado nesta mesma sessão de trabalho
 
 ## 4. Baseline de preenchimento por campo (parsers atuais, "antes")
 
-Script usado (não faz parte da suíte de testes, é ferramenta de apoio ao relatório): `tests/fixtures/source_regression/_fase0_baseline.py`.
+Script usado (não faz parte da suíte de testes, é ferramenta de apoio ao relatório): `scripts/spikes/probe_fase0_baseline.py`.
 
 | Source | found | external_id | url | title | price | year | km | location | thumbnail_url |
 |---|---|---|---|---|---|---|---|---|---|

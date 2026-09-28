@@ -2,7 +2,7 @@
 roda os parsers ATUAIS contra os fixtures capturados em 2026-09-28 e imprime a
 tabela de preenchimento por campo. Nao faz parte da suite de testes (sem
 prefixo test_, nao e coletado pelo pytest); mantido aqui so para reprodutibilidade
-do baseline citado no relatorio. Uso: python tests/fixtures/source_regression/_fase0_baseline.py
+do baseline citado no relatorio. Uso: python scripts/spikes/probe_fase0_baseline.py
 """
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+
+FIXTURES = ROOT / "tests" / "fixtures" / "source_regression"
 
 FIELDS = ("external_id", "url", "title", "price", "year", "km", "location", "thumbnail_url")
 
@@ -31,7 +33,7 @@ def _print_row(source: str, items: list[dict]) -> None:
 
 def run_olx():
     from app.scrapers.olx import _extract_rsc_json_chunks, _extract_items_from_next_data, _items_to_dicts
-    html = (Path(__file__).parent / "olx" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "olx" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
     chunks = _extract_rsc_json_chunks(html)
     all_items = []
     for c in chunks:
@@ -42,7 +44,7 @@ def run_olx():
 
 def run_chavesnamao():
     from app.scrapers.chavesnamao import scrape_chavesnamao
-    html = (Path(__file__).parent / "chavesnamao" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "chavesnamao" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
     import app.scrapers.chavesnamao as mod
     mod.fetch_html = lambda url, **kw: html
     out = scrape_chavesnamao("https://www.chavesnamao.com.br/carros/brasil/honda-civic/")
@@ -53,7 +55,7 @@ def run_mobiauto():
     from app.scrapers.mobiauto import _extract_next_data_deals
     import re
     from urllib.parse import urljoin
-    html = (Path(__file__).parent / "mobiauto" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "mobiauto" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
     from lxml import html as lxml_html
     doc = lxml_html.fromstring(html)
     search_url = "https://www.mobiauto.com.br/comprar/carros/brasil/honda/civic"
@@ -92,7 +94,7 @@ def run_kavak():
     from app.scrapers.kavak import _extract_rsc_cars, _external_id_from_url
     import re
     from urllib.parse import urljoin
-    html = (Path(__file__).parent / "kavak" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "kavak" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
     from lxml import html as lxml_html
     search_url = "https://www.kavak.com/br/seminovos/honda-civic"
     doc = lxml_html.fromstring(html)
@@ -127,7 +129,7 @@ def run_kavak():
 
 def run_gogarage():
     import app.scrapers.gogarage as mod
-    html = (Path(__file__).parent / "gogarage" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "gogarage" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
     # gogarage.py's scrape function signature/fetch call may need ctx; try the raw parse helper if present.
     import inspect
     print("gogarage      NAO EXECUTADO NESTE SCRIPT -- ver relatorio (parser precisa de ctx/fetch real, "
@@ -137,7 +139,7 @@ def run_gogarage():
 def run_turboclass():
     from app.scrapers.turboclass import scrape_turboclass
     import app.scrapers.turboclass as mod
-    html = (Path(__file__).parent / "turboclass" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "turboclass" / "2026-09-28_civic" / "listing.html").read_text(encoding="utf-8")
     mod.fetch_html_with_browser_fallback = lambda url, ctx=None: html
     out = scrape_turboclass("https://turboclass.com.br/anuncio-lista.php?q=honda+civic")
     _print_row("turboclass", out)
@@ -145,7 +147,7 @@ def run_turboclass():
 
 def run_mercadolivre():
     from app.scrapers.mercadolivre import _parse_polycard_items
-    html = (Path(__file__).parent / "mercadolivre" / "2026-09-28_civic" / "listing_shell_com_cookies_bloqueado.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "mercadolivre" / "2026-09-28_civic" / "listing_shell_com_cookies_bloqueado.html").read_text(encoding="utf-8")
     out = _parse_polycard_items(html)
     _print_row("mercadolivre (cenario: bloqueado mesmo c/ cookies, ver relatorio)", out)
 
