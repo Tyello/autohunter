@@ -367,12 +367,20 @@ def test_add_wishlist_enqueue_failure_does_not_block_creation(db, monkeypatch):
 
 
 def test_add_wishlist_enqueue_failure_in_one_source_does_not_block_others(db, monkeypatch):
+    # NOTA (Fase 1B, prompt v2): era "olx"+"mercadolivre"; mercadolivre trocado
+    # pra "chavesnamao" (tambem operational_role=primary, enabled por default)
+    # porque mercadolivre agora e operational_role="deprioritized"
+    # (app/sources/builtins.py) -- o real enqueue path filtra por is_enabled
+    # de source_configs, e um source_configs fresco (ensure_source_configs)
+    # seeda mercadolivre como is_enabled=False agora, entao o enqueue pra ela
+    # nem era tentado, dando falha total (nao parcial) e quebrando o cenario
+    # que este teste quer cobrir.
     user = _make_user(db)
     calls: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
         "app.services.wishlists_service.allowed_sources_for_wishlists",
-        lambda _db, wishlists: {wishlists[0].id: {"olx", "mercadolivre"}},
+        lambda _db, wishlists: {wishlists[0].id: {"olx", "chavesnamao"}},
     )
     monkeypatch.setattr("app.services.wishlists_service.log", lambda *args, **kwargs: None)
 
@@ -388,7 +396,7 @@ def test_add_wishlist_enqueue_failure_in_one_source_does_not_block_others(db, mo
 
     assert ok is True
     assert "primeira busca em segundo plano" in msg
-    assert {src for src, _queue in calls} == {"olx", "mercadolivre"}
+    assert {src for src, _queue in calls} == {"olx", "chavesnamao"}
 
 
 def test_create_wishlist_with_filters_returns_success_when_initial_enqueue_fails(db, monkeypatch):
