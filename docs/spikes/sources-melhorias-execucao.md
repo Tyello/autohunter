@@ -187,6 +187,92 @@ Confirmado nesta fase, sem mudança (Fase 0 é read-only):
 
 Nenhuma mudança de `source_configs` em produção foi feita nesta fase (proibido pelo modo de operação). Este quadro será preenchido nas Fases 1/3/4 conforme cada source for implementada e validada.
 
-## 8. Próximo passo
+## 8. Próximo passo (Fase 0)
 
-Abrir PR desta branch (`fase0-audit-sources`) para revisão. **Não iniciar Fase 1** até esta PR ser revisada/mesclada, conforme regra do prompt de origem ("não comece a fase seguinte sem que a anterior esteja com testes verdes e o relatório atualizado").
+PR #395 aberto (branch `fase0-audit-sources`), com os dois ajustes pré-requisito do prompt v2 aplicados (log de rede corrigido pra 15, script movido pra `scripts/spikes/probe_fase0_baseline.py`). O prompt original (`PROMPT-exec-melhorias-sources.md`) foi substituído nas Fases 1-4 por `PROMPT-exec-melhorias-sources-v2.md`; a Fase 1 abaixo já foi executada numa branch subsequente (`fase1-chavesnamao-ml`, a partir de `fase0-audit-sources`), reutilizando os fixtures desta fase.
+
+---
+
+# Fase 1 — Chaves na Mão (cobertura 5→15) + Mercado Livre `deprioritized`
+
+> Branch: `fase1-chavesnamao-ml` (a partir de `fase0-audit-sources`). Prompt: `docs/prompts/PROMPT-exec-melhorias-sources-v2.md`. Rede usada nesta fase: **0 requisições** (100% reaproveitando fixtures da Fase 0).
+
+## 1A. Chaves na Mão — JSON-LD `ItemList` como fonte primária
+
+**Mudança:** `app/scrapers/chavesnamao.py`.
+
+- `_extract_itemlist_products` (novo): encontra o bloco `<script type="application/ld+json">` com `@type=ItemList` e retorna seus `item` (`@type=Product`).
+- `_dom_km_by_url` (novo): km não existe no JSON-LD, só no texto visível do card — indexa km por URL varrendo o DOM (mesma extração de texto que já existia).
+- `_parse_from_itemlist` (novo): monta os itens a partir do `ItemList`, casando km pela URL. `title`←`name`, `price`←`offers.price`, `thumbnail_url`←`image`, `location`←`_extract_location_from_url(url)` (URL do JSON-LD tem o mesmo padrão `/carro/<uf-cidade>/...`), `year`←`extract_year_from_text(name)` com fallback pra `extract_year_from_text(url)`.
+- `_parse_from_dom` (renomeado do corpo antigo de `scrape_chavesnamao`, comportamento **inalterado**): usado como fallback quando a página não expõe `ItemList` (ex.: busca genérica `?q=...` sem SSR de modelo específico).
+- `external_id`: **mantive a mesma regra exata do caminho DOM** (`re.search(r"(\d{6,})", url)`), aplicada à URL do JSON-LD, conforme pedido ("idêntico ao atual").
+
+**Achado não corrigido (fora de escopo desta fase):** essa regra de `external_id` tem um bug pré-existente — ela pega o **primeiro** número com 6+ dígitos na URL, que às vezes é o **preço** embutido no slug (`.../RS205490/id-8870545/`) em vez do `id-<N>` real, quando o preço tem 6+ dígitos. Isso já acontecia no parser DOM-only (era só menos visível, com apenas 5 itens/página). Com o `ItemList` capturando 15, dois itens desta mesma fixture colidem no mesmo `external_id` bugado (preço `105900` idêntico para `id-8353761` e `id-8581412`) e o dedupe por `(source, external_id)` (`finalize_listings`) derruba um dos dois — **14 itens únicos, não 15**, apesar da página ter 15 `Product`. A correção óbvia (usar `re.search(r"/id-(\d+)/", url)`, que é inclusive o padrão que `app/scrapers/contract.py`'s `_fallback_external_id` já usa pra `chavesnamao` especificamente) mudaria o `external_id` de alguns itens hoje capturados incorretamente — **decisão explícita necessária antes de aplicar** (ADR-0001 + regra do prompt "se `external_id` mudar, pare e reporte"). Não apliquei essa correção nesta fase.
+
+**Paginação (`?pg=N`):** documentado, não alterado. `build_chavesnamao_search_url` (`app/scrapers/chavesnamao.py:20-79`) já limita a paginação a `?pg=2` até `?pg=5` (`page > 5: return url` sem parâmetro, comentário explícito citando o `robots.txt`). Nenhuma mudança nesta fase — a Fase 1 processa só a primeira página (mesma página buscada na Fase 0), sem aumentar o número de páginas por run.
+
+**Testes:** `tests/test_chavesnamao_jsonld_itemlist.py` (novo, 4 casos: ItemList como fonte primária + km casado por URL; ano com fallback pra URL; fallback pro DOM quando não há ItemList; fixture real de 28/09 com 14 itens únicos — 100% year/price, 100% km ≥90% exigido pelo gate — e os 5 `external_id` que o parser antigo já capturava permanecendo idênticos). `tests/test_chavesnamao_scraper.py` e `tests/test_chavesnamao_robots_compliant_pagination.py` (existentes) continuam verdes sem alteração.
+
+**Antes/depois (fixture `2026-09-28_civic`):**
+
+| | antes (DOM-only) | depois (ItemList + fallback DOM) |
+|---|---|---|
+| itens capturados | 5 | 14 (de 15 na página — 1 perdido por colisão de `external_id`, achado acima) |
+| `year` | 5/5 (100%) | 14/14 (100%) |
+| `price` | 5/5 (100%) | 14/14 (100%) |
+| `km` | 5/5 (100%) | 14/14 (100%, ≥90% exigido) |
+| `external_id` dos 5 originais | — | idênticos (regressão ADR-0001 verificada) |
+
+## 1B. Mercado Livre → `deprioritized`
+
+**Mudança:** `app/sources/builtins.py` — bloco do plugin `mercadolivre`: `operational_role` `"primary"` → `"deprioritized"`, `default_enabled=True` → `False` (mesmo padrão da Webmotors), com comentário explicando a decisão de 28/09.
+
+**Confirmado com a fixture bloqueada da Fase 0** (`tests/fixtures/source_regression/mercadolivre/2026-09-28_civic/listing_shell_com_cookies_bloqueado.html`):
+- `_is_ml_security_or_captcha_page` (`app/scrapers/mercadolivre.py:86`, marcador `account-verification` em `:95`) classifica a página real como bloqueio. Teste novo: `tests/test_mercadolivre_deprioritized.py::test_real_blocked_fixture_is_classified_as_security_page`.
+- `scrape_mercadolivre` levanta `FetchBlocked(reason="ml_security_or_captcha_page")` pra essa página real (não devolve `found=0` silencioso). Teste novo: `test_scrape_mercadolivre_raises_fetchblocked_for_real_fixture_not_found_zero`.
+
+**Confirmado que `deprioritized` não conta pra saúde crítica global:** `app/services/source_operational_policy.py` — `CRITICAL_ROLES = {"primary", "fragile"}` (linha 17) não inclui `deprioritized`; `classify_source_operational_role` retorna `include_in_critical_stale=False` pra ela; `source_operational_severity` classifica como `"info"`, não `"critical"`. O gate que efetivamente usa isso: `app/services/operational_alerts_service.py:371` (`if not should_include_in_critical_stale(plugin, cfg): continue`) — pula todo o bloco de stale/backoff pra sources não-críticas. Testes novos: `test_mercadolivre_plugin_is_deprioritized_and_disabled_by_default`, `test_deprioritized_mercadolivre_does_not_count_as_critical_health`.
+
+**Efeito colateral em testes existentes (achado real, não bug meu):** o gate de `should_include_in_critical_stale` já existia e já era usado por vários testes que **usavam `mercadolivre` só como exemplo de fonte crítica** pra exercitar mecanismos genéricos (correlação stale+backoff+blocked, texto de status no `/admin health verbose`). Como `mercadolivre` deixou de ser crítica, esses testes pararam de encontrar o alerta que esperavam — não porque o mecanismo quebrou, mas porque o exemplo escolhido não se aplica mais. Corrigidos trocando a fonte de exemplo (preservando a lógica testada):
+- `tests/test_operational_alerts_service.py::test_backoff_correlation_suppresses_redundant_stale_backoff_blocked_alerts` — trocado pra `olx` (permanece `primary`).
+- `tests/test_operational_alerts_service.py::test_source_stale_with_active_backoff_emits_single_consolidated_backoff_alert`, `test_source_active_long_backoff_without_stale_emits_backoff_alert`, `test_source_stale_without_backoff_emits_stale_alert` — trocados pra `olx`.
+- `tests/test_operational_alerts_service.py::test_mercadolivre_canary_disabled_does_not_include_canary_report`, `test_mercadolivre_canary_effective_includes_canary_report` — estes são especificamente sobre o texto do canary report do ML (`_source_status_commands`), não sobre criticidade; reescritos pra chamar `_source_status_commands` diretamente, desacoplados de `collect_operational_alerts` (o alerta que os carregava não existe mais pra ML).
+- `tests/test_admin_health_command.py::test_admin_health_stale_filters_and_sections` — a fonte de exemplo "enabled + wishlist → stale" trocada de `mercadolivre` pra `gogarage` (`fragile`, também crítica).
+
+Todos os testes tocados foram **revisados item a item** (não é um find-and-replace cego): em cada caso, a fonte de exemplo trocada continua com o mesmo `operational_role` de criticidade que `mercadolivre` tinha antes desta fase, preservando a cobertura original da lógica testada.
+
+**Docs atualizados:**
+- `docs/SOURCES_GUIDE.md` — linha do Mercado Livre na tabela de mapa de sources (`deprioritized`/bloqueado), nova seção "Mercado Livre — decisão operacional atual (28/09/2026)" espelhando a seção equivalente da Webmotors, seção "Sources despriorizadas e saúde global" atualizada para citar os dois casos.
+- `docs/MERCADOLIVRE_STRATEGY_MATRIX.md` — nova seção ao final ("Decisão 28/09/2026: Mercado Livre vira `deprioritized`"), seguindo a própria regra do arquivo de não remover histórico (a promoção V2 de junho/2026 continua registrada; a nova seção deixa claro que o bloqueio de login é anterior a qualquer estratégia de fetch/parser, então não invalida esse histórico).
+
+**Comandos que o Marcelo precisa rodar manualmente no Pi (nenhum executado nesta fase):**
+
+```
+/admin sources disable mercadolivre
+```
+
+E, antes de rodar esse comando: checar quantas wishlists ativas dependem *só* de `mercadolivre` (nenhuma outra source habilitada) — essas ficariam sem nenhuma fonte ativa até o usuário adicionar outra. Não escrevi essa query (schema de `wishlist_filters`/allowed-sources não confirmado nesta fase) — deixei como placeholder documentado em `docs/SOURCES_GUIDE.md`, seção "Mercado Livre — decisão operacional atual".
+
+## Validação (Fase 1)
+
+```
+pytest tests/test_chavesnamao_jsonld_itemlist.py tests/test_chavesnamao_scraper.py \
+  tests/test_chavesnamao_robots_compliant_pagination.py tests/test_mercadolivre_deprioritized.py \
+  tests/test_mercadolivre_scraper.py tests/test_mercadolivre_shell_fallback.py \
+  tests/test_admin_health_command.py tests/test_operational_alerts_service.py \
+  tests/test_source_execution_service.py tests/test_source_plugins_contract.py \
+  tests/test_source_operational_policy.py -q
+→ 82 passed
+```
+
+Suíte completa (`pytest tests/ -q`) iniciada em background pra confirmação final; ambiente local tem se mostrado lento pra rodar a suíte inteira (mesmo padrão observado na Fase 0), sem indicação de travamento real — resultado será reportado à parte quando terminar.
+
+## Riscos remanescentes (Fase 1)
+
+1. Bug de colisão de `external_id` em `chavesnamao.py` (achado acima) não corrigido — decisão explícita necessária.
+2. Query de wishlists dependentes só de `mercadolivre` não escrita — necessária antes do `/admin sources disable mercadolivre` real.
+3. `docs/SOURCES_GUIDE.md`/`MERCADOLIVRE_STRATEGY_MATRIX.md` documentam a decisão, mas nenhuma automação impede alguém de reverter `operational_role` pra `"primary"` sem revisar este histórico — puramente documental, sem trava técnica.
+
+## Próximo passo (Fase 1)
+
+Abrir PR desta branch (`fase1-chavesnamao-ml`) para revisão. Não iniciar Fase 2 (Kavak/Mobiauto `force_browser`) até esta PR ser revisada/mesclada.

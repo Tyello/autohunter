@@ -437,3 +437,27 @@ Regra operacional pós-Mercado Livre: toda nova source candidata deve passar por
 ### Mercado Livre V2 com zero_result_suspect
 
 Mesmo após promoção para `configured_impl=v2`, um run `runtime_impl=v2` com `found=0` e `suspicious_zero_results=true` não é estado `done`. No readiness report, esse caso deve aparecer como `blocked_or_unstable` com `zero_result_suspect=True`, baseline e motivo, recomendando `rollback_to_canary_then_validate` para validar novamente antes de considerar a migração saudável.
+
+## Decisão 28/09/2026: Mercado Livre vira `deprioritized`
+
+Contexto (`docs/prompts/PROMPT-exec-melhorias-sources-v2.md`, Fase 1B): teste manual confirmou que a busca do ML **exige login para qualquer visitante anônimo**, independente de V1/V2 -- isso não é um problema de parser/fetch strategy (as seções acima deste arquivo, incluindo a promoção V2 de junho/2026), é um bloqueio de nível de site.
+
+Observado (28/09/2026):
+
+- Chrome comum, IP residencial, janela anônima: a busca redireciona para `/gz/account-verification` ("Olá! Para continuar, acesse sua conta"), `path=/security/suspicious_traffic`.
+- Reconfirmado programaticamente com os cookies reais de produção (Playwright, storage_state de 9 dias de uso normal do scheduler no Pi): mesmo redirecionamento/bloqueio. `_is_ml_security_or_captcha_page` classifica corretamente como bloqueio (`account-verification` é um dos marcadores, `app/scrapers/mercadolivre.py:95`). Fixture salvo: `tests/fixtures/source_regression/mercadolivre/2026-09-28_civic/listing_shell_com_cookies_bloqueado.html` (~39.7 KB, 0 ocorrências de `"polycard"`).
+- API pública: já descartada (linhas 58-60 acima, seção "Known Bad Ideas" item 1).
+- Login com conta pessoal: **descartado nesta decisão** -- o risco cairia sobre a conta usada (pode estar ligada ao Mercado Pago dos pagamentos do produto) e violaria os termos de uso do site. Não reabrir essa opção sem decisão explícita revertendo este ponto.
+
+Decisão: `operational_role=deprioritized` e `default_enabled=false` (`app/sources/builtins.py`), mesmo tratamento já dado à Webmotors. Efeito: um bloqueio do ML não conta mais como falha crítica de saúde global (`app/services/source_operational_policy.py`: `CRITICAL_ROLES = {"primary", "fragile"}` não inclui `deprioritized`; `should_include_in_critical_stale` retorna `False`).
+
+Extração de `year`/`km` (que o ML nunca preencheu, ver `app/scrapers/mercadolivre.py` -- nenhuma ocorrência de `"year"` no arquivo) **não será implementada** enquanto esse status se mantiver -- está fora de escopo do prompt v2 (seção "Fora de escopo").
+
+Isso **não invalida** o histórico de V1/V2 acima (promoção de junho/2026 continua tecnicamente correta) -- só significa que, independente de qual `impl` estiver configurado, o bloqueio de acesso anônimo hoje é anterior a qualquer decisão de parser/fetch strategy. Se o bloqueio de login for revertido pelo Mercado Livre no futuro, reavaliar `operational_role` a partir do estado V2 já promovido (não retroceder pra V1 sem motivo novo).
+
+⚠️ `default_enabled=false` no plugin afeta só o seed de linhas novas em `source_configs` (`app/services/source_configs_service.py:ensure_source_configs`). Em produção, a linha de `mercadolivre` já existe com `is_enabled=true` -- desativar exige ação manual, não incluída neste PR:
+
+- `/admin sources disable mercadolivre`
+- ou SQL: `UPDATE source_configs SET is_enabled = false WHERE source = 'mercadolivre';`
+
+Antes de rodar esse comando, checar quantas wishlists ativas dependem *só* de mercadolivre (nenhuma outra source habilitada) -- essas ficariam sem nenhuma fonte ativa até o usuário adicionar outra.

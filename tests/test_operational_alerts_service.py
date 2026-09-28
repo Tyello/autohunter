@@ -202,14 +202,15 @@ def _add_mercadolivre_config(db, *, canary_enabled=False, browser_fallback_enabl
     )
 
 
+# NOTA (Fase 1B, prompt v2): estes 3 testes usavam mercadolivre so como exemplo de fonte critica pra exercitar o mecanismo generico de stale/backoff; trocados pra olx porque mercadolivre agora e operational_role="deprioritized" (app/sources/builtins.py) e should_include_in_critical_stale retorna False pra ela, pulando esse bloco inteiro (operational_alerts_service.py:371).
 def test_source_stale_with_active_backoff_emits_single_consolidated_backoff_alert(db, monkeypatch):
     now = datetime.now(timezone.utc)
     monkeypatch.setattr("app.services.operational_alerts_service.settings.enable_playwright", True)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
-    _add_mercadolivre_config(db, canary_enabled=False)
+    db.add(SourceConfig(source="olx", is_enabled=True, sched_minutes=30, browser_fallback_enabled=True, extra={"impl": "v1"}))
     db.add(
         SourceState(
-            source="mercadolivre",
+            source="olx",
             last_effective_run_at=now - timedelta(minutes=182),
             last_status="skipped:backoff",
             next_allowed_at=now + timedelta(hours=2),
@@ -218,27 +219,27 @@ def test_source_stale_with_active_backoff_emits_single_consolidated_backoff_aler
     db.commit()
 
     alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
-    ml_alerts = [a for a in alerts if "mercadolivre" in a.key]
-    keys = {a.key for a in ml_alerts}
+    src_alerts = [a for a in alerts if "olx" in a.key]
+    keys = {a.key for a in src_alerts}
 
-    assert [a.key for a in ml_alerts] == ["source_blocked_backoff:mercadolivre"]
-    assert "source_stale:mercadolivre" not in keys
-    assert "source_backoff:mercadolivre" not in keys
-    alert = ml_alerts[0]
-    assert "Source mercadolivre em backoff ativo até" in alert.message
+    assert [a.key for a in src_alerts] == ["source_blocked_backoff:olx"]
+    assert "source_stale:olx" not in keys
+    assert "source_backoff:olx" not in keys
+    alert = src_alerts[0]
+    assert "Source olx em backoff ativo até" in alert.message
     assert "Sem execução real há 182m porque o circuit breaker/backoff está segurando novas tentativas." in alert.message
-    assert "/admin sources show mercadolivre" in alert.message
-    assert "/admin sources mercadolivre" not in alert.message
-    assert "/admin sources canary mercadolivre report" not in alert.message
+    assert "/admin sources show olx" in alert.message
+    assert "/admin sources olx" not in alert.message
+    assert "/admin sources canary olx report" not in alert.message
 
 
 def test_source_active_long_backoff_without_stale_emits_backoff_alert(db):
     now = datetime.now(timezone.utc)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
-    _add_mercadolivre_config(db, canary_enabled=False)
+    db.add(SourceConfig(source="olx", is_enabled=True, sched_minutes=30, browser_fallback_enabled=True, extra={"impl": "v1"}))
     db.add(
         SourceState(
-            source="mercadolivre",
+            source="olx",
             last_effective_run_at=now - timedelta(minutes=20),
             last_status="blocked",
             next_allowed_at=now + timedelta(hours=2),
@@ -247,20 +248,20 @@ def test_source_active_long_backoff_without_stale_emits_backoff_alert(db):
     db.commit()
 
     alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
-    ml_alerts = [a for a in alerts if "mercadolivre" in a.key]
+    src_alerts = [a for a in alerts if "olx" in a.key]
 
-    assert [a.key for a in ml_alerts] == ["source_blocked_backoff:mercadolivre"]
-    assert "em backoff ativo até" in ml_alerts[0].message
-    assert "Sem execução real" not in ml_alerts[0].message
+    assert [a.key for a in src_alerts] == ["source_blocked_backoff:olx"]
+    assert "em backoff ativo até" in src_alerts[0].message
+    assert "Sem execução real" not in src_alerts[0].message
 
 
 def test_source_stale_without_backoff_emits_stale_alert(db):
     now = datetime.now(timezone.utc)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
-    _add_mercadolivre_config(db, canary_enabled=False)
+    db.add(SourceConfig(source="olx", is_enabled=True, sched_minutes=30, browser_fallback_enabled=True, extra={"impl": "v1"}))
     db.add(
         SourceState(
-            source="mercadolivre",
+            source="olx",
             last_effective_run_at=now - timedelta(hours=6),
             last_status="error",
         )
@@ -269,73 +270,73 @@ def test_source_stale_without_backoff_emits_stale_alert(db):
 
     keys = {a.key for a in collect_operational_alerts(db, now=now, consume_cooldown=False)}
 
-    assert "source_stale:mercadolivre" in keys
-    assert "source_blocked_backoff:mercadolivre" not in keys
+    assert "source_stale:olx" in keys
+    assert "source_blocked_backoff:olx" not in keys
 
 
-def test_mercadolivre_canary_disabled_does_not_include_canary_report(db, monkeypatch):
-    now = datetime.now(timezone.utc)
-    monkeypatch.setattr("app.services.operational_alerts_service.settings.enable_playwright", True)
-    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
-    _add_mercadolivre_config(db, canary_enabled=False)
-    db.add(
-        SourceState(
-            source="mercadolivre",
-            last_effective_run_at=now - timedelta(minutes=181),
-            last_status="skipped:backoff",
-            next_allowed_at=now + timedelta(hours=2),
-        )
-    )
-    db.commit()
+def test_mercadolivre_canary_disabled_does_not_include_canary_report():
+    # Testa _source_status_commands diretamente, desacoplado de
+    # collect_operational_alerts: desde a Fase 1B do prompt v2, mercadolivre e
+    # operational_role="deprioritized" (app/sources/builtins.py), entao
+    # should_include_in_critical_stale retorna False pra ela e o bloco de
+    # staleness/backoff que gerava "source_blocked_backoff:mercadolivre"
+    # (operational_alerts_service.py:371) e pulado por completo -- esse
+    # alerta nao existe mais pra ML em producao. A logica de selecao de texto
+    # em si (_source_status_commands) continua existindo e testavel isolada.
+    from app.services.operational_alerts_service import _source_status_commands
 
-    alert = next(a for a in collect_operational_alerts(db, now=now, consume_cooldown=False) if a.key == "source_blocked_backoff:mercadolivre")
+    msg = _source_status_commands("mercadolivre", {"canary_effective": False})
 
-    assert "/admin sources canary mercadolivre report" not in alert.message
-    assert "/admin sources show mercadolivre" in alert.message
+    assert "/admin sources canary mercadolivre report" not in msg
+    assert "/admin sources show mercadolivre" in msg
 
 
-def test_mercadolivre_canary_effective_includes_canary_report(db, monkeypatch):
-    now = datetime.now(timezone.utc)
-    monkeypatch.setattr("app.services.operational_alerts_service.settings.enable_playwright", True)
-    db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
-    _add_mercadolivre_config(db, canary_enabled=True, browser_fallback_enabled=True)
-    db.add(
-        SourceState(
-            source="mercadolivre",
-            last_effective_run_at=now - timedelta(minutes=181),
-            last_status="skipped:backoff",
-            next_allowed_at=now + timedelta(hours=2),
-        )
-    )
-    db.commit()
+def test_mercadolivre_canary_effective_includes_canary_report():
+    from app.services.operational_alerts_service import _source_status_commands
 
-    alert = next(a for a in collect_operational_alerts(db, now=now, consume_cooldown=False) if a.key == "source_blocked_backoff:mercadolivre")
+    msg = _source_status_commands("mercadolivre", {"canary_effective": True})
 
-    assert "/admin sources canary mercadolivre report" in alert.message
-    assert "/admin sources show mercadolivre" in alert.message
-    assert "/admin sources mercadolivre" not in alert.message
+    assert "/admin sources canary mercadolivre report" in msg
+    assert "/admin sources show mercadolivre" in msg
+    assert "/admin sources mercadolivre" not in msg
 
 
 def test_backoff_correlation_suppresses_redundant_stale_backoff_blocked_alerts(db, monkeypatch):
+    # Fonte de exemplo trocada de mercadolivre -> olx (Fase 1B do prompt v2:
+    # mercadolivre virou operational_role="deprioritized", app/sources/builtins.py,
+    # o que faz should_include_in_critical_stale retornar False pra ela e o
+    # bloco de staleness/backoff inteiro (operational_alerts_service.py:371)
+    # ser pulado -- correto e esperado (ML nao deve mais gerar esse tipo de
+    # alerta critico global), mas obsoleta mercadolivre como exemplo aqui.
+    # O mecanismo generico de correlacao stale+backoff+blocked continua
+    # coberto, so que via uma fonte que permanece "primary" (olx).
     now = datetime.now(timezone.utc)
     monkeypatch.setattr("app.services.operational_alerts_service.settings.enable_playwright", True)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now - timedelta(minutes=1)))
-    _add_mercadolivre_config(db, canary_enabled=True)
+    db.add(
+        SourceConfig(
+            source="olx",
+            is_enabled=True,
+            sched_minutes=30,
+            browser_fallback_enabled=True,
+            extra={"impl": "v1"},
+        )
+    )
     db.add(
         SourceState(
-            source="mercadolivre",
+            source="olx",
             last_effective_run_at=now - timedelta(hours=4),
             last_status="skipped:backoff",
             next_allowed_at=now + timedelta(hours=2),
         )
     )
     for i in range(3):
-        db.add(SourceRun(source="mercadolivre", kind="scheduler", status="blocked", created_at=now - timedelta(minutes=i + 1)))
+        db.add(SourceRun(source="olx", kind="scheduler", status="blocked", created_at=now - timedelta(minutes=i + 1)))
     db.commit()
 
     alerts = collect_operational_alerts(db, now=now, consume_cooldown=False)
-    ml_keys = [a.key for a in alerts if "mercadolivre" in a.key]
-    assert ml_keys == ["source_blocked_backoff:mercadolivre"]
+    olx_keys = [a.key for a in alerts if "olx" in a.key]
+    assert olx_keys == ["source_blocked_backoff:olx"]
 
 
 def test_impl_drift_alert_for_enabled_source_with_runtime(db):

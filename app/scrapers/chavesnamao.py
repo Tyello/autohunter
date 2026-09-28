@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote_plus, urlparse
 
 from bs4 import BeautifulSoup
@@ -155,25 +156,122 @@ def _extract_location_from_anchor_text(text: str) -> Optional[str]:
 
 DETAIL_THUMB_MAX = 20
 
+_JSONLD_SCRIPT_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 
-def scrape_chavesnamao(
-    search_url: str,
-    limit: int = 50,
-    ctx: Optional[ScrapeContext] = None,
-) -> list[dict]:
-    if ctx is not None:
-        html = fetch_html_with_browser_fallback(
-            search_url,
-            ctx=ctx,
-            referer=_CHAVES_BASE + "/",
-            # Cards renderizam via JS/hidratação client-side; "domcontentloaded"
-            # dispara antes das imagens dos cards serem populadas.
-            wait_until="networkidle",
+
+def _extract_itemlist_products(html: str) -> list[dict]:
+    """Encontra o bloco JSON-LD `@type=ItemList` da pagina de busca e retorna
+    seus `item` (`@type=Product`).
+
+    Chaves na Mao expoe 15 anuncios/pagina nesse bloco (confirmado ao vivo em
+    28/09, tests/fixtures/source_regression/chavesnamao/2026-09-28_civic/),
+    mais confiavel e completo que o `<a href>` + regex de texto usado ate
+    aqui (que so pegava os anuncios cujo link tinha "R$" visivel no texto do
+    proprio <a>, perdendo cards cujo preco so aparece em elemento separado).
+    """
+    for raw in _JSONLD_SCRIPT_RE.findall(html or ""):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(data, dict) or data.get("@type") != "ItemList":
+            continue
+        elements = data.get("itemListElement")
+        if not isinstance(elements, list):
+            continue
+        out: list[dict] = []
+        for el in elements:
+            if not isinstance(el, dict):
+                continue
+            item = el.get("item")
+            if isinstance(item, dict) and item.get("@type") == "Product":
+                out.append(item)
+        return out
+    return []
+
+
+def _dom_km_by_url(soup: BeautifulSoup) -> dict[str, int]:
+    """Indexa quilometragem por URL a partir do texto visivel dos cards.
+
+    O JSON-LD `ItemList` nao tem km -- só existe no texto do card em HTML,
+    por isso o parser baseado em ItemList ainda precisa varrer o DOM pra
+    casar km por URL (mesma fonte/regra que o caminho antigo já usava).
+    """
+    out: dict[str, int] = {}
+    for a in soup.select("a[href]"):
+        href = a.get("href")
+        if not href or "/id-" not in href:
+            continue
+        url = href
+        if url.startswith("/"):
+            url = _CHAVES_BASE + url
+        km = extract_mileage_km_from_text(a.get_text(" ", strip=True) or "")
+        if km is not None:
+            out.setdefault(url, km)
+    return out
+
+
+def _parse_from_itemlist(products: list[dict], soup: BeautifulSoup, limit: int) -> list[dict]:
+    km_by_url = _dom_km_by_url(soup)
+    out: list[dict] = []
+
+    for p in products:
+        url = (p.get("url") or "").strip()
+        if not url:
+            continue
+
+        # Mesma regra de external_id do caminho DOM (nao mudar -- ADR-0001):
+        # primeiro segmento numerico com 6+ digitos na URL. Isso as vezes
+        # casa o preco embutido no slug antes do "id-<N>" real quando o preco
+        # tem 6+ digitos -- bug preexistente, fora de escopo desta fase (ver
+        # docs/spikes/sources-melhorias-execucao.md, Fase 1).
+        m = re.search(r"(\d{6,})", url)
+        external_id = m.group(1) if m else url
+
+        name = (p.get("name") or "").strip() or None
+        year = extract_year_from_text(name or "") or extract_year_from_text(url)
+        km = km_by_url.get(url)
+
+        offers = p.get("offers") if isinstance(p.get("offers"), dict) else {}
+        price = parse_brl_price(str(offers.get("price"))) if offers.get("price") is not None else None
+
+        location = _extract_location_from_url(url)
+
+        thumb = p.get("image")
+        if isinstance(thumb, list):
+            thumb = thumb[0] if thumb else None
+        if isinstance(thumb, str):
+            thumb = normalize_asset_url(thumb, _CHAVES_BASE)
+        else:
+            thumb = None
+
+        out.append(
+            {
+                "source": "chavesnamao",
+                "external_id": str(external_id),
+                "title": name,
+                "url": url,
+                "thumbnail_url": thumb,
+                "price": price,
+                "currency": "BRL",
+                "location": location,
+                "year": year,
+                "km": km,
+            }
         )
-    else:
-        html = fetch_html(search_url)
-    soup = BeautifulSoup(html, "html.parser")
 
+        if len(out) >= limit:
+            break
+
+    return out
+
+
+def _parse_from_dom(soup: BeautifulSoup, limit: int) -> list[dict]:
+    """Caminho original (pre-Fase 1): <a href> + regex de texto no card.
+
+    Mantido como fallback para quando a pagina nao expoe `ItemList` JSON-LD
+    (ex.: busca generica `?q=...` sem SSR de modelo especifico -- ver
+    `build_chavesnamao_search_url`)."""
     out: list[dict] = []
 
     # A página lista os anúncios como <a> com o título + preço no texto.
@@ -236,6 +334,30 @@ def scrape_chavesnamao(
 
         if len(out) >= limit:
             break
+
+    return out
+
+
+def scrape_chavesnamao(
+    search_url: str,
+    limit: int = 50,
+    ctx: Optional[ScrapeContext] = None,
+) -> list[dict]:
+    if ctx is not None:
+        html = fetch_html_with_browser_fallback(
+            search_url,
+            ctx=ctx,
+            referer=_CHAVES_BASE + "/",
+            # Cards renderizam via JS/hidratação client-side; "domcontentloaded"
+            # dispara antes das imagens dos cards serem populadas.
+            wait_until="networkidle",
+        )
+    else:
+        html = fetch_html(search_url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    products = _extract_itemlist_products(html)
+    out = _parse_from_itemlist(products, soup, limit) if products else _parse_from_dom(soup, limit)
 
     # dedupe interno
     seen = set()
