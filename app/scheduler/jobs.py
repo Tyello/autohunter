@@ -292,7 +292,15 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                     "incremental": {"mode": "skip", "cursor": top},
                 }, source=ctx.source, event_type="pipeline_summary", tags=["ok", "incremental"])
                 db.commit()
-                return {"ok": True, "found": found, "inserted": 0, "updated": 0, "upserted": 0, "matched": 0, "queued": 0, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
+                # field_coverage already computed above (line ~251) from the real fetch --
+                # was missing here, so every run that hit this "nothing changed" shortcut
+                # (common for low-turnover sources like turboclass, which can go many days
+                # without a new top listing) silently dropped field_coverage from the
+                # aggregate. That looked identical to a parsing regression in
+                # source_execution_service's total_field_present aggregation and in the
+                # operational_alerts_service field-coverage alert, even though the fetch +
+                # parse were fine the whole time.
+                return {"ok": True, "found": found, "inserted": 0, "updated": 0, "upserted": 0, "matched": 0, "queued": 0, "thumb_present": thumb_present, "thumb_rate": thumb_rate, "field_coverage": field_coverage, "incremental": "skip", "audit_artifacts": audit_artifacts, **_ctx_fetch_diag(ctx)}
 
             # ingest only listings before the cursor (still match on full set)
             if cur and inc_cursor:
@@ -579,7 +587,8 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                     "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
                 }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok", "incremental"])
                 db.commit()
-                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "incremental": "skip", "audit_artifacts": audit_artifacts, **_runtime_fields(), **_ctx_fetch_diag(ctx)}
+                # Same field_coverage gap as scrape_ingest_match's skip branch above -- keep in sync.
+                return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "field_coverage": field_coverage, "incremental": "skip", "audit_artifacts": audit_artifacts, **_runtime_fields(), **_ctx_fetch_diag(ctx)}
 
             if cur and inc_cursor:
                 inc_mode = "cut"
