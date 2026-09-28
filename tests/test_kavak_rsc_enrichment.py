@@ -44,16 +44,13 @@ _HTML = f"""
 """
 
 
-class _FakeBrowserResult:
-    def __init__(self, html):
-        self.html = html
-        self.final_url = _SEARCH_URL
-
-
 def test_scrape_kavak_enriches_km_and_year_from_rsc_payload():
+    # Fase 2 (prompt v2): scrape_kavak trocou fetch_html_browser direto por
+    # fetch_html_with_browser_fallback (mesmo padrao do mobiauto) -- mocka
+    # essa funcao (que ja devolve str, nao um objeto com .html/.final_url).
     with patch(
-        "app.scrapers.kavak.fetch_html_browser",
-        return_value=_FakeBrowserResult(_HTML),
+        "app.scrapers.kavak.fetch_html_with_browser_fallback",
+        return_value=_HTML,
     ):
         listings = scrape_kavak(_SEARCH_URL, ctx=_CTX)
 

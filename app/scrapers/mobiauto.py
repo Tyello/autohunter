@@ -165,12 +165,52 @@ def _pick_thumb_from_element(el, base_url: str) -> Optional[str]:
     return out[0] if out else None
 
 
+_MOBIAUTO_IMAGE_LINE_RE = re.compile(r"^(\d+),(\d+)$", re.M)
+
+
+def _mobiauto_image_url(image_id: str, width: int = 640) -> str:
+    """CDN do mobiauto pra imagens, confirmado no HTML real (fixture
+    tests/fixtures/source_regression/mobiauto/2026-09-28_civic/listing.html):
+    <img> aponta pra https://image1.mobiauto.com.br/images/api/images/v1.0/<id>/transform/...w_<n>."""
+    return f"https://image1.mobiauto.com.br/images/api/images/v1.0/{image_id}/transform/fl_progressive,f_webp,q_70,w_{width}"
+
+
+def _first_image_id_from_next_data(images_field: object) -> Optional[str]:
+    """item['images'] no __NEXT_DATA__ NAO e JSON de verdade -- e uma string
+    com um cabecalho de schema seguido de linhas "imageId,position", ex.:
+    "[17]{imageId:int,position:int}\\n711786622,0\\n711786629,1\\n...".
+    Pega o imageId da linha com position=0 (capa)."""
+    if not isinstance(images_field, str) or not images_field:
+        return None
+    for m in _MOBIAUTO_IMAGE_LINE_RE.finditer(images_field):
+        image_id, position = m.group(1), m.group(2)
+        if position == "0":
+            return image_id
+    return None
+
+
+def _title_from_trim(trim: dict) -> Optional[str]:
+    make = (trim.get("make") or {}).get("name") if isinstance(trim.get("make"), dict) else None
+    model = (trim.get("model") or {}).get("name") if isinstance(trim.get("model"), dict) else None
+    trim_name = trim.get("name")
+    parts = [p for p in (make, model, trim_name) if p]
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
 def _extract_next_data_deals(html_text: str) -> dict[str, dict]:
     """A pagina de busca do mobiauto e SSR via Next.js e ja embute os
-    resultados completos (id/price/km/ano) em `__NEXT_DATA__`, sem precisar
-    de browser/JS (ver docs/spikes/scraping-efetividade-audit.md secao 4).
-    Retorna um dict `external_id -> {price, km, year}` para enriquecer o que
-    o parser CSS/heuristico ja extraiu."""
+    resultados completos (id/price/km/ano/imagens/trim) em `__NEXT_DATA__`,
+    sem precisar de browser/JS (ver docs/spikes/scraping-efetividade-audit.md
+    secao 4). Retorna um dict `external_id -> {price, km, year, title,
+    thumbnail_url}` para enriquecer o que o parser CSS/heuristico ja extraiu.
+
+    Fase 2 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): title/
+    thumbnail_url adicionados, mapeados de trim.make/trim.model/trim.name e
+    de item['images'] (ver _first_image_id_from_next_data) -- antes so
+    price/km/year vinham do JSON, title/thumbnail dependiam so do DOM (ou do
+    fallback caro de _detail_enrich, uma requisicao extra por item)."""
     m = re.search(
         r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.S
     )
@@ -201,10 +241,19 @@ def _extract_next_data_deals(html_text: str) -> dict[str, dict]:
         trim = item.get("trim") if isinstance(item.get("trim"), dict) else {}
         year = trim.get("productionYear") or (trim.get("model") or {}).get("year")
 
+        title = _title_from_trim(trim)
+        if title and year and str(year) not in title:
+            title = f"{title} {year}"
+
+        image_id = _first_image_id_from_next_data(item.get("images"))
+        thumbnail_url = _mobiauto_image_url(image_id) if image_id else None
+
         out[ext_id] = {
             "price": item.get("price"),
             "km": item.get("km"),
             "year": year,
+            "title": title,
+            "thumbnail_url": thumbnail_url,
         }
     return out
 
@@ -447,8 +496,13 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
             }
 
 
-    # Enrich price/km/year from the __NEXT_DATA__ JSON already embedded in the
-    # SSR HTML (no extra request, no browser needed).
+    # Enrich price/km/year/title/thumbnail from the __NEXT_DATA__ JSON already
+    # embedded in the SSR HTML (no extra request, no browser needed).
+    # Fase 2 (prompt v2): title/thumbnail_url adicionados aqui -- antes so
+    # price/km/year vinham do JSON; title/thumbnail dependiam do DOM ou do
+    # fallback caro de _detail_enrich (uma requisicao HTTP extra por item,
+    # so pros 8 primeiros ainda faltando). Preencher a partir do JSON aqui
+    # reduz quantos itens caem nesse fallback caro.
     next_data_deals = _extract_next_data_deals(html_text)
     for cur in by_url.values():
         deal = next_data_deals.get(cur["external_id"])
@@ -460,6 +514,10 @@ def scrape_mobiauto(search_url: str, ctx: ScrapeContext) -> list[dict]:
             cur["km"] = deal["km"]
         if deal.get("year") is not None:
             cur["year"] = deal["year"]
+        if not cur.get("title") and deal.get("title"):
+            cur["title"] = deal["title"]
+        if not cur.get("thumbnail_url") and deal.get("thumbnail_url"):
+            cur["thumbnail_url"] = deal["thumbnail_url"]
 
     # Enrich a few items missing title/thumbnail (cheap backfill)
     needs = [x for x in by_url.values() if not x.get("thumbnail_url") or not x.get("title")]
