@@ -25,24 +25,53 @@ class FetchBlocked(Exception):
 
 
 # Reutiliza sessão para manter cookies. Isso ajuda bastante em sites tipo OLX.
+#
+# Sessões nunca eram recicladas: o scheduler roda como processo único por dias,
+# então uma sessão (cookies + fingerprint TCP/TLS) acumula milhares de requests
+# pro mesmo source ao longo de uma semana+. Alguns sites (ex.: turboclass)
+# degradam silenciosamente sessões "antigas" -- continuam servindo HTML 200
+# com imagens, mas passam a omitir tabelas de preço/ano/especificação, sem
+# nunca retornar um bloqueio explícito. Isso não aparecia como erro/bloqueio,
+# só como field_coverage baixo (ver app/services/operational_alerts_service.py).
+# TTL abaixo força uma sessão (cookies novos) periodicamente para mitigar isso,
+# mantendo o reuso dentro da janela (bom p/ OLX) mas sem sessões eternas.
+_SESSION_TTL_SECONDS = 6 * 60 * 60  # 6h
+
 _sessions: dict[str, requests.Session] = {}
+_sessions_created_at: dict[str, float] = {}
 _sessions_lock = threading.Lock()
 
 
 def _get_session(proxy: Optional[str], session_key: Optional[str] = None) -> requests.Session:
     sk = (session_key or "__global__").strip().lower() or "__global__"
     key = f"{sk}::{proxy or '__default__'}"
+    now = time.monotonic()
     with _sessions_lock:
         sess = _sessions.get(key)
-        if sess is None:
+        created_at = _sessions_created_at.get(key)
+        expired = sess is not None and created_at is not None and (now - created_at) >= _SESSION_TTL_SECONDS
+        if sess is None or expired:
+            if expired and sess is not None:
+                try:
+                    sess.close()
+                except Exception:
+                    pass
             sess = _init_session(requests.Session())
             _sessions[key] = sess
+            _sessions_created_at[key] = now
         return sess
 
 
 def get_session_stats() -> dict:
+    now = time.monotonic()
     with _sessions_lock:
-        return {"sessions": len(_sessions), "keys": list(_sessions.keys())[:10]}
+        return {
+            "sessions": len(_sessions),
+            "keys": list(_sessions.keys())[:10],
+            "age_seconds": {
+                k: round(now - v, 1) for k, v in list(_sessions_created_at.items())[:10]
+            },
+        }
 
 
 retries = Retry(

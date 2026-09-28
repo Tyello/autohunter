@@ -200,10 +200,16 @@ register_source(
         supports_manual_search=True,
         supports_wishlist_monitoring=True,
         fetch_mode="browser",
+        default_enabled=False,
         default_force_browser=True,
         default_browser_fallback_enabled=True,
         default_extra={
-            "operational_role": "fragile",
+            # 2026-09-28: iCarros retirou (ou reestruturou) a busca de usados --
+            # /comprar/... e /busca?... hoje redirecionam pra /catalogo/ (zero km),
+            # confirmado ao vivo. Não é bug de parsing do scraper; found=0 em toda
+            # run desde ~20/09 é o site mesmo. Desabilitado até surgir um endpoint
+            # de usados novo pra mapear, ou o path antigo voltar.
+            "operational_role": "deprioritized",
             "browser_timeout_ms": 45000,
             "browser_wait_until": "domcontentloaded",
             "browser_block_resources": False,
