@@ -275,4 +275,65 @@ Suíte completa (`pytest tests/ -q`) iniciada em background pra confirmação fi
 
 ## Próximo passo (Fase 1)
 
-Abrir PR desta branch (`fase1-chavesnamao-ml`) para revisão. Não iniciar Fase 2 (Kavak/Mobiauto `force_browser`) até esta PR ser revisada/mesclada.
+PR #396 aberto, revisado e mesclado em `main` (junto com o PR #395 da Fase 0) — autorização explícita do Marcelo pra commitar/deployar/seguir sem esperar review assíncrono adicional. Deploy em produção confirmado (`autohunter-scheduler`/`autohunter-bot` ativos, commit `1400b2e`).
+
+**Achado pós-merge (suíte completa):** rodar `pytest tests/ -q` revelou 3 outros testes que também usavam `mercadolivre` só como exemplo de fonte crítica, não cobertos pelos arquivos testados isoladamente na Fase 1 original: `tests/test_source_v2_readiness.py` (2 casos) e `tests/test_wishlist_initial_run.py` (1 caso). Corrigidos na mesma branch antes do merge (commit `af8302e`), com o mesmo cuidado de preservar a lógica original de cada teste. Achado extra documentado: `_recommendation` (`app/services/source_v2_readiness.py:219`) checa `zero_result_suspect` antes de checar `status=="deprioritized"` (`:232`), então o relatório de readiness ainda recomenda `rollback_to_canary_then_validate` pro Mercado Livre mesmo com `status="deprioritized"` — par inconsistente, não corrigido (fora de escopo desta fase).
+
+---
+
+# Fase 2 — Tirar o Chromium de Kavak e Mobiauto (preparar, não virar)
+
+> Branch: `fase2-kavak-mobiauto-http-first` (a partir de `main`, já com Fases 0+1 mescladas). Prompt: `docs/prompts/PROMPT-exec-melhorias-sources-v2.md`. Rede usada nesta fase: **0 requisições** (reaproveitando fixtures da Fase 0). `force_browser` **não alterado em produção** nem no default de seed — só preparação de código, conforme pedido.
+
+## Kavak (`app/scrapers/kavak.py`)
+
+- Trocado `fetch_html_browser` (Playwright direto) por `fetch_html_with_browser_fallback` (mesmo padrão do Mobiauto) — `_extract_rsc_cars` (já existente) passa a ser a fonte de `price`/`km`/`year`/`location` tanto no caminho HTTP quanto no browser.
+- Removidas as 2 referências a `res.final_url` (não existe mais um objeto `res` — `fetch_html_with_browser_fallback` devolve `str`); `urljoin` passou a usar `search_url` diretamente, igual ao Mobiauto.
+- **Nenhuma mudança de comportamento em produção agora**: `default_force_browser=True` continua no default de seed (`app/sources/builtins.py`, não tocado), e `fetch_html_with_browser_fallback` pula direto pro browser quando `ctx.force_browser=True` (`app/scrapers/fetching.py:65-67`) — o código só fica *pronto* para um flip futuro.
+- **Rate limit / `Crawl-delay: 20` (achado, não implementado nesta fase):** `kavak.com/robots.txt` declara `Crawl-delay: 20` (confirmado na Fase 0). Hoje, `source_configs.extra` do Kavak não tem `http_min_delay_ms`/`http_max_delay_ms` (`app/sources/builtins.py`, `default_extra={"operational_role": "experimental"}` — só isso), e `default_rate_limit_seconds` não é setado (cai no default `0` da dataclass, `app/sources/types.py`). Hoje isso não importa porque o Kavak é sempre-browser (cada navegação Playwright já leva dezenas de segundos, respeitando o crawl-delay "de graça"). **Antes de qualquer flip real pra HTTP-first, é obrigatório**: (1) setar `http_min_delay_ms`/`http_max_delay_ms` ≥ 20000 no `extra` do Kavak (mesmo mecanismo já usado por OLX/TurboClass); (2) revisar `source_group_max_workers` (default `4`, `app/core/settings.py:352`) especificamente pro Kavak — requisições HTTP concorrentes de grupos diferentes não respeitam um `Crawl-delay` por-request sozinho, precisaria rodar sequencial (`source_group_max_workers=1` só pro Kavak, ou um mecanismo de serialização por source que hoje não existe). Nenhuma dessas mudanças foi aplicada nesta fase (mudaria comportamento de produção).
+
+## Mobiauto (`app/scrapers/mobiauto.py`)
+
+- `_extract_next_data_deals` (já existente) ganhou `title` e `thumbnail_url`, mapeados de `trim.make.name` + `trim.model.name` + `trim.name` (+ ano, se ainda não estiver no texto) e de `item["images"]` respectivamente.
+- **Achado sobre `item["images"]`:** não é JSON válido — é uma string com um cabeçalho de schema seguido de linhas `"<imageId>,<position>"` (ex.: `"[17]{imageId:int,position:int}\n711786622,0\n..."`). Nova função `_first_image_id_from_next_data` parseia a linha `position=0` via regex. URL do CDN confirmada no HTML real da fixture: `https://image1.mobiauto.com.br/images/api/images/v1.0/<imageId>/transform/fl_progressive,f_webp,q_70,w_<width>` (função `_mobiauto_image_url`).
+- O enriquecimento por JSON roda **antes** do fallback caro de `_detail_enrich` (que já existia, limitado a 8 itens/run) — itens que o JSON já preenche não caem mais nesse fallback, reduzindo requisições HTTP extras.
+- **Confirmado com a fixture real (HTTP puro, sem nenhum acesso a browser, `_detail_enrich` mockado pra devolver `None`/`None`)**: 24 itens (bate com `__NEXT_DATA__.deals.results`), `price` 23/24 (96%, ≥ baseline 95%), `year` 24/24 (100%), `km` 24/24 (100%, ≥ baseline 91%), `title` 24/24 (100%, era 0% no baseline simplificado da Fase 0 — achado real desta fase). `thumbnail_url` só do JSON: 7/24 (~29%) sem nenhuma requisição extra; o restante ainda depende do fallback de `_detail_enrich` (limitado a 8/run) — não eliminado, só reduzido.
+
+## Testes
+
+- `tests/test_kavak_http_first.py` (novo): roda `scrape_kavak` com `ctx.force_browser=False` contra a fixture real da Fase 0, mockando `fetch_html_with_browser_fallback` e garantindo que `fetch_html_browser` (browser puro) **nunca** é chamado; confirma 9 itens com `price`/`year`/`km`/`location` 100% (baseline da Fase 0, via RSC).
+- `tests/test_kavak_rsc_enrichment.py` (existente): ajustado pra mockar `fetch_html_with_browser_fallback` em vez de `fetch_html_browser` (a função não existe mais como import direto em `kavak.py`).
+- `tests/test_mobiauto_next_data_title_thumbnail.py` (novo): cobre `_first_image_id_from_next_data`, `_mobiauto_image_url`, `_extract_next_data_deals` com título/thumbnail, e um cenário de ponta a ponta onde o DOM não tem nem título nem thumbnail utilizável e tudo vem do JSON (`_detail_enrich` não é chamado nesse caso).
+- `tests/test_mobiauto_http_first.py` (novo): mesmo padrão do Kavak — HTTP puro contra a fixture real, confirma `fetch_html_browser` nunca chamado, e os números acima.
+
+```
+pytest tests/test_kavak_http_first.py tests/test_kavak_rsc_enrichment.py \
+  tests/test_mobiauto_next_data_title_thumbnail.py tests/test_mobiauto_http_first.py \
+  tests/test_mobiauto_next_data_enrichment.py tests/test_mobiauto_pipeline.py \
+  tests/test_mobiauto_robots_compliance.py -q
+→ 16 passed
+```
+
+## Plano de rollout (nenhum comando `/admin` executado nesta fase)
+
+O framework de `dual_run`/`compare_only` existente (`app/sources/flags.py`) é pra comparar implementação **v1 vs v2** do scraper (parsers diferentes), não caminho HTTP-vs-browser dentro do v1 — não se aplica diretamente aqui. O mecanismo real disponível é o flag `force_browser` por source + monitoramento manual.
+
+**Ordem sugerida (uma source de cada vez, nunca as duas juntas):**
+
+1. Checar baseline atual: `/admin sources show kavak` (ou `mobiauto`) — anotar `ok_rate`, `field_coverage` e volume de `found` das últimas execuções browser-first.
+2. **Só pro Kavak**, antes do passo 3: configurar `http_min_delay_ms`/`http_max_delay_ms` ≥ 20000 no `extra` via comando `/admin sources set kavak extra {...}` (sintaxe exata a confirmar em `/admin sources` — não verificado nesta fase) — sem isso, não flipar (violaria `Crawl-delay: 20`).
+3. Flipar: `/admin sources force kavak false` (ou `mobiauto`).
+4. Observar por **≥24h**: `/admin health`, `/admin sources show kavak`, alertas de `field_coverage` (`operational_alerts_service.py`).
+5. **Critério de go/no-go:** `found` HTTP ≥95% do baseline browser **e** preenchimento de campos (`price`/`year`/`km`/`title`/`thumbnail`) ≥ baseline browser. Qualquer alerta de `field_coverage` ou aumento de `blocked`/`error` nas 24h = no-go.
+6. Se no-go: rollback imediato — `/admin sources force kavak true`.
+7. Se go: manter por mais alguns dias antes de considerar isso "padrão" (este PR não muda o default de seed; uma decisão de tornar `force_browser=false` o default exigiria outro PR revisando `app/sources/builtins.py`).
+
+## Riscos remanescentes (Fase 2)
+
+1. Kavak: rate limit/delay pra respeitar `Crawl-delay: 20` não implementado (achado documentado, não aplicado — mudaria comportamento).
+2. Mobiauto: `thumbnail_url` só do JSON cobre ~29% nesta fixture — o fallback de `_detail_enrich` continua necessário pro restante, então o flip não elimina 100% do custo de requisições extras, só reduz.
+3. Nenhuma validação real de 24h no Pi foi feita (fora de escopo — exigiria mudar produção, proibido nesta fase).
+
+## Próximo passo (Fase 2)
+
+Abrir PR desta branch (`fase2-kavak-mobiauto-http-first`) para revisão. Não iniciar Fase 3 (OLX) até esta PR ser revisada/mesclada.

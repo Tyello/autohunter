@@ -7,10 +7,10 @@ from urllib.parse import urljoin
 
 from lxml import html as lxml_html
 
+from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import parse_brl_price
 from app.scrapers.contract import finalize_listings
 from app.scrapers.utils import clean_text
-from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
 
@@ -107,18 +107,34 @@ def _extract_rsc_cars(html_text: str) -> dict[str, dict]:
 
 
 def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
-    """Kavak scraper (Playwright-first).
+    """Kavak scraper (HTTP-first com fallback pra browser).
 
-    Kavak é JS-heavy. A estratégia aqui é:
-    - renderizar a página de resultados com Playwright
-    - para cada card, extrair title/price/km/location/thumb do *card container*
-      (não só do texto do <a>, que costuma vir "colado" e incompleto).
+    Fase 2 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): trocado de
+    `fetch_html_browser` direto pra `fetch_html_with_browser_fallback` (mesmo
+    padrao do mobiauto, app/scrapers/mobiauto.py). Isso so muda o comportamento
+    de fato quando `source_configs.force_browser=false` pra kavak -- hoje o
+    default de seed continua `force_browser=True` (app/sources/builtins.py,
+    nao alterado nesta fase), entao em producao o fluxo real continua igual:
+    `fetch_html_with_browser_fallback` ve `ctx.force_browser=True` e pula
+    direto pro browser (app/scrapers/fetching.py:65-67). O ganho desta fase e
+    deixar o codigo pronto pra um flip futuro (dual_run + validacao antes,
+    ver relatorio), sem mudar nada em producao agora.
+
+    RSC (`_extract_rsc_cars`, ja existente) e a fonte de price/km/year/location
+    tanto no caminho HTTP quanto no browser -- o parser de DOM abaixo so
+    cobre title/thumbnail/url/external_id, que o RSC nao tem hoje.
     """
-    res = fetch_html_browser(search_url, ctx=ctx, timeout_ms=60000, wait_until="domcontentloaded")
-    html_text = res.html
+    html_text = fetch_html_with_browser_fallback(
+        search_url,
+        ctx=ctx,
+        timeout=25,
+        proxy=ctx.proxy_server,
+        wait_until="domcontentloaded",
+        timeout_ms=60000,
+    )
 
     doc = lxml_html.fromstring(html_text)
-    doc.make_links_absolute(res.final_url or search_url)
+    doc.make_links_absolute(search_url)
 
     PRICE_RE = re.compile(r"R\$\s*[\d\.]+(?:,\d{2})?", re.IGNORECASE)
     KM_RE = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{1,7})\s*km\b", re.IGNORECASE)
@@ -188,7 +204,7 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
             if u.startswith("//"):
                 u = "https:" + u
             if u.startswith("/"):
-                u = urljoin(res.final_url or search_url, u)
+                u = urljoin(search_url, u)
             sc = score(u)
             if sc > best_s:
                 best_s = sc
@@ -244,7 +260,7 @@ def scrape_kavak(search_url: str, ctx: ScrapeContext) -> list[dict]:
         href = a.get("href") or ""
         if not href:
             continue
-        url = urljoin(res.final_url or search_url, href)
+        url = urljoin(search_url, href)
         if "/br/venda/" not in url:
             continue
 
