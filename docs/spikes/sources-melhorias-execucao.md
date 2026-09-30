@@ -383,4 +383,54 @@ pytest tests/ -k "olx" -q
 
 ## Próximo passo (Fase 3)
 
-Abrir PR desta branch (`fase3-olx-cleanup`) para revisão. Não iniciar Fase 4 (GoGarage/TurboClass) até esta PR ser revisada/mesclada.
+PR #398 aberto, revisado e mesclado (autorização explícita do Marcelo). Deploy em produção confirmado (commit `913cae2`). **Validação pós-deploy:** a OLX estava bloqueada no momento do deploy (achado pré-existente, não relacionado a esta mudança — mesma degradação anti-bot já investigada antes). Sem conseguir uma run ao vivo bem-sucedida, validei o código já deployado rodando contra a fixture real diretamente no Pi: `gearbox`/`fuel_type` extraídos corretamente em 100% dos 50 itens.
+
+---
+
+# Fase 4 — GoGarage e TurboClass
+
+> Branch: `fase4-gogarage-turboclass` (a partir de `main`, com Fases 0-3 mescladas). Prompt: `docs/prompts/PROMPT-exec-melhorias-sources-v2.md`. Rede usada nesta fase: **0 requisições** (reaproveitando a fixture da Fase 0).
+
+## GoGarage — achado real ao rodar o parser pela primeira vez
+
+Rodar `scrape_gogarage` (real, nunca executado antes contra fixture — pendência da Fase 0) contra `tests/fixtures/source_regression/gogarage/2026-09-28_civic/listing.html` deu **12 itens para a busca "honda civic"**. Inspeção item a item: **11 dos 12 não têm nenhuma relação com "civic"** — Renault Clio, Honda City, Volkswagen Nivus, Chevrolet Spin, Cruze, Peugeot 207, Gol, Fiesta, Santana, Palio, Kadett. Confirma exatamente o achado ao vivo do prompt ("carrossel de boosts/destaques não relacionados à busca").
+
+**Causa raiz encontrada por inspeção do HTML:** a página tem duas seções distintas:
+- `<div class="gg-home-curated" id="ggHomeCuratedSections">` — carrossel fixo da home ("Mais recentes"/"Boosts"/"Peças do marketplace"), **igual pra qualquer busca**, sem filtro pelo termo.
+- `<div class="bc-resultsbar" id="resultados">` com `<div id="resultsMount"></div>` — a grade real de resultados, **vazia no HTML estático** desta fixture (`<div class="bc-kpi">Carregando os achados…</div>` confirma que é populada via JS/AJAX, `POST ?action=search`, já documentado na auditoria de 25/09).
+
+O parser atual (`_extract_from_anchors`, `app/scrapers/gogarage.py`) varria **qualquer** `<a href*="/ads/">` da página inteira, sem distinguir as duas seções — por isso pegava só o carrossel (sempre presente) e nunca a grade real (vazia sem JS nesta captura).
+
+**Mudança:** `_extract_from_anchors` e o re-lookup de card em `scrape_gogarage` agora excluem qualquer `<a>` descendente de `#ggHomeCuratedSections` (via XPath `not(ancestor::*[@id='ggHomeCuratedSections'])`). Escolhi excluir o container **conhecido-ruim** em vez de tentar mirar no container "bom" (que não pude validar com JS real, dado o orçamento de rede zero desta fase) — mais robusto a variações que eu não consigo confirmar sem rede.
+
+**Resultado nesta fixture, pós-fix: 0 itens** (não 12 com ruído). Zero é estritamente melhor que 11 itens fora do tema — satisfaz o gate ("nenhum item fora do termo buscado") mas **não** resolve captura real pra esta fixture específica, porque ela foi capturada sem JS (curl simples, Fase 0) e a grade real depende de JS/AJAX que nunca rodou.
+
+**Achado operacional importante (não uma regressão desta fase):** em produção, `gogarage` já roda com `default_force_browser=True` (`app/sources/builtins.py`, não alterado) — ou seja, o HTML que o scraper processa em produção **já é pós-JS** (renderizado via Playwright), diferente desta fixture (capturada via HTTP puro). Isso significa que, em produção, a grade real provavelmente **não** está vazia — só nesta fixture específica, que não reflete o caminho real de produção. Não consigo confirmar isso sem uma nova captura via browser (fora do orçamento de rede desta fase) — marcado como **NÃO VERIFICADO**.
+
+**Divergência de citação da Fase 0, reconciliada:** a auditoria de 25/09 (`scraping-efetividade-audit.md`) citava JSON-LD (`@id`) como fonte primária do GoGarage; a fixture de 28/09 só tinha JSON-LD `WebSite` (sem `ItemList`/`Product`). Explicação: `_extract_jsonld_itemlist` (código atual) já tenta JSON-LD `itemListElement` primeiro e cai pro fallback de âncoras quando não encontra — comportamento correto, só que nesta fixture específica não há `ItemList` (site pode ter deixado de emitir esse JSON-LD para resultados de busca, ou nunca emitiu e a citação de 25/09 se referia a outra página/contexto). Não é uma regressão de código, é o fallback funcionando como projetado.
+
+**`external_id` → `data-ad-id` (avaliação, ADR-0001, não aplicado):** os cards têm um atributo `data-ad-id` (ex.: `data-ad-id="1292"`) nos links, mais estável em tese que o slug da URL (`_guess_external_id`, que já usa o slug de `/ads/<slug>` — igual ao pedido do prompt, não migrei). Migrar exigiria comparar slug↔`data-ad-id` por um período pra garantir que a mesma ad sempre mapeia pro mesmo `data-ad-id` entre execuções (não verificado nesta fase) antes de considerar — risco de dedup duplo/perdido se algum `data-ad-id` mudar entre requests ou se o slug já usado hoje divergir do id numérico pra ads antigas. Não aplicado, conforme instrução do prompt.
+
+## TurboClass — `engine_tag`
+
+`app/scrapers/turboclass.py`: variável `spec` (MOTORIZAÇÃO do card — Turbo/Original/etc, já extraída e usada só para compor o `title`) agora também sai como campo extra `"engine_tag"`. Sem mudança de schema: não é chave reconhecida por `app/sources/normalize.py`, cai no catch-all `extras` (JSONB já existente em `CarListing`), confirmado via `normalize_ad` num teste dedicado.
+
+## Testes
+
+```
+pytest tests/ -k "gogarage or turboclass or normalize or contract" -q
+→ 122 passed
+```
+
+- `tests/test_gogarage_curated_carousel_exclusion.py` (novo): exclusão do carrossel confirmada com dado sintético (card destaque + card real lado a lado); gate da Fase 4 confirmado na fixture real (0 itens, não itens fora do tema).
+- `tests/test_turboclass_engine_tag.py` (novo): `engine_tag` presente em 100% da fixture real (27 itens); fluxo ponta a ponta via `normalize_ad` confirmando que cai em `extras` sem mudança de schema.
+
+## Riscos remanescentes (Fase 4)
+
+1. **GoGarage: captura real não validada.** A fixture da Fase 0 não reflete o caminho de produção (que já usa browser/JS). Não é possível confirmar, sem uma nova captura via navegador (fora do orçamento desta fase), se a grade real (`#resultsMount`) vem populada corretamente em produção após o fix. Recomendo validar isso o quanto antes após o deploy — ex.: forçar uma run real e conferir se `found`/`car_listings` para gogarage continuam saudáveis (não caem a zero) depois do fix.
+2. **GoGarage: `_extract_jsonld_itemlist` não recebeu a mesma exclusão.** Se o carrossel da home algum dia emitir seu próprio JSON-LD `ItemList` (não emite hoje, confirmado), essa função ficaria vulnerável ao mesmo problema. Não aplicado porque não há evidência atual de que isso acontece.
+3. **GoGarage: fallback regex (`except Exception` em `_extract_from_anchors`) não tem a exclusão** — só o caminho `lxml`/XPath tem. Risco baixo (fallback de último recurso, só ativa se o parse lxml falhar).
+
+## Próximo passo (Fase 4)
+
+Abrir PR desta branch (`fase4-gogarage-turboclass`) para revisão. Esta é a última fase do prompt v2 — depois desta, todas as 4 fases estarão completas.
