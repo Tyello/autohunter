@@ -169,6 +169,14 @@ class OlxItem:
     location: Optional[str] = None
     year: Optional[int] = None
     km: Optional[int] = None
+    # Fase 3 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): gearbox/fuel_type
+    # sao chaves ja reconhecidas por app/sources/normalize.py (`known`/`pick`),
+    # entao fluem pros campos estruturados transmission/fuel_type sem mudanca de
+    # schema. professional_ad nao tem campo dedicado -- cai no catch-all
+    # `extras` (JSONB, ja existente em CarListing) via normalize.py.
+    gearbox: Optional[str] = None
+    fuel_type: Optional[str] = None
+    professional_ad: Optional[bool] = None
 
 
 def _walk(obj: Any) -> Iterable[Any]:
@@ -443,6 +451,39 @@ def _year_km_from_properties(node: dict) -> tuple[Optional[int], Optional[int]]:
     return year, km
 
 
+def _gearbox_fuel_from_properties(node: dict) -> tuple[Optional[str], Optional[str]]:
+    """Mesma lista node['properties'] de `_year_km_from_properties`: cambio
+    vem em name="gearbox" (label "Câmbio", ex.: "Automático") e combustível em
+    name="fuel" (label "Combustível", ex.: "Híbrido") -- confirmado ao vivo em
+    28/09 (tests/fixtures/source_regression/olx/2026-09-28_civic/listing.html).
+
+    Fase 3 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): os valores sao
+    texto livre em pt-br (label do proprio OLX, nao um enum), entao guardamos
+    crus aqui -- a normalizacao pro enum canonico (ex. "automatic"/"hybrid")
+    ja acontece a jusante em app/sources/normalize.py
+    (normalize_transmission/normalize_fuel_type), reaproveitada por todas as
+    sources via o pipeline v1 (adapt_v1). Nao adicionamos nenhum campo novo
+    ao schema: "gearbox" e "fuel_type" ja sao chaves conhecidas por
+    normalize.py (`known`, linha ~344), que as mapeia pros campos
+    estruturados existentes `transmission`/`fuel_type`."""
+    props = node.get("properties")
+    if not isinstance(props, list):
+        return None, None
+
+    gearbox = None
+    fuel = None
+    for p in props:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name")
+        value = p.get("value")
+        if name == "gearbox" and value:
+            gearbox = str(value).strip() or None
+        elif name == "fuel" and value:
+            fuel = str(value).strip() or None
+    return gearbox, fuel
+
+
 def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
     """
     Os itens aparecem com chaves como:
@@ -486,6 +527,10 @@ def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
                     loc = uf
 
             year, km = _year_km_from_properties(node)
+            gearbox, fuel_type = _gearbox_fuel_from_properties(node)
+            professional_ad = node.get("professionalAd")
+            if not isinstance(professional_ad, bool):
+                professional_ad = None
 
             items.append(
                 OlxItem(
@@ -497,6 +542,9 @@ def _extract_items_from_next_data(next_data: Any) -> list[OlxItem]:
                     location=loc,
                     year=year,
                     km=km,
+                    gearbox=gearbox,
+                    fuel_type=fuel_type,
+                    professional_ad=professional_ad,
                 )
             )
 
@@ -527,6 +575,12 @@ def _items_to_dicts(items: list[OlxItem]) -> list[dict]:
                 "location": it.location,
                 "year": it.year if it.year is not None else extract_year_from_text(it.title),
                 "km": it.km if it.km is not None else extract_mileage_km_from_text(it.title),
+                # Fase 3 (prompt v2): gearbox/fuel_type sao chaves reconhecidas por
+                # app/sources/normalize.py (mapeiam pra transmission/fuel_type sem
+                # mudanca de schema); professionalAd cai no catch-all `extras`.
+                "gearbox": it.gearbox,
+                "fuel_type": it.fuel_type,
+                "professionalAd": it.professional_ad,
             }
         )
     return finalize_listings("olx", out)

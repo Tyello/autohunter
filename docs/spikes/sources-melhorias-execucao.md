@@ -336,4 +336,51 @@ O framework de `dual_run`/`compare_only` existente (`app/sources/flags.py`) é p
 
 ## Próximo passo (Fase 2)
 
-Abrir PR desta branch (`fase2-kavak-mobiauto-http-first`) para revisão. Não iniciar Fase 3 (OLX) até esta PR ser revisada/mesclada.
+PR #397 aberto, revisado e mesclado (autorização explícita do Marcelo). Deploy em produção confirmado (commit `d31f9fc`). **Achado na validação pós-deploy:** `mobiauto` já estava rodando com `force_browser=false` em produção (decisão anterior a esta fase, não relacionada ao trabalho aqui) — ou seja, o enriquecimento de `title`/`thumbnail` desta fase já tem efeito real imediato, não é só preparação dormente. Confirmei com uma run forçada real (`status=success, found=73`) e inspeção de `car_listings`: URLs de thumbnail novas (`image1.mobiauto.com.br/...`) já sendo geradas pelo código novo. Kavak continua `force_browser=true` (só preparação, sem efeito ainda). Suíte completa (`pytest tests/ -q`) rodou 100% limpa antes do merge desta fase.
+
+---
+
+# Fase 3 — OLX: limpeza
+
+> Branch: `fase3-olx-cleanup` (a partir de `main`, com Fases 0-2 mescladas). Prompt: `docs/prompts/PROMPT-exec-melhorias-sources-v2.md`. Rede usada nesta fase: **0 requisições** (reaproveitando a fixture da Fase 0).
+
+## 1. Duplicatas por `listId`
+
+**Achado:** não consegui reproduzir o cenário "cards patrocinados/destaque repetem o mesmo carro" na fixture real da Fase 0 (`tests/fixtures/source_regression/olx/2026-09-28_civic/listing.html`). Confirmado via inspeção direta:
+- Nenhuma ocorrência de `fixedOnTop`/`professionalAd`/`lastBumpAgeSecs` no HTML bruto desta fixture (grep vazio).
+- Contagem de `listId` bruta (antes de qualquer dedup, direto no `_walk` dos 5 chunks RSC) já é 100% única: 50 ocorrências, 50 `listId` distintos.
+
+Ou seja: o achado ao vivo de 28/09 (provavelmente numa busca/momento diferente, com itens patrocinados presentes) não está representado nesta fixture específica. **O código já tinha um dedup por `external_id`** no fim de `_extract_items_from_next_data` (`app/scrapers/olx.py`, "first occurrence wins" — mantém o primeiro nó encontrado, não descarta o anúncio) — isso já cobre corretamente o cenário descrito, só não estava coberto por nenhum teste explícito. Adicionei `tests/test_olx_sponsored_dedup_and_extras.py::test_sponsored_duplicate_listid_kept_once_not_discarded` com dados sintéticos (dois nós com o mesmo `listId`, um marcado `fixedOnTop=True`) confirmando: exatamente 1 item no resultado final (não 0, não 2), com os dados do primeiro nó encontrado preservados, e um anúncio distinto ao lado não é afetado. Nenhuma mudança de código nesta parte — só teste de regressão explícito.
+
+## 2. `gearbox`/`fuel`/`professionalAd` como campos extras
+
+Confirmado na fixture real: `properties` de cada anúncio inclui `name="gearbox"` (ex.: `"Automático"`) e `name="fuel"` (ex.: `"Híbrido"`), texto livre em pt-BR do próprio OLX — mesma lista que já fornecia `regdate`/`mileage`.
+
+**Confirmado que `finalize_listings` aceita sem mudança de schema** (`app/scrapers/contract.py` → `app/sources/normalize.py`, pipeline v1 compartilhado por todas as sources):
+- `"gearbox"` e `"fuel_type"` **já são chaves reconhecidas** pelo `known`/`pick()` de `normalize.py` (linha ~344) — mapeiam automaticamente para os campos estruturados já existentes `transmission`/`fuel_type` (colunas já usadas por outras sources). Usei a chave `"fuel_type"` (não `"fuel"`, que é o nome bruto do OLX) especificamente pra bater com o `pick("fuel_type")` já existente, sem precisar tocar em `normalize.py` (fora do escopo de arquivo desta fase, que é só `app/scrapers/olx.py`).
+- `"professionalAd"` não tem campo dedicado — cai no catch-all `extras` (JSONB já existente em `CarListing`, `app/repositories/car_listings_repo.py:194`).
+- A normalização pt-BR→enum canônico (`"Automático"`→`"automatic"`, `"Híbrido"`→`"hybrid"`) já existe e funciona (`normalize_transmission`/`normalize_fuel_type`, testado com os valores reais da fixture).
+
+**Mudança:** `app/scrapers/olx.py` — `OlxItem` ganhou `gearbox`/`fuel_type`/`professional_ad` (opcionais, default `None`); nova função `_gearbox_fuel_from_properties` (mesmo padrão de `_year_km_from_properties`); `_extract_items_from_next_data` popula os novos campos; `_items_to_dicts` os inclui no dict final.
+
+## Testes
+
+`tests/test_olx_sponsored_dedup_and_extras.py` (novo, 4 casos):
+- dedup de `listId` duplicado (dados sintéticos, não reproduzível na fixture real);
+- `gearbox`/`fuel_type`/`professionalAd` extraídos corretamente pro dict final;
+- fluxo ponta a ponta por `normalize_ad` confirmando que os valores pt-BR crus viram os enums canônicos existentes, sem mudança de schema;
+- gate da Fase 3 na fixture real: zero `listId` duplicado (50 únicos de 50), `year`/`km` mantidos em 100%.
+
+```
+pytest tests/ -k "olx" -q
+→ 41 passed
+```
+
+## Riscos remanescentes (Fase 3)
+
+1. O cenário de duplicata por `listId` de itens patrocinados não foi validado contra dado real (só sintético) — se a Fase 0 recapturar uma fixture com `fixedOnTop`/`professionalAd` presentes no futuro, vale rodar o teste de novo contra dado real.
+2. Nenhuma mudança de comportamento em produção — os novos campos só aparecerão em `car_listings.transmission`/`fuel_type`/`extras` depois do deploy.
+
+## Próximo passo (Fase 3)
+
+Abrir PR desta branch (`fase3-olx-cleanup`) para revisão. Não iniciar Fase 4 (GoGarage/TurboClass) até esta PR ser revisada/mesclada.
