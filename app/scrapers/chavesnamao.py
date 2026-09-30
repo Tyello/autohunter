@@ -220,12 +220,15 @@ def _parse_from_itemlist(products: list[dict], soup: BeautifulSoup, limit: int) 
         if not url:
             continue
 
-        # Mesma regra de external_id do caminho DOM (nao mudar -- ADR-0001):
-        # primeiro segmento numerico com 6+ digitos na URL. Isso as vezes
-        # casa o preco embutido no slug antes do "id-<N>" real quando o preco
-        # tem 6+ digitos -- bug preexistente, fora de escopo desta fase (ver
-        # docs/spikes/sources-melhorias-execucao.md, Fase 1).
-        m = re.search(r"(\d{6,})", url)
+        # Ancorado no segmento "id-<N>" da URL (mesmo padrão de
+        # app/scrapers/contract.py:_RE_CHAVES, já usado como fallback de
+        # external_id pra esta source). Corrige o bug documentado na Fase 1
+        # (docs/spikes/sources-melhorias-execucao.md): a regra antiga
+        # ("primeiro número com 6+ dígitos na URL") às vezes casava o preço
+        # embutido no slug (ex. ".../RS205490/id-8870545/") em vez do id real,
+        # quando o preço tinha 6+ dígitos -- corrigido a pedido do Marcelo,
+        # ciente de que external_id muda pra esses itens (ADR-0001).
+        m = re.search(r"/id-(\d+)", url)
         external_id = m.group(1) if m else url
 
         name = (p.get("name") or "").strip() or None
@@ -293,8 +296,12 @@ def _parse_from_dom(soup: BeautifulSoup, limit: int) -> list[dict]:
         if url.startswith("/"):
             url = "https://www.chavesnamao.com.br" + url
 
-        # external_id: tenta extrair último segmento numérico; senão usa a URL
-        m = re.search(r"(\d{6,})", url)
+        # Ancorado no segmento "id-<N>" da URL (mesmo padrão de
+        # app/scrapers/contract.py:_RE_CHAVES). Corrige o bug documentado na
+        # Fase 1 (docs/spikes/sources-melhorias-execucao.md): a regra antiga
+        # ("primeiro número com 6+ dígitos na URL") às vezes casava o preço
+        # embutido no slug em vez do id real, quando o preço tinha 6+ dígitos.
+        m = re.search(r"/id-(\d+)", url)
         external_id = m.group(1) if m else url
 
 

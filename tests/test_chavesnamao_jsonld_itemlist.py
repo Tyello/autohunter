@@ -1,4 +1,4 @@
-"""Fase 1 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): Chaves na Mao
+r"""Fase 1 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): Chaves na Mao
 capturava so 5 de 15 anuncios por pagina de busca porque so olhava para
 <a href> + regex de texto no DOM, ignorando o JSON-LD `ItemList` que a propria
 pagina ja expoe com todos os 15 (confirmado no fixture ao vivo de 28/09,
@@ -7,11 +7,15 @@ tests/fixtures/source_regression/chavesnamao/2026-09-28_civic/listing.html).
 Esta suite cobre: (1) ItemList como fonte primaria quando presente, com km
 casado pelo texto do card correspondente (o JSON-LD nao tem km); (2) fallback
 para o caminho DOM antigo quando nao ha ItemList; (3) o fixture real gerando
-15 itens, com os `external_id` dos 5 que o parser antigo ja capturava
-permanecendo IDENTICOS (ADR-0001) -- inclusive um bug preexistente onde a
-regex de external_id (r"(\d{6,})" sobre a url, chavesnamao.py) as vezes
-casa o PRECO embutido no slug da URL antes do "id-<N>" real, quando o preco
-tem 6+ digitos. Nao e corrigido nesta fase (fora do escopo do prompt v2)."""
+os 15 itens, todos com external_id unico e correto.
+
+Nota historica: a Fase 1 original preservou de proposito um bug preexistente
+de colisao de external_id (regex "primeiro numero com 6+ digitos na URL"
+casando o preco em vez do "id-<N>" real, quando o preco tinha 6+ digitos),
+por instrucao explicita do prompt v2 ("external_id identico ao atual"). O
+Marcelo pediu a correcao depois (ver commit que ancora a regex em
+"/id-(\d+)", mesmo padrao de app/scrapers/contract.py:_RE_CHAVES) -- os
+testes abaixo refletem o comportamento ja corrigido."""
 
 from __future__ import annotations
 
@@ -164,8 +168,16 @@ def test_falls_back_to_dom_when_no_itemlist(monkeypatch):
 
 
 def test_real_fixture_yields_15_items_with_price_and_year_full_coverage():
-    """Fixture ao vivo de 28/09 (docs/spikes/sources-melhorias-execucao.md secao 3/4):
-    15 Products no ItemList, parser antigo so capturava 5 (secao 4 do relatorio)."""
+    r"""Fixture ao vivo de 28/09 (docs/spikes/sources-melhorias-execucao.md secao 3/4):
+    15 Products no ItemList, parser antigo so capturava 5 (secao 4 do relatorio).
+
+    Ate a correcao do bug de colisao external_id (pedida explicitamente pelo
+    Marcelo apos a Fase 1), esse teste esperava 14 itens unicos -- 2 dos 15
+    Products colidiam no mesmo external_id bugado (o preco "105900" batendo
+    antes do "id-<N>" real na URL). Com a regex ancorada em "/id-(\d+)"
+    (app/scrapers/chavesnamao.py, mesmo padrao de
+    app/scrapers/contract.py:_RE_CHAVES), os 15 saem com external_id correto
+    e unico -- nenhuma colisao."""
     if not FIXTURE.exists():
         import pytest
 
@@ -184,16 +196,20 @@ def test_real_fixture_yields_15_items_with_price_and_year_full_coverage():
     finally:
         chavesnamao.fetch_html = orig_fetch_html
 
-    # A pagina tem 15 Products no ItemList, mas 2 deles (id-8353761 e
-    # id-8581412) tem o MESMO preco de 6 digitos (105900), entao colidem no
-    # mesmo external_id preexistente-bugado (ver docstring do modulo) e o
-    # dedupe por (source, external_id) em scrape_chavesnamao derruba um dos
-    # dois -- 14 itens unicos, nao 15. Isso e uma consequencia visivel do bug
-    # de colisao preco/id ja existente no parser DOM, so que so aparece agora
-    # porque estamos capturando 15 itens em vez de 5 (mais chance de colisao
-    # aleatoria de preco). Documentado no relatorio da Fase 1; nao corrigido
-    # aqui (fora do escopo do prompt v2 para esta fase).
-    assert len(items) == 14
+    assert len(items) == 15
+
+    got_ids = [it["external_id"] for it in items]
+    assert len(got_ids) == len(set(got_ids)), "external_id nao pode colidir entre anuncios distintos"
+
+    # IDs reais (segmento /id-<N> da URL), confirmados um a um contra o
+    # ItemList da fixture -- inclui os dois que antes colidiam no preco
+    # "105900" (8353761 e 8581412), agora distintos e corretos.
+    expected_ids = {
+        "8353761", "8870545", "9072157", "8581412", "8663724", "8930167",
+        "9084945", "8660397", "9081898", "9079257", "9070208", "8917437",
+        "8767654", "8715434", "8932030",
+    }
+    assert set(got_ids) == expected_ids
 
     with_year = sum(1 for it in items if it.get("year") is not None)
     with_price = sum(1 for it in items if it.get("price") is not None)
@@ -202,11 +218,3 @@ def test_real_fixture_yields_15_items_with_price_and_year_full_coverage():
     assert with_year == len(items)
     assert with_price == len(items)
     assert with_km >= len(items) * 0.9  # regra do prompt: km em >=90%
-
-    # Regressao ADR-0001: os 5 external_id que o parser DOM-only ja capturava
-    # nesta mesma fixture (validado manualmente, ver relatorio da Fase 1)
-    # continuam presentes e identicos -- inclusive o bug preexistente de
-    # colisao preco/id quando o preco tem 6+ digitos (nao corrigido aqui).
-    previously_captured_ids = {"205490", "9084945", "8660397", "136900", "194390"}
-    got_ids = {it["external_id"] for it in items}
-    assert previously_captured_ids.issubset(got_ids)
