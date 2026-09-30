@@ -214,9 +214,21 @@ def _base_cooldown_minutes_for(src: str, cfg: SourceConfig) -> int:
     name = (src or "").lower()
     if name == "mercadolivre":
         return max(int(cfg.cooldown_minutes or 0), 240)
+    if name == "olx":
+        return max(int(cfg.cooldown_minutes or 0), 1440)
     if name == "webmotors":
         return max(int(cfg.cooldown_minutes or 0), 15)
     return max(int(cfg.cooldown_minutes or 0), 1)
+
+
+def _max_backoff_minutes_for(src: str) -> Optional[int]:
+    """Per-source backoff ceiling (None = global `source_backoff_max_minutes`)."""
+    name = (src or "").lower()
+    if name == "mercadolivre":
+        return 10080
+    if name == "olx":
+        return 1440
+    return None
 
 
 def _get_state(db: Session, source: str) -> Optional[SourceState]:
@@ -730,7 +742,7 @@ def _run_source_for_all_wishlists_locked(
                 base_cooldown_minutes=_base_cooldown_minutes_for(src, cfg),
                 http_status=res.get("status_code"),
                 url=res.get("url") or url,
-                max_backoff_minutes=(10080 if (src or '').lower()=='mercadolivre' else None),
+                max_backoff_minutes=_max_backoff_minutes_for(src),
             )
             payload = build_run_payload(
                 run_summary=run_summary_err,
