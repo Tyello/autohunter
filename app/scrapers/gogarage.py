@@ -265,13 +265,31 @@ def _extract_jsonld_itemlist(html: str) -> List[Tuple[str, Optional[str]]]:
 
 
 def _extract_from_anchors(html: str) -> List[str]:
-    """Fallback: varre âncoras /ads/ no HTML."""
+    """Fallback: varre âncoras /ads/ no HTML.
+
+    Fase 4 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): exclui
+    explicitamente qualquer <a> descendente de #ggHomeCuratedSections --
+    confirmado ao vivo em 28/09 (tests/fixtures/source_regression/gogarage/
+    2026-09-28_civic/listing.html) que esse container envolve as seções
+    "Mais recentes"/"Boosts"/"Peças do marketplace" da home, que aparecem
+    ANTES da grade real de resultados (#resultados/#resultsMount) e não têm
+    nenhuma relação com o termo buscado -- rodando o parser real contra essa
+    fixture sem esse filtro, 11 dos 12 "resultados" eram carros aleatórios
+    do carrossel de destaque (Clio, Honda City, Nivus, Spin, Cruze, Peugeot
+    207, Gol, Fiesta, Santana, Palio, Kadett), não Civics. A grade real
+    (#resultsMount) é populada via JS/AJAX (POST ?action=search) e por isso
+    vem vazia no HTML estático desta fixture (capturada sem navegador) --
+    ver relatório, seção Fase 4, para a implicação disso em produção (onde
+    force_browser já é True e o HTML processado é pós-JS)."""
     try:
         from lxml import html as lhtml
 
         doc = lhtml.fromstring(html)
         urls = []
-        for a in doc.xpath("//a[contains(@href,'/ads/') and @href]"):
+        for a in doc.xpath(
+            "//a[contains(@href,'/ads/') and @href"
+            " and not(ancestor::*[@id='ggHomeCuratedSections'])]"
+        ):
             href = a.get("href")
             if not href:
                 continue
@@ -696,7 +714,13 @@ def scrape_gogarage(search_url: str, ctx: ScrapeContext) -> list[dict]:
         if doc is not None:
             # tenta achar a âncora exata e seu "card" pai
             try:
-                a_nodes = doc.xpath(f"//a[contains(@href, '{urlparse_safe(url)}')]")
+                # Mesma exclusão de _extract_from_anchors: se a mesma URL aparecer
+                # também no carrossel de destaques da home, não queremos reancorar
+                # no card errado (destaque em vez do card real da grade de resultados).
+                a_nodes = doc.xpath(
+                    f"//a[contains(@href, '{urlparse_safe(url)}')"
+                    " and not(ancestor::*[@id='ggHomeCuratedSections'])]"
+                )
             except Exception:
                 a_nodes = []
             if a_nodes:

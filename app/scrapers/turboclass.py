@@ -277,6 +277,13 @@ def scrape_turboclass(search_url: str, ctx: ScrapeContext | None = None, limit: 
                 "year": year,
                 "make": make or None,
                 "model": model or None,
+                # Fase 4 (docs/prompts/PROMPT-exec-melhorias-sources-v2.md): expõe a
+                # MOTORIZAÇÃO do card (Turbo/Original/etc, variável `spec` acima) como
+                # campo extra -- antes só era usada pra compor o título. Sem mudança de
+                # schema: "engine_tag" não é uma chave reconhecida por
+                # app/sources/normalize.py, então cai no catch-all `extras` (JSONB já
+                # existente em CarListing).
+                "engine_tag": spec or None,
         }
 
         out.append(payload)
