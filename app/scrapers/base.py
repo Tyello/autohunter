@@ -4,7 +4,6 @@ import random
 import time
 import threading
 from typing import Optional
-from urllib.parse import urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -41,51 +40,6 @@ _SESSION_TTL_SECONDS = 6 * 60 * 60  # 6h
 _sessions: dict[str, requests.Session] = {}
 _sessions_created_at: dict[str, float] = {}
 _sessions_lock = threading.Lock()
-
-# OLX passou a responder 403 (Cloudflare "Attention Required") ao fingerprint TLS
-# do Python `requests`, mesmo com o IP que recebe 200 via Chrome/curl_cffi.
-# Para esses hosts usamos curl_cffi com impersonate; se a lib faltar, cai em requests.
-_CFFI_IMPERSONATE = "chrome"
-_CFFI_HOSTS = ("olx.com.br",)
-_CFFI_OWN_HEADER_PREFIXES = ("user-agent", "sec-", "accept", "upgrade-insecure-requests", "cache-control", "pragma")
-
-_cffi_sessions: dict[str, object] = {}
-_cffi_sessions_created_at: dict[str, float] = {}
-
-
-def _use_cffi_for(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    return any(host == h or host.endswith("." + h) for h in _CFFI_HOSTS)
-
-
-def _new_cffi_session():
-    try:
-        from curl_cffi import requests as cffi_requests
-    except Exception:
-        return None
-    return cffi_requests.Session()
-
-
-def _get_cffi_session(proxy: Optional[str], session_key: Optional[str] = None):
-    sk = (session_key or "__global__").strip().lower() or "__global__"
-    key = f"{sk}::{proxy or '__default__'}"
-    now = time.monotonic()
-    with _sessions_lock:
-        sess = _cffi_sessions.get(key)
-        created_at = _cffi_sessions_created_at.get(key)
-        expired = sess is not None and created_at is not None and (now - created_at) >= _SESSION_TTL_SECONDS
-        if sess is None or expired:
-            if expired and sess is not None:
-                try:
-                    sess.close()
-                except Exception:
-                    pass
-            sess = _new_cffi_session()
-            if sess is None:
-                return None
-            _cffi_sessions[key] = sess
-            _cffi_sessions_created_at[key] = now
-        return sess
 
 
 def _get_session(proxy: Optional[str], session_key: Optional[str] = None) -> requests.Session:
@@ -352,6 +306,9 @@ def fetch_response(
         time.sleep(delay)
 
     proxy = _resolve_proxy(proxy, ctx)
+    sess = _get_session(proxy, _resolve_session_key(ctx))
+    _ensure_session_fingerprint(sess)
+    _apply_hybrid_cookies(sess, ctx)
 
     base_headers = {}
     if referer:
@@ -365,31 +322,13 @@ def fetch_response(
 
     req_timeout = _resolve_timeout(timeout, ctx)
 
-    cffi_sess = _get_cffi_session(proxy, _resolve_session_key(ctx)) if _use_cffi_for(url) else None
-    if cffi_sess is not None:
-        # UA/Accept/Sec-* vem do impersonate; headers manuais divergentes do TLS entregam o bot.
-        cffi_headers = {
-            k: v for k, v in base_headers.items() if not k.lower().startswith(_CFFI_OWN_HEADER_PREFIXES)
-        }
-        resp = cffi_sess.get(
-            url,
-            headers=cffi_headers,
-            timeout=req_timeout,
-            allow_redirects=allow_redirects,
-            proxies=proxies,
-            impersonate=_CFFI_IMPERSONATE,
-        )
-    else:
-        sess = _get_session(proxy, _resolve_session_key(ctx))
-        _ensure_session_fingerprint(sess)
-        _apply_hybrid_cookies(sess, ctx)
-        resp = sess.get(
-            url,
-            headers=base_headers,
-            timeout=req_timeout,
-            allow_redirects=allow_redirects,
-            proxies=proxies,
-        )
+    resp = sess.get(
+        url,
+        headers=base_headers,
+        timeout=req_timeout,
+        allow_redirects=allow_redirects,
+        proxies=proxies,
+    )
 
     # Bloqueio explícito
     if resp.status_code in (403, 429):

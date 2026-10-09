@@ -620,6 +620,9 @@ def _storage_state_path_for_ctx(ctx: ScrapeContext, source: str) -> str:
     return str(base / f"storage_{safe_source}__{safe_proxy}.json")
 
 
+_CF_CHALLENGE_COOKIES = frozenset({"cf_clearance", "__cf_bm", "_cfuvid"})
+
+
 def _load_playwright_cookies_for_olx(ctx: ScrapeContext) -> dict[str, str]:
     """Reaproveita cookies persistidos pelo PlaywrightPool (storage_state)."""
     src = (ctx.source or "olx").lower().strip() or "olx"
@@ -636,6 +639,10 @@ def _load_playwright_cookies_for_olx(ctx: ScrapeContext) -> dict[str, str]:
             value = c.get("value")
             domain = (c.get("domain") or "")
             if not name or value is None:
+                continue
+            # cookies de challenge do Cloudflare sao amarrados ao fingerprint do browser;
+            # reenviados com o TLS do curl_cffi viram 403.
+            if str(name) in _CF_CHALLENGE_COOKIES:
                 continue
             # mantém cookies de olx (ou domínios “largos”)
             if "olx.com.br" in domain or domain.endswith(".olx.com.br") or domain == "":
