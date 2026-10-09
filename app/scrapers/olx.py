@@ -774,6 +774,8 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
         items = _parse_olx_listing_items(html)
         if not items:
+            if _is_empty_results_page(html):
+                return []
             raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
         return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
@@ -805,8 +807,17 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     items = _parse_olx_listing_items(html)
     if not items:
+        if _is_empty_results_page(html):
+            return []
         raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
     return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
+
+
+def _is_empty_results_page(html: str) -> bool:
+    """Pagina 200 legitima de busca sem resultados (nao e bloqueio)."""
+    if not html or _looks_like_cf_or_bot(html):
+        return False
+    return "Nenhum anúncio foi encontrado" in html or '"totalOfAds":0' in html
 
 
 def _parse_olx_listing_items(html: str) -> list[OlxItem]:
