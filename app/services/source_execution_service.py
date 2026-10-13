@@ -215,7 +215,7 @@ def _base_cooldown_minutes_for(src: str, cfg: SourceConfig) -> int:
     if name == "mercadolivre":
         return max(int(cfg.cooldown_minutes or 0), 240)
     if name == "olx":
-        return max(int(cfg.cooldown_minutes or 0), 1440)
+        return max(int(cfg.cooldown_minutes or 0), 120)
     if name == "webmotors":
         return max(int(cfg.cooldown_minutes or 0), 15)
     return max(int(cfg.cooldown_minutes or 0), 1)
