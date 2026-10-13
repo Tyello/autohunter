@@ -774,9 +774,7 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
         items = _parse_olx_listing_items(html)
         if not items:
-            if _is_empty_results_page(html):
-                return []
-            raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
+            return _no_items_result(html, search_url)
         return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
 
     # 2) Preferred: HTTP hybrid
@@ -807,10 +805,42 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
 
     items = _parse_olx_listing_items(html)
     if not items:
-        if _is_empty_results_page(html):
-            return []
-        raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
+        return _no_items_result(html, search_url)
     return _items_to_dicts(_enrich_missing_olx_thumbnails(items, ctx))
+
+
+# Paginas de busca reais da OLX pesam centenas de KB; um desafio/interstitial e
+# pequeno. Acima disso, sem sinal de bot, "sem itens" e falha de parse/resposta
+# parcial e nao justifica derrubar a source inteira com backoff.
+_OLX_FULL_PAGE_MIN_CHARS = 100_000
+_OLX_UNPARSEABLE_SNIPPET_CHARS = 2000
+
+
+def _no_items_result(html: str, search_url: str) -> list[dict]:
+    """Pagina 200 sem itens: [] se vazia/parse falho; FetchBlocked se suspeita de bloqueio."""
+    if _is_empty_results_page(html):
+        return []
+    if len(html or "") >= _OLX_FULL_PAGE_MIN_CHARS and not _looks_like_cf_or_bot(html):
+        _dump_unparseable_olx_html(html, search_url)
+        logger.warning(
+            "olx: pagina grande (%s chars) sem itens parseaveis e sem sinal de bot; tratando como vazia url=%s",
+            len(html), search_url,
+        )
+        return []
+    raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
+
+
+def _dump_unparseable_olx_html(html: str, search_url: str) -> None:
+    """Guarda um trecho do HTML para diagnostico posterior (best effort)."""
+    try:
+        path = health_dir() / "olx_unparseable_last.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"<!-- url={search_url} len={len(html)} -->\n{html[:_OLX_UNPARSEABLE_SNIPPET_CHARS]}",
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.debug("olx: falha ao salvar trecho do HTML sem itens", exc_info=True)
 
 
 def _is_empty_results_page(html: str) -> bool:

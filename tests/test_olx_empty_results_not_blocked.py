@@ -48,3 +48,33 @@ def test_challenge_page_is_never_treated_as_empty(monkeypatch):
     # _fetch_http_hybrid ja levantaria FetchBlocked p/ desafio; aqui garantimos que o
     # marcador de vazio sozinho nao mascara uma pagina de bot que escapou.
     assert olx_mod._is_empty_results_page(CHALLENGE_HTML) is False
+
+
+def test_large_page_without_items_or_bot_signal_is_empty_and_dumped(monkeypatch, tmp_path):
+    monkeypatch.setattr(olx_mod, "health_dir", lambda: tmp_path)
+    big = "<html><body>" + ("<div>conteudo sem anuncios parseaveis</div>" * 5000) + "</body></html>"
+    assert len(big) >= olx_mod._OLX_FULL_PAGE_MIN_CHARS
+    assert _run(monkeypatch, big) == []
+    dumped = (tmp_path / "olx_unparseable_last.html").read_text(encoding="utf-8")
+    assert dumped.startswith("<!-- url=https://www.olx.com.br/")
+    assert len(dumped) < 3000
+
+
+def test_large_challenge_page_is_still_blocked(monkeypatch, tmp_path):
+    monkeypatch.setattr(olx_mod, "health_dir", lambda: tmp_path)
+    big = "<html><title>Just a moment...</title>" + ("<div>x</div>" * 20000) + "</html>"
+    # desafio e barrado antes (fetch hybrid); aqui simulamos o parse caindo no ramo sem itens
+    with pytest.raises(FetchBlocked):
+        olx_mod._no_items_result(big, "https://www.olx.com.br/x")
+    assert not (tmp_path / "olx_unparseable_last.html").exists()
+
+
+def test_olx_first_block_backoff_is_120_minutes():
+    from app.services.source_execution_service import _base_cooldown_minutes_for, _max_backoff_minutes_for
+    from app.services.source_backoff_service import _compute_backoff_minutes
+
+    cfg = SimpleNamespace(cooldown_minutes=0)
+    base = _base_cooldown_minutes_for("olx", cfg)
+    cap = _max_backoff_minutes_for("olx")
+    assert base == 120
+    assert [_compute_backoff_minutes(base, n, cap) for n in (1, 2, 3, 4, 5)] == [120, 240, 480, 960, 1440]
