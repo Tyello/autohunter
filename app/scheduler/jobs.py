@@ -195,8 +195,10 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
-        emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
-        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
+        block_reason = getattr(e, "reason", None)
+        block_html_length = getattr(e, "html_length", None)
+        emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url, "reason": block_reason, "html_length": block_html_length}, tags=["blocked"])
+        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url, "reason": block_reason, "html_length": block_html_length}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
         return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "error": str(e), "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__
@@ -484,8 +486,10 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     except FetchBlocked as e:
         status_code = getattr(e, "status_code", None)
         url = getattr(e, "url", search_url)
-        emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url}, tags=["blocked"])
-        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
+        block_reason = getattr(e, "reason", None)
+        block_html_length = getattr(e, "html_length", None)
+        emit_event(db, level="warn", event_type="source_blocked", source=ctx.source, message="source_blocked", evidence={"status_code": status_code, "url": url, "reason": block_reason, "html_length": block_html_length}, tags=["blocked"])
+        log(db, "warn", job_name, "source_blocked", {"status_code": status_code, "url": url, "reason": block_reason, "html_length": block_html_length}, source=ctx.source, event_type="source_blocked", tags=["blocked"])
         return {"ok": False, "reason": "blocked", "status_code": status_code, "url": url, "error": str(e), "audit_artifacts": _capture_if_needed(ctx=ctx, found=None, listings=[], reason="blocked", stage="scrape_exception"), **_runtime_fields(), **_ctx_fetch_diag(ctx)}
     except Exception as e:
         exc_type = type(e).__name__

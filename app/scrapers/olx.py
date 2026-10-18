@@ -694,7 +694,8 @@ def _fetch_http_hybrid(search_url: str, ctx: ScrapeContext, *, min_delay_ms: int
             raise FetchBlocked(status, search_url, reason="http_status")
 
         if status == 200 and _looks_like_cf_or_bot(text):
-            raise FetchBlocked(200, search_url, reason="bot_challenge")
+            _dump_unparseable_olx_html(text, search_url)
+            raise FetchBlocked(200, search_url, reason="bot_challenge", html_length=len(text))
 
         if status >= 400:
             raise FetchBlocked(status, search_url, reason="http_status")
@@ -827,7 +828,8 @@ def _no_items_result(html: str, search_url: str) -> list[dict]:
             len(html), search_url,
         )
         return []
-    raise FetchBlocked(200, search_url, reason="empty_or_unparseable")
+    _dump_unparseable_olx_html(html, search_url)
+    raise FetchBlocked(200, search_url, reason="empty_or_unparseable", html_length=len(html or ""))
 
 
 def _dump_unparseable_olx_html(html: str, search_url: str) -> None:

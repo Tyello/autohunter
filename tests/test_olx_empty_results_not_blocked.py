@@ -39,9 +39,14 @@ def test_empty_results_page_returns_empty_list(monkeypatch):
     assert _run(monkeypatch, EMPTY_HTML) == []
 
 
-def test_unknown_page_without_items_is_still_blocked(monkeypatch):
-    with pytest.raises(FetchBlocked):
+def test_unknown_page_without_items_is_still_blocked(monkeypatch, tmp_path):
+    monkeypatch.setattr(olx_mod, "health_dir", lambda: tmp_path)
+    with pytest.raises(FetchBlocked) as exc:
         _run(monkeypatch, UNKNOWN_HTML)
+    # diagnostico: motivo e tamanho vao no evento source_blocked; trecho do HTML e guardado
+    assert exc.value.reason == "empty_or_unparseable"
+    assert exc.value.html_length == len(UNKNOWN_HTML)
+    assert "algo inesperado" in (tmp_path / "olx_unparseable_last.html").read_text(encoding="utf-8")
 
 
 def test_challenge_page_is_never_treated_as_empty(monkeypatch):
@@ -64,9 +69,11 @@ def test_large_challenge_page_is_still_blocked(monkeypatch, tmp_path):
     monkeypatch.setattr(olx_mod, "health_dir", lambda: tmp_path)
     big = "<html><title>Just a moment...</title>" + ("<div>x</div>" * 20000) + "</html>"
     # desafio e barrado antes (fetch hybrid); aqui simulamos o parse caindo no ramo sem itens
-    with pytest.raises(FetchBlocked):
+    with pytest.raises(FetchBlocked) as exc:
         olx_mod._no_items_result(big, "https://www.olx.com.br/x")
-    assert not (tmp_path / "olx_unparseable_last.html").exists()
+    assert exc.value.reason == "empty_or_unparseable"
+    assert exc.value.html_length == len(big)
+    assert "Just a moment" in (tmp_path / "olx_unparseable_last.html").read_text(encoding="utf-8")
 
 
 def test_olx_first_block_backoff_is_120_minutes():
