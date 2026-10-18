@@ -14,7 +14,7 @@ from app.services.source_audit_capture_service import source_audit_capture_servi
 
 
 class FetchBlocked(Exception):
-    def __init__(self, status_code: int, url: str, *, reason: str | None = None):
+    def __init__(self, status_code: int, url: str, *, reason: str | None = None, html_length: int | None = None):
         msg = f"Blocked ({status_code}) for url={url}"
         if reason:
             msg += f" reason={reason}"
@@ -22,6 +22,7 @@ class FetchBlocked(Exception):
         self.status_code = status_code
         self.url = url
         self.reason = reason
+        self.html_length = html_length
 
 
 # Reutiliza sessão para manter cookies. Isso ajuda bastante em sites tipo OLX.
