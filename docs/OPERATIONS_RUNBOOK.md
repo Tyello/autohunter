@@ -766,3 +766,27 @@ o scraper recarrega sozinho pelo mtime, sem restart.
   `ml_session_recovered` (info) quando volta. `rejected` = sessao expirada ou conta marcada:
   gerar nova sessao pelo procedimento acima.
 - Sem sessao instalada o comportamento e o anterior (gate `account-verification`, backoff normal).
+
+## Pacing por source (rajadas menores, espacadas e irregulares)
+
+Opcional e **desligado por padrao**. Configurado em `source_configs.extra.pacing` (ver
+`app/services/source_pacing_service.py`):
+
+| Chave | Efeito |
+|---|---|
+| `inter_group_delay_s: [min, max]` | pausa aleatoria (s) entre buscas da mesma rodada. So vale em sources que rodam grupos em sequencia (mercadolivre, olx, webmotors). Teto 600s. |
+| `shuffle_groups: true` | ordem das buscas aleatoria a cada rodada. |
+| `max_groups_per_run: N` | cada rodada atende so as N buscas atendidas ha mais tempo (cursor em `AppKV` `source_group_cursor:<source>`); buscas bloqueadas nao avancam o cursor. Reduza `sched_minutes` para cobrir todas (buscas/N rodadas). |
+| `sched_jitter_pct: P` | o intervalo entre rodadas varia +-P% (max 50), de forma estavel entre ticks da mesma rodada. |
+
+Exemplo (mercadolivre, ~10 buscas -> 4 rodadas de 3 buscas, ciclo ~12h, pausas de 40-150s):
+
+```sql
+update source_configs
+   set sched_minutes = 180,
+       extra = jsonb_set(extra, '{pacing}', '{"inter_group_delay_s":[40,150],"shuffle_groups":true,"max_groups_per_run":3,"sched_jitter_pct":25}')
+ where source = 'mercadolivre';
+```
+
+Atencao: com `max_groups_per_run` o tempo de uma rodada cresce (soma das pausas) e cada busca passa
+a ser consultada menos vezes por dia (alertas mais lentos). Para desligar: `extra = extra - 'pacing'`.
