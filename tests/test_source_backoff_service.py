@@ -117,3 +117,17 @@ def test_mark_bug_uses_short_fixed_retry_without_exponential_escalation(db):
     assert st.consecutive_blocks == 0
     assert minutes <= 5
     assert st.last_payload["bug"] is True
+
+
+def test_mark_blocked_grace_tolerates_first_block_then_escalates(db):
+    kw = dict(base_cooldown_minutes=120, max_backoff_minutes=1440, grace_blocks=1, grace_minutes=5)
+    assert mark_blocked(db, "olx", **kw) == 5       # bloqueio isolado: backoff curto
+    assert mark_blocked(db, "olx", **kw) == 120     # 2o seguido: backoff longo comeca na base
+    assert mark_blocked(db, "olx", **kw) == 240
+    mark_success(db, "olx")
+    assert mark_blocked(db, "olx", **kw) == 5       # sucesso zera a tolerancia
+
+
+def test_mark_blocked_without_grace_is_unchanged(db):
+    assert mark_blocked(db, "olx", base_cooldown_minutes=120) == 120
+    assert mark_blocked(db, "olx", base_cooldown_minutes=120) == 240

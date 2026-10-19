@@ -814,7 +814,9 @@ def scrape_olx(search_url: str, ctx: ScrapeContext) -> list[dict]:
 # pequeno. Acima disso, sem sinal de bot, "sem itens" e falha de parse/resposta
 # parcial e nao justifica derrubar a source inteira com backoff.
 _OLX_FULL_PAGE_MIN_CHARS = 100_000
-_OLX_UNPARSEABLE_SNIPPET_CHARS = 2000
+# Paginas de bloqueio da Cloudflare sao pequenas (~5KB) e trazem o Ray ID/motivo no fim;
+# guardar o suficiente para te-los. Paginas grandes continuam truncadas.
+_OLX_UNPARSEABLE_SNIPPET_CHARS = 8000
 
 
 def _no_items_result(html: str, search_url: str) -> list[dict]:
@@ -829,7 +831,8 @@ def _no_items_result(html: str, search_url: str) -> list[dict]:
         )
         return []
     _dump_unparseable_olx_html(html, search_url)
-    raise FetchBlocked(200, search_url, reason="empty_or_unparseable", html_length=len(html or ""))
+    reason = "bot_challenge" if _looks_like_cf_or_bot(html) else "empty_or_unparseable"
+    raise FetchBlocked(200, search_url, reason=reason, html_length=len(html or ""))
 
 
 def _dump_unparseable_olx_html(html: str, search_url: str) -> None:

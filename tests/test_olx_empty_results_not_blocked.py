@@ -62,7 +62,7 @@ def test_large_page_without_items_or_bot_signal_is_empty_and_dumped(monkeypatch,
     assert _run(monkeypatch, big) == []
     dumped = (tmp_path / "olx_unparseable_last.html").read_text(encoding="utf-8")
     assert dumped.startswith("<!-- url=https://www.olx.com.br/")
-    assert len(dumped) < 3000
+    assert len(dumped) < 9000
 
 
 def test_large_challenge_page_is_still_blocked(monkeypatch, tmp_path):
@@ -71,7 +71,7 @@ def test_large_challenge_page_is_still_blocked(monkeypatch, tmp_path):
     # desafio e barrado antes (fetch hybrid); aqui simulamos o parse caindo no ramo sem itens
     with pytest.raises(FetchBlocked) as exc:
         olx_mod._no_items_result(big, "https://www.olx.com.br/x")
-    assert exc.value.reason == "empty_or_unparseable"
+    assert exc.value.reason == "bot_challenge"
     assert exc.value.html_length == len(big)
     assert "Just a moment" in (tmp_path / "olx_unparseable_last.html").read_text(encoding="utf-8")
 
@@ -85,3 +85,12 @@ def test_olx_first_block_backoff_is_120_minutes():
     cap = _max_backoff_minutes_for("olx")
     assert base == 120
     assert [_compute_backoff_minutes(base, n, cap) for n in (1, 2, 3, 4, 5)] == [120, 240, 480, 960, 1440]
+
+
+def test_cloudflare_block_page_reaching_no_items_path_is_bot_challenge(monkeypatch, tmp_path):
+    # prod 19/10: pagina "Sorry, you have been blocked" (browser fallback) saia como empty_or_unparseable
+    monkeypatch.setattr(olx_mod, "health_dir", lambda: tmp_path)
+    page = "<html><title>Attention Required! | Cloudflare</title>Sorry, you have been blocked</html>"
+    with pytest.raises(FetchBlocked) as exc:
+        olx_mod._no_items_result(page, "https://www.olx.com.br/x")
+    assert exc.value.reason == "bot_challenge"
