@@ -1,5 +1,7 @@
 import re
 import json
+import logging
+import time
 from typing import List, Dict, Any, Optional, Iterable
 from urllib.parse import urlparse, urlunparse, parse_qs, unquote
 
@@ -13,6 +15,9 @@ from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
 from app.core.settings import settings
+from app.core.runtime_paths import health_dir
+
+logger = logging.getLogger(__name__)
 
 
 def _ml_session_cookies(proxy: Optional[str]) -> dict[str, str]:
@@ -748,6 +753,29 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
     return items
 
 
+_POLYCARD_SAMPLE_CHARS = 7000
+_POLYCARD_SAMPLE_MIN_INTERVAL_S = 3600
+_POLYCARD_SAMPLE_SEP = "\n\n=====\n\n"
+
+
+def _dump_polycard_sample(html: str, search_url: str) -> None:
+    """Diagnostico (best effort): guarda o inicio de 2 polycards crus, p/ descobrir onde o ML
+    expoe km/ano (o parser de cards nao extrai atributos). No maximo 1x/hora; sobrescreve."""
+    try:
+        path = health_dir() / "ml_polycard_sample.txt"
+        if path.exists() and time.time() - path.stat().st_mtime < _POLYCARD_SAMPLE_MIN_INTERVAL_S:
+            return
+        starts = [m.start() for m in re.finditer(r'"polycard"\s*:\s*\{', html or "")][:2]
+        if not starts:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        parts = [f"<!-- url={search_url} len={len(html)} -->"]
+        parts += [html[i:i + _POLYCARD_SAMPLE_CHARS] for i in starts]
+        path.write_text(_POLYCARD_SAMPLE_SEP.join(parts), encoding="utf-8")
+    except Exception:
+        logger.debug("mercadolivre: falha ao salvar amostra de polycard", exc_info=True)
+
+
 def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) -> List[Dict[str, Any]]:
     """
     HTML público do Mercado Livre.
@@ -765,6 +793,8 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
 
     # POLYCARD é o layout mais confiável hoje; preferimos ele como base
     poly_items = _parse_polycard_items(html, limit=50)
+    if poly_items:
+        _dump_polycard_sample(html, search_url)
     poly_by_id = {p.get("external_id"): p for p in poly_items if p.get("external_id")}
 
     soup = BeautifulSoup(html, "lxml")
