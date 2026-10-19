@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import threading
+import time
 from typing import Any, Optional, Dict, Iterable
 import uuid
 
@@ -23,6 +25,25 @@ def _to_json(payload: Optional[Dict[str, Any]]) -> str:
         return json.dumps(payload, ensure_ascii=False, default=str)
     except Exception:
         return str(payload)
+
+
+_throttle_lock = threading.Lock()
+_throttle_last: Dict[str, float] = {}
+
+
+def should_log_throttled(key: str, min_interval_s: float) -> bool:
+    """True no maximo 1x a cada `min_interval_s` por `key` (por processo).
+
+    Para logs de rotina de alta frequencia (heartbeat, "job ok" ocioso): evita encher
+    `system_logs` sem perder o sinal de vida. Falhas/eventos relevantes nao devem usar isto.
+    """
+    now = time.monotonic()
+    with _throttle_lock:
+        last = _throttle_last.get(key)
+        if last is not None and now - last < min_interval_s:
+            return False
+        _throttle_last[key] = now
+        return True
 
 
 def log(
