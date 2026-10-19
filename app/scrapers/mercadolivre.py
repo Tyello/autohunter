@@ -7,11 +7,29 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.fetching import fetch_html_with_browser_fallback
+from app.services import ml_session_service
 from app.services.browser_fetcher import fetch_html_browser, reset_browser_state_for_source
 from app.scrapers.parsing import parse_brl_price
 from app.sources.types import ScrapeContext
 
 from app.core.settings import settings
+
+
+def _ml_session_cookies(proxy: Optional[str]) -> dict[str, str]:
+    """Cookies do ML do storage_state (sessao logada evita o gate account-verification)."""
+    return ml_session_service.session_cookies(proxy)
+
+
+_NORDIC_REDIRECT_RE = re.compile(r'isRedirect\\*"\s*:\s*true.*?Location\\*"\s*:\s*\\*"(.+?)\\*"', re.DOTALL)
+
+
+def _extract_nordic_redirect(html: str) -> Optional[str]:
+    """Destino do redirect canonico (SEO_CANONICAL) embutido no payload streaming do ML."""
+    m = _NORDIC_REDIRECT_RE.search(html or "")
+    if not m:
+        return None
+    loc = re.sub(r"\\+u002F", "/", m.group(1)).replace("\\", "")
+    return loc if loc.startswith("https://") else None
 
 
 def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
@@ -46,15 +64,37 @@ def _fetch_html_ml(url: str, ctx: ScrapeContext, timeout: int = 25) -> str:
         }
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
+        cookies = _ml_session_cookies(proxy)
+        impersonate = getattr(settings, "ml_impersonate", None) or "chrome120"
+        if cookies:
+            # Sessao vem de um Chrome real: UA/headers customizados nao batem com o
+            # fingerprint e o ML responde com captcha. Deixa a impersonacao definir tudo.
+            headers = None
+
         r = creq.get(
             url,
             headers=headers,
             timeout=timeout,
             proxies=proxies,
-            impersonate=getattr(settings, "ml_impersonate", None) or "chrome120",
+            cookies=cookies or None,
+            impersonate=impersonate,
             allow_redirects=True,
         )
         if r.status_code == 200 and r.text:
+            # O shell do ML devolve 200 com a busca vazia e o redirect canonico no payload.
+            redirect_url = _extract_nordic_redirect(r.text)
+            if redirect_url and redirect_url != url:
+                r2 = creq.get(
+                    redirect_url,
+                    headers=headers,
+                    timeout=timeout,
+                    proxies=proxies,
+                    cookies=cookies or None,
+                    impersonate=impersonate,
+                    allow_redirects=True,
+                )
+                if r2.status_code == 200 and r2.text:
+                    return r2.text
             return r.text
         if int(getattr(r, "status_code", 0) or 0) in (403, 429):
             raise FetchBlocked(int(r.status_code), url, reason="http_status")
@@ -138,6 +178,12 @@ def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext],
     """Busca HTML da listagem ML priorizando HTTP e fallback browser networkidle."""
     html = _fetch_html_ml(url, ctx, timeout=timeout)
     is_blocked = _is_ml_security_or_captcha_page(html)
+    proxy = getattr(ctx, "proxy_server", None)
+    ml_session_service.record_outcome(
+        ml_session_service.classify_outcome(has_session=bool(_ml_session_cookies(proxy)), blocked=is_blocked),
+        proxy=proxy,
+        url=url,
+    )
     if not is_blocked and not _is_ml_shell_without_results(html):
         return html
 

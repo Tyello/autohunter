@@ -735,3 +735,34 @@ group by status;
 ```
 
 Retenção recomendada para beta: `system_logs`/`telemetry_events` 7 dias, `scrape_jobs` concluídos 48h, `source_runs` 30 dias, `notifications` 90 dias e `wishlist_listing_activity` 90 dias. Critério de aceite: queda estimada de IO por uso de índices nas rotas quentes e visibilidade diária via `/admin db io`. Rollback: reverter a migration de índices; o comando admin é somente leitura.
+
+## Sessao do Mercado Livre (conta de servico)
+
+Sem login, o ML redireciona o trafego do Pi para `account-verification` (HTTP 200). Com o
+`storage_state` de uma conta logada a busca volta normal (validado em 18/10/2026: ~50 anuncios
+por busca de veiculo). **Use uma conta de servico da Garagem Alvo, nunca uma conta pessoal**:
+se o ML invalidar ou marcar a sessao, so essa conta e afetada.
+
+Arquivo lido pela source: `<playwright_storage_dir>/storage_mercadolivre____no_proxy__.json`
+(em producao: `/opt/autohunter/.data/playwright/`). Trocar de conta = substituir esse arquivo;
+o scraper recarrega sozinho pelo mtime, sem restart.
+
+### Trocar/instalar a sessao
+1. Abrir um Chrome **normal** (o Chromium do Playwright nao renderiza o captcha do ML) com perfil
+   limpo e porta de debug: `chrome --remote-debugging-port=9222 --user-data-dir=<dir vazio> https://www.mercadolivre.com.br/`
+2. Logar com a conta de servico e resolver captcha/2FA. Nao fechar a janela.
+3. Exportar: `py scripts/ml_session.py capture --out storage_mercadolivre.json`
+4. Copiar para o Pi e instalar (faz backup do arquivo atual, chmod 600):
+   `sudo -u autohunter .venv/bin/python scripts/ml_session.py install /tmp/storage_mercadolivre.json`
+5. Apagar o arquivo exportado e deslogar/fechar o Chrome de debug.
+
+### Rastreio (como saber se esta funcionando)
+- `python scripts/ml_session.py status` mostra se a sessao esta logada, quando os cookies de
+  login expiram e a saude registrada (`AppKV` chave `ml_session_health`: `last_outcome`,
+  `ok_count`, `rejected_count`, `last_ok_at`, `last_rejected_at`).
+- Cada busca do ML registra `ok` (sessao presente e pagina normal), `rejected` (sessao presente,
+  mas o ML mandou captcha/verificacao) ou `no_session`.
+- Telemetria: `ml_session_rejected` (warn, so na transicao) quando a sessao deixa de funcionar e
+  `ml_session_recovered` (info) quando volta. `rejected` = sessao expirada ou conta marcada:
+  gerar nova sessao pelo procedimento acima.
+- Sem sessao instalada o comportamento e o anterior (gate `account-verification`, backoff normal).
