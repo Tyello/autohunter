@@ -3,7 +3,7 @@ import time
 from app.core.settings import settings
 from app.core.shutdown import is_shutdown_requested
 from app.db.session import SessionLocal
-from app.services.system_logs_service import log
+from app.services.system_logs_service import log, should_log_throttled
 
 
 def job_browser_process_watchdog() -> None:
@@ -67,7 +67,8 @@ def job_browser_worker_heartbeat_watchdog() -> None:
             elif res.get("action") == "reset_failed":
                 log(db, "error", "browser_watchdog", "worker_wedge_reset_failed", {**res, "ms": dt_ms})
             else:
-                log(db, "debug", "browser_watchdog", "worker_heartbeat_ok", {**res, "ms": dt_ms})
+                if should_log_throttled("browser_watchdog:worker_heartbeat_ok", 600):
+                    log(db, "debug", "browser_watchdog", "worker_heartbeat_ok", {**res, "ms": dt_ms})
             db.commit()
         except Exception as e:
             dt_ms = int((time.time() - t0) * 1000)

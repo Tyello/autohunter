@@ -15,7 +15,7 @@ from app.services.notification_delivery_service import (
     mark_notification_sent,
 )
 from app.services.notifications_service import mark_suppressed_reason
-from app.services.system_logs_service import log
+from app.services.system_logs_service import log, should_log_throttled
 
 from app.bot.sender import send_daily_limit_notice_http
 
@@ -114,15 +114,16 @@ def send_queued_notifications(db: Session, component: str, sender_fn):
 
     _flush(force=True)
 
-    log(db, "info", component, "send queued notifications result", {
-        "claimed": len(queued),
-        "sent": sent,
-        "blocked_daily_limit": blocked,
-        "failed": failed,
-        "retried": retried,
-        "discarded": discarded,
-        "commit_batch_size": commit_batch_size,
-    })
+    if queued or should_log_throttled(f"{component}:send_result_idle", 600):
+        log(db, "info", component, "send queued notifications result", {
+            "claimed": len(queued),
+            "sent": sent,
+            "blocked_daily_limit": blocked,
+            "failed": failed,
+            "retried": retried,
+            "discarded": discarded,
+            "commit_batch_size": commit_batch_size,
+        })
 
     db.commit()
 

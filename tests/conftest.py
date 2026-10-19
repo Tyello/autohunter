@@ -90,6 +90,14 @@ def _reset_db(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
+def _reset_log_throttle():
+    from app.services import system_logs_service
+
+    system_logs_service._throttle_last.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _force_fb_test_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fb_profiles = tmp_path / "fb_profiles"
     fb_debug = tmp_path / "fb_debug"
