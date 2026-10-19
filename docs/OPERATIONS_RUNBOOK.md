@@ -790,3 +790,20 @@ update source_configs
 
 Atencao: com `max_groups_per_run` o tempo de uma rodada cresce (soma das pausas) e cada busca passa
 a ser consultada menos vezes por dia (alertas mais lentos). Para desligar: `extra = extra - 'pacing'`.
+
+### Tolerancia a bloqueio isolado (`extra.block_grace`)
+
+`source_configs.extra.block_grace: N` (0-5, padrao 0): os primeiros N bloqueios seguidos aplicam so
+um backoff curto (5 min; a proxima rodada agendada tenta de novo) e o backoff exponencial comeca no
+bloqueio N+1. Um sucesso zera a contagem. Usado na OLX (`1`), onde bloqueios da Cloudflare em 1 de 11
+buscas eram transitorios e custavam 2-4h de coleta. Exemplo:
+
+```sql
+update source_configs
+   set sched_minutes = 120,
+       extra = extra || '{"block_grace":1,"pacing":{"inter_group_delay_s":[30,90],"shuffle_groups":true,"sched_jitter_pct":20}}'::jsonb
+ where source = 'olx';
+```
+
+Paginas de bloqueio da Cloudflare agora saem com `reason=bot_challenge` e o trecho salvo em
+`olx_unparseable_last.html` tem 8000 chars (inclui o Ray ID).

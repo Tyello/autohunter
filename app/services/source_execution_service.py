@@ -232,6 +232,15 @@ def _base_cooldown_minutes_for(src: str, cfg: SourceConfig) -> int:
     return max(int(cfg.cooldown_minutes or 0), 1)
 
 
+def _block_grace_for(cfg: SourceConfig) -> int:
+    """`extra.block_grace`: bloqueios seguidos tolerados (backoff curto) antes do backoff longo."""
+    extra = cfg.extra if isinstance(cfg.extra, dict) else {}
+    try:
+        return min(5, max(0, int(extra.get("block_grace") or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _max_backoff_minutes_for(src: str) -> Optional[int]:
     """Per-source backoff ceiling (None = global `source_backoff_max_minutes`)."""
     name = (src or "").lower()
@@ -778,6 +787,7 @@ def _run_source_for_all_wishlists_locked(
                 http_status=res.get("status_code"),
                 url=res.get("url") or url,
                 max_backoff_minutes=_max_backoff_minutes_for(src),
+                grace_blocks=_block_grace_for(cfg),
             )
             payload = build_run_payload(
                 run_summary=run_summary_err,

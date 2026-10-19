@@ -88,12 +88,18 @@ def mark_blocked(
     http_status: Optional[int] = None,
     url: Optional[str] = None,
     max_backoff_minutes: Optional[int] = None,
+    grace_blocks: int = 0,
+    grace_minutes: int = 5,
 ) -> int:
     """Marca bloqueio e retorna minutos de backoff aplicado.
 
     `max_backoff_minutes` permite um teto de backoff maior que o global para
     fontes com bloqueio de longa duração (ex.: reputação de IP), sem afetar
     o teto padrão usado por outras fontes.
+
+    `grace_blocks`: os primeiros N bloqueios seguidos só aplicam `grace_minutes` (bloqueio
+    isolado/transitório, a próxima rodada agendada tenta de novo); o backoff exponencial
+    começa a contar a partir do bloqueio N+1.
     """
     st = _get_or_create_state(db, source)
     now = _utcnow()
@@ -102,7 +108,11 @@ def mark_blocked(
     st.consecutive_blocks = int(st.consecutive_blocks or 0) + 1
     st.consecutive_failures = 0
 
-    minutes = _compute_backoff_minutes(base_cooldown_minutes, st.consecutive_blocks, max_backoff_minutes)
+    grace = max(0, int(grace_blocks or 0))
+    if st.consecutive_blocks <= grace:
+        minutes = max(1, int(grace_minutes or 1))
+    else:
+        minutes = _compute_backoff_minutes(base_cooldown_minutes, st.consecutive_blocks - grace, max_backoff_minutes)
     jitter_s = int(getattr(settings, "source_backoff_jitter_seconds", 20) or 20)
     st.next_allowed_at = now + timedelta(minutes=minutes, seconds=jitter_s)
 
