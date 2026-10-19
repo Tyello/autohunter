@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -16,7 +17,17 @@ from app.models.source_run import SourceRun
 from app.models.wishlist import Wishlist
 from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
 from app.services.search_deduplication_service import canonical_search_key
+from app.services.app_kv_service import get_kv, set_kv
 from app.services.source_concurrency import get_source_semaphore
+from app.services.source_pacing_service import (
+    CURSOR_KV_PREFIX,
+    delay_seconds,
+    jittered_minutes,
+    mark_served,
+    order_groups,
+    pick_groups,
+    read_pacing,
+)
 from app.services.system_logs_service import log
 from app.services.source_backoff_service import is_source_allowed, mark_blocked, mark_error, mark_bug, mark_success, mark_skipped
 from app.services.source_configs_service import ensure_source_configs, build_scrape_context, get_source_config_snapshot
@@ -498,8 +509,12 @@ def _run_source_for_all_wishlists_locked(
 
         st = _get_state(db, src)
         last_eff = _ensure_utc(st.last_effective_run_at) if st else None
+        minutes = jittered_minutes(minutes, last_eff, read_pacing(cfg.extra).sched_jitter_pct)
         if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
             return {"ok": True, "status": "skipped", "reason": "not_due", "run_reason": reason}
+
+    pacing = read_pacing(cfg.extra)
+    pacing_cursor_key = f"{CURSOR_KV_PREFIX}{src}"
 
     # Feed sources (maintenance/inventory) can run without wishlists.
     if not bool(getattr(plugin, "supports_wishlist_monitoring", True)):
@@ -537,6 +552,15 @@ def _run_source_for_all_wishlists_locked(
                 groups[url] = {"query": w.query, "wishlists": [w]}
             else:
                 g["wishlists"].append(w)
+
+        # Pacing opcional (source_configs.extra.pacing): atende so as N buscas atendidas ha mais
+        # tempo. `wishlists` tambem encolhe, senao o reconciliador de atividade trataria os
+        # anuncios das buscas nao atendidas como "ausentes".
+        if pacing.max_groups_per_run > 0 and len(groups) > pacing.max_groups_per_run:
+            cursor = get_kv(db, pacing_cursor_key) or {}
+            picked = pick_groups(list(groups.keys()), last_served=cursor, max_groups=pacing.max_groups_per_run)
+            groups = {u: groups[u] for u in picked}
+            wishlists = [w for g in groups.values() for w in g["wishlists"]]
 
         # Proactive request budget: sources with a single-IP anti-bot fingerprint
         # (mercadolivre) get flagged for repeated bursts of distinct search URLs
@@ -625,7 +649,7 @@ def _run_source_for_all_wishlists_locked(
     group_summaries: list[dict[str, Any]] = []
 
     job_name = f"scraper_{src}"
-    ordered_urls = list(groups.keys())
+    ordered_urls = order_groups(list(groups.keys()), shuffle=pacing.shuffle_groups)
     max_workers = max(1, min(int(settings.source_group_max_workers or 1), len(ordered_urls) or 1))
 
     # Sources with a single-IP anti-bot fingerprint (mercadolivre, olx, webmotors) get
@@ -637,7 +661,11 @@ def _run_source_for_all_wishlists_locked(
 
     if stop_remaining_on_block:
         results_in_order = []
-        for u in ordered_urls:
+        for idx, u in enumerate(ordered_urls):
+            if idx > 0:
+                pause = delay_seconds(pacing)
+                if pause > 0:
+                    time.sleep(pause)
             entry = _process_group_isolated(
                 url=u,
                 g=groups[u],
@@ -663,6 +691,13 @@ def _run_source_for_all_wishlists_locked(
                 for u in ordered_urls
             ]
             results_in_order = [f.result() for f in futures]
+
+    if pacing.max_groups_per_run > 0:
+        try:
+            served = [e["url"] for e in results_in_order if (e.get("res") or {}).get("ok")]
+            set_kv(db, pacing_cursor_key, mark_served(get_kv(db, pacing_cursor_key), served, now=_utcnow(), keep=list(groups.keys())))
+        except Exception:
+            logger.debug("pacing: falha ao salvar cursor src=%s", src, exc_info=True)
 
     first_failure: dict | None = None
     for entry in results_in_order:

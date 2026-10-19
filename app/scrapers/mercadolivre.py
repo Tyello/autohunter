@@ -176,9 +176,18 @@ def _is_ml_shell_without_results(html: str) -> bool:
 
 def _fetch_ml_search_with_shell_fallback(url: str, ctx: Optional[ScrapeContext], timeout: int = 25) -> str:
     """Busca HTML da listagem ML priorizando HTTP e fallback browser networkidle."""
-    html = _fetch_html_ml(url, ctx, timeout=timeout)
-    is_blocked = _is_ml_security_or_captcha_page(html)
     proxy = getattr(ctx, "proxy_server", None)
+    try:
+        html = _fetch_html_ml(url, ctx, timeout=timeout)
+    except FetchBlocked:
+        # bloqueio levantado dentro do fetch (ex.: captcha no fallback de browser) tambem conta.
+        ml_session_service.record_outcome(
+            ml_session_service.classify_outcome(has_session=bool(_ml_session_cookies(proxy)), blocked=True),
+            proxy=proxy,
+            url=url,
+        )
+        raise
+    is_blocked = _is_ml_security_or_captcha_page(html)
     ml_session_service.record_outcome(
         ml_session_service.classify_outcome(has_session=bool(_ml_session_cookies(proxy)), blocked=is_blocked),
         proxy=proxy,
