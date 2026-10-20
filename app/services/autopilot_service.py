@@ -591,7 +591,7 @@ def _candidate_operational(db: Session, now: datetime) -> List[FindingCandidate]
         age_m = round((_as_utc(now) - hb_at).total_seconds() / 60.0, 1) if hb_at else None
         out.append(FindingCandidate(kind="scheduler_heartbeat_missing", source=None, fingerprint=_sha1("scheduler_heartbeat_missing"), title=f"Scheduler sem heartbeat há {age_m if age_m is not None else 'nunca registrado'}min", severity="error", evidence={"last_heartbeat_at": hb_at.isoformat() if hb_at else None, "age_minutes": age_m, "threshold_minutes": hb_missing_m, "checked_at": _as_utc(now).isoformat()}, suggested_actions="Ações sugeridas: verificar se o processo autohunter-scheduler.service está de pé (crash loop) e reiniciar se necessário."))
 
-    source_runs_window_m = int(getattr(settings, "autopilot_source_runs_zero_window_minutes", 55) or 55)
+    source_runs_window_m = int(getattr(settings, "autopilot_source_runs_zero_window_minutes", 90) or 90)
     sr_cut = _as_utc(now - timedelta(minutes=source_runs_window_m))
     runs_recent = (
         db.query(func.count(SourceRun.id))

@@ -772,20 +772,28 @@ _POLYCARD_SAMPLE_SEP = "\n\n=====\n\n"
 
 
 def _dump_polycard_sample(html: str, search_url: str) -> None:
-    """Diagnostico (best effort): guarda o inicio de 2 polycards crus, p/ descobrir onde o ML
-    expoe km/ano (o parser de cards nao extrai atributos). No maximo 1x/hora; sobrescreve."""
+    """Diagnostico (best effort): guarda trechos crus do HTML ao redor dos 2 primeiros anuncios
+    (qualquer layout: polycard, card classico, wrapper), p/ descobrir onde o ML expoe km/ano.
+    No maximo 1x/hora; sobrescreve."""
     try:
         path = health_dir() / "ml_polycard_sample.txt"
         if path.exists() and time.time() - path.stat().st_mtime < _POLYCARD_SAMPLE_MIN_INTERVAL_S:
             return
-        starts = [m.start() for m in re.finditer(r'"polycard"\s*:\s*\{', html or "")][:2]
-        if not starts:  # layout classico: guarda o inicio de 2 cards <li>
-            starts = [m.start() for m in re.finditer(r"<li[^>]+ui-search-layout__item", html or "")][:2]
+        text = html or ""
+        starts: list[int] = []
+        seen: set[str] = set()
+        for m in re.finditer(r"MLB-?(\d{6,})", text):
+            if m.group(1) in seen:
+                continue
+            seen.add(m.group(1))
+            starts.append(max(0, m.start() - 2500))
+            if len(starts) >= 2:
+                break
         if not starts:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
-        parts = [f"<!-- url={search_url} len={len(html)} -->"]
-        parts += [html[i:i + _POLYCARD_SAMPLE_CHARS] for i in starts]
+        parts = [f"<!-- url={search_url} len={len(text)} -->", text[:1500]]
+        parts += [text[i:i + _POLYCARD_SAMPLE_CHARS] for i in starts]
         path.write_text(_POLYCARD_SAMPLE_SEP.join(parts), encoding="utf-8")
     except Exception:
         logger.debug("mercadolivre: falha ao salvar amostra de polycard", exc_info=True)

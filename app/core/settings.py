@@ -334,7 +334,9 @@ class Settings(BaseSettings):
     # Calibrado a partir do padrão real de operação: com sched_minutes=60-90 e ~9 fontes
     # habilitadas escalonadas, gaps naturais entre execuções chegam a ~40min (p99) sem
     # nenhum problema real. Ver docs/autopilot-heartbeat-alert.md.
-    autopilot_source_runs_zero_window_minutes: int = 55
+    # 2026-10-20: olx (120) e mercadolivre (180, 3 buscas) espacaram as rodadas e os gaps
+    # saudaveis chegaram a ~60 min (falso positivo as 05:37 UTC) -> 90.
+    autopilot_source_runs_zero_window_minutes: int = 90
     # heartbeat do scheduler roda a cada 10s (app/scheduler/run.py); se sumir por esse
     # tempo, o processo do scheduler provavelmente caiu (crash loop) — cenário distinto
     # de "processo vivo mas worker travado".

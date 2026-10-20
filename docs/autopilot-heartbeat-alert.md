@@ -19,7 +19,7 @@ processar fontes", implementados em `app/services/autopilot_service.py::_candida
 ### 2. `scheduler_heartbeat_without_runs` (processo vivo, mas nada é processado)
 
 - Conta `SourceRun` com `status in (success, error)` criados nos últimos
-  `autopilot_source_runs_zero_window_minutes` (default **55 min**).
+  `autopilot_source_runs_zero_window_minutes` (default **90 min**; era 55 ate 2026-10-20).
 - Só dispara se **ambas** as condições forem verdadeiras:
   - heartbeat fresco pelo padrão mais rígido do check #1 (senão os dois disparariam juntos
     pelo mesmo problema subjacente — heartbeat sumido já é coberto lá);
@@ -47,7 +47,7 @@ Medido contra `source_runs` reais das últimas 48h em produção (2026-08-25):
 | gap p99 entre execuções | ~40.6 min |
 | gap máximo observado | ~41.9 min |
 
-Threshold de **55 min** dá ~13 min de margem acima do maior gap natural observado — grande
+Threshold de **55 min** (calibração original; hoje 90 min, ver abaixo) dá ~13 min de margem acima do maior gap natural observado — grande
 o suficiente para não confundir com o pior caso saudável, apertado o suficiente para não
 demorar mais de ~1h para detectar um worker realmente travado.
 
@@ -154,3 +154,11 @@ auto-close quando a condição some, reabertura resetando `hit_count`).
 - **Pendente de confirmar**: que o deploy do commit `fe0deb0` está de fato ativo e estável
   no `autohunter-scheduler.service` (o fechamento às 20:17 é evidência forte, mas vale
   observar mais um ciclo antes de considerar 100% validado).
+
+
+## Recalibração 2026-10-20
+
+Ao espaçar a OLX (60→120 min) e o Mercado Livre (3h, 3 buscas por rodada, com pacing), os gaps
+saudáveis entre `source_runs` chegaram a ~60 min (medido em 12h: 59 min), e o alerta
+`scheduler_heartbeat_without_runs` disparou sem falha real (heartbeat contínuo, runs voltando
+logo depois). Janela subida de 55 para 90 min. Refazer a medição se os `sched_minutes` mudarem.

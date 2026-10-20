@@ -159,7 +159,7 @@ def test_autopilot_operational_singleton_finding_auto_closes_then_reopens(db, mo
     assert row.status == "closed"
 
     # scan 3: goes quiet again -> reopens as a fresh episode (not stuck closed forever)
-    now3 = now2 + timedelta(minutes=60)
+    now3 = now2 + timedelta(minutes=100)
     db.add(SystemLog(component="scheduler", message="heartbeat", created_at=now3))
     db.commit()
     cands3 = autopilot_service.build_candidates(db, now=now3)
