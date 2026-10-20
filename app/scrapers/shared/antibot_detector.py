@@ -295,6 +295,12 @@ def is_blocked(
     if not structural:  # AutoHunter
         return False, ""
 
+    return _structural_checks(status_code, html)
+
+
+def _structural_checks(status_code: Optional[int], html: str) -> Tuple[bool, str]:
+    """AutoHunter: the near-empty-200 + Tier 3 tail of is_blocked, extracted
+    verbatim so shadow_reason() can run it without re-scanning Tier 1/2."""
     # --- HTTP 200 + near-empty content (JS-rendered empty page) ---
     if status_code == 200:
         stripped = html.strip()
@@ -347,7 +353,9 @@ def local_block_reason(html: str) -> str:
 def shadow_reason(status_code: Optional[int], html: str) -> str:
     """Tier 3 / near-empty reason for shadow-mode logging; "" if clean.
 
-    Never use this to make a blocking decision (see header).
+    Never use this to make a blocking decision (see header). Runs only the
+    near-empty/Tier 3 checks: callers already ran the Tier 1/2 + local scan via
+    is_blocked()/classify_block(), so repeating it would just double the cost.
     """
-    blocked, reason = is_blocked(status_code, html, structural=True, local=False)
+    blocked, reason = _structural_checks(status_code, html or "")
     return reason if blocked else ""
