@@ -11,7 +11,7 @@ from app.scrapers.base import fetch_html, FetchBlocked
 from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.services import ml_session_service
 from app.services.browser_fetcher import fetch_html_browser, reset_browser_state_for_source
-from app.scrapers.parsing import parse_brl_price
+from app.scrapers.parsing import extract_mileage_km_from_text, parse_brl_price
 from app.sources.types import ScrapeContext
 
 from app.core.settings import settings
@@ -703,6 +703,18 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
         re.DOTALL
     )
 
+    # Janela crua de cada polycard (ate o proximo): a lista de atributos (ano | km) pode vir
+    # em componentes aninhados que o regex acima nao captura.
+    starts = [m.start() for m in re.finditer(r'"polycard"\s*:\s*\{', html or "")]
+    km_by_id: Dict[str, int] = {}
+    for i, st in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else st + 12000
+        window = (html or "")[st:min(end, st + 12000)]
+        mid = re.search(r'"id"\s*:\s*"(MLB\d+)"', window)
+        km = extract_mileage_km_from_text(_unescape_ml(window))
+        if mid and km is not None:
+            km_by_id.setdefault(mid.group(1), km)
+
     for m in pattern.finditer(html or ""):
         external_id = m.group(1)
         raw_url = _unescape_ml(m.group(2))
@@ -745,6 +757,7 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
             "price": price,
             "currency": "BRL",
             "location": location,
+            "mileage_km": km_by_id.get(external_id),
         })
 
         if len(items) >= limit:
@@ -766,6 +779,8 @@ def _dump_polycard_sample(html: str, search_url: str) -> None:
         if path.exists() and time.time() - path.stat().st_mtime < _POLYCARD_SAMPLE_MIN_INTERVAL_S:
             return
         starts = [m.start() for m in re.finditer(r'"polycard"\s*:\s*\{', html or "")][:2]
+        if not starts:  # layout classico: guarda o inicio de 2 cards <li>
+            starts = [m.start() for m in re.finditer(r"<li[^>]+ui-search-layout__item", html or "")][:2]
         if not starts:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -793,8 +808,7 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
 
     # POLYCARD é o layout mais confiável hoje; preferimos ele como base
     poly_items = _parse_polycard_items(html, limit=50)
-    if poly_items:
-        _dump_polycard_sample(html, search_url)
+    _dump_polycard_sample(html, search_url)
     poly_by_id = {p.get("external_id"): p for p in poly_items if p.get("external_id")}
 
     soup = BeautifulSoup(html, "lxml")
@@ -853,6 +867,7 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
             "price": price,
             "currency": "BRL",
             "location": None,
+            "mileage_km": extract_mileage_km_from_text(c.get_text(" ", strip=True)),
         })
 
     # Se POLYCARD existir, ele vira a base (evita URL de tracking e layout instável).
@@ -870,7 +885,7 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
             else:
                 # completa campos faltantes no polycard
                 cur = base_by_id[pid]
-                for k in ("title", "thumbnail_url", "price", "location", "url"):
+                for k in ("title", "thumbnail_url", "price", "location", "url", "mileage_km"):
                     if not cur.get(k) and it.get(k):
                         cur[k] = it[k]
         items = base

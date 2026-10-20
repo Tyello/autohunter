@@ -445,3 +445,36 @@ def test_fetch_content_shell_raises_blocked(monkeypatch, scraper, ctx):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_classic_card_extracts_mileage_km(monkeypatch):
+    from app.scrapers import mercadolivre as ml
+
+    html = (
+        '<html><head><title>x | Mercado Livre</title></head><body><ol>'
+        '<li class="ui-search-layout__item"><a class="ui-search-link" href="https://carro.mercadolivre.com.br/MLB-123456789-honda-civic-_JM">'
+        '<h2 class="ui-search-item__title">Honda Civic 2016 Lxr 2.0 Aut</h2></a>'
+        '<span class="andes-money-amount__fraction">79.900</span>'
+        '<ul><li>2016</li><li>80.000 Km</li></ul></li></ol></body></html>'
+    )
+    monkeypatch.setattr(ml, "_fetch_ml_search_with_shell_fallback", lambda *a, **k: html)
+    monkeypatch.setattr(ml, "_dump_polycard_sample", lambda *a, **k: None)
+    items = ml.scrape_mercadolivre("https://lista.mercadolivre.com.br/veiculos/carros-caminhonetes/civic", None)
+    assert [i["mileage_km"] for i in items] == [80000]
+
+
+def test_polycard_extracts_mileage_km_from_attribute_list():
+    from app.scrapers import mercadolivre as ml
+
+    def card(mid, km):
+        return (
+            '{"polycard":{"metadata":{"id":"%s","url":"carro.mercadolivre.com.br\u002FMLB-%s-honda-civic-_JM"},'
+            '"pictures":{"pictures":[{"id":"D_1"}]},"components":[{"type":"title","title":{"text":"Honda Civic 2016 Lxr Aut"}},'
+            '{"type":"price","price":{"current_price":{"value":79900}}},'
+            '{"type":"attributes_list","attributes_list":{"texts":["2016","%s"]}}]}}' % (mid, mid[3:], km)
+        )
+
+    html = "<script>" + card("MLB111111111", "80.000 Km") + "," + card("MLB222222222", "Sem info") + "</script>"
+    by_id = {i["external_id"]: i for i in ml._parse_polycard_items(html)}
+    assert by_id["MLB111111111"]["mileage_km"] == 80000
+    assert by_id["MLB222222222"]["mileage_km"] is None
