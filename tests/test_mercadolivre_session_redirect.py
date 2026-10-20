@@ -35,14 +35,17 @@ def test_session_cookies_only_mercadolivre_domains(monkeypatch):
     assert ml._ml_session_cookies(None) == {"ssid": "a"}
 
 
-def test_polycard_sample_is_dumped_once_per_interval(monkeypatch, tmp_path):
+def test_listing_sample_is_dumped_once_per_interval_for_any_layout(monkeypatch, tmp_path):
     from app.scrapers import mercadolivre as ml
 
     monkeypatch.setattr(ml, "health_dir", lambda: tmp_path)
-    html = '<script>{"polycard":{"metadata":{"id":"MLB1"},"components":[{"type":"attributes_list"}]}}</script>' * 3
+    html = (
+        '<div class="ui-search-result__wrapper"><a href="https://carro.mercadolivre.com.br/MLB-1234567890-civic-_JM">'
+        '</a><ul><li>2016</li><li>80.000 Km</li></ul></div>'
+    ) * 3
     ml._dump_polycard_sample(html, "https://lista.mercadolivre.com.br/x")
     out = (tmp_path / "ml_polycard_sample.txt").read_text(encoding="utf-8")
-    assert "attributes_list" in out and out.count("=====") == 2  # cabecalho + 2 amostras
+    assert "80.000 Km" in out and "ui-search-result__wrapper" in out
 
     (tmp_path / "ml_polycard_sample.txt").write_text("keep", encoding="utf-8")
     ml._dump_polycard_sample(html, "https://lista.mercadolivre.com.br/x")  # dentro de 1h: nao sobrescreve
