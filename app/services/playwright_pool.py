@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from app.core.runtime_paths import playwright_browsers_dir, playwright_storage_dir
 from app.core.settings import settings, ensure_playwright_browsers_env
 from app.scrapers.base import FetchBlocked
+from app.scrapers.shared.antibot_detector import is_blocked as antibot_is_blocked
 from app.scrapers.webmotors_ops import detect_webmotors_challenge
 
 
@@ -747,17 +748,8 @@ class _PlaywrightCore:
                 page.wait_for_timeout(800 if i == 0 else 1200)
                 html = self._safe_page_content(page)
                 final_url = page.url
-                h = (html or "").lower()
-                is_challenge = (
-                    "captcha" in h
-                    or "verify you are" in h
-                    or "cloudflare" in h
-                    or "incapsula" in h
-                    or "datadome" in h
-                    or "perimeterx" in h
-                    or "access denied" in h
-                    or "just a moment" in h
-                )
+                # Tier 3 is off here: it would keep waiting on small legit pages.
+                is_challenge, _ = antibot_is_blocked(200, html or "", structural=False)
                 if not is_challenge:
                     break
             # done

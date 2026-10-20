@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from app.core.settings import settings
-from app.scrapers.base import FetchBlocked, fetch_html
+from app.scrapers.base import FetchBlocked, classify_block, fetch_html, record_antibot_shadow
 from app.services.browser_fetcher import fetch_html_browser
 from app.sources.types import ScrapeContext
 
+
+logger = logging.getLogger(__name__)
 
 _BLOCKED_HTTP_CODES = {403, 429}
 
@@ -15,7 +18,8 @@ def _is_blocked_error(exc: Exception) -> bool:
     if isinstance(exc, FetchBlocked):
         if exc.status_code in _BLOCKED_HTTP_CODES:
             return True
-        return (exc.reason or "") in {"bot_challenge", "http_status"}
+        reason = exc.reason or ""
+        return reason in {"bot_challenge", "http_status"} or reason.startswith("antibot:")
     msg = str(exc).lower()
     return any(k in msg for k in ("captcha", "cloudflare", "challenge", "access denied"))
 
@@ -60,7 +64,7 @@ def fetch_html_with_browser_fallback(
         )
         return res.html
 
-    _set_ctx_diag(ctx, _hybrid_browser_used=False, _hybrid_blocked=False, _hybrid_blocked_status=None)
+    _set_ctx_diag(ctx, _hybrid_browser_used=False, _hybrid_blocked=False, _hybrid_blocked_status=None, _hybrid_block_reason=None)
 
     if settings.enable_playwright and getattr(ctx, "force_browser", False):
         _set_ctx_diag(ctx, _hybrid_browser_used=True)
@@ -82,7 +86,11 @@ def fetch_html_with_browser_fallback(
         if not _is_blocked_error(first_exc):
             raise
 
-        _set_ctx_diag(ctx, _hybrid_blocked=True)
+        _set_ctx_diag(ctx, _hybrid_blocked=True, _hybrid_block_reason=getattr(first_exc, "reason", None))
+        logger.info(
+            "hybrid_fetch_blocked source=%s reason=%s url=%s",
+            getattr(ctx, "source", "unknown"), getattr(first_exc, "reason", None), url,
+        )
 
         # 1) Browser warmup to refresh storage_state/cookies.
         try:
@@ -107,6 +115,15 @@ def fetch_html_with_browser_fallback(
         except Exception as second_exc:
             if not _is_blocked_error(second_exc):
                 raise
-            # 3) Last resort: return browser HTML.
+            # 3) Last resort: return browser HTML, unless it is itself a block page.
             _set_ctx_diag(ctx, _hybrid_browser_used=True, _hybrid_blocked_status=getattr(second_exc, "status_code", None))
+            final_reason = classify_block(200, browser_html)
+            if final_reason:
+                _set_ctx_diag(ctx, _hybrid_block_reason=final_reason)
+                logger.warning(
+                    "hybrid_fetch_blocked_after_browser_fallback source=%s reason=%s url=%s",
+                    getattr(ctx, "source", "unknown"), final_reason, url,
+                )
+                raise FetchBlocked(200, url, reason="blocked_after_browser_fallback", html_length=len(browser_html)) from second_exc
+            record_antibot_shadow(ctx, browser_html, status_code=200, url=url)
             return browser_html

@@ -15,7 +15,7 @@ from urllib.parse import quote_plus, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.scrapers.base import fetch_html, FetchBlocked
+from app.scrapers.base import fetch_html, FetchBlocked, classify_block, record_antibot_shadow
 from app.scrapers.parsing import extract_mileage_km_from_text, extract_year_from_text, parse_brl_price
 from app.scrapers.contract import finalize_listings
 from app.core.settings import settings
@@ -324,6 +324,11 @@ def _fetch_olx_detail_html(url: str, ctx: ScrapeContext) -> str:
             raise FetchBlocked(status, url, reason="http_status")
         if status == 200 and _looks_like_cf_or_bot(text):
             raise FetchBlocked(200, url, reason="bot_challenge")
+        if status == 200:
+            antibot_reason = classify_block(200, text)
+            if antibot_reason:
+                raise FetchBlocked(200, url, reason=antibot_reason)
+            record_antibot_shadow(ctx, text, status_code=200, url=url)
         if status >= 400:
             raise FetchBlocked(status, url, reason="http_status")
         return text
@@ -696,6 +701,13 @@ def _fetch_http_hybrid(search_url: str, ctx: ScrapeContext, *, min_delay_ms: int
         if status == 200 and _looks_like_cf_or_bot(text):
             _dump_unparseable_olx_html(text, search_url)
             raise FetchBlocked(200, search_url, reason="bot_challenge", html_length=len(text))
+
+        if status == 200:
+            antibot_reason = classify_block(200, text)
+            if antibot_reason:
+                _dump_unparseable_olx_html(text, search_url)
+                raise FetchBlocked(200, search_url, reason=antibot_reason, html_length=len(text))
+            record_antibot_shadow(ctx, text, status_code=200, url=search_url)
 
         if status >= 400:
             raise FetchBlocked(status, search_url, reason="http_status")

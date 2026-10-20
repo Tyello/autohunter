@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import random
 import time
 import threading
@@ -10,7 +11,15 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.scrapers.hybrid_cookies import inject_storage_state_cookies
+from app.scrapers.shared.antibot_detector import (
+    is_blocked as antibot_is_blocked,
+    local_block_reason,
+    shadow_reason as antibot_shadow_reason,
+)
 from app.services.source_audit_capture_service import source_audit_capture_service
+
+
+logger = logging.getLogger(__name__)
 
 
 class FetchBlocked(Exception):
@@ -127,34 +136,55 @@ def _ensure_session_fingerprint(sess: requests.Session) -> None:
     sess.headers.setdefault("Connection", "keep-alive")
 
 
-def _looks_like_bot_challenge(html: str) -> bool:
-    """Heuristic bot-challenge detection.
+_ANTIBOT_SCAN_LIMIT = 150_000
 
-    Important: avoid false positives.
-    Some legit pages contain the word "captcha" in scripts or footer.
-    We only treat it as a challenge when paired with stronger markers.
+
+def classify_block(status_code: Optional[int], html: str, content_type: str = "") -> str:
+    """Return the FetchBlocked reason for a blocked response, or "" if clean.
+
+    Single bot-challenge heuristic for the whole project (HTTP and browser):
+    legacy AutoHunter keywords keep the historical "bot_challenge" reason; any
+    other Crawl4AI Tier 1/Tier 2/status hit becomes "antibot:<reason>". Tier 3
+    is never used here (shadow only, see record_antibot_shadow). Non-HTML
+    content (JSON APIs) skips the Crawl4AI patterns.
     """
-    h = (html or "").lower()
-
-    cloudflare = (
-        "cloudflare" in h and ("just a moment" in h or "cf-chl" in h or "checking your browser" in h)
+    if local_block_reason(html):
+        return "bot_challenge"
+    ct = (content_type or "").lower()
+    if ct and "html" not in ct:
+        return ""
+    # Cost cap: the Tier 1 deep scan strips <script>/<style> from up to 500 KB
+    # (~5-8 ms on 700 KB+ listings). Block pages are small or put their marker
+    # near the top, so the vendored scan only sees the first _ANTIBOT_SCAN_LIMIT
+    # chars. The legacy keyword check above still sees the whole page.
+    blocked, reason = antibot_is_blocked(
+        status_code, (html or "")[:_ANTIBOT_SCAN_LIMIT], structural=False, local=False
     )
-    incapsula = "incapsula" in h
-    datadome = "datadome" in h and ("captcha" in h or "geetest" in h or "challenge" in h)
-    perimeterx = "perimeterx" in h and ("captcha" in h or "px-captcha" in h or "challenge" in h)
+    return f"antibot:{reason}" if blocked else ""
 
-    # Captcha-only markers (more specific than plain "captcha")
-    captcha = (
-        "hcaptcha" in h
-        or "g-recaptcha" in h
-        or ("recaptcha" in h and ("sitekey" in h or "data-sitekey" in h))
-        or "data-sitekey" in h
-    )
 
-    access_denied = "access denied" in h
-    verify = "verify you are" in h or "are you human" in h
+def _looks_like_bot_challenge(html: str) -> bool:
+    """Bool view of classify_block (kept for browser_fetcher and tests)."""
+    return bool(classify_block(200, html))
 
-    return bool(cloudflare or incapsula or datadome or perimeterx or captcha or access_denied or verify)
+
+def record_antibot_shadow(ctx: Optional[object], html: str, *, status_code: Optional[int] = 200, url: str = "") -> str:
+    """Shadow mode for Tier 3: record antibot_shadow_tier3=<reason>, never block."""
+    try:
+        reason = antibot_shadow_reason(status_code, html)
+        if not reason:
+            return ""
+        source = getattr(ctx, "source", "unknown") if ctx is not None else "unknown"
+        if ctx is not None:
+            try:
+                object.__setattr__(ctx, "antibot_shadow_tier3", reason)
+            except Exception:
+                pass
+        logger.info("antibot_shadow_tier3=%s source=%s url=%s", reason, source, url)
+        return reason
+    except Exception:
+        return ""
+
 
 def _resolve_proxy(proxy: Optional[str], ctx: Optional[object]) -> Optional[str]:
     if proxy:
@@ -336,8 +366,11 @@ def fetch_response(
         raise FetchBlocked(resp.status_code, url, reason="http_status")
 
     # Pode vir 200 com challenge no corpo
-    if resp.status_code == 200 and _looks_like_bot_challenge(resp.text):
-        raise FetchBlocked(200, url, reason="bot_challenge")
+    if resp.status_code == 200:
+        block_reason = classify_block(200, resp.text, resp.headers.get("Content-Type", ""))
+        if block_reason:
+            raise FetchBlocked(200, url, reason=block_reason, html_length=len(resp.text))
+        record_antibot_shadow(ctx, resp.text, status_code=200, url=url)
 
     try:
         source_audit_capture_service.register_runtime_fetch_sample(

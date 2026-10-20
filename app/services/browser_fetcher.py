@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
-from app.scrapers.base import FetchBlocked
+from app.scrapers.base import FetchBlocked, _looks_like_bot_challenge, record_antibot_shadow
 from app.services.source_audit_capture_service import source_audit_capture_service
 from app.scrapers.diagnostics import current_diagnostics
 from app.core.settings import settings
@@ -106,31 +106,6 @@ class BrowserJsonFetchResult:
     data: dict
     final_url: str
     data_url: str
-
-
-def _looks_like_bot_challenge(html: str) -> bool:
-    """Heuristic bot-challenge detection (browser).
-
-    Keep it conservative to avoid false positives.
-    """
-    h = (html or "").lower()
-
-    cloudflare = (
-        "cloudflare" in h and ("just a moment" in h or "cf-chl" in h or "checking your browser" in h)
-    )
-    incapsula = "incapsula" in h
-    datadome = "datadome" in h and ("captcha" in h or "geetest" in h or "challenge" in h)
-    perimeterx = "perimeterx" in h and ("captcha" in h or "px-captcha" in h or "challenge" in h)
-    captcha = (
-        "hcaptcha" in h
-        or "g-recaptcha" in h
-        or ("recaptcha" in h and ("sitekey" in h or "data-sitekey" in h))
-        or "data-sitekey" in h
-    )
-    access_denied = "access denied" in h
-    verify = "verify you are" in h or "are you human" in h
-
-    return bool(cloudflare or incapsula or datadome or perimeterx or captcha or access_denied or verify)
 
 
 def _is_target_closed_error(err: Exception) -> bool:
@@ -314,6 +289,8 @@ def fetch_html_browser(
                 ),
             )
         raise FetchBlocked(200, url, reason="bot_challenge")
+
+    record_antibot_shadow(ctx, html, status_code=200, url=url)
 
     if diag is not None:
         diag.inc("br_ok")
