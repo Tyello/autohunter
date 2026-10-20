@@ -28,21 +28,38 @@
 - Novos: 53 passam. Cobrem positivos (Cloudflare form/JS, PerimeterX, DataDome, Akamai, Incapsula), 429/403, JSON, content-type não HTML, 9 detecções legadas preservadas, integração em `fetching.py` (warmup acionado por `antibot:*`; challenge nunca chega ao parser) e em `base.fetch_html`.
 - Negativos: 18 fixtures reais/aparados (OLX, Chaves na Mão, GoGarage, Kavak, Mobiauto, iCarros, TurboClass, ML) retornam `False` com `structural=False`.
 - Tier 3 documentado: 9 fixtures legítimos retornam `True` com `structural=True` (5 da OLX, 3 do iCarros, 1 do ML), com o shell RSC `olx/search_rsc_price_nodes.html` como caso principal. É o motivo de o Tier 3 estar desligado. Nenhum fixture foi alterado.
-- Suíte completa após as mudanças: **2304 passaram, 3 skipped, 0 falharam** (contagem pelos caracteres de progresso do pytest; esta versão não imprimiu a linha-resumo com `-q`).
+- Suíte completa após as mudanças e após a otimização do custo (seção 4): **2304 passaram, 3 skipped, 0 falharam** nas duas rodadas (contagem pelos caracteres de progresso do pytest; esta versão não imprimiu a linha-resumo com `-q`).
 - Baseline antes das mudanças: terminou com exit code 0, mas não capturei a contagem.
 
-## 4. Custo do detector (`classify_block`, máquina de dev, não o Pi)
+## 4. Custo do detector (máquina de dev, não o Pi; melhor de 5 rodadas × 30 chamadas, em ms)
 
-| Fonte | Tamanho | Tempo |
-|---|---|---|
-| TurboClass | 109 KB | 5,2 ms |
-| Kavak | 333 KB | 9,8 ms |
-| GoGarage | 444 KB | 9,9 ms |
-| Mobiauto | 709 KB | 12,8 ms |
-| Chaves na Mão | 733 KB | 12,3 ms |
-| OLX | 1806 KB | 20,9 ms |
+Mesma máquina e mesmos HTMLs (`tests/fixtures/source_regression/*/2026-09-28_civic/listing.html`). Colunas:
+**legado** = heurística antiga de `base.py` @ `5d561b5` (o que já existia); **classify** = decisão atual (`classify_block`);
+**cls+sombra** = o que o fetch paga por resposta (`classify_block` + `shadow_reason`).
 
-**A meta de < 5 ms não foi atingida em páginas grandes.** O custo dominante é `html.lower()` + predicados de `local_block_reason` (≈ 8 ms em 700 KB), a mesma heurística que já rodava antes sobre a página inteira. Limitar essa varredura reduziria detecções existentes, o que foi vetado. O limite de 150 000 chars só atinge a parte Crawl4AI. No Pi o custo será maior. Opção futura: pré-filtro barato (ex.: `"cloudflare" in h`) antes dos predicados.
+| Fonte | KB | legado | classify (antes → depois) | cls+sombra antes | cls+sombra depois |
+|---|---|---|---|---|---|
+| TurboClass | 109 | 1,08 | 5,19 → 5,18 | 9,29 | 5,30 |
+| Kavak | 333 | 3,56 | 10,00 → 9,76 | 16,82 | 9,73 |
+| GoGarage | 444 | 4,39 | 9,44 → 9,35 | 16,47 | 9,55 |
+| Mobiauto | 709 | 8,08 | 12,74 → 12,58 | 20,80 | 12,69 |
+| Chaves na Mão | 733 | 7,35 | 12,06 → 11,81 | 20,48 | 11,85 |
+| OLX | 1806 | 16,51 | 19,62 → 19,56 | 24,01 | 19,76 |
+
+**Otimização aplicada.** `lower()` já rodava uma única vez por chamada de `classify_block` (o Tier 3 usa regex com
+`IGNORECASE`, não `lower()`), então não havia o que reaproveitar ali. O desperdício real era `shadow_reason` chamar
+`is_blocked(structural=True)`, que **repetia a varredura Tier 1/2** (incluindo o strip de `<script>/<style>`) já feita por
+`classify_block`: ≈ +4 a +8 ms por resposta. Agora a sombra roda só as checagens de casca vazia/Tier 3 (`_structural_checks`,
+extraídas sem alterar a lógica), custando ≈ 0,1 ms. Resultado: o custo por resposta caiu de 9–24 ms para 5–20 ms, sem
+mudar nenhuma decisão de bloqueio.
+
+**Quanto o detector somou ao que já existia** (cls+sombra depois − legado): TurboClass +4,2 ms, Kavak +6,2, GoGarage +5,2,
+Mobiauto +4,6, Chaves na Mão +4,5, OLX +3,3. Esse acréscimo é basicamente o strip de `<script>/<style>` do Tier 1
+(≈ 4–5 ms em 700 KB, já limitado aos primeiros 150 000 chars).
+
+**A meta de < 5 ms não foi atingida em páginas grandes**, e a maior parte do custo (7–16 ms) é a heurística legada, que já
+existia. Varredura não foi limitada nas palavras-chave antigas (decisão: nenhuma detecção pode ser perdida). No Pi o
+custo será maior; o tempo médio real lá deve ser medido na validação pós-deploy.
 
 ## 5. Riscos e pendências
 
