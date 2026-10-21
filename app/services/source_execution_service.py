@@ -34,7 +34,12 @@ from app.services.source_configs_service import ensure_source_configs, build_scr
 from app.services.source_runs_service import record_run
 from app.services.telemetry_events_service import emit_event
 from app.services.wishlist_sources_service import get_eligible_wishlists_for_source
-from app.services.source_execution_helpers import build_scrape_dispatch, build_run_payload
+from app.services.source_execution_helpers import (
+    antibot_run_diag,
+    build_run_payload,
+    build_scrape_dispatch,
+    merge_antibot_diag,
+)
 from app.sources.registry import get_source
 from app.services.source_operational_policy import classify_source_operational_role
 from app.sources.flags import read_source_impl_flags
@@ -652,6 +657,7 @@ def _run_source_for_all_wishlists_locked(
     seen_identities_by_wishlist: dict[str, list] = {}
     any_hybrid_browser = False
     any_hybrid_blocked = False
+    antibot_acc: dict[str, Any] = {}
     last_hybrid_blocked_status: int | None = None
     last_runtime_impl: str | None = None
     last_adapter_meta: dict[str, Any] | None = None
@@ -718,6 +724,7 @@ def _run_source_for_all_wishlists_locked(
 
         any_hybrid_browser = any_hybrid_browser or bool(res.get("hybrid_browser_used"))
         any_hybrid_blocked = any_hybrid_blocked or bool(res.get("hybrid_blocked"))
+        merge_antibot_diag(antibot_acc, res)
         if res.get("hybrid_blocked_status") is not None:
             last_hybrid_blocked_status = int(res.get("hybrid_blocked_status"))
         if res.get("runtime_impl"):
@@ -795,6 +802,7 @@ def _run_source_for_all_wishlists_locked(
                 hybrid_browser_used=bool(res.get("hybrid_browser_used")),
                 hybrid_blocked=bool(res.get("hybrid_blocked")),
                 hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                antibot=antibot_run_diag(antibot_acc),
                 backoff_minutes=minutes,
                 webmotors_diag=wm_diag,
                 dual_report=getattr(group_ctx, "_dual_run_report_path", None),
@@ -855,6 +863,7 @@ def _run_source_for_all_wishlists_locked(
                     hybrid_browser_used=bool(res.get("hybrid_browser_used")),
                     hybrid_blocked=bool(res.get("hybrid_blocked")),
                     hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                    antibot=antibot_run_diag(antibot_acc),
                     retry_minutes=minutes,
                     is_bug=True,
                     webmotors_diag=wm_diag,
@@ -916,6 +925,7 @@ def _run_source_for_all_wishlists_locked(
                 hybrid_browser_used=bool(res.get("hybrid_browser_used")),
                 hybrid_blocked=bool(res.get("hybrid_blocked")),
                 hybrid_blocked_status=res.get("hybrid_blocked_status"),
+                antibot=antibot_run_diag(antibot_acc),
                 backoff_minutes=minutes,
                 webmotors_diag=wm_diag,
                 dual_report=getattr(group_ctx, "_dual_run_report_path", None),
@@ -990,6 +1000,7 @@ def _run_source_for_all_wishlists_locked(
             hybrid_browser_used=any_hybrid_browser,
             hybrid_blocked=any_hybrid_blocked,
             hybrid_blocked_status=last_hybrid_blocked_status,
+            antibot=antibot_run_diag(antibot_acc),
             thumb_present=total_thumb_present,
             thumb_rate=(float(total_thumb_present) / float(total_found)) if total_found else 0.0,
             field_coverage={

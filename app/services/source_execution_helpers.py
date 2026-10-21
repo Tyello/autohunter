@@ -129,6 +129,49 @@ def build_scrape_dispatch(
     return _scrape_dispatch
 
 
+_ANTIBOT_MAX_SHADOW_URLS = 5
+
+
+def merge_antibot_diag(acc: dict[str, Any], res: dict[str, Any]) -> None:
+    """Accumulate the antibot fields of one scrape result (see jobs._ctx_fetch_diag)."""
+    acc["detector_calls"] = int(acc.get("detector_calls", 0)) + int(res.get("antibot_detector_calls") or 0)
+    acc["detector_ms"] = float(acc.get("detector_ms", 0.0)) + float(res.get("antibot_detector_ms") or 0.0)
+    shadow = int(res.get("antibot_shadow_count") or 0)
+    acc["shadow_count"] = int(acc.get("shadow_count", 0)) + shadow
+    if shadow:
+        acc["shadow_reason"] = res.get("antibot_shadow_tier3")
+        url = res.get("antibot_shadow_url")
+        urls = acc.setdefault("shadow_urls", [])
+        if url and url not in urls and len(urls) < _ANTIBOT_MAX_SHADOW_URLS:
+            urls.append(url)
+    reason = res.get("hybrid_block_reason")
+    if reason:
+        reasons = acc.setdefault("block_reasons", {})
+        reasons[reason] = int(reasons.get(reason, 0)) + 1
+
+
+def antibot_run_diag(acc: dict[str, Any]) -> dict[str, Any] | None:
+    """Compact antibot summary for SourceRun.payload; None when there is nothing to report."""
+    calls = int(acc.get("detector_calls") or acc.get("antibot_detector_calls") or 0)
+    ms = float(acc.get("detector_ms") if acc.get("detector_ms") is not None else acc.get("antibot_detector_ms") or 0.0)
+    shadow = int(acc.get("shadow_count") or acc.get("antibot_shadow_count") or 0)
+    reasons = acc.get("block_reasons") or {}
+    if not (calls or shadow or reasons):
+        return None
+    out: dict[str, Any] = {
+        "detector_calls": calls,
+        "detector_ms": round(ms, 3),
+        "detector_ms_avg": round(ms / calls, 3) if calls else 0.0,
+        "shadow_count": shadow,
+    }
+    if shadow:
+        out["shadow_reason"] = acc.get("shadow_reason")
+        out["shadow_urls"] = list(acc.get("shadow_urls") or [])
+    if reasons:
+        out["block_reasons"] = dict(reasons)
+    return out
+
+
 def build_run_payload(
     *,
     run_summary: dict[str, Any],
@@ -146,6 +189,7 @@ def build_run_payload(
     dual_report: str | None = None,
     runtime_impl: str | None = None,
     adapter_meta: dict[str, Any] | None = None,
+    antibot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "hybrid_browser_used": bool(hybrid_browser_used),
@@ -172,6 +216,8 @@ def build_run_payload(
         payload["dual_report"] = dual_report
     if runtime_impl:
         payload["runtime_impl"] = str(runtime_impl)
+    if isinstance(antibot, dict) and antibot:
+        payload["antibot"] = antibot
     if isinstance(adapter_meta, dict):
         payload["adapter_meta"] = adapter_meta
     return payload

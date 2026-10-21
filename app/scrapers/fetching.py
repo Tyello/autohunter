@@ -117,7 +117,7 @@ def fetch_html_with_browser_fallback(
                 raise
             # 3) Last resort: return browser HTML, unless it is itself a block page.
             _set_ctx_diag(ctx, _hybrid_browser_used=True, _hybrid_blocked_status=getattr(second_exc, "status_code", None))
-            final_reason = classify_block(200, browser_html)
+            final_reason = classify_block(200, browser_html, ctx=ctx)
             if final_reason:
                 _set_ctx_diag(ctx, _hybrid_block_reason=final_reason)
                 logger.warning(

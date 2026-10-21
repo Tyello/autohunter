@@ -179,7 +179,32 @@ def _ctx_fetch_diag(ctx) -> dict:
         "hybrid_browser_used": bool(getattr(ctx, "_hybrid_browser_used", False)),
         "hybrid_blocked": bool(getattr(ctx, "_hybrid_blocked", False)),
         "hybrid_blocked_status": getattr(ctx, "_hybrid_blocked_status", None),
+        "hybrid_block_reason": getattr(ctx, "_hybrid_block_reason", None),
+        "antibot_shadow_tier3": getattr(ctx, "antibot_shadow_tier3", None),
+        "antibot_shadow_url": getattr(ctx, "antibot_shadow_url", None),
+        "antibot_shadow_count": int(getattr(ctx, "antibot_shadow_count", 0) or 0),
+        "antibot_detector_ms": float(getattr(ctx, "antibot_detector_ms", 0.0) or 0.0),
+        "antibot_detector_calls": int(getattr(ctx, "antibot_detector_calls", 0) or 0),
     }
+
+
+def _log_antibot_shadow(db, job_name: str, ctx, search_url: str, found: int) -> None:
+    """Tier 3 shadow evidence. `found` lets us cross it with listings parsed from the
+    same responses: found > 0 means Tier 3 would have been a false positive."""
+    reason = getattr(ctx, "antibot_shadow_tier3", None)
+    if not reason:
+        return
+    log(
+        db, "info", job_name, "antibot_shadow_tier3",
+        {
+            "reason": reason,
+            "url": search_url,
+            "shadow_url": getattr(ctx, "antibot_shadow_url", None),
+            "count": int(getattr(ctx, "antibot_shadow_count", 0) or 0),
+            "found": found,
+        },
+        source=ctx.source, event_type="antibot_shadow_tier3", tags=["antibot", "shadow"],
+    )
 
 def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=None, health: HealthCollector | None = None) -> dict:
     try:
@@ -224,6 +249,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
 
     listings_all = list(listings or [])
     found = len(listings_all)
+    _log_antibot_shadow(db, job_name, ctx, search_url, found)
     parse_failure = decide_parse_failure(
         source=str(getattr(ctx, "source", "") or ""),
         url=search_url,
@@ -517,6 +543,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
     adapter_meta = getattr(ctx, "_last_adapter_meta", None)
     listings_all = list(listings or [])
     found = len(listings_all)
+    _log_antibot_shadow(db, job_name, ctx, search_url, found)
     parse_failure = decide_parse_failure(
         source=str(getattr(ctx, "source", "") or ""),
         url=search_url,

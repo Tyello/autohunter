@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
-from app.scrapers.base import FetchBlocked, _looks_like_bot_challenge, record_antibot_shadow
+from app.scrapers.base import FetchBlocked, _looks_like_bot_challenge, classify_block, record_antibot_shadow
 from app.services.source_audit_capture_service import source_audit_capture_service
 from app.scrapers.diagnostics import current_diagnostics
 from app.core.settings import settings
@@ -270,7 +270,7 @@ def fetch_html_browser(
     html = r.html
     final_url = r.final_url
 
-    if _looks_like_bot_challenge(html):
+    if classify_block(200, html, ctx=ctx):
         if diag is not None:
             diag.flag("blocked", True)
             diag.inc("blocked_browser")
