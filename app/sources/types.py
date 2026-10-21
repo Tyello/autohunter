@@ -58,6 +58,15 @@ class ScrapeContext:
     _dual_run_summary: Optional[Dict[str, Any]] = None
     _last_adapter_meta: Optional[Dict[str, Any]] = None
 
+    # Anti-bot detector diagnostics (ScrapeContext uses slots: anything not declared
+    # here is silently dropped by object.__setattr__ in app/scrapers/base.py).
+    _hybrid_block_reason: Optional[str] = None
+    antibot_shadow_tier3: Optional[str] = None
+    antibot_shadow_url: Optional[str] = None
+    antibot_shadow_count: int = 0
+    antibot_detector_ms: float = 0.0
+    antibot_detector_calls: int = 0
+
 
 ScrapeFn = Callable[[str, ScrapeContext], List[Dict[str, Any]]]
 BuildUrlFn = Callable[[str], str]

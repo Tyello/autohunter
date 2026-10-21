@@ -58,8 +58,41 @@ Mobiauto +4,6, Chaves na Mão +4,5, OLX +3,3. Esse acréscimo é basicamente o s
 (≈ 4–5 ms em 700 KB, já limitado aos primeiros 150 000 chars).
 
 **A meta de < 5 ms não foi atingida em páginas grandes**, e a maior parte do custo (7–16 ms) é a heurística legada, que já
-existia. Varredura não foi limitada nas palavras-chave antigas (decisão: nenhuma detecção pode ser perdida). No Pi o
-custo será maior; o tempo médio real lá deve ser medido na validação pós-deploy.
+existia. Varredura não foi limitada nas palavras-chave antigas (decisão: nenhuma detecção pode ser perdida).
+
+**Medição no Pi** (RPi 4, ocioso, load 0,07; mesmos HTMLs e mesmo script; ms):
+
+| Fonte | KB | legado | classify | cls+sombra | detector somou |
+|---|---|---|---|---|---|
+| TurboClass | 109 | 3,10 | 17,15 | 17,16 | +14,1 |
+| Kavak | 333 | 10,62 | 28,90 | 28,90 | +18,3 |
+| GoGarage | 444 | 13,35 | 30,33 | 30,76 | +17,4 |
+| Mobiauto | 709 | 23,04 | 40,29 | 40,27 | +17,2 |
+| Chaves na Mão | 733 | 21,05 | 37,91 | 37,90 | +16,9 |
+| OLX | 1806 | 50,04 | 63,45 | 63,46 | +13,4 |
+
+No Pi o detector custa ≈ 3× a máquina de dev: +13 a +18 ms por resposta HTML sobre a heurística antiga, e 17–63 ms no
+total. É pequeno frente a um fetch HTTP de centenas de ms, mas acima da meta de < 5 ms. O tempo real em produção passa a
+ser coletado em `SourceRun.payload["antibot"]` (`detector_ms_avg`, `detector_calls`); ver seção 6.
+
+## 5-bis. Correção pós-deploy: observabilidade que não funcionava
+
+Ao avaliar o Pi após o deploy de #415/#416 constatou-se que **nenhum sinal do detector chegava a lugar nenhum**:
+- `ScrapeContext` é `dataclass(slots=True)`. `_hybrid_block_reason` e `antibot_shadow_tier3` não eram campos, e o
+  `object.__setattr__` dentro de `try/except` os descartava em silêncio. Os testes usavam `SimpleNamespace` e não pegaram.
+- O app não configura `logging`: os `logger.info` (`hybrid_fetch_blocked`, `antibot_shadow_tier3`) não vão a lugar nenhum.
+  O log operacional do AutoHunter é a tabela `system_logs`/`SourceRun.payload`, não o journal (que, além disso, não tem
+  as linhas do AutoHunter, pois `LOG_STDOUT=false`).
+- `jobs._ctx_fetch_diag` só lia 3 campos `_hybrid_*`.
+
+Correção (sem migration): campos declarados no `ScrapeContext`; `_ctx_fetch_diag` expõe `hybrid_block_reason`,
+`antibot_shadow_*`, `antibot_detector_ms/calls`; `source_execution_service` agrega por run e grava em
+`SourceRun.payload["antibot"]`; `scrape_ingest_match(_many)` grava o evento `antibot_shadow_tier3` em `system_logs` com
+`found` (anúncios parseados na mesma resposta), permitindo o cruzamento "parseou, logo o Tier 3 errou". Testes com
+`ScrapeContext` real em `tests/test_antibot_observability.py`.
+
+Limite conhecido: `block_reasons` só registra o `reason` do **último** bloqueio por resposta/ctx; bloqueios que levantam
+`FetchBlocked` até o job continuam registrados também como `source_blocked` em `system_logs` (campo `reason`).
 
 ## 5. Riscos e pendências
 
@@ -67,11 +100,20 @@ custo será maior; o tempo médio real lá deve ser medido na validação pós-d
 - **Lacuna conhecida:** `mercadolivre/2026-09-28_civic/listing_shell_com_cookies_bloqueado.html` (bloqueio real do ML) **não é detectado** pelos Tiers 1 e 2 (travado em teste). ML segue fora de escopo.
 - O check "200 quase vazio" do Crawl4AI também foi movido para `structural=True`.
 - 503 não passa por `classify_block` em `fetch_html` (a condição existente é só 200; 403/429 já levantavam).
-- Custo acima da meta (seção 4).
+- Custo acima da meta, inclusive no Pi (seção 4).
 - Fase 4 (`tools/schema_gen/`) **não foi feita** (opcional).
 - Cobertura de Kavak/Mobiauto/iCarros restrita aos fixtures aparados existentes; sem coleta ao vivo.
 - Nenhum fixture legítimo ficou próximo do Tier 2 (nenhum disparo de Tier 1/2 em qualquer fixture).
 
-## 6. Validação pós-deploy (48 h)
+## 6. Validação pós-deploy (48 h) — onde ler (corrigido)
 
-Contar por fonte nos logs: `hybrid_fetch_blocked … reason=antibot:*`, `hybrid_fetch_blocked_after_browser_fallback`, e `antibot_shadow_tier3=`. Critérios: (a) `antibot:*` em páginas que antes parseavam bem indica falso positivo, então reverter o padrão; (b) volume de `antibot_shadow_tier3` por fonte decide se o Tier 3 pode virar decisão; (c) separar bloqueio de falha de parse no diagnóstico da OLX. Só então avançar.
+Os dados estão no banco (somente leitura), não no journal:
+- `source_runs.payload->'antibot'`: `block_reasons` (bloqueios rescatados pelo warmup, por `reason`), `shadow_count`,
+  `shadow_urls`, `detector_ms_avg`, `detector_calls`. Cruzar com `items_found`/`status` da mesma run.
+- `system_logs` com `event_type='antibot_shadow_tier3'`: `payload.found > 0` significa que o Tier 3 teria errado.
+- `system_logs` com `event_type='source_blocked'` e `payload.reason` começando por `antibot:` ou igual a
+  `blocked_after_browser_fallback`: bloqueios que chegaram ao job.
+Critérios: (a) `antibot:*` em páginas que antes parseavam bem indica falso positivo, então reverter o padrão; (b) o volume de
+shadow com `found > 0` decide se o Tier 3 pode virar decisão; (c) `detector_ms_avg` por fonte no Pi; (d) separar
+bloqueio de falha de parse no diagnóstico da OLX. Só então avançar. A janela de 48 h conta a partir do deploy desta correção
+(o deploy anterior, #415/#416, não gravava esses dados).

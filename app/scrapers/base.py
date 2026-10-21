@@ -139,7 +139,16 @@ def _ensure_session_fingerprint(sess: requests.Session) -> None:
 _ANTIBOT_SCAN_LIMIT = 150_000
 
 
-def classify_block(status_code: Optional[int], html: str, content_type: str = "") -> str:
+def _ctx_bump(ctx: Optional[object], name: str, delta: float) -> None:
+    if ctx is None:
+        return
+    try:
+        object.__setattr__(ctx, name, (getattr(ctx, name, 0) or 0) + delta)
+    except Exception:
+        pass
+
+
+def classify_block(status_code: Optional[int], html: str, content_type: str = "", *, ctx: Optional[object] = None) -> str:
     """Return the FetchBlocked reason for a blocked response, or "" if clean.
 
     Single bot-challenge heuristic for the whole project (HTTP and browser):
@@ -148,6 +157,17 @@ def classify_block(status_code: Optional[int], html: str, content_type: str = ""
     is never used here (shadow only, see record_antibot_shadow). Non-HTML
     content (JSON APIs) skips the Crawl4AI patterns.
     """
+    if ctx is None:
+        return _classify_block(status_code, html, content_type)
+    started = time.perf_counter()
+    try:
+        return _classify_block(status_code, html, content_type)
+    finally:
+        _ctx_bump(ctx, "antibot_detector_ms", (time.perf_counter() - started) * 1000.0)
+        _ctx_bump(ctx, "antibot_detector_calls", 1)
+
+
+def _classify_block(status_code: Optional[int], html: str, content_type: str) -> str:
     if local_block_reason(html):
         return "bot_challenge"
     ct = (content_type or "").lower()
@@ -178,8 +198,10 @@ def record_antibot_shadow(ctx: Optional[object], html: str, *, status_code: Opti
         if ctx is not None:
             try:
                 object.__setattr__(ctx, "antibot_shadow_tier3", reason)
+                object.__setattr__(ctx, "antibot_shadow_url", url or None)
             except Exception:
                 pass
+            _ctx_bump(ctx, "antibot_shadow_count", 1)
         logger.info("antibot_shadow_tier3=%s source=%s url=%s", reason, source, url)
         return reason
     except Exception:
@@ -367,7 +389,7 @@ def fetch_response(
 
     # Pode vir 200 com challenge no corpo
     if resp.status_code == 200:
-        block_reason = classify_block(200, resp.text, resp.headers.get("Content-Type", ""))
+        block_reason = classify_block(200, resp.text, resp.headers.get("Content-Type", ""), ctx=ctx)
         if block_reason:
             raise FetchBlocked(200, url, reason=block_reason, html_length=len(resp.text))
         record_antibot_shadow(ctx, resp.text, status_code=200, url=url)

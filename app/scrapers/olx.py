@@ -325,7 +325,7 @@ def _fetch_olx_detail_html(url: str, ctx: ScrapeContext) -> str:
         if status == 200 and _looks_like_cf_or_bot(text):
             raise FetchBlocked(200, url, reason="bot_challenge")
         if status == 200:
-            antibot_reason = classify_block(200, text)
+            antibot_reason = classify_block(200, text, ctx=ctx)
             if antibot_reason:
                 raise FetchBlocked(200, url, reason=antibot_reason)
             record_antibot_shadow(ctx, text, status_code=200, url=url)
@@ -703,7 +703,7 @@ def _fetch_http_hybrid(search_url: str, ctx: ScrapeContext, *, min_delay_ms: int
             raise FetchBlocked(200, search_url, reason="bot_challenge", html_length=len(text))
 
         if status == 200:
-            antibot_reason = classify_block(200, text)
+            antibot_reason = classify_block(200, text, ctx=ctx)
             if antibot_reason:
                 _dump_unparseable_olx_html(text, search_url)
                 raise FetchBlocked(200, search_url, reason=antibot_reason, html_length=len(text))
