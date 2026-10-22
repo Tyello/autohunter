@@ -97,6 +97,11 @@ Limite conhecido: `block_reasons` só registra o `reason` do **último** bloquei
 ## 5. Riscos e pendências
 
 - **Tier 3 desligado** por falsos positivos; só opera em modo sombra (`antibot_shadow_tier3`). Fixtures aparados à mão podem não refletir respostas reais; revisar após o período de sombra.
+- **Lacuna corrigida em 2026-10-21 (avaliação em produção):** a página real "Attention Required! | Cloudflare" (HTTP 200,
+  capturada de um bloqueio da OLX) não era detectada nem pelos Tiers 1/2 nem pela heurística antiga de `base.py`; só o
+  `_looks_like_cf_or_bot` próprio da OLX a pegava. As demais fontes (que só passam por `classify_block`) a deixariam seguir
+  ao parser. Adicionado em `_LOCAL_PATTERNS` o título completo `attention required! | cloudflare` (a frase solta não casa).
+  Fixture anonimizado em `tests/fixtures/antibot/cloudflare_attention_required.html` (IP e Ray ID substituídos).
 - **Lacuna conhecida:** `mercadolivre/2026-09-28_civic/listing_shell_com_cookies_bloqueado.html` (bloqueio real do ML) **não é detectado** pelos Tiers 1 e 2 (travado em teste). ML segue fora de escopo.
 - O check "200 quase vazio" do Crawl4AI também foi movido para `structural=True`.
 - 503 não passa por `classify_block` em `fetch_html` (a condição existente é só 200; 403/429 já levantavam).
