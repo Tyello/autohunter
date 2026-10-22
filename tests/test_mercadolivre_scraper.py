@@ -478,3 +478,21 @@ def test_polycard_extracts_mileage_km_from_attribute_list():
     by_id = {i["external_id"]: i for i in ml._parse_polycard_items(html)}
     assert by_id["MLB111111111"]["mileage_km"] == 80000
     assert by_id["MLB222222222"]["mileage_km"] is None
+
+
+# --- JSON embutido em string JS (aspas escapadas) --------------------------------------
+# Em algumas respostas o ML manda os polycards dentro de `_n.ctx.s["nr"].q("0:{\"...`;
+# o parser so enxergava `"polycard":{` sem escape e achava 0 anuncios (ex.: busca 'audi-rs5').
+
+def test_parse_polycard_items_handles_escaped_json_string():
+    from pathlib import Path
+
+    from app.scrapers.mercadolivre import _parse_polycard_items
+
+    html = (Path(__file__).parent / "fixtures/mercadolivre/search_polycard_escaped_json.html").read_text(encoding="utf-8")
+    assert '"polycard"' not in html  # so existe na forma escapada
+    items = _parse_polycard_items(html, limit=50)
+    assert len(items) == 2
+    assert all(i["external_id"].startswith("MLB") for i in items)
+    assert all(i["price"] and i["price"] > 0 for i in items)
+    assert all(i["title"] for i in items)
