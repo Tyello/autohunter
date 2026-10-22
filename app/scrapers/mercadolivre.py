@@ -799,19 +799,18 @@ def _dump_polycard_sample(html: str, search_url: str) -> None:
         logger.debug("mercadolivre: falha ao salvar amostra de polycard", exc_info=True)
 
 
-def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) -> List[Dict[str, Any]]:
-    """
-    HTML público do Mercado Livre.
-    """
+def _scrape_mercadolivre_once(search_url: str, ctx: Optional[ScrapeContext] = None) -> tuple[List[Dict[str, Any]], bool]:
+    """Uma busca; devolve (anuncios, pagina_sem_resultados)."""
 
     # Trava a busca no vertical de veículos.
     search_url = _ensure_vehicle_search_url(search_url)
 
     html = _fetch_ml_search_with_shell_fallback(search_url, ctx, timeout=25)
+    empty_page = _is_ml_empty_results_page(html)
 
     # Se o ML saiu do vertical (redirect/canonical fora de carro.*), não ingere nada.
     if _left_vehicle_vertical(search_url, html):
-        return []
+        return [], False
 
 
     # POLYCARD é o layout mais confiável hoje; preferimos ele como base
@@ -914,4 +913,57 @@ def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) ->
             except Exception:
                 pass
 
-    return items
+    return items, empty_page
+
+
+_ML_MAKE_BY_MODEL = {"defender": "land-rover"}
+_ML_SLUG_FALLBACK_MAX = 2
+
+
+def _is_ml_empty_results_page(html: str) -> bool:
+    """Pagina de busca valida, mas sem resultados (`"results":[]`): o slug nao casou com nenhum modelo."""
+    return '"results":[]' in (html or "").replace('\\"', '"')
+
+
+def _fallback_search_urls(search_url: str) -> List[str]:
+    """Slugs alternativos para quando o ML nao resolve o slug da busca.
+
+    Medido em 2026-10-22: 'audi-rs5', 'a5-ambition-plus' e 'defender' dao zero resultados, mas
+    'rs5', 'a5' e 'land-rover-defender' resolvem. Os anuncios extras sao filtrados pelo matching.
+    """
+    from app.services.search_urls_service import _BRANDS
+
+    base, _, slug = search_url.rstrip("/").rpartition("/")
+    tokens = [t for t in slug.split("-") if t]
+    candidates: List[str] = []
+    if len(tokens) == 1 and tokens[0] in _ML_MAKE_BY_MODEL:
+        candidates.append(f"{_ML_MAKE_BY_MODEL[tokens[0]]}-{tokens[0]}")
+    elif len(tokens) > 1:
+        rest = tokens[1:] if tokens[0] in _BRANDS else tokens
+        if rest != tokens:
+            candidates.append("-".join(rest))
+        if len(rest) > 1 or rest != tokens:
+            candidates.append(rest[0])
+    out: List[str] = []
+    for c in candidates:
+        if c != slug and c not in out:
+            out.append(c)
+    return [f"{base}/{c}" for c in out[:_ML_SLUG_FALLBACK_MAX]]
+
+
+def scrape_mercadolivre(search_url: str, ctx: Optional[ScrapeContext] = None) -> List[Dict[str, Any]]:
+    """
+    HTML público do Mercado Livre.
+
+    Se a busca volta sem resultados porque o ML nao resolveu o slug, tenta slugs alternativos
+    (no maximo `_ML_SLUG_FALLBACK_MAX` buscas extras, so nesse caso).
+    """
+    items, empty_page = _scrape_mercadolivre_once(search_url, ctx)
+    if items or not empty_page:
+        return items
+    for alt_url in _fallback_search_urls(_ensure_vehicle_search_url(search_url)):
+        items, _ = _scrape_mercadolivre_once(alt_url, ctx)
+        if items:
+            logger.info("mercadolivre: slug alternativo %s resolveu %s", alt_url, search_url)
+            return items
+    return []
