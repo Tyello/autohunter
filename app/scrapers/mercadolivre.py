@@ -696,6 +696,10 @@ def _parse_polycard_items(html: str, limit: int = 50) -> List[Dict[str, Any]]:
     """
     items: List[Dict[str, Any]] = []
 
+    # Variante em que o ML embute o JSON numa string JS (`q("0:{\"polycard\":{...`): desescapa as aspas.
+    if html and '\\"polycard\\"' in html and '"polycard"' not in html:
+        html = html.replace('\\"', '"')
+
     pattern = re.compile(
         r'"polycard"\s*:\s*\{.*?"metadata"\s*:\s*\{.*?"id"\s*:\s*"(MLB\d+)".*?"url"\s*:\s*"(.*?)".*?\}\s*,'
         r'.*?"pictures"\s*:\s*\{.*?"pictures"\s*:\s*\[\s*\{\s*"id"\s*:\s*"(.*?)".*?\}\s*\].*?\}\s*,'
