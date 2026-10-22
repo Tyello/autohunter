@@ -224,3 +224,23 @@ def test_shadow_tier3_recorded_but_not_blocking(monkeypatch):
     ctx = SimpleNamespace(source="olx")
     assert base.fetch_html("https://x/y", ctx=ctx, min_delay_ms=0, max_delay_ms=0) == shell
     assert ctx.antibot_shadow_tier3.startswith("Structural")
+
+
+# --- Cloudflare "Attention Required!" (captured from a real OLX block, anonymized) ---
+
+CF_ATTENTION = FIX / "antibot" / "cloudflare_attention_required.html"
+
+
+def test_cloudflare_attention_required_page_is_blocked():
+    """Real block page served with HTTP 200 by Cloudflare; Tier 1/2 of Crawl4AI miss it
+    and the old base.py heuristic missed it too (only olx.py's own check caught it)."""
+    html = _read(CF_ATTENTION)
+    assert is_blocked(200, html, structural=False, local=False) == (False, "")  # upstream gap
+    assert local_block_reason(html)
+    assert classify_block(200, html, "text/html") == "bot_challenge"
+    assert is_blocked(200, html, structural=False)[0] is True
+
+
+def test_attention_required_phrase_alone_is_not_a_block():
+    page = "<html><head><title>Minha conta</title></head><body><p>Attention required: confirme seu e-mail.</p></body></html>"
+    assert classify_block(200, page, "text/html") == ""

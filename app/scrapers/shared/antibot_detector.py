@@ -321,8 +321,8 @@ def _structural_checks(status_code: Optional[int], html: str) -> Tuple[bool, str
 # Exact port of the keyword heuristic that lived in
 # app/scrapers/base.py:_looks_like_bot_challenge (and its copy in
 # app/services/browser_fetcher.py) before the consolidation, so nothing that
-# was detected before stops being detected. Each entry is (predicate over the
-# lowercased html, reason).
+# was detected before stops being detected, plus the entries explicitly marked
+# as additions below. Each entry is (predicate over the lowercased html, reason).
 # ---------------------------------------------------------------------------
 _LOCAL_PATTERNS = [
     (lambda h: "cloudflare" in h and ("just a moment" in h or "cf-chl" in h or "checking your browser" in h),
@@ -338,6 +338,11 @@ _LOCAL_PATTERNS = [
      "local: captcha widget"),
     (lambda h: "access denied" in h, "local: access denied"),
     (lambda h: "verify you are" in h or "are you human" in h, "local: human verification"),
+    # Cloudflare WAF block page ("Attention Required! | Cloudflare"), captured from a real
+    # OLX block served with HTTP 200 (tests/fixtures/antibot/). Not in the legacy set:
+    # only olx.py's own check caught it. The full title is required, so the bare phrase
+    # "attention required" in ordinary content does not match.
+    (lambda h: "attention required! | cloudflare" in h, "local: cloudflare attention required"),
 ]
 
 
