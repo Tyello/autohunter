@@ -261,6 +261,9 @@ class MercadoLivreScraper(BaseScraper):
             mileage_km = self._parse_km(self._extract_attribute(attributes, "KILOMETERS") or "")
             if mileage_km is None and isinstance(attributes, list):
                 mileage_km = self._extract_km_from_attrs([a for a in attributes if isinstance(a, str)])
+            if mileage_km is None:
+                # polycard: o parser da listagem ja extraiu o km do card (nao vem em `attributes`)
+                mileage_km = self._parse_km(str(raw_data.get("mileage_km") or ""))
             fuel_type = self._normalize_fuel(self._extract_attribute(attributes, "FUEL_TYPE") or "")
             transmission = self._normalize_transmission(self._extract_attribute(attributes, "TRANSMISSION") or "")
 
@@ -314,6 +317,7 @@ class MercadoLivreScraper(BaseScraper):
             "currency_id": item.get("currency") or "BRL",
             "location": item.get("location") or "",
             "attributes": [],
+            "mileage_km": item.get("mileage_km"),
         }
 
     def _extract_title_from_card_fallback(self, card, link_el, url: str) -> str:

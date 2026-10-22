@@ -496,3 +496,26 @@ def test_parse_polycard_items_handles_escaped_json_string():
     assert all(i["external_id"].startswith("MLB") for i in items)
     assert all(i["price"] and i["price"] > 0 for i in items)
     assert all(i["title"] for i in items)
+
+
+# --- V2 (canario em producao): o km do polycard precisa chegar ao anuncio -----------------
+# Regressao: `_convert_polycard_item` descartava o `mileage_km` que o parser ja extraia, e a
+# cobertura de `mileage_km` do ML ficou em 0% em producao (o canario V2 tem prioridade sobre v1).
+
+def test_v2_polycard_keeps_mileage_km(scraper):
+    from pathlib import Path
+
+    html = (Path(__file__).parent / "fixtures/mercadolivre/search_polycard_escaped_json.html").read_text(encoding="utf-8")
+    raws = scraper.extract_raw_data(html, ScrapeContext(source="mercadolivre"))
+    assert len(raws) == 2
+    listings = [scraper.parse_listing(r) for r in raws]
+    assert all(l is not None for l in listings)
+    assert all(isinstance(l["mileage_km"], int) and l["mileage_km"] > 0 for l in listings)
+    assert all(l["year"] for l in listings)
+
+
+def test_v2_polycard_without_km_stays_none(scraper):
+    item = {"external_id": "MLB1", "url": "https://carro.mercadolivre.com.br/MLB-1-x-_JM", "title": "Honda Civic 2014",
+            "price": 50000, "thumbnail_url": None, "mileage_km": None}
+    raw = scraper._convert_polycard_item(item)
+    assert scraper.parse_listing(raw)["mileage_km"] is None
