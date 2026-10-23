@@ -238,6 +238,8 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "info"
     log_stdout: bool = False
+    # Nivel minimo espelhado no stdout quando log_stdout=true (debug|info|warning|error).
+    log_stdout_min_level: str = "debug"
 
     # Source audit
     source_audit_debug: bool = False

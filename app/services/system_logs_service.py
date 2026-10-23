@@ -14,8 +14,20 @@ from app.utils.fingerprint import compute_fingerprint
 from app.core.settings import settings
 
 
+_LEVEL_RANK = {"debug": 10, "info": 20, "warn": 30, "warning": 30, "error": 40, "critical": 50}
+
+
 def _log_stdout_enabled() -> bool:
     return bool(settings.log_stdout)
+
+
+def _level_passes_stdout(level: str) -> bool:
+    """True se `level` atinge o minimo configurado em `log_stdout_min_level`.
+
+    Nivel desconhecido passa (nao esconder sinal); minimo invalido cai em debug.
+    """
+    minimum = _LEVEL_RANK.get(str(settings.log_stdout_min_level or "").strip().lower(), 10)
+    return _LEVEL_RANK.get(str(level or "").strip().lower(), minimum) >= minimum
 
 
 def _to_json(payload: Optional[Dict[str, Any]]) -> str:
@@ -94,7 +106,7 @@ def log(
     db.add(row)
 
     # opcional: espelha no stdout (pra journalctl)
-    if _log_stdout_enabled():
+    if _log_stdout_enabled() and _level_passes_stdout(level):
         try:
             ts = datetime.now(timezone.utc).isoformat()
             line = f"{ts} {level} {component} {message}"

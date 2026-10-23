@@ -7,7 +7,7 @@ from urllib.parse import quote_plus, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.core.text_norm import normalize
+from app.core.text_norm import normalize, normalize_search_query
 from app.scrapers.base import fetch_html
 from app.scrapers.fetching import fetch_html_with_browser_fallback
 from app.scrapers.parsing import extract_mileage_km_from_text, extract_year_from_text, parse_brl_price
@@ -67,7 +67,7 @@ def build_chavesnamao_search_url(query: str, page: int = 1) -> str:
         # without a full brand/model slug-mapping system (the SSR page above only
         # covers the few slugs we've validated), so we keep it as a deliberate,
         # documented last resort rather than silently dropping search coverage.
-        q = quote_plus((query or "").strip())
+        q = quote_plus(normalize_search_query(query))
         url = f"https://www.chavesnamao.com.br/carros-usados/brasil/?q={q}"
 
     if page and page > 1:

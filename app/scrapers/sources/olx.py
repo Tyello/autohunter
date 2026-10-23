@@ -17,6 +17,8 @@ import json
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin, urlparse
 
+from app.core.text_norm import normalize_search_query
+
 from app.scrapers.scraper_base import BaseScraper
 
 
@@ -48,7 +50,7 @@ class OLXScraper(BaseScraper):
         Returns:
             URL da página de busca HTML da OLX
         """
-        q = quote_plus(query.strip())
+        q = quote_plus(normalize_search_query(query))
         category = kwargs.get("category", "autos-e-pecas/carros-vans-e-utilitarios")
 
         return f"{self.BASE_URL}/{category}?q={q}"

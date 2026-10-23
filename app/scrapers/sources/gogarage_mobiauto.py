@@ -13,6 +13,8 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin
 
+from app.core.text_norm import normalize_search_query
+
 from app.scrapers.scraper_base import BaseScraper
 
 
@@ -25,7 +27,7 @@ class GoGarageScraper(BaseScraper):
         super().__init__(source_name="gogarage")
     
     def build_search_url(self, query: str, **kwargs) -> str:
-        q = query.replace(" ", "-").lower()
+        q = normalize_search_query(query).replace(" ", "-")
         return f"{self.BASE_URL}/carros/{q}"
     
     def extract_raw_data(self, raw_content: str, ctx) -> List[Dict]:
@@ -138,7 +140,7 @@ class MobiautoScraper(BaseScraper):
         super().__init__(source_name="mobiauto")
     
     def build_search_url(self, query: str, **kwargs) -> str:
-        q = quote_plus(query)
+        q = quote_plus(normalize_search_query(query))
         return f"{self.BASE_URL}/busca?q={q}"
     
     def extract_raw_data(self, raw_content: str, ctx) -> List[Dict]:
