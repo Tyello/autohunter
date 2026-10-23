@@ -206,6 +206,7 @@ def _render_initial_run_feedback(summary: dict | None) -> str:
     triggered = int(summary.get("triggered") or 0)
     failed = int(summary.get("failed") or 0)
     skipped = int(summary.get("skipped") or 0)
+    deferred = int(summary.get("deferred") or 0)
     immediate = int(summary.get("immediate_results") or summary.get("results_found") or summary.get("listings_found") or 0)
     sent = int(summary.get("sent") or summary.get("notifications_sent") or 0)
     if sent > 0 or immediate > 0:
@@ -217,6 +218,8 @@ def _render_initial_run_feedback(summary: dict | None) -> str:
             "⚠️ Não consegui agendar a primeira busca agora.\n"
             "Mesmo assim, o monitoramento contínuo segue ativo."
         )
+    if deferred > 0:
+        return "Sua busca já está no monitoramento.\nAviso na hora que aparecer algo compatível."
     if skipped > 0:
         return (
             "Nenhuma fonte disponível para varredura imediata agora.\n"

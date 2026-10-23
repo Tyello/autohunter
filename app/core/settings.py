@@ -300,6 +300,15 @@ class Settings(BaseSettings):
     # HTTP queue cap (protects DB/RAM)
     http_queue_max_jobs: int = 200
 
+    # Primeira busca ao criar wishlist: agrupa criacoes proximas (debounce), respeita um
+    # intervalo minimo desde a ultima execucao da source (cooldown) e responde na hora com o
+    # estoque ja ingerido (backfill). Override do cooldown por source: source_configs.extra.initial_run.
+    initial_run_debounce_min_seconds: int = 90
+    initial_run_debounce_max_seconds: int = 120
+    initial_run_cooldown_minutes: int = 30
+    initial_run_backfill_hours: int = 72
+    initial_run_backfill_max_notifications: int = 5
+
     # Consider queue jobs stuck in "running" after this timeout and requeue them.
     scrape_job_running_ttl_seconds: int = 900
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.models.source_config import SourceConfig
@@ -517,3 +517,59 @@ def test_create_wishlist_with_filters_and_initial_summary_fipe_lookup_enqueued(d
 
     assert result.ok is True
     assert len(calls) == 1
+
+
+def _seed_olx_with_last_run(db, *, minutes_ago: int, sched_minutes: int = 180, extra=None):
+    now = datetime.now(timezone.utc)
+    last = now - timedelta(minutes=minutes_ago)
+    db.add(
+        SourceConfig(
+            source="olx",
+            is_enabled=True,
+            sched_minutes=sched_minutes,
+            cooldown_minutes=0,
+            rate_limit_seconds=0,
+            browser_fallback_enabled=False,
+            force_browser=False,
+            extra=extra or {},
+        )
+    )
+    db.add(SourceState(source="olx", last_effective_run_at=last, last_run_at=last, consecutive_blocks=0, consecutive_failures=0))
+    db.commit()
+    return now
+
+
+def test_initial_run_job_bypasses_not_due_once_cooldown_elapsed(db, monkeypatch):
+    _seed_olx_with_last_run(db, minutes_ago=45)  # ciclo normal (180) ainda nao venceu; cooldown (30) sim
+    monkeypatch.setattr("app.services.source_execution_service.log", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *a, **k: None)
+
+    normal = run_source_for_all_wishlists(db, "olx", kind="queue", force=False, run_reason="queue")
+    initial = run_source_for_all_wishlists(db, "olx", kind="queue", force=False, run_reason="wishlist_created")
+
+    assert normal["reason"] == "not_due"
+    # passou da checagem de ciclo: parou adiante (sem wishlists ativas neste cenario)
+    assert initial["reason"] == "no_active_wishlists"
+    assert initial["run_reason"] == "wishlist_created"
+
+
+def test_initial_run_job_respects_cooldown(db, monkeypatch):
+    _seed_olx_with_last_run(db, minutes_ago=10)
+    monkeypatch.setattr("app.services.source_execution_service.log", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *a, **k: None)
+
+    res = run_source_for_all_wishlists(db, "olx", kind="queue", force=False, run_reason="wishlist_created")
+
+    assert res["status"] == "skipped"
+    assert res["reason"] == "initial_cooldown"
+    assert 0 < res["cooldown_remaining_seconds"] <= 20 * 60
+
+
+def test_initial_run_cooldown_override_from_source_config(db, monkeypatch):
+    _seed_olx_with_last_run(db, minutes_ago=10, extra={"initial_run": {"cooldown_minutes": 5}})
+    monkeypatch.setattr("app.services.source_execution_service.log", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.source_execution_service.emit_event", lambda *a, **k: None)
+
+    res = run_source_for_all_wishlists(db, "olx", kind="queue", force=False, run_reason="wishlist_created")
+
+    assert res["reason"] == "no_active_wishlists"
