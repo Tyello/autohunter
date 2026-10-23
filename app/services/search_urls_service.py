@@ -120,6 +120,14 @@ def _infer_brand_model(query: str) -> tuple[str | None, str | None]:
     return None, q
 
 
+def _normalize_query(query: str | None) -> str:
+    """Minusculas + espacos colapsados, para buscas `?q=` que ignoram caixa.
+
+    Evita que 'Civic Si' e 'civic si' virem URLs (e grupos de scrape) distintos.
+    """
+    return re.sub(r"\s+", " ", (query or "").strip()).lower()
+
+
 def ml_url(query: str) -> str:
     """Mercado Livre URL builder.
 
@@ -137,7 +145,7 @@ def ml_url(query: str) -> str:
 
 
 def olx_url(query: str) -> str:
-    q = quote_plus((query or "").strip())
+    q = quote_plus(_normalize_query(query))
     return f"https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q={q}"
 
 
@@ -280,7 +288,7 @@ def facebook_marketplace_url(query: str, location: str | None = None) -> str:
     """
     from app.core.geo import STATE_NAME_TO_UF, UF_TO_CAPITAL
 
-    q = quote_plus((query or "").strip())
+    q = quote_plus(_normalize_query(query))
 
     loc = (location or "").strip()
     if loc.upper() in UF_TO_CAPITAL:
@@ -310,5 +318,5 @@ def turboclass_url(query: str) -> str:
     """
     # O TurboClass aceita `q` diretamente (forma curta e que o próprio site divulga
     # no schema.org SearchAction). Mantemos sem `o/pg` para reduzir variações de HTML.
-    q = quote_plus((query or "").strip())
+    q = quote_plus(_normalize_query(query))
     return f"https://turboclass.com.br/anuncio-lista.php?q={q}"

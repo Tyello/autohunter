@@ -67,3 +67,14 @@ def test_turboclass_url_encodes_query():
         search_urls_service.turboclass_url("civic si")
         == "https://turboclass.com.br/anuncio-lista.php?q=civic+si"
     )
+
+
+@pytest.mark.parametrize("query", ["Civic Si", "civic si", "  CIVIC   SI "])
+def test_q_based_urls_ignore_case_and_extra_spaces(query):
+    assert search_urls_service.olx_url(query) == search_urls_service.olx_url("civic si")
+    assert (
+        search_urls_service.olx_url(query)
+        == "https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=civic+si"
+    )
+    assert search_urls_service.turboclass_url(query) == search_urls_service.turboclass_url("civic si")
+    assert search_urls_service.facebook_marketplace_url(query) == search_urls_service.facebook_marketplace_url("civic si")
