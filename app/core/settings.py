@@ -246,7 +246,7 @@ class Settings(BaseSettings):
     # OLX
     olx_health_path: str | None = None
     olx_force_browser_hours: int = 6
-    olx_impersonate: str = "chrome120"
+    olx_impersonate: str = "chrome136"
 
     # Notifications (legacy module compatibility)
     whatsapp_enabled: bool = False
