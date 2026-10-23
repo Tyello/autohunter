@@ -16,6 +16,15 @@ _RE_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _RE_WS = re.compile(r"\s+")
 
 
+def normalize_search_query(query: str | None) -> str:
+    """Minusculas + espacos colapsados, para URLs de busca livre (`?q=`) que ignoram caixa.
+
+    Evita que 'Civic Si' e 'civic si' virem URLs (e grupos de scrape) distintos.
+    Mantem acentos e pontuacao: so a forma canonica do texto digitado.
+    """
+    return _RE_WS.sub(" ", (query or "").strip()).lower()
+
+
 @lru_cache(maxsize=4096)
 def normalize(text: str) -> str:
     """Lowercase, remove accents, convert punctuation to spaces, collapse whitespace."""

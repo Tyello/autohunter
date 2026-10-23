@@ -15,6 +15,8 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin
 
+from app.core.text_norm import normalize_search_query
+
 from app.scrapers.scraper_base import BaseScraper
 
 
@@ -39,7 +41,7 @@ class ChavesNaMaoScraper(BaseScraper):
         Returns:
             URL de busca
         """
-        q = quote_plus(query.strip())
+        q = quote_plus(normalize_search_query(query))
         url = f"{self.BASE_URL}/busca?q={q}"
         return url
     

@@ -3,6 +3,8 @@ from urllib.parse import quote_plus
 import re
 import unicodedata
 
+from app.core.text_norm import normalize_search_query as _normalize_query
+
 
 # Chaves na Mão tem padrões de URL por modelo (SSR) bem melhores do que `?q=`.
 # Mantemos a lógica de resolução no scraper para reutilizar no bot e no scheduler.
@@ -120,14 +122,6 @@ def _infer_brand_model(query: str) -> tuple[str | None, str | None]:
     return None, q
 
 
-def _normalize_query(query: str | None) -> str:
-    """Minusculas + espacos colapsados, para buscas `?q=` que ignoram caixa.
-
-    Evita que 'Civic Si' e 'civic si' virem URLs (e grupos de scrape) distintos.
-    """
-    return re.sub(r"\s+", " ", (query or "").strip()).lower()
-
-
 def ml_url(query: str) -> str:
     """Mercado Livre URL builder.
 
@@ -158,7 +152,7 @@ def webmotors_url(query: str) -> str:
     """
 
     raw = (query or "").strip()
-    q = quote_plus(raw)
+    q = quote_plus(_normalize_query(raw))
 
     raw2 = _strip_year_phrases(raw)
     brand, model = _infer_brand_model(raw2 or raw)
@@ -216,7 +210,7 @@ def gogarage_url(query: str) -> str:
     raw2 = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", raw2 or "")
     raw2 = re.sub(r"\s+", " ", raw2).strip()
 
-    q = quote_plus(raw2 or raw)
+    q = quote_plus(_normalize_query(raw2 or raw))
     return f"https://www.gogarage.com.br/index.php?q={q}"
 
 
@@ -258,7 +252,7 @@ def icarros_url(query: str) -> str:
     if brand and model:
         return f"https://www.icarros.com.br/comprar/usados/{brand}/{model}"
     # Fallback: generic search landing page (browser will be needed anyway)
-    q = quote_plus((query or "").strip())
+    q = quote_plus(_normalize_query(query))
     return f"https://www.icarros.com.br/busca?anunciante=concessionaria&produto=carro&palavra-chave={q}"
 
 
