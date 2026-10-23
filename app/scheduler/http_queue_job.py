@@ -6,6 +6,7 @@ from app.core.settings import settings
 from app.core.shutdown import is_shutdown_requested
 from app.db.session import session_scope
 from app.services.system_logs_service import log
+from app.services.initial_run_policy import run_reason_for_job_priority
 from app.services.source_execution_service import run_source_for_all_wishlists
 from app.services.scrape_jobs_service import dequeue_next_job, mark_done, mark_failed
 
@@ -41,6 +42,7 @@ def job_http_queue_worker(worker_id: str = "http_worker"):
                 kind="queue",
                 force=False,
                 ignore_backoff=False,
+                run_reason=run_reason_for_job_priority(job.priority),
             )
             dur_ms = int((_utcnow() - t0).total_seconds() * 1000)
 

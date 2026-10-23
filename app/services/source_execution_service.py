@@ -19,6 +19,7 @@ from app.scheduler.jobs import scrape_ingest_match, scrape_ingest_match_many
 from app.services.search_deduplication_service import canonical_search_key
 from app.services.app_kv_service import get_kv, set_kv
 from app.services.source_concurrency import get_source_semaphore
+from app.services.initial_run_policy import cooldown_remaining, is_initial_run_reason, read_initial_run_policy
 from app.services.source_pacing_service import (
     CURSOR_KV_PREFIX,
     delay_seconds,
@@ -523,9 +524,22 @@ def _run_source_for_all_wishlists_locked(
 
         st = _get_state(db, src)
         last_eff = _ensure_utc(st.last_effective_run_at) if st else None
-        minutes = jittered_minutes(minutes, last_eff, read_pacing(cfg.extra).sched_jitter_pct)
-        if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
-            return {"ok": True, "status": "skipped", "reason": "not_due", "run_reason": reason}
+        if is_initial_run_reason(reason):
+            # Primeira busca de wishlist nova: nao espera o ciclo da source, mas respeita o
+            # intervalo minimo desde a ultima execucao (cooldown) para nao bater em sequencia.
+            remaining = cooldown_remaining(last_eff, _utcnow(), read_initial_run_policy(src, cfg.extra))
+            if remaining > timedelta(0):
+                return {
+                    "ok": True,
+                    "status": "skipped",
+                    "reason": "initial_cooldown",
+                    "run_reason": reason,
+                    "cooldown_remaining_seconds": int(remaining.total_seconds()),
+                }
+        else:
+            minutes = jittered_minutes(minutes, last_eff, read_pacing(cfg.extra).sched_jitter_pct)
+            if last_eff and (_utcnow() - last_eff) < timedelta(minutes=minutes):
+                return {"ok": True, "status": "skipped", "reason": "not_due", "run_reason": reason}
 
     pacing = read_pacing(cfg.extra)
     pacing_cursor_key = f"{CURSOR_KV_PREFIX}{src}"

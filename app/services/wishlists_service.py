@@ -23,7 +23,16 @@ from app.models.notification import Notification
 from app.models.wishlist_token import WishlistToken
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 from app.services.fipe_on_demand_lookup_service import enqueue_fipe_lookup_for_wishlist
-from app.services.scrape_jobs_service import enqueue_job
+from app.models.source_state import SourceState
+from app.services.initial_backfill_service import backfill_wishlist_from_stock
+from app.services.initial_run_policy import (
+    INITIAL_RUN_PRIORITY,
+    cooldown_remaining,
+    debounce_delay_seconds,
+    read_initial_run_policy,
+)
+from app.services.source_configs_service import get_source_config_snapshot
+from app.services.scrape_jobs_service import enqueue_job, pull_forward_active_job
 from app.services.source_operational_policy import (
     classify_source_operational_role,
     resolve_source_queue,
@@ -697,6 +706,18 @@ def add_wishlist(db: Session, user_id, query: str, enqueue_initial_run: bool = T
 
     if run_summary.get("failed", 0) > 0 and run_summary.get("triggered", 0) == 0:
         return True, "✅ Busca criada com sucesso.\nNão consegui agendar a primeira busca agora, mas o monitoramento contínuo segue ativo."
+    if run_summary.get("immediate_results", 0) > 0:
+        return True, (
+            f"✅ Wishlist criada: {cleaned_query}\n\n"
+            "Já encontrei anúncios compatíveis — enviando agora.\n"
+            "Você será avisado dos próximos."
+        )
+    if run_summary.get("deferred", 0) > 0 and run_summary.get("triggered", 0) == 0:
+        return True, (
+            f"✅ Wishlist criada: {cleaned_query}\n\n"
+            "Sua busca já está no monitoramento.\n"
+            "Você será avisado se encontrar bons anúncios."
+        )
     return True, (
         f"✅ Wishlist criada: {cleaned_query}\n\n"
         "Vou fazer a primeira busca em segundo plano.\n"
@@ -933,6 +954,37 @@ def normalize_wishlist_filter_input(field: str, operator: str, value: str) -> No
     return NormalizedWishlistFilter(field=field, operator=operator, value=value)
 
 
+def _source_extra(db: Session, src: str) -> dict | None:
+    cfg = get_source_config_snapshot(db, src)
+    return dict(cfg.extra) if cfg is not None and isinstance(cfg.extra, dict) else None
+
+
+def _initial_run_deferral(db: Session, src: str) -> dict | None:
+    """Motivo para NAO enfileirar a primeira busca agora (None = pode enfileirar).
+
+    A busca nova segue coberta pelo ciclo normal da source (e pelo backfill do estoque);
+    so evitamos bater de novo cedo demais ou numa source em backoff.
+    """
+    st = db.query(SourceState).filter(SourceState.source == src).first()
+    if st is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    next_allowed = st.next_allowed_at
+    if next_allowed is not None:
+        if next_allowed.tzinfo is None:
+            next_allowed = next_allowed.replace(tzinfo=timezone.utc)
+        if next_allowed > now:
+            return {"status": "deferred_backoff", "retry_in_seconds": int((next_allowed - now).total_seconds())}
+
+    remaining = cooldown_remaining(
+        st.last_effective_run_at, now, read_initial_run_policy(src, _source_extra(db, src))
+    )
+    if remaining > timedelta(0):
+        return {"status": "deferred_cooldown", "retry_in_seconds": int(remaining.total_seconds())}
+    return None
+
+
 def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_reason: str = "wishlist_created") -> Dict[str, Any]:
     """Agenda a primeira execução de uma wishlist recém-criada no pipeline oficial."""
     if not wishlist:
@@ -956,7 +1008,23 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
         db.commit()
         return {"triggered": 0, "ok": 0, "skipped": 1, "failed": 0, "sources": []}
 
-    out = {"triggered": 0, "ok": 0, "skipped": 0, "failed": 0, "sources": []}
+    out = {"triggered": 0, "ok": 0, "skipped": 0, "failed": 0, "deferred": 0, "immediate_results": 0, "sources": []}
+
+    # Resposta imediata com o estoque ja ingerido (sem rede); a varredura abaixo e complemento.
+    try:
+        backfill = backfill_wishlist_from_stock(
+            db,
+            wishlist,
+            sources=sources,
+            hours=int(settings.initial_run_backfill_hours),
+            max_notifications=int(settings.initial_run_backfill_max_notifications),
+        )
+        out["immediate_results"] = int(backfill.get("queued") or 0)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning("initial wishlist backfill failed wishlist_id=%s err=%s", wishlist.id, exc)
+
     for src in sources:
         plugin = get_source(src)
         if plugin is None:
@@ -971,15 +1039,33 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
             continue
 
         queue = resolve_source_queue(plugin)
+
+        deferred = _initial_run_deferral(db, src)
+        if deferred:
+            out["sources"].append({"source": src, "queue": queue, **deferred})
+            out["deferred"] += 1
+            continue
+
+        policy = read_initial_run_policy(src, _source_extra(db, src))
+        delay_s = debounce_delay_seconds(policy)
+        run_at = datetime.now(timezone.utc) + timedelta(seconds=delay_s)
         try:
-            inserted = enqueue_job(db, source=src, queue=queue, priority=1, max_attempts=3)
-            status = "queued" if inserted else "already_queued"
+            inserted = enqueue_job(
+                db, source=src, queue=queue, run_at=run_at, priority=INITIAL_RUN_PRIORITY, max_attempts=3
+            )
+            if inserted:
+                status = "queued"
+            elif pull_forward_active_job(db, source=src, queue=queue, run_at=run_at, priority=INITIAL_RUN_PRIORITY):
+                status = "coalesced"
+            else:
+                status = "already_queued"
             logger.info(
-                "initial wishlist enqueue source=%s queue=%s wishlist_id=%s status=%s",
+                "initial wishlist enqueue source=%s queue=%s wishlist_id=%s status=%s run_in_s=%s",
                 src,
                 queue,
                 wishlist.id,
                 status,
+                delay_s,
             )
         except SQLAlchemyError as exc:
             db.rollback()
@@ -989,8 +1075,8 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
             db.rollback()
             status = "enqueue_failed"
             logger.warning("initial wishlist enqueue failed source=%s wishlist_id=%s err=%s", src, wishlist.id, exc)
-        out["sources"].append({"source": src, "queue": queue, "status": status})
-        if status == "queued":
+        out["sources"].append({"source": src, "queue": queue, "status": status, "run_in_seconds": delay_s})
+        if status in {"queued", "coalesced"}:
             out["triggered"] += 1
             out["ok"] += 1
         elif status == "already_queued":
@@ -1011,6 +1097,8 @@ def trigger_initial_run_for_wishlist(db: Session, wishlist: Wishlist, *, run_rea
                 "ok": out["ok"],
                 "skipped": out["skipped"],
                 "failed": out["failed"],
+                "deferred": out["deferred"],
+                "immediate_results": out["immediate_results"],
                 "sources": out["sources"],
             },
             event_type="wishlist_initial_run",

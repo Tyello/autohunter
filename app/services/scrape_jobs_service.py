@@ -265,6 +265,39 @@ def enqueue_job(
     return bool(getattr(res, "rowcount", 0) == 1)
 
 
+def pull_forward_active_job(
+    db: Session,
+    *,
+    source: str,
+    queue: str,
+    run_at: datetime,
+    priority: int = 0,
+) -> bool:
+    """Antecipa o job `queued` ativo de (source, queue) para `run_at` e sobe sua prioridade.
+
+    Usado pela primeira busca de wishlist: se ja ha um job esperando (ex.: ciclo normal daqui a
+    horas), a busca nova pega carona nele em vez de gerar outra varredura. Nunca adia um job.
+    Retorna False se nao ha job `queued` (nenhum ou ja `running`).
+    """
+    src = (source or "").strip().lower()
+    job = db.execute(
+        select(ScrapeJob)
+        .where(ScrapeJob.source == src, ScrapeJob.queue == queue, ScrapeJob.status == "queued")
+        .with_for_update()
+        .limit(1)
+    ).scalar_one_or_none()
+    if job is None:
+        return False
+
+    current = job.run_at if job.run_at.tzinfo else job.run_at.replace(tzinfo=timezone.utc)
+    if current > run_at:
+        job.run_at = run_at
+    if int(job.priority or 0) < int(priority or 0):
+        job.priority = int(priority)
+    db.flush()
+    return True
+
+
 def dequeue_next_job(
     db: Session,
     *,
