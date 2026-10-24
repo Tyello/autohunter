@@ -195,7 +195,11 @@ def _normalize_create_feedback(msg: object) -> str:
     lines = [line.strip() for line in msg.strip().splitlines() if line.strip()]
     if not lines:
         return ""
-    if lines[0].startswith("✅ Busca criada com sucesso.") or lines[0].startswith("✅ Wishlist criada:"):
+    if (
+        lines[0].startswith("✅ Busca criada com sucesso.")
+        or lines[0].startswith("✅ Wishlist criada:")
+        or lines[0] == "Wishlist criada com sucesso."
+    ):
         lines = lines[1:]
     return "\n".join(lines).strip()
 
