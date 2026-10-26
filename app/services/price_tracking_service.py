@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.models.car_listing import CarListing
+from app.services.listing_presence_service import listing_is_unavailable
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
 
 
@@ -27,7 +28,7 @@ def _now(now: datetime | None) -> datetime:
 def _listing_status(listing: CarListing | None) -> str:
     if listing is None:
         return "orphan"
-    if getattr(listing, "is_sold", False):
+    if listing_is_unavailable(listing):
         return "inactive"
     return "active"
 

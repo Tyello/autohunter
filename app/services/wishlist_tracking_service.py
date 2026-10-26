@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.car_listing import CarListing
+from app.services.listing_presence_service import listing_is_unavailable
 from app.models.notification import Notification
 from app.models.wishlist import Wishlist
 from app.models.wishlist_tracked_listing import WishlistTrackedListing
@@ -206,7 +207,7 @@ def add_tracked_listing_result(
             wishlist_index=wishlist_index,
         )
 
-    listing_status = "inactive" if getattr(listing, "is_sold", False) else "active"
+    listing_status = "inactive" if listing_is_unavailable(listing) else "active"
     if listing_status != "active":
         return _build_tracked_result(
             ok=False,

@@ -38,6 +38,12 @@ O bloco entre `BEGIN GENERATED` e `END GENERATED` é gerado dos models por `scri
 | `source_runs.status` | `success`, `error`, `blocked`, `skipped` |
 | `source_states.last_status` | `success`, `skipped:disabled`, e demais status de run |
 | `system_logs.level` | `debug`, `info`, `warn`, `error` (o código também aceita `warning`/`critical` na filtragem de stdout) |
+| `car_listings.status` | `ativo` (default; o upsert sempre devolve a `ativo` ao reaparecer), `inativo` ("não vi mais", reversível; escrito por `listing_presence_service`), `suspeito` (reservado, nada escreve) |
+| `car_listings.is_sold` | venda **confirmada pela source** (ex.: sites que mantêm o anúncio marcado como vendido). Semântica OR: nunca reverte. Hoje nenhum scraper preenche. Não usar para "sumiu da lista" |
+
+### Inatividade de `car_listings` (presença por busca)
+
+`listing_presence_service` marca `status='inativo'` aproveitando os scrapes: um anúncio ausente de `missing_runs` buscas **completas** seguidas da mesma busca (`last_seen_search_key`) vira `inativo`. Busca com página cheia (`found >= page_capacity`) ou vazia nunca conta como ausência. Config por source em `source_configs.extra.inactive_reconcile` (default `off`): `{"mode": "off|dry_run|on", "page_capacity": 40, "missing_runs": 3, "stale_days": 30}`. `dry_run` só conta/loga (`system_logs` eventos `presence_reconcile` / `presence_stale`). `stale_days` é a rede de segurança por `last_seen_at` aplicada ao fim de run bem-sucedido. Consumidores que ignoram `inativo`: `/buscar`, facets, backfill, digest semanal, tracking (`listing_is_unavailable`).
 
 ## `app_kv` — chaves conhecidas
 
@@ -329,6 +335,8 @@ Constraints e índices:
 | `sold_at` | DATETIME | sim |  |  |  |
 | `status` | TEXT | não | server: `ativo` |  |  |
 | `last_seen_at` | DATETIME | não | server: `CURRENT_TIMESTAMP` |  |  |
+| `last_seen_search_key` | TEXT | sim |  |  | Presenca por busca (listing_presence_service): ultima busca/grupo em que o anuncio apareceu e quantas buscas completas seguidas dessa mesma busca nao o trouxeram. |
+| `missing_runs_count` | INTEGER | não | server: `0` |  |  |
 | `created_at` | DATETIME | não | callable |  |  |
 | `updated_at` | DATETIME | não | callable |  |  |
 
@@ -336,6 +344,7 @@ Constraints e índices:
 
 - CHECK `check_status_valid`: `status IN ('ativo','suspeito','inativo')`
 - UNIQUE `uq_car_listings_source_external_id` (source, external_id)
+- INDEX `ix_car_listings_source_search_key` (source, last_seen_search_key)
 
 ### `notifications`
 

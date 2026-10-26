@@ -58,6 +58,7 @@ from app.health.classify import classify_error
 from app.health.explain import add_anomaly_notes
 from app.health.models import RunStatus
 from app.services.listing_activity_service import reconcile_listing_activity_for_source_run
+from app.services.listing_presence_service import mark_stale_listings_inactive, parse_presence_config
 
 
 logger = logging.getLogger(__name__)
@@ -1043,6 +1044,16 @@ def _run_source_for_all_wishlists_locked(
         "activity": activity_stats.to_dict(),
         "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3),
     }
+    presence_cfg = parse_presence_config(cfg.extra)
+    if presence_cfg.enabled:
+        try:
+            with db.begin_nested():
+                stale_stats = mark_stale_listings_inactive(db, source=src, cfg=presence_cfg)
+            run_row.payload = {**(run_row.payload or {}), "presence_stale": stale_stats}
+            if stale_stats.get("marked_inactive") or stale_stats.get("would_mark_inactive"):
+                log(db, "info", component, "presence_stale", stale_stats, source=src, run_id=run_row.id, event_type="presence_stale", tags=["presence", presence_cfg.mode])
+        except Exception as e:
+            log(db, "warn", component, "presence_stale_failed", {"error": f"{type(e).__name__}: {e}"[:300]}, source=src, run_id=run_row.id, event_type="presence_stale_failed", tags=["presence", "error"])
     logger.info("source_run_summary", extra=run_summary_ok)
 
     emit_event(
