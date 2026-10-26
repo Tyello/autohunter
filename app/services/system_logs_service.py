@@ -39,6 +39,20 @@ def _to_json(payload: Optional[Dict[str, Any]]) -> str:
         return str(payload)
 
 
+def _json_safe(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Converte tipos nao-JSON (UUID, datetime, ...) em str antes de ir pro JSONB.
+
+    O driver serializa a coluna com json.dumps puro: um UUID no payload derruba o INSERT
+    (e, via session_scope, o rollback leva junto a mutacao que estava sendo logada).
+    """
+    if payload is None:
+        return None
+    try:
+        return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        return {"_unserializable_payload": str(payload)[:2000]}
+
+
 _throttle_lock = threading.Lock()
 _throttle_last: Dict[str, float] = {}
 
@@ -80,6 +94,8 @@ def log(
 
     Quem chama deve decidir quando commitar/rollback.
     """
+
+    payload = _json_safe(payload)
 
     fp = fingerprint
     if event_type and not fp:

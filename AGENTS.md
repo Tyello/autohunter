@@ -62,6 +62,7 @@ Mapa rápido:
 | Feature grande ou nova frente | `ai/skills/to-prd.md` |
 | Transferir contexto para novo chat | `ai/skills/handoff.md` |
 | Experimento isolado | `ai/skills/prototype.md` |
+| Mexer em model, migration, SQL ou script que toca o banco | ler `docs/DATABASE_SCHEMA.md` (tabelas/colunas reais) + `docs/DB_GUARDRAILS.md` |
 | Segurança Git para agentes | `ai/skills/git-guardrails-claude-code.md` |
 | Hooks/checks locais | `ai/skills/setup-pre-commit.md` |
 
@@ -149,4 +150,5 @@ Lacunas principais para lançamento público:
 9. `docs/AUCTION_RUNTIME.md`
 10. `docs/OPERATIONS_RUNBOOK.md`
 11. `docs/LEGACY_INVENTORY.md`
-12. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`
+12. `docs/DATABASE_SCHEMA.md` (obrigatório antes de tocar no banco)
+13. Código: `app/bot/`, `app/scheduler/`, `app/services/`, `app/sources/`, `app/models/`

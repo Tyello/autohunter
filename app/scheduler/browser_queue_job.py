@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from datetime import datetime, timezone
 
 from app.core.settings import settings
@@ -17,7 +18,7 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
-def _reset_playwright_pool_best_effort(job_id: int, source: str) -> None:
+def _reset_playwright_pool_best_effort(job_id: uuid.UUID, source: str) -> None:
     """Discard a possibly-wedged Playwright worker thread and start a fresh one.
 
     Best-effort: never raises. Used when a job run exceeds its hard wall-clock
@@ -58,7 +59,7 @@ def _reset_playwright_pool_best_effort(job_id: int, source: str) -> None:
         )
 
 
-def _handle_hard_timeout(job_id: int, source: str, dur_ms: int, hard_timeout_s: int) -> None:
+def _handle_hard_timeout(job_id: uuid.UUID, source: str, dur_ms: int, hard_timeout_s: int) -> None:
     """Force-fail/requeue a job whose worker thread is still stuck, using a
     brand-new session so we never touch the (possibly still in-use) session
     owned by the wedged worker thread.
