@@ -22,6 +22,7 @@ Implementar com teste guiando comportamento e protegendo regressões.
 - Não faça teste dependente de credenciais reais.
 - Prefira fixtures/mocks para sources e Telegram.
 - Para DB/migrations, valide Alembic quando aplicável.
+- Antes de tocar em model/migration/SQL, leia `docs/DATABASE_SCHEMA.md` (nomes reais de tabelas/colunas) e regenere-o com `scripts/generate_db_schema_doc.py` ao mudar schema.
 
 ## Saída esperada
 
