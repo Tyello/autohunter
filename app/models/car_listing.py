@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Text, Numeric, Integer, Boolean, DateTime, UniqueConstraint, CheckConstraint
+from sqlalchemy import Text, Numeric, Integer, Boolean, DateTime, Index, UniqueConstraint, CheckConstraint
 from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
@@ -27,6 +27,12 @@ class CarListing(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("source", "external_id", name="uq_car_listings_source_external_id"),
         CheckConstraint("status IN ('ativo','suspeito','inativo')", name="check_status_valid"),
+        Index(
+            "ix_car_listings_source_search_key",
+            "source",
+            "last_seen_search_key",
+            postgresql_where=sql_text("last_seen_search_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -75,4 +81,8 @@ class CarListing(TimestampMixin, Base):
     sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default='ativo')
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=sql_text('CURRENT_TIMESTAMP'))
+    # Presenca por busca (listing_presence_service): ultima busca/grupo em que o anuncio apareceu e
+    # quantas buscas completas seguidas dessa mesma busca nao o trouxeram.
+    last_seen_search_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    missing_runs_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 

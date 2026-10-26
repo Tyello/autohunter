@@ -16,6 +16,7 @@ from app.services.notifications_queue_service import (
     queue_notifications_for_matches_diag,
 )
 from app.services.listing_activity_service import build_seen_identity
+from app.services.listing_presence_service import parse_presence_config, reconcile_search_presence
 from app.services.matching_service import match_listings_for_wishlists, match_listings_for_active_wishlists
 from app.services.listings_service import ingest_listings, ingest_listings_stats
 from app.services.source_url_cursors_service import get_cursor, touch_cursor
@@ -67,6 +68,27 @@ def _is_bug_type(exc_type: str, exc: BaseException | None = None) -> bool:
 
 MAX_CANDIDATE_LISTINGS_PER_RUN = int(settings.match_candidates_per_run)
 MAX_QUEUE_PER_WISHLIST_PER_RUN = int(settings.match_max_queue_per_wishlist)
+
+
+def _reconcile_presence_best_effort(db, job_name, ctx, search_url, listings_all, found) -> None:
+    """Marca presenca/ausencia por busca (listing_presence_service). Nunca quebra o pipeline."""
+    cfg = parse_presence_config(getattr(ctx, "extra", None))
+    if not cfg.enabled:
+        return
+    try:
+        with db.begin_nested():
+            stats = reconcile_search_presence(
+                db,
+                source=ctx.source,
+                search_key=search_url,
+                seen_external_ids=[(it or {}).get("external_id") for it in listings_all],
+                found=found,
+                cfg=cfg,
+            )
+        if stats.get("marked_inactive") or stats.get("would_mark_inactive") or stats.get("reactivated"):
+            log(db, "info", job_name, "presence_reconcile", {"url": search_url, **stats}, source=ctx.source, event_type="presence_reconcile", tags=["presence", cfg.mode])
+    except Exception as e:
+        log(db, "warn", job_name, "presence_reconcile_failed", {"url": search_url, "error": f"{type(e).__name__}: {e}"[:300]}, source=ctx.source, event_type="presence_reconcile_failed", tags=["presence", "error"])
 
 
 def _parse_incremental_max_new(ctx) -> int | None:
@@ -341,6 +363,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
             listings_to_ingest = listings_all
 
     ing = ingest_listings_stats(db, listings_to_ingest)
+    _reconcile_presence_best_effort(db, job_name, ctx, search_url, listings_all, found)
     inserted_new = int(getattr(ing, "inserted_new", 0) or 0)
     if health is not None:
         health.inc("inserted", inserted_new)
@@ -630,6 +653,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
             listings_to_ingest = listings_all
 
     ing = ingest_listings_stats(db, listings_to_ingest)
+    _reconcile_presence_best_effort(db, job_name, ctx, search_url, listings_all, found)
     inserted_new = int(getattr(ing, "inserted_new", 0) or 0)
     if health is not None:
         health.inc("inserted", inserted_new)

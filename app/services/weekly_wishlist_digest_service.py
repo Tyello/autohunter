@@ -65,6 +65,7 @@ class WeeklyWishlistDigestService:
             .filter(WishlistListingActivity.status == "active")
             .filter(WishlistListingActivity.car_listing_id.isnot(None))
             .filter(CarListing.is_sold.is_(False))
+            .filter(CarListing.status != "inativo")
             .order_by(WishlistListingActivity.last_seen_at.desc(), WishlistListingActivity.created_at.desc())
             .all()
         )
