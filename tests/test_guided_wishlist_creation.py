@@ -431,3 +431,40 @@ def test_upgrade_fallback_ends_flow_and_opens_upgrade(monkeypatch):
     assert called["upgrade"] == 1
     assert ctx.user_data == {}
     assert "Premium" in msg.sent[-1]["text"]
+
+
+def _run_create(monkeypatch, *, first: bool | None):
+    _patch_user(monkeypatch)
+    monkeypatch.setattr(handlers_core, "add_wishlist_with_initial_summary", lambda *_a, **_k: _create_result(summary={"triggered": 5, "ok": 5, "skipped": 0, "failed": 0, "sources": ["s1"]}))
+    if first is not None:
+        monkeypatch.setattr(handlers_core, "_is_first_wishlist", lambda _db, _uid: first)
+    ctx = types.SimpleNamespace(user_data={"menu_create_wishlist_query": "civic si"})
+    update = _Update(q=_CallbackQuery("CWL:CREATE"))
+    state = asyncio.run(handlers_core.cb_menu_create_wishlist(update, ctx))
+    return state, update
+
+
+def test_first_wishlist_sends_score_explainer_after_creation(monkeypatch):
+    state, update = _run_create(monkeypatch, first=True)
+
+    assert state == ConversationHandler.END
+    assert "✅ Busca criada com sucesso." in update.callback_query.edits[-1]["text"]
+    sent = [m["text"] for m in update.effective_message.sent]
+    assert len(sent) == 1
+    assert "Como ler a nota" in sent[0]
+    assert "0 a 100" in sent[0]
+    assert "Garagem Alvo" in sent[0]
+
+
+def test_next_wishlists_do_not_repeat_score_explainer(monkeypatch):
+    _, update = _run_create(monkeypatch, first=False)
+
+    assert update.effective_message.sent == []
+
+
+def test_score_explainer_failure_never_breaks_creation(monkeypatch):
+    # sem patch: a sessao fake nao suporta consulta, o helper deve falhar em silencio
+    state, update = _run_create(monkeypatch, first=None)
+
+    assert state == ConversationHandler.END
+    assert update.effective_message.sent == []

@@ -70,11 +70,47 @@ def test_complete_score_gt_zero_snapshot_and_order():
     payload = format_ad_message(ad)
     lines = payload.text.splitlines()
 
-    assert lines[0] == "🔥 87/100 · Honda Civic 2019 SI"
-    assert lines[1] == "📍 São Paulo-SP · R$ 98.900,00 · webmotors | ⏱️ Há 3h | 🛞 75.352 km | ⚙️ Manual | 👤 Particular"
-    assert lines[2] == "💰 FIPE —"
-    assert len(lines) == 3
+    assert lines[0] == "🔥 87/100 · Honda Civic 2019 SI · webmotors"
+    assert lines[1] == "🛞 75.352 km · ⚙️ Manual"
+    assert lines[2] == "📍 São Paulo-SP · ⏱️ Há 3h · 👤 Particular"
+    assert lines[3] == "💰 R$ 98.900,00 · FIPE —"
+    assert len(lines) == 4
     assert payload.inline_keyboard == [[{"text": "Abrir anúncio", "url": "https://www.webmotors.com.br/comprar/1"}]]
+
+
+def test_price_and_fipe_share_a_line_and_km_gearbox_share_a_line():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(score_breakdown={
+        "total": 80, "reasons": ["ok"],
+        "market_context": {"fipe": {"fipe_price": 105000}},
+    }))
+    lines = payload.text.splitlines()
+
+    assert "💰 R$ 98.900,00 · FIPE R$ 105.000,00" in lines
+    assert "🛞 75.352 km · ⚙️ Manual" in lines
+    assert any(l.startswith("📍 São Paulo-SP") for l in lines)
+
+
+def test_criteria_lines_come_last_right_after_price_and_fipe_line():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    ad = _base_ad(score_breakdown={"total": 70, "reasons": ["ok"]})
+    ad.wishlist_filters = [{"field": "year", "operator": "lte", "value": "2008"}]
+    lines = format_ad_message(ad).text.splitlines()
+
+    assert lines[-1] == "✓ ano ≤ 2008"
+    assert lines[-2].startswith("💰 ")
+
+
+def test_km_line_without_gearbox_shows_only_km():
+    from app.notifications.telegram_formatter import format_ad_message
+
+    payload = format_ad_message(_base_ad(transmission=None))
+    lines = payload.text.splitlines()
+
+    assert "🛞 75.352 km" in lines
+    assert not any("⚙️" in line for line in lines)
 
 
 def test_score_92_shows_excellent_opportunity_label():
@@ -163,7 +199,7 @@ def test_score_zero_with_query_shows_minimum_context():
     ad.wishlist_query = "civic si"
     payload = format_ad_message(ad)
 
-    assert payload.text.splitlines()[0] == "Honda Civic 2019 SI"
+    assert payload.text.splitlines()[0] == "Honda Civic 2019 SI · webmotors"
     assert "🔥" not in payload.text
     assert "✓ civic si" in payload.text
 
@@ -254,7 +290,7 @@ def test_missing_price_shows_dash_and_no_invented_data():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(price=None))
-    assert "— · webmotors" in payload.text
+    assert "💰 — · FIPE —" in payload.text.splitlines()
 
 
 def test_rarity_context_shows_only_with_enough_sample():
@@ -309,7 +345,8 @@ def test_fipe_line_shows_absolute_value_when_present():
         "total": 80, "reasons": ["ok"],
         "market_context": {"fipe": {"fipe_price": 36500, "delta_vs_fipe_pct": -0.12}},
     }))
-    assert "💰 FIPE R$ 36.500,00" in payload.text
+    assert "FIPE R$ 36.500,00" in payload.text
+    assert payload.text.count("💰") == 1
     assert "%" not in payload.text
 
 
@@ -318,7 +355,7 @@ def test_fipe_line_shows_dash_when_absent():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "reasons": ["ok"]}))
-    assert "💰 FIPE —" in payload.text
+    assert "FIPE —" in payload.text
 
 
 def test_fipe_line_ignores_legacy_flat_breakdown_shape():
@@ -328,7 +365,7 @@ def test_fipe_line_ignores_legacy_flat_breakdown_shape():
     from app.notifications.telegram_formatter import format_ad_message
 
     payload = format_ad_message(_base_ad(score_breakdown={"total": 80, "delta_vs_fipe_pct": -12, "reasons": ["ok"]}))
-    assert "💰 FIPE —" in payload.text
+    assert "FIPE —" in payload.text
 
 
 def test_criteria_lines_list_only_user_filters_never_price_reason():
