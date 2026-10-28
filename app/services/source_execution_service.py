@@ -550,6 +550,7 @@ def _run_source_for_all_wishlists_locked(
         url = plugin.build_url("")
         groups: dict[str, dict] = {url: {"query": None, "wishlists": []}}
         wishlists = []
+        all_group_urls = list(groups.keys())
     else:
         wishlists, wishlist_stats = _wishlist_eligibility_snapshot(db, src)
         if not wishlists:
@@ -581,6 +582,7 @@ def _run_source_for_all_wishlists_locked(
                 groups[url] = {"query": w.query, "wishlists": [w]}
             else:
                 g["wishlists"].append(w)
+        all_group_urls = list(groups.keys())
 
         # Pacing opcional (source_configs.extra.pacing): atende so as N buscas atendidas ha mais
         # tempo. `wishlists` tambem encolhe, senao o reconciliador de atividade trataria os
@@ -725,7 +727,7 @@ def _run_source_for_all_wishlists_locked(
     if pacing.max_groups_per_run > 0:
         try:
             served = [e["url"] for e in results_in_order if (e.get("res") or {}).get("ok")]
-            set_kv(db, pacing_cursor_key, mark_served(get_kv(db, pacing_cursor_key), served, now=_utcnow(), keep=list(groups.keys())))
+            set_kv(db, pacing_cursor_key, mark_served(get_kv(db, pacing_cursor_key), served, now=_utcnow(), keep=all_group_urls))
         except Exception:
             logger.debug("pacing: falha ao salvar cursor src=%s", src, exc_info=True)
 

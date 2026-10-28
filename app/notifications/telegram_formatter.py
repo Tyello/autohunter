@@ -380,14 +380,6 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
     if recency:
         badges.append(recency)
 
-    km_badge = format_km(getattr(ad, "mileage_km", None))
-    if km_badge:
-        badges.append(f"🛞 {km_badge} km")
-
-    gb = _short_gearbox(getattr(ad, "transmission", None))
-    if gb:
-        badges.append(f"⚙️ {gb}")
-
     seller = build_seller_type_badge(ad)
     if seller:
         badges.append(seller)
@@ -413,6 +405,17 @@ def build_badges(ad: Any, score_result: Any | None, listing_flags: ListingFlags)
         if item:
             compact.append(item)
     return compact
+
+
+def build_specs_line(ad: Any) -> str:
+    parts: list[str] = []
+    km_badge = format_km(getattr(ad, "mileage_km", None))
+    if km_badge:
+        parts.append(f"🛞 {km_badge} km")
+    gb = _short_gearbox(getattr(ad, "transmission", None))
+    if gb:
+        parts.append(f"⚙️ {gb}")
+    return " · ".join(parts)
 
 
 def _compact_filters(ad: Any) -> list[str]:
@@ -516,10 +519,12 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
         score_i = 0
 
     title = build_title(ad)
+    source = _clean(getattr(ad, "source", None))
+    title_with_source = f"{title} · {source}" if source else title
     if score_i > 0:
-        line1 = f"🔥 {score_i}/100 · {title}"
+        line1 = f"🔥 {score_i}/100 · {title_with_source}"
     else:
-        line1 = title
+        line1 = title_with_source
 
     flags = extract_listing_flags(ad)
     badges = build_badges(ad, score_result, flags)
@@ -530,19 +535,14 @@ def format_ad_message(ad: Any, score_result: Any | None = None) -> TelegramMessa
         state=getattr(ad, "state", None),
     )
     price_txt = _format_price_brl(getattr(ad, "price", None))
-    source = _clean(getattr(ad, "source", None))
-    core = " · ".join(p for p in (f"📍 {loc_badge}" if loc_badge else None, price_txt, source or None) if p)
-    line2 = " | ".join(p for p in (core, *badges) if p)
+    price_line = f"💰 {price_txt} · FIPE {_format_price_brl(_fipe_price(breakdown))}"
 
-    line3 = f"💰 FIPE {_format_price_brl(_fipe_price(breakdown))}"
-
-    lines = [line1]
-    if line2:
-        lines.append(line2)
+    footer = " · ".join(p for p in (f"📍 {loc_badge}" if loc_badge else None, *badges) if p)
+    lines = [line1, build_specs_line(ad), footer]
     rarity_context = _rarity_context_line(breakdown)
     if rarity_context:
         lines.append(rarity_context)
-    lines.append(line3)
+    lines.append(price_line)
     lines.extend(_build_criteria_lines(ad))
 
     compact_lines = [_clip(line, _MAX_LINE) for line in lines if _clean(line)]

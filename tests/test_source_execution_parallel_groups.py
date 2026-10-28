@@ -405,3 +405,32 @@ def test_req006_parallel_tick_latency_beats_sequential_baseline(db, monkeypatch)
         f"parallel tick ({parallel_ms}ms) should be well under 60% of the sequential "
         f"baseline ({sequential_ms:.1f}ms) with source_group_max_workers=4 for N={n} groups"
     )
+
+
+def test_pacing_cursor_keeps_unserved_groups_so_rotation_covers_every_group(db, monkeypatch):
+    """Regressao: o cursor de rodizio nao pode descartar as buscas nao atendidas na rodada.
+
+    Antes, `keep` era so o subconjunto escolhido; o cursor encolhia para N entradas e o
+    rodizio ficava preso nos mesmos grupos (ex.: ML nunca atendia `honda fit s`).
+    """
+    plugin = _plugin("mercadolivre")
+    wishlists = _wishlists(5)
+    urls = _urls_for(plugin, wishlists)
+    _add_cfg(db, extra={"impl": "v1", "pacing": {"max_groups_per_run": 2, "shuffle_groups": False}})
+    db.commit()
+    _setup_run(monkeypatch, wishlists=wishlists, plugin=plugin)
+
+    calls = []
+    lock = threading.Lock()
+
+    def _scrape(_db, _job_name, _dispatch, url, *, ctx, wishlist=None, health=None):
+        with lock:
+            calls.append(url)
+        return _ok_result()
+
+    monkeypatch.setattr(svc, "scrape_ingest_match", _scrape)
+
+    for _ in range(3):
+        svc.run_source_for_all_wishlists(db, "mercadolivre", kind="scheduler", force=True, ignore_backoff=True)
+
+    assert set(calls) == set(urls), "3 rodadas de 2 buscas devem cobrir as 5 buscas"

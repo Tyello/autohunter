@@ -232,6 +232,36 @@ def _render_initial_run_feedback(summary: dict | None) -> str:
     return "Primeira varredura em andamento. Resultados chegam em minutos."
 
 
+SCORE_EXPLAINER_TEXT = (
+    "📊 Como ler a nota dos alertas\n\n"
+    "Cada anúncio recebe uma nota de 0 a 100 na Garagem Alvo. Ela combina:\n"
+    "• Aderência à sua busca\n"
+    "• Preço frente a anúncios parecidos e à tabela FIPE\n"
+    "• Quilometragem em relação à idade do carro\n"
+    "• Raridade do modelo (quando há dados suficientes)\n"
+    "• Qualidade do anúncio (preço, km, local e fotos informados)\n\n"
+    "Quanto maior a nota, mais o anúncio combina com o que você procura. "
+    "É uma referência, não uma garantia: confira o anúncio antes de decidir."
+)
+
+
+def _is_first_wishlist(db, user_id) -> bool:
+    try:
+        return len(list_wishlists(db, user_id)) == 1
+    except Exception:
+        logger.debug("score explainer: falha ao contar buscas", exc_info=True)
+        return False
+
+
+async def _send_score_explainer_if_first(update: Update, first_search: bool) -> None:
+    if not first_search:
+        return
+    try:
+        await reply_text(update, SCORE_EXPLAINER_TEXT)
+    except Exception:
+        logger.debug("score explainer: falha ao enviar", exc_info=True)
+
+
 def _post_creation_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎯 Ver minhas buscas", callback_data="MENU:WISHLISTS")],
@@ -1171,6 +1201,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 context.user_data.pop("menu_create_wishlist_last_create_key", None)
                 await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
                 return MENU_CREATE_WISHLIST_QUERY
+            first_search = bool(create_result.ok) and _is_first_wishlist(db, user.id)
         if not create_result.ok:
             context.user_data["menu_create_wishlist_creating"] = False
             context.user_data.pop("menu_create_wishlist_last_create_key", None)
@@ -1197,6 +1228,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             ),
             reply_markup=_post_creation_markup(),
         )
+        await _send_score_explainer_if_first(update, first_search)
         return ConversationHandler.END
 
     if data == "CWL:CREATE_FILTERS":
@@ -1303,6 +1335,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
                 context.user_data.pop("menu_create_wishlist_last_create_key", None)
                 await _safe_edit_or_send(update, "Não consegui concluir essa ação agora. Tente novamente em instantes.")
                 return MENU_CREATE_WISHLIST_QUERY
+            first_search = bool(create_result.ok) and _is_first_wishlist(db, user.id)
         if not create_result.ok:
             context.user_data["menu_create_wishlist_creating"] = False
             context.user_data.pop("menu_create_wishlist_last_create_key", None)
@@ -1318,6 +1351,7 @@ async def cb_menu_create_wishlist(update: Update, context: ContextTypes.DEFAULT_
             f"✅ Busca criada com sucesso.\n\n✅ {query} monitorado.\nBusca: {query}\nLeilões: {_render_auctions_status(include_auctions)}\nFiltros:\n{labels}\n\n{initial_run_feedback}",
             reply_markup=_post_creation_markup(),
         )
+        await _send_score_explainer_if_first(update, first_search)
         return ConversationHandler.END
 
     await _safe_edit_or_send(update, "Essa opção não está mais válida.\n\nAbra o menu novamente para continuar.\n\nUse /menu.")
