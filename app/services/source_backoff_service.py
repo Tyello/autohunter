@@ -34,7 +34,10 @@ def _get_or_create_state(db: Session, source: str) -> SourceState:
 def is_source_allowed(db: Session, source: str) -> Availability:
     """Retorna se a fonte pode rodar agora (considera backoff)."""
     st = _get_or_create_state(db, source)
-    if st.next_allowed_at and st.next_allowed_at > _utcnow():
+    nxt = st.next_allowed_at
+    if nxt is not None and nxt.tzinfo is None:
+        nxt = nxt.replace(tzinfo=timezone.utc)  # SQLite devolve datetime ingenuo (UTC)
+    if nxt and nxt > _utcnow():
         return Availability(is_allowed=False, reason="backoff", next_allowed_at=st.next_allowed_at)
     return Availability(is_allowed=True)
 
