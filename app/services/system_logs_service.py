@@ -30,6 +30,12 @@ def _level_passes_stdout(level: str) -> bool:
     return _LEVEL_RANK.get(str(level or "").strip().lower(), minimum) >= minimum
 
 
+def _message_always_on_stdout(message: str) -> bool:
+    """True se `message` esta em `log_stdout_always_messages` (vai ao stdout independente do nivel)."""
+    raw = str(getattr(settings, "log_stdout_always_messages", "") or "")
+    return str(message or "") in {m.strip() for m in raw.split(",") if m.strip()}
+
+
 def _to_json(payload: Optional[Dict[str, Any]]) -> str:
     if payload is None:
         return ""
@@ -122,7 +128,7 @@ def log(
     db.add(row)
 
     # opcional: espelha no stdout (pra journalctl)
-    if _log_stdout_enabled() and _level_passes_stdout(level):
+    if _log_stdout_enabled() and (_level_passes_stdout(level) or _message_always_on_stdout(message)):
         try:
             ts = datetime.now(timezone.utc).isoformat()
             line = f"{ts} {level} {component} {message}"

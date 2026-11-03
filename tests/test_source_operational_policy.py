@@ -106,3 +106,20 @@ def test_source_operational_severity_matrix():
     assert source_operational_severity("disabled", enabled=True) == "ignored"
     assert source_operational_severity("unknown", enabled=True) == "warning"
     assert source_operational_severity("primary", enabled=False) == "ignored"
+
+
+def test_db_operational_role_overrides_plugin_default():
+    """Prod: ML esta `primary` no banco (source_configs.extra) mas `deprioritized` no plugin;
+    o banco e a fonte de verdade, senao o ML parado nunca gera alerta de source stale."""
+    plugin = _plugin(name="mercadolivre", default_extra={"operational_role": "deprioritized"})
+    cfg = SimpleNamespace(is_enabled=True, extra={"operational_role": "primary"})
+    op = classify_source_operational_role(plugin, cfg=cfg)
+    assert op.role == "primary"
+    assert should_include_in_critical_stale(plugin, cfg=cfg) is True
+
+
+def test_plugin_role_used_when_db_has_no_or_invalid_role():
+    plugin = _plugin(default_extra={"operational_role": "fragile"})
+    for extra in (None, {}, {"operational_role": ""}, {"operational_role": "bogus"}):
+        cfg = SimpleNamespace(is_enabled=True, extra=extra)
+        assert classify_source_operational_role(plugin, cfg=cfg).role == "fragile"

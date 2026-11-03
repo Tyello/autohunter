@@ -31,8 +31,7 @@ def _is_enabled(cfg: Any, plugin: SourcePlugin) -> bool:
     return bool(getattr(cfg, "is_enabled", False))
 
 
-def _manual_role_override(plugin: SourcePlugin) -> Optional[str]:
-    extra = getattr(plugin, "default_extra", None)
+def _role_from_extra(extra: Any) -> Optional[str]:
     if not isinstance(extra, dict):
         return None
     role = extra.get("operational_role")
@@ -41,6 +40,13 @@ def _manual_role_override(plugin: SourcePlugin) -> Optional[str]:
         if normalized in ALLOWED_OPERATIONAL_ROLES:
             return normalized
     return None
+
+
+def _manual_role_override(plugin: SourcePlugin, cfg: Any = None) -> Optional[str]:
+    # A config do banco (source_configs.extra) e a fonte de verdade; o default do plugin e so seed.
+    # Antes so o plugin era lido: o ML estava `primary` no banco mas `deprioritized` no plugin e
+    # nunca entrou nos alertas de source parada (prod: 5 dias sem coletar, 0 alertas).
+    return _role_from_extra(getattr(cfg, "extra", None)) or _role_from_extra(getattr(plugin, "default_extra", None))
 
 
 def classify_source_operational_role(
@@ -56,7 +62,7 @@ def classify_source_operational_role(
 
     supports_wishlist = bool(getattr(plugin, "supports_wishlist_monitoring", True))
     implemented = callable(getattr(plugin, "scrape", None))
-    explicit_role = _manual_role_override(plugin)
+    explicit_role = _manual_role_override(plugin, cfg)
 
     if explicit_role == "disabled":
         return SourceOperationalClassification("disabled", False, "explicit:disabled")

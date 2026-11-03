@@ -240,6 +240,9 @@ class Settings(BaseSettings):
     log_stdout: bool = False
     # Nivel minimo espelhado no stdout quando log_stdout=true (debug|info|warning|error).
     log_stdout_min_level: str = "debug"
+    # Mensagens (separadas por virgula) espelhadas no stdout mesmo abaixo de log_stdout_min_level.
+    # Com min_level=warning o journal so mostra erro/bloqueio; o resumo por busca mostra o que deu certo.
+    log_stdout_always_messages: str = "pipeline_summary"
 
     # Source audit
     source_audit_debug: bool = False
