@@ -251,9 +251,9 @@ def _block_grace_for(cfg: SourceConfig) -> int:
 def _max_backoff_minutes_for(src: str) -> Optional[int]:
     """Per-source backoff ceiling (None = global `source_backoff_max_minutes`)."""
     name = (src or "").lower()
-    if name == "mercadolivre":
-        return 10080
-    if name == "olx":
+    # ML: 7 dias parado (prod 28/10-08/11) por 6 bloqueios seguidos era excessivo; teto de 24h
+    # mantem o respiro para reputacao de IP sem desligar a source por dias.
+    if name in ("mercadolivre", "olx"):
         return 1440
     return None
 
@@ -492,7 +492,20 @@ def _run_source_for_all_wishlists_locked(
     if not (force or ignore_backoff):
         avail = is_source_allowed(db, src)
         if not avail.is_allowed:
-            mark_skipped(db, src, "backoff", {"next_allowed_at": str(avail.next_allowed_at) if avail.next_allowed_at else None})
+            next_allowed_str = str(avail.next_allowed_at) if avail.next_allowed_at else None
+            prev_state = _get_state(db, src)
+            already_reported = bool(
+                prev_state is not None
+                and prev_state.last_status == "skipped:backoff"
+                and isinstance(prev_state.last_payload, dict)
+                and prev_state.last_payload.get("next_allowed_at") == next_allowed_str
+            )
+            mark_skipped(db, src, "backoff", {"next_allowed_at": next_allowed_str})
+            if already_reported:
+                # Mesma janela de backoff ja registrada: nao grava run/evento/log a cada tick
+                # (prod: ~960 skips/dia por source, 3 escritas cada). O estado acima segue atualizado.
+                db.commit()
+                return {"ok": True, "status": "skipped", "reason": "backoff", "next_allowed_at": avail.next_allowed_at, "run_reason": reason}
             run_row = record_run(
                 db,
                 source=src,
