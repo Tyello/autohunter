@@ -119,6 +119,7 @@ def test_interpreter_shutdown_error_not_marked_failed_and_logged(monkeypatch):
 
     class DummyJob:
         source = "olx"
+        priority = 0
 
     class DummyDB:
         def __init__(self):
