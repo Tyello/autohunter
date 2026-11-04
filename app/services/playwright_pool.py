@@ -1169,6 +1169,21 @@ def get_playwright_pool() -> PlaywrightPool:
     return _POOL
 
 
+def shutdown_playwright_pool() -> Optional[dict]:
+    """Fecha o pool no shutdown do processo, sem criar um so para fecha-lo.
+
+    Retorna o resultado de ``PlaywrightPool.close()`` ou None se o pool nunca
+    foi criado. Sem isso, um restart deixa headless_shell vivo e o systemd
+    precisa dar SIGKILL no cgroup inteiro.
+    """
+    global _POOL
+    pool = _POOL
+    if pool is None:
+        return None
+    _POOL = None
+    return pool.close()
+
+
 _ORPHAN_PROCESS_MARKERS = ("headless_shell", "ms-playwright", "playwright")
 
 

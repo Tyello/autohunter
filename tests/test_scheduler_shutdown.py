@@ -38,6 +38,56 @@ def test_run_scheduler_graceful_shutdown(monkeypatch):
     assert sched.shutdown_wait is True
 
 
+def test_run_scheduler_closes_browsers_on_shutdown(monkeypatch):
+    """Restart nao pode deixar headless_shell vivo para o systemd dar SIGKILL."""
+    from app.cli import run_scheduler
+
+    class DummySched:
+        def pause(self):
+            pass
+
+        def shutdown(self, wait=False):
+            pass
+
+    calls = []
+    monkeypatch.setattr(run_scheduler, "start_scheduler", lambda: DummySched())
+    monkeypatch.setattr(run_scheduler, "stop_worker_threads", lambda timeout=10: calls.append("workers"))
+    monkeypatch.setattr(run_scheduler, "shutdown_playwright_pool", lambda: calls.append("pool"))
+    monkeypatch.setattr(run_scheduler, "shutdown_browser_manager", lambda: calls.append("manager"))
+    monkeypatch.setattr(run_scheduler.time, "sleep", lambda _s: shutdown_state.request_shutdown("test"))
+
+    assert run_scheduler.main() == 0
+    # browsers so fecham depois que os workers pararam (nenhum job usa o pool)
+    assert calls == ["workers", "pool", "manager"]
+
+
+def test_run_scheduler_browser_close_failure_does_not_abort_shutdown(monkeypatch, capsys):
+    from app.cli import run_scheduler
+
+    class DummySched:
+        def pause(self):
+            pass
+
+        def shutdown(self, wait=False):
+            pass
+
+    def boom():
+        raise RuntimeError("pool wedged")
+
+    called = []
+    monkeypatch.setattr(run_scheduler, "start_scheduler", lambda: DummySched())
+    monkeypatch.setattr(run_scheduler, "stop_worker_threads", lambda timeout=10: None)
+    monkeypatch.setattr(run_scheduler, "shutdown_playwright_pool", boom)
+    monkeypatch.setattr(run_scheduler, "shutdown_browser_manager", lambda: called.append("manager"))
+    monkeypatch.setattr(run_scheduler.time, "sleep", lambda _s: shutdown_state.request_shutdown("test"))
+
+    assert run_scheduler.main() == 0
+    assert called == ["manager"]  # segue para o proximo mesmo com falha
+    out = capsys.readouterr().out
+    assert "shutdown_complete" in out
+    assert "stage=shutdown.playwright_pool" in out
+
+
 def test_tick_does_not_enqueue_during_shutdown(monkeypatch):
     from app.scheduler import run as scheduler_run
 
