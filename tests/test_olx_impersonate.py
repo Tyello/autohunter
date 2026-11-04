@@ -22,7 +22,7 @@ def test_module_user_agent_matches_configured_impersonation():
 
 
 def test_default_impersonate_is_recent_chrome():
-    assert Settings.model_fields["olx_impersonate"].default == "chrome136"
+    assert Settings.model_fields["olx_impersonate"].default == "chrome146"
 
 
 def test_olx_requests_use_the_shared_user_agent(monkeypatch):
