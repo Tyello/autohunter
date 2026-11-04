@@ -179,14 +179,6 @@ def test_source_failure_is_recorded_and_notifies_nobody(db, world):
     assert _send(db) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG conhecido: candidate_wishlist_ids_for_listing_tokens exige min_overlap=2 tokens, entao uma "
-        "busca de UMA palavra (ex.: 'defender', 'cuore', 'rs4') nunca vira candidata no matching do "
-        "scheduler e so recebe alertas no backfill da criacao. Remova o xfail ao corrigir."
-    ),
-)
 def test_single_word_wishlist_is_matched_by_the_scheduler(db, world):
     world.wish.query = "civic"
     db.query(WishlistToken).filter_by(wishlist_id=world.wish.id).delete()
