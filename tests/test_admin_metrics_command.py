@@ -63,6 +63,10 @@ def test_admin_metrics_render_empty_base(monkeypatch, db):
 def test_admin_metrics_counts_and_sources(monkeypatch, db):
     _bind_session(monkeypatch, db)
     now = datetime.now(timezone.utc)
+    # "Enviados hoje (UTC)": o envio de hoje fica sempre entre 00:00Z e agora. `now - 2h` cruzava
+    # a meia-noite UTC e quebrava o teste todo dia entre 00:00 e 02:00 UTC.
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_sent_at = midnight + (now - midnight) / 2
 
     free = User(id=uuid.uuid4(), telegram_chat_id=1001, username="free", is_active=True)
     new_user = User(id=uuid.uuid4(), telegram_chat_id=1002, username="new", is_active=True, created_at=now - timedelta(days=2))
@@ -95,7 +99,7 @@ def test_admin_metrics_counts_and_sources(monkeypatch, db):
     db.add_all([l1, l2])
 
     db.add_all([
-        Notification(id=uuid.uuid4(), user_id=free.id, wishlist_id=wl1.id, car_listing_id=l1.id, status="sent", sent_at=now - timedelta(hours=2)),
+        Notification(id=uuid.uuid4(), user_id=free.id, wishlist_id=wl1.id, car_listing_id=l1.id, status="sent", sent_at=today_sent_at),
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l1.id, status="sent", sent_at=now - timedelta(days=2)),
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l2.id, status="sent", sent_at=now - timedelta(days=5)),
         Notification(id=uuid.uuid4(), user_id=premium.id, wishlist_id=wl2.id, car_listing_id=l2.id, status="queued"),

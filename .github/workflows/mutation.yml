@@ -1,0 +1,33 @@
+name: Mutation testing
+
+# Manual: cada mutante roda pytest (~4s). Mede se os testes realmente detectam defeitos nos modulos
+# de dominio criticos. Veja docs/TESTING.md.
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Modulo-alvo (ex.: app/services/source_backoff_service.py)"
+        required: true
+        default: "app/services/source_staleness_service.py"
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ENABLE_SCHEDULER_IN_API: "false"
+      ENABLE_PLAYWRIGHT: "false"
+      TELEGRAM_BOT_TOKEN: "dummy"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements.dev.txt
+      - run: python tools/mutation_test.py "${{ inputs.module }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-result
+          path: .data/mutation/**/result.json

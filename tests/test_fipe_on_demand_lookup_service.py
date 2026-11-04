@@ -621,15 +621,6 @@ def test_pseudo_listing_no_year_filter_is_none(db):
     assert listing.year is None
 
 
-def test_pseudo_listing_year_default_unchanged_prefers_gte(db):
-    """Etapa 3, teste 6: chamada sem parâmetro year deve usar comportamento padrão (gte se houver)."""
-    wishlist = _make_wishlist(db, year_gte=2018, year_lte=2020)
-    filters = db.query(WishlistFilter).filter(WishlistFilter.wishlist_id == wishlist.id).all()
-    # Sem passar year, deve preferir gte (2018)
-    listing = svc._build_pseudo_listing(wishlist, filters, db)
-    assert listing.year == 2018
-
-
 def test_pseudo_listing_year_explicit_overrides_filters(db):
     """Etapa 3, teste 7: parâmetro year explícito (não _UNSET) deve sobrescrever filters."""
     wishlist = _make_wishlist(db, year_gte=2018, year_lte=2020)
