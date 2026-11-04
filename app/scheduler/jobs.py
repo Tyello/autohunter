@@ -75,6 +75,17 @@ def _reconcile_presence_best_effort(db, job_name, ctx, search_url, listings_all,
     cfg = parse_presence_config(getattr(ctx, "extra", None))
     if not cfg.enabled:
         return
+    pending = getattr(ctx, "_presence_pending", None)
+    if getattr(ctx, "defer_presence", False) and pending is not None:
+        # Ausencia so e evidencia se o run inteiro passar: quem orquestra aplica depois.
+        pending.append(
+            {
+                "search_url": search_url,
+                "seen_external_ids": [(it or {}).get("external_id") for it in listings_all],
+                "found": found,
+            }
+        )
+        return
     try:
         with db.begin_nested():
             stats = reconcile_search_presence(

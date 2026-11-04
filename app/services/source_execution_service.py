@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -58,7 +59,7 @@ from app.health.classify import classify_error
 from app.health.explain import add_anomaly_notes
 from app.health.models import RunStatus
 from app.services.listing_activity_service import reconcile_listing_activity_for_source_run
-from app.services.listing_presence_service import mark_stale_listings_inactive, parse_presence_config
+from app.services.listing_presence_service import mark_stale_listings_inactive, parse_presence_config, reconcile_search_presence
 
 
 logger = logging.getLogger(__name__)
@@ -357,6 +358,8 @@ def _process_group_isolated(*, url: str, g: dict, src: str, job_name: str, scrap
     try:
         with session_scope() as thread_db:
             thread_ctx = build_scrape_context(thread_db, src)
+            # ausencia por busca so vale se o run inteiro passar: adia ate o orquestrador decidir
+            thread_ctx = dataclasses.replace(thread_ctx, defer_presence=True, _presence_pending=[])
             sem = get_source_semaphore(src)
             with sem:
                 res = scrape_ingest_match(
@@ -1098,6 +1101,25 @@ def _run_source_for_all_wishlists_locked(
     if partial_block is not None:
         run_row.payload = {**(run_row.payload or {}), "partial_block": partial_block}
 
+    # Ausencia de anuncio so e evidencia quando o run passou por inteiro. Em run parcial, nada de
+    # presenca por busca, contagem de ausencia por wishlist ou stale_days (vistos continuam valendo).
+    presence_cfg = parse_presence_config(cfg.extra)
+    if presence_cfg.enabled and partial_block is None:
+        for entry in ok_entries:
+            for pend in getattr(entry.get("ctx"), "_presence_pending", None) or []:
+                try:
+                    with db.begin_nested():
+                        reconcile_search_presence(
+                            db,
+                            source=src,
+                            search_key=pend["search_url"],
+                            seen_external_ids=pend["seen_external_ids"],
+                            found=pend["found"],
+                            cfg=presence_cfg,
+                        )
+                except Exception as e:
+                    log(db, "warn", component, "presence_reconcile_failed", {"url": pend.get("search_url"), "error": f"{type(e).__name__}: {e}"[:300]}, source=src, run_id=run_row.id, event_type="presence_reconcile_failed", tags=["presence", "error"])
+
     activity_stats = reconcile_listing_activity_for_source_run(
         db,
         source_name=src,
@@ -1107,14 +1129,14 @@ def _run_source_for_all_wishlists_locked(
         target_wishlist_ids=[w.id for w in wishlists if w.id not in partial_blocked_wishlist_ids],
         missing_threshold=int(settings.listing_inactive_missing_runs_threshold or 3),
         valid_run_id=run_row.id,
+        apply_missing=partial_block is None,
     )
     run_row.payload = {
         **(run_row.payload or {}),
         "activity": activity_stats.to_dict(),
         "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3),
     }
-    presence_cfg = parse_presence_config(cfg.extra)
-    if presence_cfg.enabled:
+    if presence_cfg.enabled and partial_block is None:
         try:
             with db.begin_nested():
                 stale_stats = mark_stale_listings_inactive(db, source=src, cfg=presence_cfg)
