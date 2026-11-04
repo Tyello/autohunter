@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -58,7 +59,7 @@ from app.health.classify import classify_error
 from app.health.explain import add_anomaly_notes
 from app.health.models import RunStatus
 from app.services.listing_activity_service import reconcile_listing_activity_for_source_run
-from app.services.listing_presence_service import mark_stale_listings_inactive, parse_presence_config
+from app.services.listing_presence_service import mark_stale_listings_inactive, parse_presence_config, reconcile_search_presence
 
 
 logger = logging.getLogger(__name__)
@@ -258,6 +259,16 @@ def _max_backoff_minutes_for(src: str) -> Optional[int]:
     return None
 
 
+def _max_consecutive_blocks_for(src: str) -> int:
+    """Grupos bloqueados SEGUIDOS tolerados num run antes de parar de tentar (>= 1).
+
+    OLX: o captcha da Cloudflare costuma ser pontual (um grupo) e nao do IP inteiro, entao
+    1 bloqueio isolado nao encerra o run; 2 seguidos indicam IP/fingerprint sinalizado e o
+    run para e aplica o backoff. Demais sources de IP unico mantem "para no primeiro".
+    """
+    return 2 if (src or "").lower() == "olx" else 1
+
+
 def _get_state(db: Session, source: str) -> Optional[SourceState]:
     return db.execute(select(SourceState).where(SourceState.source == source)).scalar_one_or_none()
 
@@ -347,6 +358,8 @@ def _process_group_isolated(*, url: str, g: dict, src: str, job_name: str, scrap
     try:
         with session_scope() as thread_db:
             thread_ctx = build_scrape_context(thread_db, src)
+            # ausencia por busca so vale se o run inteiro passar: adia ate o orquestrador decidir
+            thread_ctx = dataclasses.replace(thread_ctx, defer_presence=True, _presence_pending=[])
             sem = get_source_semaphore(src)
             with sem:
                 res = scrape_ingest_match(
@@ -704,8 +717,12 @@ def _run_source_for_all_wishlists_locked(
     # benefit.
     stop_remaining_on_block = (src or "").lower() in ("mercadolivre", "olx", "webmotors")
 
+    max_consecutive_blocks = _max_consecutive_blocks_for(src)
+    stopped_on_blocks = False
+
     if stop_remaining_on_block:
         results_in_order = []
+        consecutive_blocks = 0
         for idx, u in enumerate(ordered_urls):
             if idx > 0:
                 pause = delay_seconds(pacing)
@@ -721,7 +738,12 @@ def _run_source_for_all_wishlists_locked(
             results_in_order.append(entry)
             res = entry.get("res") or {}
             if not res.get("ok") and str(res.get("reason") or "").lower() == "blocked":
-                break
+                consecutive_blocks += 1
+                if consecutive_blocks >= max_consecutive_blocks:
+                    stopped_on_blocks = True
+                    break
+            else:
+                consecutive_blocks = 0
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = [
@@ -745,6 +767,7 @@ def _run_source_for_all_wishlists_locked(
             logger.debug("pacing: falha ao salvar cursor src=%s", src, exc_info=True)
 
     first_failure: dict | None = None
+    partial_blocked_wishlist_ids: set = set()
     for entry in results_in_order:
         url = entry["url"]
         g = entry["g"]
@@ -796,6 +819,29 @@ def _run_source_for_all_wishlists_locked(
         for wid, seen_items in (res.get("seen_identities_by_wishlist") or {}).items():
             bucket = seen_identities_by_wishlist.setdefault(str(wid), [])
             bucket.extend(seen_items or [])
+
+    # Bloqueio parcial: so grupos bloqueados (nenhum erro de outra natureza), o run nao parou por
+    # bloqueios seguidos e ao menos um grupo entregou resultado. O run segue como sucesso, sem backoff.
+    failed_entries = [e for e in results_in_order if not (e.get("res") or {}).get("ok")]
+    ok_entries = [e for e in results_in_order if (e.get("res") or {}).get("ok")]
+    partial_block: dict[str, Any] | None = None
+    if (
+        first_failure is not None
+        and max_consecutive_blocks > 1
+        and not stopped_on_blocks
+        and ok_entries
+        and all(str((e.get("res") or {}).get("reason") or "").lower() == "blocked" for e in failed_entries)
+    ):
+        partial_block = {
+            "blocked_groups": len(failed_entries),
+            "ok_groups": len(ok_entries),
+            "blocked_urls": [str(e["url"])[:240] for e in failed_entries],
+            "max_consecutive_blocks": max_consecutive_blocks,
+        }
+        for e in failed_entries:
+            for w in (e.get("g") or {}).get("wishlists") or []:
+                partial_blocked_wishlist_ids.add(w.id)
+        first_failure = None
 
     if first_failure is not None:
         url = first_failure["url"]
@@ -998,6 +1044,13 @@ def _run_source_for_all_wishlists_locked(
         runtime_impl=last_runtime_impl,
     )
     run_summary_ok.update(zero_result_payload)
+    if partial_block is not None:
+        notes = run_summary_ok.setdefault("notes", [])
+        if isinstance(notes, list):
+            notes.append(
+                f"partial_block: {partial_block['blocked_groups']} grupo(s) bloqueado(s), "
+                f"{partial_block['ok_groups']} ok; sem backoff"
+            )
     if zero_result_payload.get("suspicious_zero_results") is True:
         notes = run_summary_ok.setdefault("notes", [])
         if isinstance(notes, list):
@@ -1045,22 +1098,45 @@ def _run_source_for_all_wishlists_locked(
         ),
     )
     run_row.payload = {**(run_row.payload or {}), **zero_result_payload}
+    if partial_block is not None:
+        run_row.payload = {**(run_row.payload or {}), "partial_block": partial_block}
+
+    # Ausencia de anuncio so e evidencia quando o run passou por inteiro. Em run parcial, nada de
+    # presenca por busca, contagem de ausencia por wishlist ou stale_days (vistos continuam valendo).
+    presence_cfg = parse_presence_config(cfg.extra)
+    if presence_cfg.enabled and partial_block is None:
+        for entry in ok_entries:
+            for pend in getattr(entry.get("ctx"), "_presence_pending", None) or []:
+                try:
+                    with db.begin_nested():
+                        reconcile_search_presence(
+                            db,
+                            source=src,
+                            search_key=pend["search_url"],
+                            seen_external_ids=pend["seen_external_ids"],
+                            found=pend["found"],
+                            cfg=presence_cfg,
+                        )
+                except Exception as e:
+                    log(db, "warn", component, "presence_reconcile_failed", {"url": pend.get("search_url"), "error": f"{type(e).__name__}: {e}"[:300]}, source=src, run_id=run_row.id, event_type="presence_reconcile_failed", tags=["presence", "error"])
 
     activity_stats = reconcile_listing_activity_for_source_run(
         db,
         source_name=src,
-        wishlist_seen={w.id: (seen_identities_by_wishlist.get(str(w.id)) or []) for w in wishlists},
-        target_wishlist_ids=[w.id for w in wishlists],
+        # wishlists de grupos bloqueados ficam de fora: sem item visto, o reconciliador as trataria
+        # como "ausentes" e desativaria anuncios validos.
+        wishlist_seen={w.id: (seen_identities_by_wishlist.get(str(w.id)) or []) for w in wishlists if w.id not in partial_blocked_wishlist_ids},
+        target_wishlist_ids=[w.id for w in wishlists if w.id not in partial_blocked_wishlist_ids],
         missing_threshold=int(settings.listing_inactive_missing_runs_threshold or 3),
         valid_run_id=run_row.id,
+        apply_missing=partial_block is None,
     )
     run_row.payload = {
         **(run_row.payload or {}),
         "activity": activity_stats.to_dict(),
         "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3),
     }
-    presence_cfg = parse_presence_config(cfg.extra)
-    if presence_cfg.enabled:
+    if presence_cfg.enabled and partial_block is None:
         try:
             with db.begin_nested():
                 stale_stats = mark_stale_listings_inactive(db, source=src, cfg=presence_cfg)
@@ -1081,6 +1157,17 @@ def _run_source_for_all_wishlists_locked(
         evidence={"groups": groups_count, "wishlists": total_wishlists, "found": total_found, "inserted": total_inserted, "matched": total_matched, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "thumb_present": total_thumb_present, "thumb_rate": (float(total_thumb_present) / float(total_found)) if total_found else 0.0, "duration_ms": duration_ms, "kind": kind, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)},
         tags=[kind, reason, "ok"],
     )
+    if partial_block is not None:
+        emit_event(
+            db,
+            level="warn",
+            event_type="source_partial_block",
+            source=src,
+            run_id=run_row.id,
+            message="source_partial_block",
+            evidence={**partial_block, "kind": kind},
+            tags=[kind, "partial_block"],
+        )
 
     log(db, "info", component, "run_ok", {"groups": groups_count, "found": total_found, "inserted": total_inserted, "queued": total_queued, "already_notified": total_already_notified, "reason_buckets": total_reason_buckets, "run_reason": reason, "activity": activity_stats.to_dict(), "activity_missing_threshold": int(settings.listing_inactive_missing_runs_threshold or 3)}, source=src, run_id=run_row.id, event_type="run_ok", tags=[kind, reason, "ok"])
 

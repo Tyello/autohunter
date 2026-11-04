@@ -205,7 +205,9 @@ def reconcile_listing_activity_for_source_run(
     missing_threshold: int,
     valid_run_id: UUID | None = None,
     now: datetime | None = None,
+    apply_missing: bool = True,
 ) -> ActivityReconcileStats:
+    """`apply_missing=False`: registra o que foi visto mas nunca conta ausencia (run nao 100% limpo)."""
     t = now or _now()
 
     seen_by_wishlist: dict[UUID, list[SeenListingIdentity]] = {
@@ -232,6 +234,8 @@ def reconcile_listing_activity_for_source_run(
         total_seen_upserts += int(seen_stats.seen_upserts)
         total_reactivated += int(seen_stats.reactivated)
 
+        if not apply_missing:
+            continue
         missing_stats = apply_missing_for_wishlist_source(
             db,
             wishlist_id=wishlist_id,

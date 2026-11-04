@@ -67,6 +67,12 @@ class ScrapeContext:
     antibot_detector_ms: float = 0.0
     antibot_detector_calls: int = 0
 
+    # Presenca por busca adiada: quando True, o pipeline NAO aplica a reconciliacao de
+    # ausencia ao fim de cada grupo; ele registra o que viu em `_presence_pending` e quem
+    # orquestra o run decide aplicar so se o run inteiro passar (ver source_execution_service).
+    defer_presence: bool = False
+    _presence_pending: Optional[List[Dict[str, Any]]] = None
+
 
 ScrapeFn = Callable[[str, ScrapeContext], List[Dict[str, Any]]]
 BuildUrlFn = Callable[[str], str]
