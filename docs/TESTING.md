@@ -29,9 +29,7 @@ falsifica as duas fronteiras externas: a página da source (`plugin.scrape`) e o
 Banco, ingestão, dedupe, matching, fila, limites de plano e sender rodam de verdade.
 
 Cenários: ingestão+match+envio; reexecução sem duplicar nem renotificar; limite diário do plano
-Free; falha da source sem alerta. Um `xfail(strict=True)` documenta um **bug conhecido** (busca de
-uma palavra nunca vira candidata — ver abaixo) e passa a falhar quando alguém corrigir, para o
-marcador ser removido.
+Free; falha da source sem alerta. Inclui a busca de uma palavra (bug corrigido, ver abaixo).
 
 Limite do SQLite: só há um escritor. Cada grupo de busca roda em sessão própria (como em produção);
 o fixture confirma a sessão do teste antes de cada grupo para emular o isolamento do Postgres.
@@ -65,10 +63,10 @@ Cobertura de linhas **sozinha não basta para apagar**: dois testes podem execut
 asserções diferentes. A análise por contexto (`coverage run` com `dynamic_context = test_function`)
 só aponta candidatos; a remoção exige evidência de mutação ou duplicata exata.
 
-## Bug conhecido revelado pelo e2e
+## Bug revelado pelo e2e (corrigido)
 
-`candidate_wishlist_ids_for_listing_tokens` (`app/services/wishlist_tokens_service.py`) exige
-`min_overlap=2` tokens em comum. Uma busca de **uma palavra** (`defender`, `cuore`, `rs4`) tem no
-máximo 1 token no índice e **nunca é candidata** no matching do scheduler — só recebe alertas no
-backfill da criação. Em produção (03/11/2026): os últimos alertas dessas buscas são de junho, apesar
-de 217 anúncios de "defender" nos últimos 30 dias.
+`candidate_wishlist_ids_for_listing_tokens` exigia `min_overlap=2` tokens em comum, entao buscas de
+**uma palavra** (`defender`, `cuore`, `rs4`) nunca eram candidatas no matching do scheduler. Agora o
+minimo exigido e limitado ao total de tokens da propria busca (`min(min_overlap, total)`); buscas com
+2+ palavras continuam exigindo 2. Cobertura: `tests/test_wishlist_tokens_service.py` e o cenario
+`test_single_word_wishlist_is_matched_by_the_scheduler` em `tests/e2e/`.

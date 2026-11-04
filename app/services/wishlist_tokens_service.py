@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
-from sqlalchemy import select, func
+from sqlalchemy import case, select, func
 from sqlalchemy.orm import Session
 
 from app.core.text_norm import tokens as tokenize, STOPWORDS as _STOPWORDS
@@ -104,15 +104,24 @@ def candidate_wishlist_ids_for_listing_tokens(
     toks = [t for t in listing_tokens if t]
     if not toks:
         return []
+    # Total de tokens indexados por wishlist: uma busca de UMA palavra (ex.: "defender") tem so 1
+    # token e nunca alcancaria min_overlap=2. O minimo exigido e limitado ao tamanho da propria busca.
+    totals = (
+        select(WishlistToken.wishlist_id.label("wid"), func.count(WishlistToken.token).label("total"))
+        .group_by(WishlistToken.wishlist_id)
+        .subquery()
+    )
+    required = case((totals.c.total < int(min_overlap), totals.c.total), else_=int(min_overlap))
     # group by wishlist_id, count overlaps
     q = (
         select(WishlistToken.wishlist_id, func.count(WishlistToken.token).label("c"))
         .join(Wishlist, Wishlist.id == WishlistToken.wishlist_id)
+        .join(totals, totals.c.wid == WishlistToken.wishlist_id)
         .where(WishlistToken.token.in_(toks))
         .where(Wishlist.is_active.is_(True))
         .where(Wishlist.deleted_at.is_(None))
-        .group_by(WishlistToken.wishlist_id)
-        .having(func.count(WishlistToken.token) >= int(min_overlap))
+        .group_by(WishlistToken.wishlist_id, totals.c.total)
+        .having(func.count(WishlistToken.token) >= required)
         .order_by(func.count(WishlistToken.token).desc())
         .limit(int(max_candidates))
     )
