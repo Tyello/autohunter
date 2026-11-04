@@ -254,32 +254,100 @@ def test_mercadolivre_stops_remaining_groups_after_first_block(db, monkeypatch):
     assert calls == urls[:2], "groups after the first block must not be dispatched for mercadolivre"
 
 
-def test_olx_stops_remaining_groups_after_first_block(db, monkeypatch):
-    """OLX shares the same single-IP anti-bot fingerprint problem as mercadolivre:
-    firing the remaining groups after one comes back blocked just burns more
-    requests against an IP that's already flagged (see stop_remaining_on_block)."""
+def _olx_run(db, monkeypatch, *, n_groups, blocked_idx, reconcile_spy=None):
+    """Roda o OLX com `n_groups` grupos; os indices em `blocked_idx` voltam bloqueados."""
     plugin = _plugin("olx")
-    wishlists = _wishlists(4)
+    wishlists = _wishlists(n_groups)
     urls = _urls_for(plugin, wishlists)
     _add_cfg(db, source="olx")
     db.commit()
     _setup_run(monkeypatch, source="olx", wishlists=wishlists, plugin=plugin)
+    if reconcile_spy is not None:
+        monkeypatch.setattr(
+            svc,
+            "reconcile_listing_activity_for_source_run",
+            lambda *_a, **kw: (reconcile_spy.update(kw) or SimpleNamespace(to_dict=lambda: {"ok": True})),
+        )
 
     calls = []
 
     def _scrape(_db, _job_name, _dispatch, url, *, ctx, wishlist=None, health=None):
         calls.append(url)
-        if url == urls[1]:
+        if urls.index(url) in blocked_idx:
             return {"ok": False, "reason": "blocked", "status_code": 200, "url": url, "error": "blocked"}
-        return _ok_result()
+        return _ok_result(found=5, inserted=1)
 
     monkeypatch.setattr(svc, "scrape_ingest_match", _scrape)
-
     res = svc.run_source_for_all_wishlists(db, "olx", kind="scheduler", force=True, ignore_backoff=True)
+    return res, calls, urls, wishlists
 
+
+def test_olx_single_block_keeps_going_and_run_is_partial_success(db, monkeypatch):
+    """Um captcha isolado nao pode punir um run que ja entregou resultado."""
+    res, calls, urls, _ = _olx_run(db, monkeypatch, n_groups=4, blocked_idx={1})
+
+    assert calls == urls, "apos 1 bloqueio o OLX segue para o proximo grupo"
+    assert res["ok"] is True
+    assert res["status"] == "success"
+    assert res["found"] == 15, "so os 3 grupos ok contam"
+
+    run = _last_run(db, "olx")
+    assert run.status == "success"
+    partial = run.payload["partial_block"]
+    assert partial["blocked_groups"] == 1
+    assert partial["ok_groups"] == 3
+    assert partial["blocked_urls"] == [urls[1]]
+
+    from app.models.source_state import SourceState
+
+    st = db.query(SourceState).filter(SourceState.source == "olx").one()
+    assert st.next_allowed_at is None, "sem backoff para bloqueio parcial"
+
+
+def test_olx_two_consecutive_blocks_stop_the_run_and_apply_backoff(db, monkeypatch):
+    res, calls, urls, _ = _olx_run(db, monkeypatch, n_groups=5, blocked_idx={1, 2})
+
+    assert calls == urls[:3], "2 bloqueios seguidos: nao tenta os grupos restantes"
     assert res["ok"] is False
     assert res["status"] == "blocked"
-    assert calls == urls[:2], "groups after the first block must not be dispatched for olx"
+    assert res["backoff_minutes"] >= 5
+    assert _last_run(db, "olx").status == "blocked"
+
+
+def test_olx_non_consecutive_blocks_do_not_trip_the_consecutive_limit(db, monkeypatch):
+    res, calls, urls, _ = _olx_run(db, monkeypatch, n_groups=5, blocked_idx={1, 3})
+
+    assert calls == urls
+    assert res["status"] == "success"
+    assert _last_run(db, "olx").payload["partial_block"]["blocked_groups"] == 2
+
+
+def test_olx_block_with_no_successful_group_is_a_full_block(db, monkeypatch):
+    res, calls, urls, _ = _olx_run(db, monkeypatch, n_groups=1, blocked_idx={0})
+
+    assert calls == urls
+    assert res["ok"] is False
+    assert res["status"] == "blocked"
+
+
+def test_olx_first_two_groups_blocked_is_a_full_block(db, monkeypatch):
+    res, calls, urls, _ = _olx_run(db, monkeypatch, n_groups=4, blocked_idx={0, 1})
+
+    assert calls == urls[:2]
+    assert res["status"] == "blocked"
+
+
+def test_olx_partial_block_does_not_mark_blocked_group_listings_as_missing(db, monkeypatch):
+    """O reconciliador trata wishlists-alvo sem item visto como 'ausentes': o grupo
+    bloqueado nao pode entrar, senao anuncios validos seriam desativados."""
+    spy: dict = {}
+    res, _calls, _urls, wishlists = _olx_run(db, monkeypatch, n_groups=3, blocked_idx={1}, reconcile_spy=spy)
+
+    assert res["status"] == "success"
+    target = set(spy["target_wishlist_ids"])
+    assert wishlists[1].id not in target
+    assert {wishlists[0].id, wishlists[2].id} == target
+    assert wishlists[1].id not in spy["wishlist_seen"]
 
 
 def test_webmotors_stops_remaining_groups_after_first_block(db, monkeypatch):
