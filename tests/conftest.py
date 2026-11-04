@@ -11,10 +11,13 @@ _DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Shared only within the current pytest process (not across runs/processes).
 _SESSION_DB_DIR = Path(tempfile.mkdtemp(prefix="autohunter_pytest_", dir=_DATA_DIR))
-os.environ.setdefault(
-    "DATABASE_URL",
-    f"sqlite+pysqlite:///{(_SESSION_DB_DIR / 'autohunter_test.db').as_posix()}?check_same_thread=false",
-)
+_SQLITE_URL = f"sqlite+pysqlite:///{(_SESSION_DB_DIR / 'autohunter_test.db').as_posix()}?check_same_thread=false"
+os.environ.setdefault("DATABASE_URL", _SQLITE_URL)
+# pytest-xdist: os workers herdam o DATABASE_URL do processo principal; com um unico arquivo
+# SQLite compartilhado, o drop_all/create_all de um worker apaga as tabelas dos outros
+# ("no such table"). Cada worker usa o proprio arquivo (nao mexe em URLs que nao sao SQLite).
+if os.environ.get("PYTEST_XDIST_WORKER") and os.environ["DATABASE_URL"].startswith("sqlite"):
+    os.environ["DATABASE_URL"] = _SQLITE_URL
 
 os.environ.setdefault("ENABLE_SCHEDULER_IN_API", "false")
 os.environ.setdefault("ENABLE_PLAYWRIGHT", "false")
@@ -48,6 +51,31 @@ def _compile_array_sqlite(type_, compiler, **kw):
     return "TEXT"
 
 
+# No SQLite a coluna ARRAY vira TEXT, mas o sqlite3 nao aceita `list` como parametro. Serializa
+# como JSON na ida e desserializa na volta, para que log()/emit_event() (tags=[...]) rodem de
+# verdade nos testes em vez de serem trocados por monkeypatch.
+import json as _json
+
+_orig_array_bind = ARRAY.bind_processor
+_orig_array_result = ARRAY.result_processor
+
+
+def _array_bind_processor(self, dialect):
+    if dialect.name == "postgresql":
+        return _orig_array_bind(self, dialect)
+    return lambda value: None if value is None else _json.dumps(list(value))
+
+
+def _array_result_processor(self, dialect, coltype):
+    if dialect.name == "postgresql":
+        return _orig_array_result(self, dialect, coltype)
+    return lambda value: _json.loads(value) if isinstance(value, str) else value
+
+
+ARRAY.bind_processor = _array_bind_processor
+ARRAY.result_processor = _array_result_processor
+
+
 # Postgres accepts a plain string for a UUID column bind (e.g. an id parsed straight out of
 # Telegram callback_data). SQLite's fallback Uuid processor requires an actual uuid.UUID
 # instance, so code paths comparing a UUID column to a raw string can't be exercised against
@@ -79,13 +107,43 @@ from app.db.session import SessionLocalHTTP, engine
 from app.core.settings import settings
 
 
+_SCHEMA_READY = False
+
+
+def _recreate_schema() -> None:
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+
+def _truncate_all_tables() -> None:
+    """Esvazia todas as tabelas (ordem inversa das FKs) sem refazer o DDL."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(table.delete())
+        # sqlite_sequence so existe se alguma tabela usa AUTOINCREMENT (e so depois do 1o insert).
+        if conn.execute(text("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_sequence'")).first():
+            conn.execute(text("DELETE FROM sqlite_sequence"))
+
+
 @pytest.fixture(autouse=True)
 def _reset_db(request: pytest.FixtureRequest):
+    # Antes: drop_all+create_all de ~31 tabelas em CADA teste (~0,7s de setup x 2.300 testes).
+    # Agora o schema e criado uma vez por processo e cada teste so limpa as linhas.
+    global _SCHEMA_READY
     if request.node.get_closest_marker("postgres"):
         yield
         return
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    if not _SCHEMA_READY:
+        _recreate_schema()
+        _SCHEMA_READY = True
+    else:
+        try:
+            _truncate_all_tables()
+        except Exception:
+            # Um teste pode ter alterado o schema (drop_all/create_all proprio): recria do zero.
+            _recreate_schema()
     yield
 
 

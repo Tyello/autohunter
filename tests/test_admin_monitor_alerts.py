@@ -22,6 +22,9 @@ def test_monitor_no_admin_chat(monkeypatch, db):
     monkeypatch.setattr("app.scheduler.admin_monitor_job.iter_admin_chat_ids", lambda: [])
     monkeypatch.setattr("app.scheduler.admin_monitor_job.send_admin_text", lambda _t: (_ for _ in ()).throw(AssertionError("should not send")))
     job_admin_monitor()
+    # Sem chat de admin: nao envia, mas deixa rastro para o operador configurar o destino.
+    cnt = db.query(SystemLog).filter(SystemLog.component == "admin_monitor", SystemLog.message == "missing_admin_alert_chat").count()
+    assert cnt == 1
 
 
 def test_monitor_no_admin_chat_without_alerts_no_warning_log(monkeypatch, db):

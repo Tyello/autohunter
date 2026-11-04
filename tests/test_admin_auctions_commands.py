@@ -16,6 +16,7 @@ from app.models.wishlist import Wishlist
 from app.services.app_kv_service import set_kv
 from app.bot.renderers import render_admin_auction_lot, render_admin_auctions_summary
 from app.services.auction_lot_service import upsert_lot
+from app.sources.auctions.registry import render_supported_auction_sources_hint
 
 
 class _Msg:
@@ -413,6 +414,11 @@ def test_admin_auctions_hygiene_mega_apply_blocked_when_not_experimental(monkeyp
 def test_admin_auctions_source_invalid_shows_registry_hint(monkeypatch, db):
     monkeypatch.setattr(admin_router, "is_admin", lambda _cid: True)
     monkeypatch.setattr(admin_auctions_module, "SessionLocal", lambda: _SessionWrap(db))
+    up = _Update()
+    asyncio.run(handlers_admin.cmd_admin(up, _ctx("auctions", "source", "invalida")))
+    # A dica lista as sources do registro (nao uma lista fixa): cobre o corpo perdido na refatoracao.
+    assert up.message.sent[-1] == f"Source de leilão não suportada. {render_supported_auction_sources_hint()}"
+    assert "vip" in up.message.sent[-1]
 
 
 def test_admin_auctions_settings_blocks_dry_run_false(monkeypatch, db):

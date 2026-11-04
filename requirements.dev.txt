@@ -1,1 +1,7 @@
 pytest>=7.0
+# execucao paralela da suite (cada worker usa o proprio banco SQLite; ver tests/conftest.py)
+pytest-xdist>=3.5
+# cobertura por teste e analise de redundancia
+coverage>=7.4
+# teste de mutacao (tools/mutation_test.py). mutmut NAO roda em Windows (os.fork).
+cosmic-ray>=8.3

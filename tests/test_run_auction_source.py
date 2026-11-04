@@ -1,3 +1,5 @@
+import pytest
+
 from app.sources.auctions.base import NormalizedAuctionLot
 from scripts.run_auction_source import run
 
@@ -48,19 +50,24 @@ def test_run_enrich_details_passed_to_vip(monkeypatch):
     assert called["enrich"] is True
 
 
-def test_run_dry_run_mega(monkeypatch):
-    monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "mega_auctions")
-    monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("mega_auctions", lambda limit: [NormalizedAuctionLot(source="mega_auctions", external_id="m1")], lambda: None, False))
-    run(source="mega_auctions", limit=1, dry_run=True)
+@pytest.mark.parametrize(
+    "alias, key, ext",
+    [("mega_auctions", "mega_auctions", "m1"), ("sodre", "sodre_auctions", "s1"), ("superbid", "superbid_auctions", "sb1")],
+)
+def test_run_dry_run_fetches_but_never_persists(monkeypatch, alias, key, ext):
+    fetched = {"limit": None}
 
+    def fetcher(limit):
+        fetched["limit"] = limit
+        return [NormalizedAuctionLot(source=key, external_id=ext)]
 
-def test_run_dry_run_sodre(monkeypatch):
-    monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "sodre_auctions")
-    monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("sodre_auctions", lambda limit: [NormalizedAuctionLot(source="sodre_auctions", external_id="s1")], lambda: None, False))
-    run(source="sodre", limit=1, dry_run=True)
+    def must_not_persist(**_kw):
+        raise AssertionError("dry_run nao pode persistir")
 
+    monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: key)
+    monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def(key, fetcher, lambda: None, False))
+    monkeypatch.setattr("scripts.run_auction_source.run_auction_ingestion", must_not_persist)
 
-def test_run_dry_run_superbid(monkeypatch):
-    monkeypatch.setattr("scripts.run_auction_source.resolve_auction_source_alias", lambda s: "superbid_auctions")
-    monkeypatch.setattr("scripts.run_auction_source.get_auction_source_definition", lambda s: _Def("superbid_auctions", lambda limit: [NormalizedAuctionLot(source="superbid_auctions", external_id="sb1")], lambda: None, False))
-    run(source="superbid", limit=1, dry_run=True)
+    run(source=alias, limit=3, dry_run=True)
+
+    assert fetched["limit"] == 3
