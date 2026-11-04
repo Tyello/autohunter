@@ -158,3 +158,28 @@ def test_reset_browser_state_for_source_calls_backend_invalidate(monkeypatch):
         "block_resources": False,
         "clear_storage": True,
     }
+
+
+def test_shutdown_playwright_pool_is_noop_when_pool_never_created(monkeypatch):
+    from app.services import playwright_pool
+
+    monkeypatch.setattr(playwright_pool, "_POOL", None)
+
+    assert playwright_pool.shutdown_playwright_pool() is None
+    # nao pode criar o pool so para fecha-lo (evita boot de Chromium no shutdown)
+    assert playwright_pool._POOL is None
+
+
+def test_shutdown_playwright_pool_closes_and_clears_singleton(monkeypatch):
+    from app.services import playwright_pool
+
+    class _FakePool:
+        def close(self):
+            return {"stopped_cleanly": True, "force_killed": 0}
+
+    monkeypatch.setattr(playwright_pool, "_POOL", _FakePool())
+
+    res = playwright_pool.shutdown_playwright_pool()
+
+    assert res == {"stopped_cleanly": True, "force_killed": 0}
+    assert playwright_pool._POOL is None
