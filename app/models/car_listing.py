@@ -33,6 +33,12 @@ class CarListing(TimestampMixin, Base):
             "last_seen_search_key",
             postgresql_where=sql_text("last_seen_search_key IS NOT NULL"),
         ),
+        Index(
+            "ix_car_listings_source_last_seen_active",
+            "source",
+            "last_seen_at",
+            postgresql_where=sql_text("status = 'ativo'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

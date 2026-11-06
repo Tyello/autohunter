@@ -62,7 +62,8 @@ def test_insert_ignore_duplicates_accepts_mixed_cross_source_fingerprint_rows(db
             return []
 
     def _capture_execute(stmt, *args, **kwargs):
-        captured["stmt"] = stmt
+        # Só o 1º statement (o INSERT) interessa; o upsert agora pode emitir um SELECT de ids depois.
+        captured.setdefault("stmt", stmt)
         return _Result()
 
     monkeypatch.setattr(db, "execute", _capture_execute)

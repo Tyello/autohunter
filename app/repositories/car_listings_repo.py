@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 import uuid
 
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func, case, literal_column, literal, text
+from sqlalchemy import func, case, literal_column, literal, select, text
 from sqlalchemy.exc import ProgrammingError, OperationalError
 
 from app.models.car_listing import CarListing
@@ -17,6 +17,11 @@ _FUEL_ALLOWED = {"gasoline", "ethanol", "flex", "diesel", "electric", "hybrid"}
 _TRANSMISSION_ALLOWED = {"manual", "automatic", "cvt", "automated", "semi_automatic"}
 _SELLER_ALLOWED = {"dealer", "private", "unknown"}
 _LISTING_TYPE_ALLOWED = {"marketplace", "auction_lot", "classified"}
+
+# Throttle de last_seen_at (SPEC 010, D3): upsert idêntico de linha já `ativo` só regrava
+# last_seen_at depois desta janela (ou se algum campo mudou / a linha estava inativa).
+LAST_SEEN_THROTTLE = timedelta(minutes=30)
+_LOOKUP_CHUNK = 500
 
 
 def _format_km_ptbr(value: int) -> str:
@@ -389,6 +394,23 @@ def _fallback_upsert_without_constraint(db: Session, listings: list[dict], *, wi
     }
 
 
+def _fetch_ids_by_keys(db: Session, keys: list[tuple[str, str]]) -> list[uuid.UUID]:
+    """Ids das linhas (source, external_id) — usado para linhas puladas pelo throttle do upsert."""
+    by_source: dict[str, list[str]] = {}
+    for source, external_id in keys:
+        by_source.setdefault(source, []).append(external_id)
+
+    out: list[uuid.UUID] = []
+    for source, ext_ids in by_source.items():
+        for i in range(0, len(ext_ids), _LOOKUP_CHUNK):
+            chunk = ext_ids[i : i + _LOOKUP_CHUNK]
+            res = db.execute(
+                select(CarListing.id).where(CarListing.source == source, CarListing.external_id.in_(chunk))
+            )
+            out.extend(row[0] for row in res.fetchall())
+    return out
+
+
 def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_stats: bool = False):
     """
     Faz bulk upsert por (source, external_id).
@@ -619,19 +641,29 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
             # updated_at: only update if any column value changed
             "updated_at": case((changed, literal(now_ts)), else_=CarListing.updated_at),
         },
+        # Throttle (D3): só reescreve a linha se algo mudou, se last_seen_at tem >30 min,
+        # ou se não está 'ativo'. Linhas puladas não aparecem no RETURNING (ver abaixo).
+        where=(
+            changed
+            | CarListing.last_seen_at.is_(None)
+            | (CarListing.last_seen_at < now_ts - LAST_SEEN_THROTTLE)
+            | CarListing.status.is_distinct_from(literal('ativo'))
+        ),
     )
 
     # `xmax` is a PostgreSQL system column (not part of mapped table columns),
     # so reference it as a literal SQL column in RETURNING.
     # For SQLite, use a different approach since it doesn't support xmax.
+    # source/external_id são sempre as duas últimas colunas do RETURNING: permitem
+    # identificar as linhas puladas pelo WHERE do throttle.
     dialect_name = db.bind.dialect.name.lower()
     if dialect_name == 'sqlite':
         # SQLite: just return IDs; stats tracking is best-effort
-        stmt = stmt.returning(CarListing.id)
+        stmt = stmt.returning(CarListing.id, CarListing.source, CarListing.external_id)
     else:
         # PostgreSQL and other databases: use xmax to detect inserts
         inserted_expr = (literal_column("xmax") == 0).label("inserted")
-        stmt = stmt.returning(CarListing.id, inserted_expr)
+        stmt = stmt.returning(CarListing.id, inserted_expr, CarListing.source, CarListing.external_id)
 
     try:
         result = db.execute(stmt)
@@ -642,6 +674,17 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
         return _fallback_upsert_without_constraint(db, listings, with_stats=with_stats)
     rows = result.fetchall()
     ids = [row[0] for row in rows]
+
+    # Linhas puladas pelo throttle não voltam no RETURNING: busca os ids delas para que
+    # `ids` contenha todas as linhas de entrada (contrato público inalterado).
+    returned_keys = {(row[-2], row[-1]) for row in rows}
+    skipped_keys = [
+        (listing["source"], listing["external_id"])
+        for listing in listings
+        if (listing["source"], listing["external_id"]) not in returned_keys
+    ]
+    if skipped_keys:
+        ids.extend(_fetch_ids_by_keys(db, skipped_keys))
 
     # Commit to make changes visible, and expire the identity map so any
     # already-loaded ORM objects for these rows are re-read fresh on next
@@ -661,7 +704,8 @@ def insert_ignore_duplicates_return_ids(db: Session, listings: list[dict], with_
         }
 
     inserted_new = sum(1 for row in rows if bool(row[1]))
-    upserted = len(rows)
+    # upserted = total de linhas distintas da entrada (inclui as puladas pelo throttle)
+    upserted = len(listings)
     updated = upserted - inserted_new
     return {
         "ids": ids,

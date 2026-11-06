@@ -31,7 +31,7 @@ def job_http_queue_worker(worker_id: str = "http_worker"):
             job = dequeue_next_job(db, queue="http", lock_owner=worker_id)
             if not job:
                 db.commit()
-                return
+                return False
 
             db.commit()  # confirma lock + status=running
 
@@ -58,6 +58,7 @@ def job_http_queue_worker(worker_id: str = "http_worker"):
                     mark_done(job, result_status=f"not_ok:{status}", payload=res, duration_ms=dur_ms)
 
             db.commit()
+            return True
         except Exception as e:
             err_text = f"{type(e).__name__}: {e}"
             shutdown_exc = is_shutdown_requested() or "cannot schedule new futures after interpreter shutdown" in str(e).lower()
@@ -80,3 +81,4 @@ def job_http_queue_worker(worker_id: str = "http_worker"):
                     db.commit()
                 except Exception:
                     pass
+            return True

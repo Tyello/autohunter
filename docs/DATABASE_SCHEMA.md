@@ -344,6 +344,7 @@ Constraints e índices:
 
 - CHECK `check_status_valid`: `status IN ('ativo','suspeito','inativo')`
 - UNIQUE `uq_car_listings_source_external_id` (source, external_id)
+- INDEX `ix_car_listings_source_last_seen_active` (source, last_seen_at)
 - INDEX `ix_car_listings_source_search_key` (source, last_seen_search_key)
 
 ### `notifications`

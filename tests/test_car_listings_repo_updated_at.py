@@ -351,10 +351,17 @@ def test_status_resets_to_active_on_upsert_when_inactive(db):
     assert row2.last_seen_at > last_seen_at_1, "last_seen_at should advance on upsert"
 
 
-def test_last_seen_at_updates_without_changing_updated_at(db):
+def test_last_seen_at_throttled_within_window_and_advances_after(db):
     """
-    Dois upserts consecutivos sem mudança → updated_at NÃO muda, mas last_seen_at MUDA
+    Throttle de last_seen_at (janela de 30 min, REQ-002/REQ-004):
+    (1) upserts idênticos seguidos → last_seen_at e updated_at NÃO mudam;
+    (2) last_seen_at forçado para 31 min atrás + upsert idêntico → last_seen_at AVANÇA
+        e updated_at NÃO muda (nenhum campo mudou).
     """
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
     from app.models.car_listing import CarListing
 
     payload = [
@@ -392,7 +399,7 @@ def test_last_seen_at_updates_without_changing_updated_at(db):
     # Sleep to ensure time passes
     time.sleep(0.1)
 
-    # Second upsert with identical data
+    # (1) Second upsert with identical data, dentro da janela de 30 min: throttled
     ids2 = car_listings_repo.insert_ignore_duplicates_return_ids(db, payload)
     assert len(ids2) == 1
     assert ids2[0] == ids[0]
@@ -402,4 +409,19 @@ def test_last_seen_at_updates_without_changing_updated_at(db):
     last_seen_at_2 = row2.last_seen_at
 
     assert updated_at_1 == updated_at_2, "updated_at should not change when all fields are identical"
-    assert last_seen_at_2 > last_seen_at_1, "last_seen_at should advance on every upsert"
+    assert last_seen_at_1 == last_seen_at_2, "last_seen_at should be throttled within the 30 min window"
+
+    # (2) Força last_seen_at para 31 min atrás; upsert idêntico deve avançar last_seen_at
+    old_seen = datetime.now(timezone.utc) - timedelta(minutes=31)
+    db.execute(update(CarListing).where(CarListing.id == ids[0]).values(last_seen_at=old_seen))
+    db.commit()
+    row_old = db.query(CarListing).filter(CarListing.id == ids[0]).first()
+    last_seen_forced = row_old.last_seen_at  # captura o valor: o objeto do identity map é reatualizado
+    updated_at_3 = row_old.updated_at
+
+    ids3 = car_listings_repo.insert_ignore_duplicates_return_ids(db, payload)
+    assert ids3 == ids
+
+    row3 = db.query(CarListing).filter(CarListing.id == ids[0]).first()
+    assert row3.last_seen_at > last_seen_forced, "last_seen_at should advance after the 30 min window"
+    assert row3.updated_at == updated_at_3, "updated_at should not change when no field changed"
