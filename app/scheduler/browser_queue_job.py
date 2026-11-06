@@ -161,7 +161,7 @@ def job_browser_queue_worker():
                 raise
 
             if not job:
-                return
+                return False
 
             # Capture job_id and job_source before exiting session scope
             job_id = job.id
@@ -198,7 +198,7 @@ def job_browser_queue_worker():
                 # The scrape is stuck past its budget. Do NOT touch `db` from this
                 # point on: the child thread may still be using it concurrently.
                 _handle_hard_timeout(job_id, job_source, dur_ms, hard_timeout_s)
-                return
+                return True
 
             if "exc" in result_box:
                 # The child thread's session is already closed by session_scope().
@@ -227,6 +227,7 @@ def job_browser_queue_worker():
             except Exception:
                 db.rollback()
                 raise
+        return True
     except Exception as e:
         err_text = f"{type(e).__name__}: {e}"
         shutdown_exc = is_shutdown_requested() or "cannot schedule new futures after interpreter shutdown" in str(e).lower()
@@ -250,3 +251,5 @@ def job_browser_queue_worker():
             _log_best_effort_with_scope("info", "browser_queue_worker", "shutdown_suppressed", {"err": err_text})
         else:
             _log_best_effort_with_scope("error", "browser_queue_worker", "job_failed", {"err": err_text})
+        # Job tentado (exceção após dequeue) conta como trabalho; falha antes do dequeue não.
+        return True if job_id is not None else None

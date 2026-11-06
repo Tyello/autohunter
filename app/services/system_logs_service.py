@@ -90,6 +90,7 @@ def log(
     event_type: Optional[str] = None,
     fingerprint: Optional[str] = None,
     tags: Optional[Iterable[str]] = None,
+    persist: bool = True,
 ) -> None:
     """Registra um log no banco (alto volume).
 
@@ -98,34 +99,39 @@ def log(
     Campos extras (source/event_type/fingerprint/tags) são opcionais, e servem para
     permitir que o Autopilot/agents consultem o DB sem precisar fazer parsing de JSONB.
 
+    `persist=False` não grava linha em `system_logs` (nem calcula fingerprint), mas mantém
+    o espelho em stdout conforme `log_stdout_*`. Use para eventos que já têm destino
+    estruturado próprio (ex.: `emit_event` em telemetry_events).
+
     Quem chama deve decidir quando commitar/rollback.
     """
 
     payload = _json_safe(payload)
 
-    fp = fingerprint
-    if event_type and not fp:
-        # Use payload as evidence by default (caller can pass a custom fingerprint if needed)
-        fp = compute_fingerprint(
-            source=source,
-            event_type=event_type,
-            message=message,
-            evidence=payload,
-            tags=tags,
-        )
+    if persist:
+        fp = fingerprint
+        if event_type and not fp:
+            # Use payload as evidence by default (caller can pass a custom fingerprint if needed)
+            fp = compute_fingerprint(
+                source=source,
+                event_type=event_type,
+                message=message,
+                evidence=payload,
+                tags=tags,
+            )
 
-    row = SystemLog(
-        level=level,
-        component=component,
-        message=message,
-        payload=payload,
-        source=source,
-        run_id=run_id,
-        event_type=event_type,
-        fingerprint=fp,
-        tags=list(tags) if tags else None,
-    )
-    db.add(row)
+        row = SystemLog(
+            level=level,
+            component=component,
+            message=message,
+            payload=payload,
+            source=source,
+            run_id=run_id,
+            event_type=event_type,
+            fingerprint=fp,
+            tags=list(tags) if tags else None,
+        )
+        db.add(row)
 
     # opcional: espelha no stdout (pra journalctl)
     if _log_stdout_enabled() and (_level_passes_stdout(level) or _message_always_on_stdout(message)):

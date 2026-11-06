@@ -351,7 +351,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
                     "thumb_present": thumb_present,
                     "thumb_rate": thumb_rate,
                     "incremental": {"mode": "skip", "cursor": top},
-                }, source=ctx.source, event_type="pipeline_summary", tags=["ok", "incremental"])
+                }, source=ctx.source, event_type="pipeline_summary", tags=["ok", "incremental"], persist=False)
                 db.commit()
                 # field_coverage already computed above (line ~251) from the real fetch --
                 # was missing here, so every run that hit this "nothing changed" shortcut
@@ -512,7 +512,7 @@ def scrape_ingest_match(db, job_name, scraper_fn, search_url, *, ctx, wishlist=N
         "thumb_present": thumb_present,
         "thumb_rate": thumb_rate,
         "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
-    }, source=ctx.source, event_type="pipeline_summary", tags=["ok"])
+    }, source=ctx.source, event_type="pipeline_summary", tags=["ok"], persist=False)
 
     db.commit()
 
@@ -650,7 +650,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
                     "incremental": {"mode": "skip", "cursor": top},
                     "runtime_impl": (adapter_meta or {}).get("impl"),
                     "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
-                }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok", "incremental"])
+                }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok", "incremental"], persist=False)
                 db.commit()
                 # Same field_coverage gap as scrape_ingest_match's skip branch above -- keep in sync.
                 return {"ok": True, "found": found, "inserted": 0, "matched": 0, "queued": 0, "wishlists": len(wishlists or []), "thumb_present": thumb_present, "thumb_rate": thumb_rate, "field_coverage": field_coverage, "incremental": "skip", "audit_artifacts": audit_artifacts, **_runtime_fields(), **_ctx_fetch_diag(ctx)}
@@ -768,7 +768,7 @@ def scrape_ingest_match_many(db, job_name, scraper_fn, search_url, *, ctx, wishl
         "incremental": {"mode": _incremental_mode_label(inc_mode=inc_mode, inc_enabled=inc_enabled), "cursor": inc_cursor},
         "runtime_impl": (adapter_meta or {}).get("impl"),
         "adapter_meta": adapter_meta if isinstance(adapter_meta, dict) else None,
-    }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"])
+    }, source=ctx.source, event_type="pipeline_summary_many", tags=["ok"], persist=False)
 
     db.commit()
 

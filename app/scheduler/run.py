@@ -542,7 +542,7 @@ def start_scheduler() -> BackgroundScheduler:
 
         worker_s = int(getattr(settings, "scheduler_browser_worker_seconds", 5) or 5)
         worker_s = max(2, min(worker_s, 60))
-        start_worker_thread(job_browser_queue_worker, seconds=worker_s, name="browser_queue_worker")
+        start_worker_thread(job_browser_queue_worker, seconds=worker_s, name="browser_queue_worker", max_idle_seconds=15)
     except Exception as e:
         _log_suppressed_exception(
             stage="bootstrap.browser_queue_worker_thread",
@@ -567,6 +567,7 @@ def start_scheduler() -> BackgroundScheduler:
                 functools.partial(job_http_queue_worker, worker_id=wid),
                 seconds=worker_s,
                 name=f"http_queue_worker_{i+1}",
+                max_idle_seconds=10,
             )
     except Exception as e:
         _log_suppressed_exception(

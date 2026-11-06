@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.car_listing import CarListing
@@ -112,7 +112,14 @@ def reconcile_search_presence(
             .scalar()
             or 0
         )
-        db.query(CarListing).filter(CarListing.source == source, CarListing.external_id.in_(chunk)).update(
+        db.query(CarListing).filter(CarListing.source == source, CarListing.external_id.in_(chunk)).filter(
+            # D4: só regrava linhas cujo estado realmente muda
+            or_(
+                CarListing.last_seen_search_key.is_distinct_from(search_key),
+                CarListing.missing_runs_count != 0,
+                CarListing.status == "inativo",
+            )
+        ).update(
             {
                 CarListing.last_seen_search_key: search_key,
                 CarListing.missing_runs_count: 0,
@@ -146,7 +153,14 @@ def reconcile_search_presence(
     if cfg.writes_status:
         stats["marked_inactive"] = due.update({CarListing.status: "inativo"}, synchronize_session=False)
     else:
-        stats["would_mark_inactive"] = int(due.count())
+        stats["would_mark_inactive"] = int(
+            db.query(func.count(CarListing.id))
+            .filter(CarListing.source == source, CarListing.last_seen_search_key == search_key)
+            .filter(CarListing.status == "ativo")
+            .filter(CarListing.missing_runs_count >= cfg.missing_runs)
+            .scalar()
+            or 0
+        )
     db.flush()
     return stats
 
@@ -176,6 +190,12 @@ def mark_stale_listings_inactive(
     if cfg.writes_status:
         stats["marked_inactive"] = stale.update({CarListing.status: "inativo"}, synchronize_session=False)
     else:
-        stats["would_mark_inactive"] = int(stale.count())
+        stats["would_mark_inactive"] = int(
+            db.query(func.count(CarListing.id))
+            .filter(CarListing.source == source, CarListing.status == "ativo")
+            .filter(CarListing.last_seen_at < cutoff)
+            .scalar()
+            or 0
+        )
     db.flush()
     return stats

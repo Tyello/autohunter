@@ -3,6 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import event
+
+from app.db.session import engine
 from app.models.car_listing import CarListing
 from app.services.listing_presence_service import (
     mark_stale_listings_inactive,
@@ -183,3 +186,96 @@ def test_stale_net_disabled_without_stale_days(db):
     stats = mark_stale_listings_inactive(db, source="olx", cfg=cfg, now=now)
     assert _reload(db, old).status == "ativo"
     assert stats["skipped"] == "no_stale_days"
+
+
+def test_dry_run_would_mark_inactive_counts_all_candidates(db):
+    # reconcile: 2 ativos ausentes com missing>=3 (candidatos); 1 com missing=1 (fora do limiar)
+    _mk(db, "due1", missing=3)
+    _mk(db, "due2", missing=4)
+    _mk(db, "below", missing=1)
+    stats_rec = _run(db, _cfg(mode="dry_run"), ["x"])
+    assert stats_rec["would_mark_inactive"] == 2
+    assert stats_rec["marked_inactive"] == 0
+    assert isinstance(stats_rec["would_mark_inactive"], int)
+
+    # stale: 2 ativos antigos da source olx; 1 recente e 1 antigo de outra source (fora do filtro)
+    now = datetime.now(timezone.utc)
+    _mk(db, "old1", key=None, last_seen=now - timedelta(days=45))
+    _mk(db, "old2", key=None, last_seen=now - timedelta(days=60))
+    _mk(db, "fresh", key=None, last_seen=now - timedelta(days=1))
+    _mk(db, "old_other", source="mercadolivre", key=None, last_seen=now - timedelta(days=45))
+    stats_stale = mark_stale_listings_inactive(
+        db, source="olx", cfg=_cfg(mode="dry_run", stale_days=30), now=now
+    )
+    assert stats_stale["would_mark_inactive"] == 2
+    assert stats_stale["marked_inactive"] == 0
+    assert isinstance(stats_stale["would_mark_inactive"], int)
+
+
+def test_dry_run_count_does_not_emit_count_subquery_over_car_listings(db):
+    # REQ-001: count direto (SELECT count(...) FROM car_listings), nunca
+    # SELECT count(*) FROM (SELECT <todas as colunas> FROM car_listings ...)
+    now = datetime.now(timezone.utc)
+    _mk(db, "due", missing=3)
+    _mk(db, "old", key=None, last_seen=now - timedelta(days=45))
+
+    statements: list[str] = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(" ".join(str(statement).split()).lower())
+
+    event.listen(engine, "before_cursor_execute", _capture)
+    try:
+        _run(db, _cfg(mode="dry_run"), ["x"])
+        mark_stale_listings_inactive(db, source="olx", cfg=_cfg(mode="dry_run", stale_days=30), now=now)
+    finally:
+        event.remove(engine, "before_cursor_execute", _capture)
+
+    # guarda contra passar vacuamente: a captura precisa ter visto as contagens
+    assert any("count(" in s and "car_listings" in s for s in statements), statements
+
+    offenders = [s for s in statements if "from (select" in s and "car_listings" in s]
+    assert offenders == [], offenders
+
+
+def _seen_update_rowcounts(fn) -> list[int]:
+    """rowcount de cada UPDATE que grava last_seen_search_key (só o UPDATE das linhas vistas:
+    o de "ausentes" grava missing_runs_count e o de "due" grava status)."""
+    counts: list[int] = []
+
+    def _after(conn, cursor, statement, parameters, context, executemany):
+        s = " ".join(str(statement).split()).lower()
+        if s.startswith("update car_listings") and "last_seen_search_key=" in s.split(" where ")[0]:
+            counts.append(cursor.rowcount)
+
+    event.listen(engine, "after_cursor_execute", _after)
+    try:
+        fn()
+    finally:
+        event.remove(engine, "after_cursor_execute", _after)
+    return counts
+
+
+def test_reconcile_does_not_rewrite_rows_already_in_sync(db):
+    # REQ-005 / D4: linhas vistas já com a mesma search_key, missing=0 e ativo → o UPDATE das
+    # vistas não casa nenhuma linha (rowcount 0): nenhuma linha é reescrita
+    a = _mk(db, "sync_a")
+    b = _mk(db, "sync_b")
+    counts = _seen_update_rowcounts(lambda: _run(db, _cfg(), ["sync_a", "sync_b"]))
+
+    assert sum(counts) == 0, counts
+    assert _reload(db, a).status == "ativo"
+    assert _reload(db, b).missing_runs_count == 0
+
+
+def test_reconcile_still_reactivates_and_resets_counter_when_changed(db):
+    # REQ-005: inativo visto de novo é reativado; missing>0 é zerado (as 2 linhas são gravadas)
+    inativo = _mk(db, "chg_inativo", status="inativo", missing=0)
+    missing = _mk(db, "chg_missing", missing=2)
+    counts = _seen_update_rowcounts(lambda: _run(db, _cfg(), ["chg_inativo", "chg_missing"]))
+
+    assert sum(counts) == 2, counts
+    assert _reload(db, inativo).status == "ativo"
+    assert _reload(db, missing).missing_runs_count == 0
+    assert _reload(db, inativo).status == "ativo"
+    assert _reload(db, missing).missing_runs_count == 0

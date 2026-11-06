@@ -6,7 +6,7 @@ import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case
+from sqlalchemy import func, case, and_
 
 from app.core.settings import settings
 from app.models.source_config import SourceConfig
@@ -242,45 +242,39 @@ def _candidate_blocked_spike(db: Session, now: datetime) -> List[FindingCandidat
     start, end = _window_bounds(now)
     b_start, b_end = _baseline_bounds(now)
 
-    # Aggregate window by source
-    window = (
+    # Uma única query agregada por source (REQ-008 / D7): janela e baseline em buckets
+    # condicionais. Varre apenas [min(starts), max(ends)) e separa os buckets no CASE.
+    # Sem baseline, a source fica com (0, 0) via SUM/COUNT de CASE sem linhas.
+    lo = min(start, b_start)
+    hi = max(end, b_end)
+    in_window = and_(SourceRun.created_at >= start, SourceRun.created_at < end)
+    in_baseline = and_(SourceRun.created_at >= b_start, SourceRun.created_at < b_end)
+    is_blocked = SourceRun.status == "blocked"
+    rows = (
         db.query(
             SourceRun.source.label("source"),
-            func.count(SourceRun.id).label("total"),
-            func.sum(case((SourceRun.status == "blocked", 1), else_=0)).label("blocked"),
+            func.count(case((in_window, SourceRun.id))).label("w_total"),
+            func.sum(case((and_(in_window, is_blocked), 1), else_=0)).label("w_blocked"),
+            func.count(case((in_baseline, SourceRun.id))).label("b_total"),
+            func.sum(case((and_(in_baseline, is_blocked), 1), else_=0)).label("b_blocked"),
         )
-        .filter(SourceRun.created_at >= start)
-        .filter(SourceRun.created_at < end)
+        .filter(SourceRun.created_at >= lo)
+        .filter(SourceRun.created_at < hi)
         .group_by(SourceRun.source)
         .all()
     )
-
-    # Baseline blocked rate for all sources at once (was N+1: one query per source
-    # in the loop below, which alone accounted for ~42% of total DB time in prod —
-    # see pg_stat_statements). Sources with no baseline runs simply default to (0, 0).
-    baseline_rows = (
-        db.query(
-            SourceRun.source.label("source"),
-            func.count(SourceRun.id).label("total"),
-            func.sum(case((SourceRun.status == "blocked", 1), else_=0)).label("blocked"),
-        )
-        .filter(SourceRun.created_at >= b_start)
-        .filter(SourceRun.created_at < b_end)
-        .group_by(SourceRun.source)
-        .all()
-    )
-    baseline_by_source = {r.source: (int(r.total or 0), int(r.blocked or 0)) for r in baseline_rows}
 
     out: List[FindingCandidate] = []
-    for row in window:
+    for row in rows:
         src = row.source
-        total = int(row.total or 0)
-        blocked = int(row.blocked or 0)
+        total = int(row.w_total or 0)
+        blocked = int(row.w_blocked or 0)
         if total < 5:
             continue
         blocked_rate = _calc_rates(total, blocked)
 
-        b_total, b_blocked = baseline_by_source.get(src, (0, 0))
+        b_total = int(row.b_total or 0)
+        b_blocked = int(row.b_blocked or 0)
         b_rate = _calc_rates(b_total, b_blocked)
 
         # Trigger: blocked >= 30% and significantly above baseline
