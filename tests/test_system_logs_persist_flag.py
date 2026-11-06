@@ -85,3 +85,61 @@ def test_all_pipeline_summary_log_calls_in_jobs_pass_persist_false():
         )
 
     assert len(checked) == 4, f"esperava 4 chamadas pipeline_summary[_many] em jobs.py, achei {len(checked)}"
+
+
+def _is_named_call(call, name):
+    return isinstance(call.func, ast.Name) and call.func.id == name
+
+
+def _stmt_call(stmt):
+    """Call de um statement `Expr(Call)`; None para qualquer outro statement."""
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+        return stmt.value
+    return None
+
+
+def _emit_event_type(call):
+    if not _is_named_call(call, "emit_event"):
+        return None
+    for kw in call.keywords:
+        if kw.arg == "event_type" and isinstance(kw.value, ast.Constant):
+            return kw.value.value
+    return None
+
+
+def _statement_lists(tree):
+    """Todas as listas de statements (corpo de if/try/for/with/def...) do modulo."""
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            stmts = getattr(node, field, None)
+            if isinstance(stmts, list) and stmts and isinstance(stmts[0], ast.stmt):
+                yield stmts
+
+
+def test_every_pipeline_summary_log_call_has_paired_emit_event_in_same_block():
+    # REQ-007 (metade positiva): persist=False tira so o system_logs; a telemetria estruturada
+    # (emit_event) tem de continuar no MESMO bloco. Parear por funcao nao basta: o caminho
+    # incremental (skip) e o principal vivem na mesma funcao e um emit cobriria o outro.
+    tree = ast.parse(JOBS_PATH.read_text(encoding="utf-8"))
+
+    checked = 0
+    for stmts in _statement_lists(tree):
+        for stmt in stmts:
+            call = _stmt_call(stmt)
+            if call is None or not _is_named_call(call, "log") or len(call.args) < 4:
+                continue
+            msg = call.args[3]
+            if not (isinstance(msg, ast.Constant) and msg.value in PIPELINE_MESSAGES):
+                continue
+            checked += 1
+            paired = any(
+                _emit_event_type(c) == msg.value
+                for c in (_stmt_call(other) for other in stmts)
+                if c is not None
+            )
+            assert paired, (
+                f"log pipeline_summary (mensagem {msg.value!r}) na linha {call.lineno} sem "
+                f"emit_event(event_type={msg.value!r}) no mesmo bloco"
+            )
+
+    assert checked == 4, f"esperava 4 chamadas log pipeline_summary[_many] em jobs.py, achei {checked}"

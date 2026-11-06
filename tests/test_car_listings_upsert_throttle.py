@@ -29,7 +29,7 @@ def _payload(ext: str, **over) -> dict:
         "year": 2020,
         "make": "Toyota",
         "model": "Corolla",
-        "mileage_km": "100.000",
+        "mileage_km": 100000,
         "fuel_type": "gasoline",
         "transmission": "automatic",
         "version": "2.0",
@@ -154,13 +154,17 @@ def test_mixed_batch_stats_postgres(db):
     car_listings_repo.insert_ignore_duplicates_return_ids(db, [_payload("t_d2_skip")])
     car_listings_repo.insert_ignore_duplicates_return_ids(db, [_payload("t_d2_chg")])
 
+    # Assimétrico de propósito (2 novos, 1 pulado, 1 alterado): se a detecção `xmax = 0` fosse
+    # invertida, 1 alterado contaria como inserido e um lote 1 novo + 1 alterado passaria igual.
     batch = [
-        _payload("t_d2_new"),
+        _payload("t_d2_new1"),
+        _payload("t_d2_new2"),
         _payload("t_d2_skip"),
         _payload("t_d2_chg", url="https://example.test/olx/t_d2_chg?v=2"),
     ]
     res = car_listings_repo.insert_ignore_duplicates_return_ids(db, batch, with_stats=True)
 
-    assert res["upserted"] == 3
-    assert res["inserted_new"] == 1
+    assert len(res["ids"]) == 4
+    assert res["upserted"] == 4
+    assert res["inserted_new"] == 2
     assert res["updated"] == 2

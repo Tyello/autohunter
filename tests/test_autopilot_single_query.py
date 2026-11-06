@@ -102,3 +102,56 @@ def test_candidate_blocked_spike_uses_single_aggregate_query(db, monkeypatch):
         if "source_runs" in s.lower() and "group by" in s.lower()
     ]
     assert len(aggregates) == 1, aggregates
+
+
+def test_blocked_spike_window_boundaries_are_half_open(db, monkeypatch):
+    monkeypatch.setattr(autopilot_service.settings, "autopilot_window_minutes", 30)
+    now = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    start = now - timedelta(minutes=30)
+    b_start = start - timedelta(days=7)
+
+    def m(minutes):
+        return now - timedelta(minutes=minutes)
+
+    # edge_start: run em `start` entra na janela [start, now) e fica fora do baseline [b_start, start)
+    for minutes in (1, 2, 3, 4):
+        _run(db, "edge_start", "blocked", m(minutes))
+    _run(db, "edge_start", "blocked", start)
+
+    # edge_end: run em `now` fica fora da janela (end exclusivo)
+    for minutes in (1, 2, 3, 4, 5):
+        _run(db, "edge_end", "blocked", m(minutes))
+    _run(db, "edge_end", "blocked", now)
+
+    # edge_bstart: 3 runs em b_start entram no baseline; 2 runs 1s antes ficam fora
+    for minutes in (1, 2, 3, 4, 5):
+        _run(db, "edge_bstart", "blocked", m(minutes))
+    for _ in range(3):
+        _run(db, "edge_bstart", "success", b_start)
+    for _ in range(2):
+        _run(db, "edge_bstart", "success", b_start - timedelta(seconds=1))
+
+    # just_before_start: 1 run 1s antes de start cai no baseline, não na janela
+    for minutes in (1, 2, 3, 4, 5):
+        _run(db, "just_before_start", "blocked", m(minutes))
+    _run(db, "just_before_start", "success", start - timedelta(seconds=1))
+    db.commit()
+
+    cands = autopilot_service._candidate_blocked_spike(db, now)
+    by_source = {c.source: c for c in cands}
+
+    assert set(by_source) == {"edge_start", "edge_end", "edge_bstart", "just_before_start"}
+
+    es = by_source["edge_start"].evidence
+    assert es["total"] == 5
+    assert es["baseline"]["total"] == 0
+
+    ee = by_source["edge_end"].evidence
+    assert ee["total"] == 5
+
+    eb = by_source["edge_bstart"].evidence
+    assert eb["baseline"]["total"] == 3
+
+    jb = by_source["just_before_start"].evidence
+    assert jb["total"] == 5
+    assert jb["baseline"]["total"] == 1
